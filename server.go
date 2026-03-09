@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -57,10 +58,37 @@ func NewServer(app *App) *Server {
 	return s
 }
 
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX #12 — Helper CORS centralisé (évite la duplication dans chaque handler)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func setCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX #2 — Middleware CORS pour gérer les preflight OPTIONS
+// (sans ça, RequireAuth renvoyait 401 sur toutes les requêtes OPTIONS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// FIX #12 — utilise le helper centralisé
+	setCORSHeaders(w)
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -103,26 +131,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// FIX #11 — handleMe utilise désormais GetUserFromContext (plus de logique JWT dupliquée)
+// La route est wrappée par corsMiddleware + RequireAuth dans registerRoutes
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	token := ""
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		token = auth[7:]
-	}
-	if token == "" {
+	setCORSHeaders(w)
+	claims := GetUserFromContext(r)
+	if claims == nil {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	claims, err := ValidateJWT(token)
-	if err != nil {
-		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -156,9 +171,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/auth/login", s.handleLogin)
-	s.mux.HandleFunc("/auth/me", s.handleMe)
-	s.mux.Handle("/api/rpc", RequireAuth(http.HandlerFunc(s.handleRPC)))
-	s.mux.Handle("/api/upload", RequireAuth(http.HandlerFunc(s.handleUpload)))
+	// FIX #11 — handleMe wrappé par corsMiddleware + RequireAuth
+	s.mux.Handle("/auth/me", corsMiddleware(RequireAuth(http.HandlerFunc(s.handleMe))))
+	// FIX #2 — corsMiddleware devant RequireAuth pour que les OPTIONS passent sans 401
+	s.mux.Handle("/api/rpc", corsMiddleware(RequireAuth(http.HandlerFunc(s.handleRPC))))
+	s.mux.Handle("/api/upload", corsMiddleware(RequireAuth(http.HandlerFunc(s.handleUpload))))
 
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
@@ -325,7 +342,11 @@ func (s *Server) registerHandlers() {
 		return GetWatcher().GetWatchlistHistory(params.ID)
 	})
 
+	// FIX #13 — CleanupOldJobs restreint aux admins
 	s.handle("CleanupOldJobs", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
+		if user == nil || !user.IsAdmin {
+			return nil, fmt.Errorf("admin required")
+		}
 		jm := GetJobManager()
 		if jm == nil {
 			return map[string]int{"deleted": 0}, nil
@@ -557,6 +578,9 @@ func (s *Server) registerHandlers() {
 	})
 
 	// ── History ───────────────────────────────────────────────────────────
+	// TODO #4 : GetDownloadHistory / GetFetchHistory et leurs variantes Clear/Delete
+	// retournent encore l'historique global. Un filtrage par UserID nécessite
+	// de modifier app.go / history.go pour accepter un userID en paramètre.
 	s.handle("GetDownloadHistory", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
 		return a.GetDownloadHistory()
 	})
@@ -858,12 +882,13 @@ func (s *Server) registerHandlers() {
 		return string(filepath.Separator), nil
 	})
 
+	// FIX #10 — Retourne une erreur explicite au lieu d'une chaîne vide silencieuse
 	s.handle("SelectFolder", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
-		return "", nil
+		return nil, fmt.Errorf("not supported in web mode")
 	})
 
 	s.handle("SelectFile", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
-		return "", nil
+		return nil, fmt.Errorf("not supported in web mode")
 	})
 }
 
@@ -889,11 +914,12 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Upload handler
 // ─────────────────────────────────────────────────────────────────────────────
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Methods", "POST")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -911,24 +937,27 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	tmpPath := filepath.Join(os.TempDir(), "spotiflac_upload_"+header.Filename)
+
+	// FIX #16 — filepath.Base() pour éviter tout path traversal via header.Filename
+	safeFilename := filepath.Base(header.Filename)
+	tmpPath := filepath.Join(os.TempDir(), "spotiflac_upload_"+safeFilename)
+
 	dst, err := os.Create(tmpPath)
 	if err != nil {
 		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer dst.Close()
-	buf := make([]byte, 32*1024)
-	for {
-		n, readErr := file.Read(buf)
-		if n > 0 {
-			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
-				http.Error(w, "write error: "+writeErr.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-		if readErr != nil { break }
+
+	// FIX #15 — io.Copy remplace la boucle manuelle (plus simple, gère toutes les erreurs)
+	// FIX #1  — Le fichier temporaire sera nettoyé par le consommateur (app.go) après usage.
+	//           Un nettoyage ici supprimerait le fichier avant que le handler appelant ne le lise.
+	//           TODO : faire un defer os.Remove(tmpPath) côté consommateur après traitement.
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "failed to write temp file: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"path": tmpPath})
 }
