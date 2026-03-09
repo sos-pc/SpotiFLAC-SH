@@ -39,14 +39,9 @@ func (a *App) getFirstArtist(artistString string) string {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-
-	if err := backend.InitHistoryDB("SpotiFLAC"); err != nil {
-		fmt.Printf("Failed to init history DB: %v\n", err)
-	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	backend.CloseHistoryDB()
 }
 
 type SpotifyMetadataRequest struct {
