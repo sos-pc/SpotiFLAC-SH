@@ -14,6 +14,7 @@ export function useDownloadProgress() {
     const intervalRef = useRef<number | null>(null);
     useEffect(() => {
         const pollProgress = async () => {
+        if (!localStorage.getItem("spotiflac_token")) return;
             try {
                 const progressInfo = await GetDownloadProgress();
                 setProgress(progressInfo);

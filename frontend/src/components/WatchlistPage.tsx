@@ -64,6 +64,7 @@ export function WatchlistPage() {
   const [newSyncDeletions, setNewSyncDeletions] = useState(false);
 
   const loadWatchlists = async () => {
+    if (!localStorage.getItem("spotiflac_token")) return;
     setLoading(true);
     try {
       const lists = await GetWatchlists();

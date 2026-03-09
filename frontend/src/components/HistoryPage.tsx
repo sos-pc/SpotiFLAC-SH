@@ -63,6 +63,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const [fetchCurrentPage, setFetchCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 50;
     const fetchDownloadHistory = async () => {
+        if (!localStorage.getItem("spotiflac_token")) return;
         try {
             const items = await GetDownloadHistory();
             setDownloadHistory(items || []);
@@ -72,6 +73,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
         }
     };
     const fetchFetchHistory = async () => {
+        if (!localStorage.getItem("spotiflac_token")) return;
         try {
             const items = await GetFetchHistory();
             setFetchHistory(items || []);

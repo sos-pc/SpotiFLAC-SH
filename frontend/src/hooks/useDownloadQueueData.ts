@@ -15,6 +15,7 @@ export function useDownloadQueueData() {
     }));
     useEffect(() => {
         const fetchQueue = async () => {
+            if (!localStorage.getItem("spotiflac_token")) return;
             try {
                 const info = await GetDownloadQueue();
                 setQueueInfo(info);
