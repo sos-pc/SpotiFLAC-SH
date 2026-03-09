@@ -578,15 +578,17 @@ func (s *Server) registerHandlers() {
 	})
 
 	// ── History ───────────────────────────────────────────────────────────
-	// TODO #4 : GetDownloadHistory / GetFetchHistory et leurs variantes Clear/Delete
-	// retournent encore l'historique global. Un filtrage par UserID nécessite
-	// de modifier app.go / history.go pour accepter un userID en paramètre.
+	// FIX #4 — tous les handlers history filtrés par UserID
 	s.handle("GetDownloadHistory", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
-		return a.GetDownloadHistory()
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return a.GetDownloadHistory(userID)
 	})
 
 	s.handle("ClearDownloadHistory", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
-		return nil, a.ClearDownloadHistory()
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return nil, a.ClearDownloadHistory(userID)
 	})
 
 	s.handle("DeleteDownloadHistoryItem", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
@@ -596,11 +598,15 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
-		return nil, a.DeleteDownloadHistoryItem(params.ID)
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return nil, a.DeleteDownloadHistoryItem(params.ID, userID)
 	})
 
 	s.handle("GetFetchHistory", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
-		return a.GetFetchHistory()
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return a.GetFetchHistory(userID)
 	})
 
 	s.handle("AddFetchHistory", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
@@ -612,7 +618,9 @@ func (s *Server) registerHandlers() {
 	})
 
 	s.handle("ClearFetchHistory", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
-		return nil, a.ClearFetchHistory()
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return nil, a.ClearFetchHistory(userID)
 	})
 
 	s.handle("ClearFetchHistoryByType", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
@@ -622,7 +630,9 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
-		return nil, a.ClearFetchHistoryByType(params.ItemType)
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return nil, a.ClearFetchHistoryByType(params.ItemType, userID)
 	})
 
 	s.handle("DeleteFetchHistoryItem", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
@@ -632,7 +642,9 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
-		return nil, a.DeleteFetchHistoryItem(params.ID)
+		userID := ""
+		if user != nil { userID = user.UserID }
+		return nil, a.DeleteFetchHistoryItem(params.ID, userID)
 	})
 
 	// ── Settings ──────────────────────────────────────────────────────────

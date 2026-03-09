@@ -28,6 +28,8 @@ type HistoryItem struct {
 	Format      string `json:"format"`
 	Path        string `json:"path"`
 	Timestamp   int64  `json:"timestamp"`
+	// FIX #4 — isolation par user (vide = item migré, visible par tous)
+	UserID      string `json:"user_id,omitempty"`
 }
 
 type FetchHistoryItem struct {
@@ -39,6 +41,8 @@ type FetchHistoryItem struct {
 	Image     string `json:"image"`
 	Data      string `json:"data"`
 	Timestamp int64  `json:"timestamp"`
+	// FIX #4 — isolation par user
+	UserID    string `json:"user_id,omitempty"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,10 +51,10 @@ type FetchHistoryItem struct {
 
 var (
 	historyDB        *bolt.DB
-	historyDisabled  bool          // true si toutes les tentatives ont échoué
-	historyShared    bool          // true si DB partagée avec jobs.db
-	historyConfigDir string        // chemin défini par InitHistoryDBAt
-	historyMu        sync.Mutex    // protège l'init lazy
+	historyDisabled  bool
+	historyShared    bool
+	historyConfigDir string
+	historyMu        sync.Mutex
 )
 
 const (
@@ -63,9 +67,6 @@ const (
 // Init
 // ─────────────────────────────────────────────────────────────────────────────
 
-// InitHistoryDBAt ouvre (ou crée) history.db dans configDir.
-// Réessaie jusqu'à 3 fois avec timeout croissant pour survivre aux
-// redémarrages rapides Docker qui laissent un flock BoltDB en suspens.
 func InitHistoryDBAt(configDir string) error {
 	historyMu.Lock()
 	defer historyMu.Unlock()
@@ -77,7 +78,6 @@ func InitHistoryDBAt(configDir string) error {
 	}
 	dbPath := filepath.Join(configDir, "history.db")
 
-	// Tentatives avec timeouts croissants : 3s → 5s → 8s
 	timeouts := []time.Duration{3 * time.Second, 5 * time.Second, 8 * time.Second}
 	var lastErr error
 
@@ -95,7 +95,6 @@ func InitHistoryDBAt(configDir string) error {
 			continue
 		}
 
-		// Créer les buckets si nécessaire
 		err = db.Update(func(tx *bolt.Tx) error {
 			if _, err := tx.CreateBucketIfNotExists([]byte(historyBucket)); err != nil {
 				return err
@@ -117,15 +116,12 @@ func InitHistoryDBAt(configDir string) error {
 		return nil
 	}
 
-	// Toutes les tentatives ont échoué → mode dégradé
 	historyDisabled = true
 	fmt.Printf("[History] WARNING: history DB unavailable after %d attempts: %v\n",
 		len(timeouts), lastErr)
 	return fmt.Errorf("history DB unavailable: %w", lastErr)
 }
 
-// InitHistoryDB est l'ancienne API (compatibilité Wails desktop).
-// En mode web, préférer InitHistoryDBAt.
 func InitHistoryDB(appName string) error {
 	appDir, err := GetFFmpegDir()
 	if err != nil {
@@ -135,7 +131,9 @@ func InitHistoryDB(appName string) error {
 }
 
 func CloseHistoryDB() {
-	if historyShared { return } // DB owned by JobManager
+	if historyShared {
+		return
+	}
 	historyMu.Lock()
 	defer historyMu.Unlock()
 	if historyDB != nil {
@@ -144,13 +142,6 @@ func CloseHistoryDB() {
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper interne : obtenir ou ré-initialiser historyDB
-// ─────────────────────────────────────────────────────────────────────────────
-
-// getHistoryDB retourne historyDB prêt à l'emploi.
-// Si historyDB est nil (init échouée au démarrage), tente une re-init.
-// Retourne une erreur si définitivement indisponible.
 func getHistoryDB() (*bolt.DB, error) {
 	historyMu.Lock()
 	defer historyMu.Unlock()
@@ -162,7 +153,6 @@ func getHistoryDB() (*bolt.DB, error) {
 		return historyDB, nil
 	}
 
-	// Tentative de ré-init lazy avec le bon chemin
 	if historyConfigDir == "" {
 		return nil, fmt.Errorf("history DB not initialized")
 	}
@@ -200,7 +190,7 @@ func AddHistoryItem(item HistoryItem, appName string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		fmt.Printf("[History] AddHistoryItem skipped: %v\n", err)
-		return nil // non-fatal : l'historique est optionnel
+		return nil
 	}
 	return db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(historyBucket))
@@ -216,7 +206,6 @@ func AddHistoryItem(item HistoryItem, appName string) error {
 			return err
 		}
 
-		// Élagage si limite atteinte
 		if b.Stats().KeyN >= maxHistory {
 			c := b.Cursor()
 			toDelete := maxHistory / 20
@@ -234,10 +223,12 @@ func AddHistoryItem(item HistoryItem, appName string) error {
 	})
 }
 
-func GetHistoryItems(appName string) ([]HistoryItem, error) {
+// FIX #4 — userID filtre les items. "" = admin (voit tout).
+// Les items sans UserID (migrés) sont visibles par tous pour compatibilité.
+func GetHistoryItems(appName string, userID string) ([]HistoryItem, error) {
 	db, err := getHistoryDB()
 	if err != nil {
-		return []HistoryItem{}, nil // retourner slice vide plutôt qu'erreur
+		return []HistoryItem{}, nil
 	}
 	var items []HistoryItem
 	err = db.View(func(tx *bolt.Tx) error {
@@ -249,7 +240,10 @@ func GetHistoryItems(appName string) ([]HistoryItem, error) {
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			var item HistoryItem
 			if err := json.Unmarshal(v, &item); err == nil {
-				items = append(items, item)
+				// Montrer si : admin (userID vide), item legacy (UserID vide), ou item du user
+				if userID == "" || item.UserID == "" || item.UserID == userID {
+					items = append(items, item)
+				}
 			}
 		}
 		return nil
@@ -260,17 +254,9 @@ func GetHistoryItems(appName string) ([]HistoryItem, error) {
 	return items, err
 }
 
-func ClearHistory(appName string) error {
-	db, err := getHistoryDB()
-	if err != nil {
-		return nil
-	}
-	return db.Update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket([]byte(historyBucket))
-	})
-}
-
-func DeleteHistoryItem(id string, appName string) error {
+// FIX — supprime clé par clé au lieu de détruire le bucket
+// userID vide = suppression globale (admin)
+func ClearHistory(appName string, userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -279,6 +265,50 @@ func DeleteHistoryItem(id string, appName string) error {
 		b := tx.Bucket([]byte(historyBucket))
 		if b == nil {
 			return nil
+		}
+		var toDelete [][]byte
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if userID == "" {
+				toDelete = append(toDelete, k)
+			} else {
+				var item HistoryItem
+				if err := json.Unmarshal(v, &item); err == nil {
+					if item.UserID == userID || item.UserID == "" {
+						toDelete = append(toDelete, k)
+					}
+				}
+			}
+		}
+		for _, k := range toDelete {
+			b.Delete(k)
+		}
+		return nil
+	})
+}
+
+// FIX #4 — vérifie l'ownership avant suppression
+func DeleteHistoryItem(id string, appName string, userID string) error {
+	db, err := getHistoryDB()
+	if err != nil {
+		return nil
+	}
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(historyBucket))
+		if b == nil {
+			return nil
+		}
+		// Vérifier ownership si userID fourni
+		if userID != "" {
+			data := b.Get([]byte(id))
+			if data != nil {
+				var item HistoryItem
+				if err := json.Unmarshal(data, &item); err == nil {
+					if item.UserID != "" && item.UserID != userID {
+						return fmt.Errorf("access denied")
+					}
+				}
+			}
 		}
 		return b.Delete([]byte(id))
 	})
@@ -300,13 +330,13 @@ func AddFetchHistoryItem(item FetchHistoryItem, appName string) error {
 			return err
 		}
 
-		// Dédupliquer par URL+Type
+		// Dédupliquer par URL+Type+UserID
 		if item.URL != "" {
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
 				var existing FetchHistoryItem
 				if err := json.Unmarshal(v, &existing); err == nil {
-					if existing.URL == item.URL && existing.Type == item.Type {
+					if existing.URL == item.URL && existing.Type == item.Type && existing.UserID == item.UserID {
 						b.Delete(k)
 					}
 				}
@@ -339,7 +369,8 @@ func AddFetchHistoryItem(item FetchHistoryItem, appName string) error {
 	})
 }
 
-func GetFetchHistoryItems(appName string) ([]FetchHistoryItem, error) {
+// FIX #4 — filtrage par userID
+func GetFetchHistoryItems(appName string, userID string) ([]FetchHistoryItem, error) {
 	db, err := getHistoryDB()
 	if err != nil {
 		return []FetchHistoryItem{}, nil
@@ -354,7 +385,9 @@ func GetFetchHistoryItems(appName string) ([]FetchHistoryItem, error) {
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			var item FetchHistoryItem
 			if err := json.Unmarshal(v, &item); err == nil {
-				items = append(items, item)
+				if userID == "" || item.UserID == "" || item.UserID == userID {
+					items = append(items, item)
+				}
 			}
 		}
 		return nil
@@ -365,17 +398,8 @@ func GetFetchHistoryItems(appName string) ([]FetchHistoryItem, error) {
 	return items, err
 }
 
-func ClearFetchHistory(appName string) error {
-	db, err := getHistoryDB()
-	if err != nil {
-		return nil
-	}
-	return db.Update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket([]byte(fetchHistoryBucket))
-	})
-}
-
-func ClearFetchHistoryByType(itemType string, appName string) error {
+// FIX — clé par clé + filtrage par user
+func ClearFetchHistory(appName string, userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -385,22 +409,28 @@ func ClearFetchHistoryByType(itemType string, appName string) error {
 		if b == nil {
 			return nil
 		}
-		var keysToDelete [][]byte
+		var toDelete [][]byte
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var item FetchHistoryItem
-			if err := json.Unmarshal(v, &item); err == nil && item.Type == itemType {
-				keysToDelete = append(keysToDelete, k)
+			if userID == "" {
+				toDelete = append(toDelete, k)
+			} else {
+				var item FetchHistoryItem
+				if err := json.Unmarshal(v, &item); err == nil {
+					if item.UserID == userID || item.UserID == "" {
+						toDelete = append(toDelete, k)
+					}
+				}
 			}
 		}
-		for _, k := range keysToDelete {
+		for _, k := range toDelete {
 			b.Delete(k)
 		}
 		return nil
 	})
 }
 
-func DeleteFetchHistoryItem(id string, appName string) error {
+func ClearFetchHistoryByType(itemType string, appName string, userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -410,12 +440,49 @@ func DeleteFetchHistoryItem(id string, appName string) error {
 		if b == nil {
 			return nil
 		}
+		var toDelete [][]byte
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var item FetchHistoryItem
+			if err := json.Unmarshal(v, &item); err == nil && item.Type == itemType {
+				if userID == "" || item.UserID == userID || item.UserID == "" {
+					toDelete = append(toDelete, k)
+				}
+			}
+		}
+		for _, k := range toDelete {
+			b.Delete(k)
+		}
+		return nil
+	})
+}
+
+func DeleteFetchHistoryItem(id string, appName string, userID string) error {
+	db, err := getHistoryDB()
+	if err != nil {
+		return nil
+	}
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(fetchHistoryBucket))
+		if b == nil {
+			return nil
+		}
+		if userID != "" {
+			data := b.Get([]byte(id))
+			if data != nil {
+				var item FetchHistoryItem
+				if err := json.Unmarshal(data, &item); err == nil {
+					if item.UserID != "" && item.UserID != userID {
+						return fmt.Errorf("access denied")
+					}
+				}
+			}
+		}
 		return b.Delete([]byte(id))
 	})
 }
 
 // InitHistoryDBShared réutilise une instance BoltDB existante (ex: jobs.db)
-// au lieu d'ouvrir un fichier séparé. Élimine le double flock.
 func InitHistoryDBShared(db *bolt.DB) error {
 	historyMu.Lock()
 	defer historyMu.Unlock()

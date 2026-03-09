@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-
 	"path/filepath"
-
 	"strings"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
-
 )
 
 type App struct {
@@ -24,25 +21,13 @@ func NewApp() *App {
 	return &App{}
 }
 
-func (a *App) getFirstArtist(artistString string) string {
-	if artistString == "" {
-		return ""
-	}
-	delimiters := []string{", ", " & ", " feat. ", " ft. ", " featuring "}
-	for _, d := range delimiters {
-		if idx := strings.Index(strings.ToLower(artistString), d); idx != -1 {
-			return strings.TrimSpace(artistString[:idx])
-		}
-	}
-	return artistString
-}
-
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-func (a *App) shutdown(ctx context.Context) {
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
 type SpotifyMetadataRequest struct {
 	URL     string  `json:"url"`
@@ -85,6 +70,8 @@ type DownloadRequest struct {
 	UseFirstArtistOnly   bool   `json:"use_first_artist_only,omitempty"`
 	UseSingleGenre       bool   `json:"use_single_genre,omitempty"`
 	EmbedGenre           bool   `json:"embed_genre,omitempty"`
+	// FIX #4 — propagé depuis Job.UserID pour tagguer les items d'historique
+	UserID               string `json:"user_id,omitempty"`
 }
 
 type DownloadResponse struct {
@@ -96,23 +83,24 @@ type DownloadResponse struct {
 	ItemID        string `json:"item_id,omitempty"`
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Spotify metadata
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, error) {
 	if spotifyTrackID == "" {
 		return "", fmt.Errorf("spotify track ID is required")
 	}
-
 	fmt.Printf("[GetStreamingURLs] Called for track ID: %s, Region: %s\n", spotifyTrackID, region)
 	client := backend.NewSongLinkClient()
 	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, region)
 	if err != nil {
 		return "", err
 	}
-
 	jsonData, err := json.Marshal(urls)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode response: %v", err)
 	}
-
 	return string(jsonData), nil
 }
 
@@ -120,7 +108,6 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 	if req.URL == "" {
 		return "", fmt.Errorf("URL parameter is required")
 	}
-
 	if req.Delay == 0 {
 		req.Delay = 1.0
 	}
@@ -128,40 +115,34 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 		req.Timeout = 300.0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(req.Timeout*float64(time.Second)))
-	defer cancel()
+	metaCtx, metaCancel := context.WithTimeout(context.Background(), time.Duration(req.Timeout*float64(time.Second)))
+	defer metaCancel()
 
 	settings, err := a.LoadSettings()
-
 	if err == nil && settings != nil {
 		if useAPI, ok := settings["useSpotFetchAPI"].(bool); ok && useAPI {
 			if apiURL, ok := settings["spotFetchAPIUrl"].(string); ok && apiURL != "" {
-
-				data, err := backend.GetSpotifyDataWithAPI(ctx, req.URL, true, apiURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+				data, err := backend.GetSpotifyDataWithAPI(metaCtx, req.URL, true, apiURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
 				if err != nil {
 					return "", fmt.Errorf("failed to fetch metadata from API: %v", err)
 				}
-
 				jsonData, err := json.MarshalIndent(data, "", "  ")
 				if err != nil {
 					return "", fmt.Errorf("failed to encode response: %v", err)
 				}
-
 				return string(jsonData), nil
 			}
 		}
 	}
 
-	data, err := backend.GetFilteredSpotifyData(ctx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+	data, err := backend.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch metadata: %v", err)
 	}
-
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to encode response: %v", err)
 	}
-
 	return string(jsonData), nil
 }
 
@@ -174,14 +155,11 @@ func (a *App) SearchSpotify(req SpotifySearchRequest) (*backend.SearchResponse, 
 	if req.Query == "" {
 		return nil, fmt.Errorf("search query is required")
 	}
-
 	if req.Limit <= 0 {
 		req.Limit = 10
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	return backend.SearchSpotify(ctx, req.Query, req.Limit)
 }
 
@@ -196,61 +174,51 @@ func (a *App) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([]backend.Sea
 	if req.Query == "" {
 		return nil, fmt.Errorf("search query is required")
 	}
-
 	if req.SearchType == "" {
 		return nil, fmt.Errorf("search type is required")
 	}
-
 	if req.Limit <= 0 {
 		req.Limit = 50
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	return backend.SearchSpotifyByType(ctx, req.Query, req.SearchType, req.Limit, req.Offset)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Download
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
-
 	if req.Service == "qobuz" && req.SpotifyID == "" {
-		return DownloadResponse{
-			Success: false,
-			Error:   "Spotify ID is required for Qobuz",
-		}, fmt.Errorf("spotify ID is required for Qobuz")
+		return DownloadResponse{Success: false, Error: "Spotify ID is required for Qobuz"},
+			fmt.Errorf("spotify ID is required for Qobuz")
 	}
-
 	if req.Service == "" {
 		req.Service = "tidal"
 	}
-
 	if req.OutputDir == "" {
 		req.OutputDir = "."
 	} else {
-
 		req.OutputDir = backend.SanitizeFolderPath(req.OutputDir)
 	}
-
 	if req.AudioFormat == "" {
 		req.AudioFormat = "LOSSLESS"
+	}
+	if req.FilenameFormat == "" {
+		req.FilenameFormat = "title-artist"
 	}
 
 	var err error
 	var filename string
 
-	if req.FilenameFormat == "" {
-		req.FilenameFormat = "title-artist"
-	}
-
 	itemID := req.ItemID
 	if itemID == "" {
-
 		if req.SpotifyID != "" {
 			itemID = fmt.Sprintf("%s-%d", req.SpotifyID, time.Now().UnixNano())
 		} else {
 			itemID = fmt.Sprintf("%s-%s-%d", req.TrackName, req.ArtistName, time.Now().UnixNano())
 		}
-
 		backend.AddToQueue(itemID, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID)
 	}
 
@@ -263,14 +231,14 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		spotifyURL = fmt.Sprintf("https://open.spotify.com/track/%s", req.SpotifyID)
 	}
 
+	// FIX double cancel — contextes nommés distinctement
 	if req.SpotifyID != "" && (req.Copyright == "" || req.Publisher == "" || req.SpotifyTotalDiscs == 0 || req.ReleaseDate == "" || req.SpotifyTotalTracks == 0 || req.SpotifyTrackNumber == 0) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		detailCtx, detailCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer detailCancel()
 
 		trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", req.SpotifyID)
-		trackData, err := backend.GetFilteredSpotifyData(ctx, trackURL, false, 0)
+		trackData, err := backend.GetFilteredSpotifyData(detailCtx, trackURL, false, 0)
 		if err == nil {
-
 			var trackResp struct {
 				Track struct {
 					Copyright   string `json:"copyright"`
@@ -283,7 +251,6 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			}
 			if jsonData, jsonErr := json.Marshal(trackData); jsonErr == nil {
 				if json.Unmarshal(jsonData, &trackResp) == nil {
-
 					if req.Copyright == "" && trackResp.Track.Copyright != "" {
 						req.Copyright = trackResp.Track.Copyright
 					}
@@ -310,9 +277,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 	if req.TrackName != "" && req.ArtistName != "" {
 		expectedFilename := backend.BuildExpectedFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.SpotifyDiscNumber, req.UseAlbumTrackNumber)
 		expectedPath := filepath.Join(req.OutputDir, expectedFilename)
-
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 100*1024 {
-
 			backend.SkipDownloadItem(itemID, expectedPath)
 			return DownloadResponse{
 				Success:       true,
@@ -342,7 +307,6 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		} else {
 			close(lyricsChan)
 		}
-
 		go func() {
 			client := backend.NewSongLinkClient()
 			isrc, _ := client.GetISRC(req.SpotifyID)
@@ -355,7 +319,6 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 
 	switch req.Service {
 	case "amazon":
-
 		downloader := backend.NewAmazonDownloader()
 		if req.ServiceURL != "" {
 			filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
@@ -381,7 +344,6 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		}
 
 	case "qobuz":
-
 		fmt.Println("Waiting for ISRC (Qobuz dependency)...")
 		isrc := <-isrcChan
 		downloader := backend.NewQobuzDownloader()
@@ -418,7 +380,9 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 				isrc := <-isrcChan
 				downloader := backend.NewQobuzDownloader()
 				quality := req.AudioFormat
-				if quality == "" { quality = "6" }
+				if quality == "" {
+					quality = "6"
+				}
 				filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			default:
 				continue
@@ -429,7 +393,9 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			lastErr = err
 			fmt.Printf("[Auto] %s failed for %s, trying next...\n", svc, req.TrackName)
 		}
-		if err != nil { err = lastErr }
+		if err != nil {
+			err = lastErr
+		}
 
 	default:
 		return DownloadResponse{
@@ -440,9 +406,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 
 	if err != nil {
 		backend.FailDownloadItem(itemID, fmt.Sprintf("Download failed: %v", err))
-
 		if filename != "" && !strings.HasPrefix(filename, "EXISTS:") {
-
 			if _, statErr := os.Stat(filename); statErr == nil {
 				fmt.Printf("Removing corrupted/partial file after failed download: %s\n", filename)
 				if removeErr := os.Remove(filename); removeErr != nil {
@@ -450,7 +414,6 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 				}
 			}
 		}
-
 		return DownloadResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Download failed: %v", err),
@@ -471,9 +434,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			fmt.Printf("\n--- Full LRC Content ---\n")
 			fmt.Println(lyrics)
 			fmt.Printf("--- End LRC Content ---\n\n")
-
 			fmt.Printf("Embedding into: %s\n", filename)
-
 			if err := backend.EmbedLyricsOnlyUniversal(filename, lyrics); err != nil {
 				fmt.Printf("Failed to embed lyrics: %v\n", err)
 			} else {
@@ -483,7 +444,6 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			fmt.Println("No lyrics found to embed.")
 		}
 	} else {
-
 		select {
 		case <-lyricsChan:
 		default:
@@ -495,16 +455,15 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		message = "File already exists"
 		backend.SkipDownloadItem(itemID, filename)
 	} else {
-
 		if fileInfo, statErr := os.Stat(filename); statErr == nil {
 			finalSize := float64(fileInfo.Size()) / (1024 * 1024)
 			backend.CompleteDownloadItem(itemID, filename, finalSize)
 		} else {
-
 			backend.CompleteDownloadItem(itemID, filename, 0)
 		}
 
-		go func(fPath, track, artist, album, sID, cover, format string) {
+		// FIX #4 — capture req.UserID pour le taguer dans l'item d'historique
+		go func(fPath, track, artist, album, sID, cover, format, userID string) {
 			quality := "Unknown"
 			durationStr := "--:--"
 
@@ -533,6 +492,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 				Quality:     quality,
 				Format:      strings.ToUpper(format),
 				Path:        fPath,
+				UserID:      userID,
 			}
 
 			if item.Format == "" || item.Format == "LOSSLESS" {
@@ -541,14 +501,13 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 					item.Format = strings.ToUpper(ext[1:])
 				}
 			}
-
 			switch item.Format {
 			case "6", "7", "27":
 				item.Format = "FLAC"
 			}
 
 			backend.AddHistoryItem(item, "SpotiFLAC")
-		}(filename, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID, req.CoverURL, req.AudioFormat)
+		}(filename, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID, req.CoverURL, req.AudioFormat, req.UserID)
 	}
 
 	return DownloadResponse{
@@ -560,27 +519,15 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 	}, nil
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Misc
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (a *App) OpenFolder(path string) error {
 	if path == "" {
 		return fmt.Errorf("path is required")
 	}
-
-	err := backend.OpenFolderInExplorer(path)
-	if err != nil {
-		return fmt.Errorf("failed to open folder: %v", err)
-	}
-
-	return nil
-}
-
-func (a *App) SelectFolder(defaultPath string) (string, error) {
-	// Désactivé en mode web — le frontend utilise un champ texte
-	return "", nil
-}
-
-func (a *App) SelectFile() (string, error) {
-	// Désactivé en mode web
-	return "", nil
+	return backend.OpenFolderInExplorer(path)
 }
 
 func (a *App) GetDefaults() map[string]string {
@@ -591,32 +538,45 @@ func (a *App) GetDefaults() map[string]string {
 
 func (a *App) GetDownloadProgress() backend.ProgressInfo {
 	jm := GetJobManager()
-	if jm == nil { return backend.GetDownloadProgress() }
+	if jm == nil {
+		return backend.GetDownloadProgress()
+	}
 	jobs, _ := jm.GetAllJobs()
 	var total, done int
 	for _, j := range jobs {
 		total++
-		if j.Status == StatusDone || j.Status == StatusSkipped { done++ }
+		if j.Status == StatusDone || j.Status == StatusSkipped {
+			done++
+		}
 	}
 	return backend.ProgressInfo{IsDownloading: total > 0 && done < total}
 }
 
 func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
 	jm := GetJobManager()
-	if jm == nil { return backend.GetDownloadQueue() }
+	if jm == nil {
+		return backend.GetDownloadQueue()
+	}
 	jobs, err := jm.GetAllJobs()
-	if err != nil { return backend.DownloadQueueInfo{} }
+	if err != nil {
+		return backend.DownloadQueueInfo{}
+	}
 	items := make([]backend.DownloadItem, 0, len(jobs))
 	var queued, completed, failed, skipped int
 	isDownloading := false
 	for _, job := range jobs {
 		ds := jobStatusToDownloadStatus(job.Status)
 		switch ds {
-		case backend.StatusQueued: queued++
-		case backend.StatusDownloading: isDownloading = true
-		case backend.StatusCompleted: completed++
-		case backend.StatusFailed: failed++
-		case backend.StatusSkipped: skipped++
+		case backend.StatusQueued:
+			queued++
+		case backend.StatusDownloading:
+			isDownloading = true
+		case backend.StatusCompleted:
+			completed++
+		case backend.StatusFailed:
+			failed++
+		case backend.StatusSkipped:
+			skipped++
 		}
 		liveProgress, liveSpeed := backend.GetItemProgress(job.ID)
 		progress := job.Progress
@@ -625,26 +585,29 @@ func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
 			progress = liveProgress
 		}
 		items = append(items, backend.DownloadItem{
-			ID: job.ID, TrackName: job.TrackName, ArtistName: job.ArtistName,
-			AlbumName: job.AlbumName, SpotifyID: job.SpotifyID,
-			Status: ds, ErrorMessage: job.Error, FilePath: job.FilePath,
-			StartTime: func() int64 { if job.CreatedAt.IsZero() { return 0 }; return job.CreatedAt.Unix() }(),
-			EndTime:   func() int64 { if job.UpdatedAt.IsZero() { return 0 }; return job.UpdatedAt.Unix() }(),
-			StartedAt: func() int64 { if job.StartedAt.IsZero() { return 0 }; return job.StartedAt.Unix() }(),
-			TotalSize: job.TotalSize,
-			Progress:  progress,
-			Speed:     speed,
+			ID:           job.ID,
+			TrackName:    job.TrackName,
+			ArtistName:   job.ArtistName,
+			AlbumName:    job.AlbumName,
+			SpotifyID:    job.SpotifyID,
+			Status:       ds,
+			ErrorMessage: job.Error,
+			FilePath:     job.FilePath,
+			StartTime:    func() int64 { if job.CreatedAt.IsZero() { return 0 }; return job.CreatedAt.Unix() }(),
+			EndTime:      func() int64 { if job.UpdatedAt.IsZero() { return 0 }; return job.UpdatedAt.Unix() }(),
+			StartedAt:    func() int64 { if job.StartedAt.IsZero() { return 0 }; return job.StartedAt.Unix() }(),
+			TotalSize:    job.TotalSize,
+			Progress:     progress,
+			Speed:        speed,
 		})
 	}
 	progInfo := backend.GetDownloadProgress()
-	// TotalDownloaded = somme des fichiers complétés
 	var totalDL float64
 	for _, item := range items {
 		if item.Status == backend.StatusCompleted && item.TotalSize > 0 {
 			totalDL += item.TotalSize
 		}
 	}
-	// SessionStartTime = premier job de la queue
 	var sessionStart int64
 	for _, item := range items {
 		if sessionStart == 0 || item.StartTime < sessionStart {
@@ -652,24 +615,33 @@ func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
 		}
 	}
 	return backend.DownloadQueueInfo{
-		IsDownloading: isDownloading, Queue: items,
-		QueuedCount: queued, CompletedCount: completed,
-		FailedCount: failed, SkippedCount: skipped,
-		CurrentSpeed: progInfo.SpeedMBps,
-		TotalDownloaded: totalDL,
+		IsDownloading:    isDownloading,
+		Queue:            items,
+		QueuedCount:      queued,
+		CompletedCount:   completed,
+		FailedCount:      failed,
+		SkippedCount:     skipped,
+		CurrentSpeed:     progInfo.SpeedMBps,
+		TotalDownloaded:  totalDL,
 		SessionStartTime: sessionStart,
 	}
 }
 
 func (a *App) ClearCompletedDownloads() {
 	jm := GetJobManager()
-	if jm == nil { backend.ClearDownloadQueue(); return }
+	if jm == nil {
+		backend.ClearDownloadQueue()
+		return
+	}
 	jm.ClearCompletedJobs()
 }
 
 func (a *App) ClearAllDownloads() {
 	jm := GetJobManager()
-	if jm == nil { backend.ClearAllDownloads(); return }
+	if jm == nil {
+		backend.ClearAllDownloads()
+		return
+	}
 	jm.ClearAllJobs()
 }
 
@@ -687,8 +659,10 @@ func (a *App) CancelAllQueuedItems() {
 	backend.CancelAllQueuedItems()
 }
 
+// FIX ExportFailedDownloads — utilise a.GetDownloadQueue() (lit le JobManager BoltDB)
+// au lieu de backend.GetDownloadQueue() (queue in-memory uniquement)
 func (a *App) ExportFailedDownloads() (string, error) {
-	queueInfo := backend.GetDownloadQueue()
+	queueInfo := a.GetDownloadQueue()
 	var failedItems []string
 
 	hasFailed := false
@@ -717,7 +691,6 @@ func (a *App) ExportFailedDownloads() (string, error) {
 			}
 			failedItems = append(failedItems, line)
 			failedItems = append(failedItems, fmt.Sprintf("   Error: %s", item.ErrorMessage))
-
 			if item.SpotifyID != "" {
 				failedItems = append(failedItems, fmt.Sprintf("   ID: %s", item.SpotifyID))
 				failedItems = append(failedItems, fmt.Sprintf("   URL: https://open.spotify.com/track/%s", item.SpotifyID))
@@ -727,64 +700,61 @@ func (a *App) ExportFailedDownloads() (string, error) {
 	}
 
 	content := strings.Join(failedItems, "\n")
-	defaultFilename := fmt.Sprintf("SpotiFLAC_%s_Failed.txt", time.Now().Format("20060102_150405"))
-
-	// En mode web : retourner le contenu directement (pas de dialog fichier)
-	_ = defaultFilename
 	return fmt.Sprintf("EXPORT:%s", content), nil
 }
 
-func (a *App) Quit() {
-	// No-op en mode web
+// ─────────────────────────────────────────────────────────────────────────────
+// History — FIX #4 : toutes les méthodes acceptent userID
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (a *App) GetDownloadHistory(userID string) ([]backend.HistoryItem, error) {
+	return backend.GetHistoryItems("SpotiFLAC", userID)
 }
 
-func (a *App) GetDownloadHistory() ([]backend.HistoryItem, error) {
-	return backend.GetHistoryItems("SpotiFLAC")
+func (a *App) ClearDownloadHistory(userID string) error {
+	return backend.ClearHistory("SpotiFLAC", userID)
 }
 
-func (a *App) ClearDownloadHistory() error {
-	return backend.ClearHistory("SpotiFLAC")
+func (a *App) DeleteDownloadHistoryItem(id string, userID string) error {
+	return backend.DeleteHistoryItem(id, "SpotiFLAC", userID)
 }
 
-func (a *App) DeleteDownloadHistoryItem(id string) error {
-	return backend.DeleteHistoryItem(id, "SpotiFLAC")
-}
-
-func (a *App) GetFetchHistory() ([]backend.FetchHistoryItem, error) {
-	return backend.GetFetchHistoryItems("SpotiFLAC")
+func (a *App) GetFetchHistory(userID string) ([]backend.FetchHistoryItem, error) {
+	return backend.GetFetchHistoryItems("SpotiFLAC", userID)
 }
 
 func (a *App) AddFetchHistory(item backend.FetchHistoryItem) error {
 	return backend.AddFetchHistoryItem(item, "SpotiFLAC")
 }
 
-func (a *App) ClearFetchHistory() error {
-	return backend.ClearFetchHistory("SpotiFLAC")
+func (a *App) ClearFetchHistory(userID string) error {
+	return backend.ClearFetchHistory("SpotiFLAC", userID)
 }
 
-func (a *App) DeleteFetchHistoryItem(id string) error {
-	return backend.DeleteFetchHistoryItem(id, "SpotiFLAC")
+func (a *App) ClearFetchHistoryByType(itemType string, userID string) error {
+	return backend.ClearFetchHistoryByType(itemType, "SpotiFLAC", userID)
 }
 
-func (a *App) ClearFetchHistoryByType(itemType string) error {
-	return backend.ClearFetchHistoryByType(itemType, "SpotiFLAC")
+func (a *App) DeleteFetchHistoryItem(id string, userID string) error {
+	return backend.DeleteFetchHistoryItem(id, "SpotiFLAC", userID)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio analysis
+// ─────────────────────────────────────────────────────────────────────────────
 
 func (a *App) AnalyzeTrack(filePath string) (string, error) {
 	if filePath == "" {
 		return "", fmt.Errorf("file path is required")
 	}
-
 	result, err := backend.AnalyzeTrack(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to analyze track: %v", err)
 	}
-
 	jsonData, err := json.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode response: %v", err)
 	}
-
 	return string(jsonData), nil
 }
 
@@ -792,25 +762,24 @@ func (a *App) AnalyzeMultipleTracks(filePaths []string) (string, error) {
 	if len(filePaths) == 0 {
 		return "", fmt.Errorf("at least one file path is required")
 	}
-
 	results := make([]*backend.AnalysisResult, 0, len(filePaths))
-
 	for _, filePath := range filePaths {
 		result, err := backend.AnalyzeTrack(filePath)
 		if err != nil {
-
 			continue
 		}
 		results = append(results, result)
 	}
-
 	jsonData, err := json.Marshal(results)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode response: %v", err)
 	}
-
 	return string(jsonData), nil
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lyrics / Cover / Media
+// ─────────────────────────────────────────────────────────────────────────────
 
 type LyricsDownloadRequest struct {
 	SpotifyID           string `json:"spotify_id"`
@@ -829,12 +798,9 @@ type LyricsDownloadRequest struct {
 
 func (a *App) DownloadLyrics(req LyricsDownloadRequest) (backend.LyricsDownloadResponse, error) {
 	if req.SpotifyID == "" {
-		return backend.LyricsDownloadResponse{
-			Success: false,
-			Error:   "Spotify ID is required",
-		}, fmt.Errorf("spotify ID is required")
+		return backend.LyricsDownloadResponse{Success: false, Error: "Spotify ID is required"},
+			fmt.Errorf("spotify ID is required")
 	}
-
 	client := backend.NewLyricsClient()
 	backendReq := backend.LyricsDownloadRequest{
 		SpotifyID:           req.SpotifyID,
@@ -850,15 +816,10 @@ func (a *App) DownloadLyrics(req LyricsDownloadRequest) (backend.LyricsDownloadR
 		UseAlbumTrackNumber: req.UseAlbumTrackNumber,
 		DiscNumber:          req.DiscNumber,
 	}
-
 	resp, err := client.DownloadLyrics(backendReq)
 	if err != nil {
-		return backend.LyricsDownloadResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, err
+		return backend.LyricsDownloadResponse{Success: false, Error: err.Error()}, err
 	}
-
 	return *resp, nil
 }
 
@@ -878,12 +839,9 @@ type CoverDownloadRequest struct {
 
 func (a *App) DownloadCover(req CoverDownloadRequest) (backend.CoverDownloadResponse, error) {
 	if req.CoverURL == "" {
-		return backend.CoverDownloadResponse{
-			Success: false,
-			Error:   "Cover URL is required",
-		}, fmt.Errorf("cover URL is required")
+		return backend.CoverDownloadResponse{Success: false, Error: "Cover URL is required"},
+			fmt.Errorf("cover URL is required")
 	}
-
 	client := backend.NewCoverClient()
 	backendReq := backend.CoverDownloadRequest{
 		CoverURL:       req.CoverURL,
@@ -898,15 +856,10 @@ func (a *App) DownloadCover(req CoverDownloadRequest) (backend.CoverDownloadResp
 		Position:       req.Position,
 		DiscNumber:     req.DiscNumber,
 	}
-
 	resp, err := client.DownloadCover(backendReq)
 	if err != nil {
-		return backend.CoverDownloadResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, err
+		return backend.CoverDownloadResponse{Success: false, Error: err.Error()}, err
 	}
-
 	return *resp, nil
 }
 
@@ -918,34 +871,22 @@ type HeaderDownloadRequest struct {
 
 func (a *App) DownloadHeader(req HeaderDownloadRequest) (backend.HeaderDownloadResponse, error) {
 	if req.HeaderURL == "" {
-		return backend.HeaderDownloadResponse{
-			Success: false,
-			Error:   "Header URL is required",
-		}, fmt.Errorf("header URL is required")
+		return backend.HeaderDownloadResponse{Success: false, Error: "Header URL is required"},
+			fmt.Errorf("header URL is required")
 	}
-
 	if req.ArtistName == "" {
-		return backend.HeaderDownloadResponse{
-			Success: false,
-			Error:   "Artist name is required",
-		}, fmt.Errorf("artist name is required")
+		return backend.HeaderDownloadResponse{Success: false, Error: "Artist name is required"},
+			fmt.Errorf("artist name is required")
 	}
-
 	client := backend.NewCoverClient()
-	backendReq := backend.HeaderDownloadRequest{
+	resp, err := client.DownloadHeader(backend.HeaderDownloadRequest{
 		HeaderURL:  req.HeaderURL,
 		ArtistName: req.ArtistName,
 		OutputDir:  req.OutputDir,
-	}
-
-	resp, err := client.DownloadHeader(backendReq)
+	})
 	if err != nil {
-		return backend.HeaderDownloadResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, err
+		return backend.HeaderDownloadResponse{Success: false, Error: err.Error()}, err
 	}
-
 	return *resp, nil
 }
 
@@ -958,35 +899,23 @@ type GalleryImageDownloadRequest struct {
 
 func (a *App) DownloadGalleryImage(req GalleryImageDownloadRequest) (backend.GalleryImageDownloadResponse, error) {
 	if req.ImageURL == "" {
-		return backend.GalleryImageDownloadResponse{
-			Success: false,
-			Error:   "Image URL is required",
-		}, fmt.Errorf("image URL is required")
+		return backend.GalleryImageDownloadResponse{Success: false, Error: "Image URL is required"},
+			fmt.Errorf("image URL is required")
 	}
-
 	if req.ArtistName == "" {
-		return backend.GalleryImageDownloadResponse{
-			Success: false,
-			Error:   "Artist name is required",
-		}, fmt.Errorf("artist name is required")
+		return backend.GalleryImageDownloadResponse{Success: false, Error: "Artist name is required"},
+			fmt.Errorf("artist name is required")
 	}
-
 	client := backend.NewCoverClient()
-	backendReq := backend.GalleryImageDownloadRequest{
+	resp, err := client.DownloadGalleryImage(backend.GalleryImageDownloadRequest{
 		ImageURL:   req.ImageURL,
 		ArtistName: req.ArtistName,
 		ImageIndex: req.ImageIndex,
 		OutputDir:  req.OutputDir,
-	}
-
-	resp, err := client.DownloadGalleryImage(backendReq)
+	})
 	if err != nil {
-		return backend.GalleryImageDownloadResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, err
+		return backend.GalleryImageDownloadResponse{Success: false, Error: err.Error()}, err
 	}
-
 	return *resp, nil
 }
 
@@ -998,34 +927,22 @@ type AvatarDownloadRequest struct {
 
 func (a *App) DownloadAvatar(req AvatarDownloadRequest) (backend.AvatarDownloadResponse, error) {
 	if req.AvatarURL == "" {
-		return backend.AvatarDownloadResponse{
-			Success: false,
-			Error:   "Avatar URL is required",
-		}, fmt.Errorf("avatar URL is required")
+		return backend.AvatarDownloadResponse{Success: false, Error: "Avatar URL is required"},
+			fmt.Errorf("avatar URL is required")
 	}
-
 	if req.ArtistName == "" {
-		return backend.AvatarDownloadResponse{
-			Success: false,
-			Error:   "Artist name is required",
-		}, fmt.Errorf("artist name is required")
+		return backend.AvatarDownloadResponse{Success: false, Error: "Artist name is required"},
+			fmt.Errorf("artist name is required")
 	}
-
 	client := backend.NewCoverClient()
-	backendReq := backend.AvatarDownloadRequest{
+	resp, err := client.DownloadAvatar(backend.AvatarDownloadRequest{
 		AvatarURL:  req.AvatarURL,
 		ArtistName: req.ArtistName,
 		OutputDir:  req.OutputDir,
-	}
-
-	resp, err := client.DownloadAvatar(backendReq)
+	})
 	if err != nil {
-		return backend.AvatarDownloadResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, err
+		return backend.AvatarDownloadResponse{Success: false, Error: err.Error()}, err
 	}
-
 	return *resp, nil
 }
 
@@ -1033,34 +950,26 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 	if spotifyTrackID == "" {
 		return "", fmt.Errorf("spotify track ID is required")
 	}
-
 	client := backend.NewSongLinkClient()
 	availability, err := client.CheckTrackAvailability(spotifyTrackID)
 	if err != nil {
 		return "", err
 	}
-
 	jsonData, err := json.Marshal(availability)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode response: %v", err)
 	}
-
 	return string(jsonData), nil
 }
 
-func (a *App) IsFFmpegInstalled() (bool, error) {
-	return backend.IsFFmpegInstalled()
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// FFmpeg
+// ─────────────────────────────────────────────────────────────────────────────
 
-func (a *App) IsFFprobeInstalled() (bool, error) {
-	return backend.IsFFprobeInstalled()
-}
-
-func (a *App) GetFFmpegPath() (string, error) {
-	return backend.GetFFmpegPath()
-}
-
-type DownloadFFmpegRequest struct{}
+func (a *App) IsFFmpegInstalled() (bool, error)  { return backend.IsFFmpegInstalled() }
+func (a *App) IsFFprobeInstalled() (bool, error) { return backend.IsFFprobeInstalled() }
+func (a *App) GetFFmpegPath() (string, error)    { return backend.GetFFmpegPath() }
+func (a *App) CheckFFmpegInstalled() (bool, error) { return backend.IsFFmpegInstalled() }
 
 type DownloadFFmpegResponse struct {
 	Success bool   `json:"success"`
@@ -1075,18 +984,15 @@ func (a *App) DownloadFFmpeg() DownloadFFmpegResponse {
 	})
 	if err != nil {
 		fmt.Printf("[FFmpeg] status: failed\n")
-		return DownloadFFmpegResponse{
-			Success: false,
-			Error:   err.Error(),
-		}
+		return DownloadFFmpegResponse{Success: false, Error: err.Error()}
 	}
-
 	fmt.Printf("[FFmpeg] status: completed\n")
-	return DownloadFFmpegResponse{
-		Success: true,
-		Message: "FFmpeg installed successfully",
-	}
+	return DownloadFFmpegResponse{Success: true, Message: "FFmpeg installed successfully"}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio / File tools
+// ─────────────────────────────────────────────────────────────────────────────
 
 type ConvertAudioRequest struct {
 	InputFiles   []string `json:"input_files"`
@@ -1096,53 +1002,39 @@ type ConvertAudioRequest struct {
 }
 
 func (a *App) ConvertAudio(req ConvertAudioRequest) ([]backend.ConvertAudioResult, error) {
-	backendReq := backend.ConvertAudioRequest{
+	return backend.ConvertAudio(backend.ConvertAudioRequest{
 		InputFiles:   req.InputFiles,
 		OutputFormat: req.OutputFormat,
 		Bitrate:      req.Bitrate,
 		Codec:        req.Codec,
-	}
-	return backend.ConvertAudio(backendReq)
+	})
 }
 
-func (a *App) SelectAudioFiles() ([]string, error) {
-	// Désactivé en mode web
-	return nil, nil
-}
-
-func (a *App) GetFileSizes(files []string) map[string]int64 {
-	return backend.GetFileSizes(files)
-}
-
+func (a *App) GetFileSizes(files []string) map[string]int64  { return backend.GetFileSizes(files) }
 func (a *App) ListDirectoryFiles(dirPath string) ([]backend.FileInfo, error) {
 	if dirPath == "" {
 		return nil, fmt.Errorf("directory path is required")
 	}
 	return backend.ListDirectory(dirPath)
 }
-
 func (a *App) ListAudioFilesInDir(dirPath string) ([]backend.FileInfo, error) {
 	if dirPath == "" {
 		return nil, fmt.Errorf("directory path is required")
 	}
 	return backend.ListAudioFiles(dirPath)
 }
-
 func (a *App) ReadFileMetadata(filePath string) (*backend.AudioMetadata, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("file path is required")
 	}
 	return backend.ReadAudioMetadata(filePath)
 }
-
 func (a *App) PreviewRenameFiles(files []string, format string) []backend.RenamePreview {
 	return backend.PreviewRename(files, format)
 }
-
 func (a *App) RenameFilesByMetadata(files []string, format string) []backend.RenameResult {
 	return backend.RenameFiles(files, format)
 }
-
 func (a *App) ReadTextFile(filePath string) (string, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -1150,42 +1042,30 @@ func (a *App) ReadTextFile(filePath string) (string, error) {
 	}
 	return string(content), nil
 }
-
 func (a *App) RenameFileTo(oldPath, newName string) error {
 	dir := filepath.Dir(oldPath)
 	ext := filepath.Ext(oldPath)
 	newPath := filepath.Join(dir, newName+ext)
 	return os.Rename(oldPath, newPath)
 }
-
 func (a *App) UploadImage(filePath string) (string, error) {
 	return backend.UploadToSendNow(filePath)
 }
-
 func (a *App) UploadImageBytes(filename string, base64Data string) (string, error) {
-
 	if idx := strings.Index(base64Data, ","); idx != -1 {
 		base64Data = base64Data[idx+1:]
 	}
-
 	data, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64: %v", err)
 	}
 	return backend.UploadBytesToSendNow(filename, data)
 }
-
-func (a *App) SelectImageVideo() ([]string, error) {
-	// Désactivé en mode web
-	return nil, nil
-}
-
 func (a *App) ReadImageAsBase64(filePath string) (string, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}
-
 	ext := strings.ToLower(filepath.Ext(filePath))
 	var mimeType string
 	switch ext {
@@ -1200,10 +1080,13 @@ func (a *App) ReadImageAsBase64(filePath string) (string, error) {
 	default:
 		mimeType = "image/jpeg"
 	}
-
 	encoded := base64.StdEncoding.EncodeToString(content)
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CheckFilesExistence
+// ─────────────────────────────────────────────────────────────────────────────
 
 type CheckFileExistenceRequest struct {
 	SpotifyID           string `json:"spotify_id"`
@@ -1281,66 +1164,44 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 				ArtistName: t.ArtistName,
 				Exists:     false,
 			}
-
 			if t.TrackName == "" || t.ArtistName == "" {
 				resultsChan <- result{index: idx, result: res}
 				return
 			}
-
 			filenameFormat := t.FilenameFormat
 			if filenameFormat == "" {
 				filenameFormat = defaultFilenameFormat
 			}
-
 			trackNumber := t.Position
 			if t.UseAlbumTrackNumber && t.TrackNumber > 0 {
 				trackNumber = t.TrackNumber
 			}
-
 			fileExt := ".flac"
 			if t.AudioFormat == "mp3" {
 				fileExt = ".mp3"
 			}
-
 			expectedFilenameBase := backend.BuildExpectedFilename(
-				t.TrackName,
-				t.ArtistName,
-				t.AlbumName,
-				t.AlbumArtist,
-				t.ReleaseDate,
-				filenameFormat,
-				"",
-				"",
-				t.IncludeTrackNumber,
-				trackNumber,
-				t.DiscNumber,
-				t.UseAlbumTrackNumber,
+				t.TrackName, t.ArtistName, t.AlbumName, t.AlbumArtist, t.ReleaseDate,
+				filenameFormat, "", "", t.IncludeTrackNumber, trackNumber, t.DiscNumber, t.UseAlbumTrackNumber,
 			)
-
 			expectedFilename := strings.TrimSuffix(expectedFilenameBase, ".flac") + fileExt
-
 			targetDir := outputDir
 			if t.RelativePath != "" {
 				targetDir = filepath.Join(outputDir, t.RelativePath)
 			}
-
 			expectedPath := filepath.Join(targetDir, expectedFilename)
-
 			if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 100*1024 {
 				res.Exists = true
 				res.FilePath = expectedPath
 			} else {
-
 				res.FilePath = expectedFilename
 			}
-
 			resultsChan <- result{index: idx, result: res}
 		}(i, track)
 	}
 
 	results := make([]CheckFileExistenceResult, len(tracks))
 	missingIndices := []int{}
-
 	for i := 0; i < len(tracks); i++ {
 		r := <-resultsChan
 		results[r.index] = r.result
@@ -1353,7 +1214,6 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 		filesMap := getRootDirFiles()
 		if len(filesMap) > 0 {
 			for _, idx := range missingIndices {
-
 				expectedFilename := results[idx].FilePath
 				baseName := filepath.Base(expectedFilename)
 				if path, ok := filesMap[baseName]; ok {
@@ -1377,13 +1237,9 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 	return results
 }
 
-func (a *App) SkipDownloadItem(itemID, filePath string) {
-	backend.SkipDownloadItem(itemID, filePath)
-}
-
-func (a *App) GetPreviewURL(trackID string) (string, error) {
-	return backend.GetPreviewURL(trackID)
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings
+// ─────────────────────────────────────────────────────────────────────────────
 
 func (a *App) GetConfigPath() (string, error) {
 	dir, err := backend.GetFFmpegDir()
@@ -1398,19 +1254,16 @@ func (a *App) SaveSettings(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-
 	dir := filepath.Dir(configPath)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
 	}
-
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	return os.WriteFile(configPath, data, 0644)
 }
 
@@ -1419,65 +1272,46 @@ func (a *App) LoadSettings() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, nil
 	}
-
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
 	}
-
 	var settings map[string]interface{}
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, err
 	}
-
 	return settings, nil
 }
 
-func (a *App) CheckFFmpegInstalled() (bool, error) {
-	return backend.IsFFmpegInstalled()
-}
-
-func (a *App) GetOSInfo() (string, error) {
-	return backend.GetOSInfo()
-}
+func (a *App) GetOSInfo() (string, error) { return backend.GetOSInfo() }
 
 func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []string, jellyfinMusicPath string) error {
 	if len(filePaths) == 0 {
 		return nil
 	}
-
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return err
 	}
-
-	fnName := m3u8Name
-
-	safeName := backend.SanitizeFilename(fnName)
+	safeName := backend.SanitizeFilename(m3u8Name)
 	if safeName == "" {
 		safeName = "playlist"
 	}
-
 	m3u8Path := filepath.Join(outputDir, safeName+".m3u8")
-
 	f, err := os.Create(m3u8Path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
 	if _, err := f.WriteString("#EXTM3U\n"); err != nil {
 		return err
 	}
-
 	for _, path := range filePaths {
 		if path == "" {
 			continue
 		}
-
 		var entry string
 		if jellyfinMusicPath != "" {
 			entry = strings.Replace(path, "/home/nonroot/Music", strings.TrimRight(jellyfinMusicPath, "/"), 1)
@@ -1493,23 +1327,37 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 			return err
 		}
 	}
-
 	return nil
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Misc helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (a *App) SkipDownloadItem(itemID, filePath string) { backend.SkipDownloadItem(itemID, filePath) }
+func (a *App) GetPreviewURL(trackID string) (string, error) { return backend.GetPreviewURL(trackID) }
+
 func jobStatusToDownloadStatus(s JobStatus) backend.DownloadStatus {
 	switch s {
-	case StatusPending:     return backend.StatusQueued
-	case StatusDownloading: return backend.StatusDownloading
-	case StatusDone:        return backend.StatusCompleted
-	case StatusFailed:      return backend.StatusFailed
-	case StatusSkipped:     return backend.StatusSkipped
-	default:                return backend.StatusQueued
+	case StatusPending:
+		return backend.StatusQueued
+	case StatusDownloading:
+		return backend.StatusDownloading
+	case StatusDone:
+		return backend.StatusCompleted
+	case StatusFailed:
+		return backend.StatusFailed
+	case StatusSkipped:
+		return backend.StatusSkipped
+	default:
+		return backend.StatusQueued
 	}
 }
 
 func (a *App) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchResponse, error) {
 	jm := GetJobManager()
-	if jm == nil { return EnqueueBatchResponse{}, fmt.Errorf("job manager not initialized") }
+	if jm == nil {
+		return EnqueueBatchResponse{}, fmt.Errorf("job manager not initialized")
+	}
 	return jm.EnqueueBatch(req)
 }

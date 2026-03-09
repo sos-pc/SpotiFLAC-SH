@@ -576,6 +576,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		Copyright:            job.Copyright,
 		Publisher:            job.Publisher,
 		PlaylistName:         job.PlaylistName,
+		UserID:               job.UserID,
 		AllowFallback:        s.AllowFallback,
 		UseFirstArtistOnly:   s.UseFirstArtistOnly,
 		UseSingleGenre:       s.UseSingleGenre,
