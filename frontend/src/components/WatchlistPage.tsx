@@ -196,6 +196,18 @@ export function WatchlistPage() {
       setSyncing(null);
     }
   };
+  const handleRefreshAll = async () => {
+    setLoading(true);
+    try {
+      await Promise.all(watchlists.map((l) => ForceSyncWatchlist(l.id)));
+      toast.success(`Sync triggered for ${watchlists.length} playlist(s)`);
+      setTimeout(loadWatchlists, 2000);
+    } catch (err) {
+      toast.error(`Sync failed: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const formatLastSync = (lastSync: string) => {
     if (!lastSync || lastSync.startsWith("0001")) return "Never synced";
@@ -207,7 +219,7 @@ export function WatchlistPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Auto-Sync Playlists</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={loadWatchlists} disabled={loading}>
+          <Button variant="outline" onClick={handleRefreshAll} disabled={loading || watchlists.length === 0}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
