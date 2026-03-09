@@ -395,6 +395,19 @@ func (w *Watcher) GetWatchlists() ([]WatchedPlaylist, error) {
 	return playlists, err
 }
 
+func (w *Watcher) getWatchlistByID(id string) (*WatchedPlaylist, error) {
+	playlists, err := w.GetWatchlists()
+	if err != nil {
+		return nil, err
+	}
+	for _, pl := range playlists {
+		if pl.ID == id {
+			return &pl, nil
+		}
+	}
+	return nil, fmt.Errorf("watchlist not found: %s", id)
+}
+
 func (w *Watcher) GetWatchlistsByUser(userID string) ([]WatchedPlaylist, error) {
 	all, err := w.GetWatchlists()
 	if err != nil {

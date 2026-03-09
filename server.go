@@ -132,6 +132,20 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func checkWatchlistOwnership(watchlistID string, user *JWTClaims) error {
+	if user == nil {
+		return fmt.Errorf("unauthorized")
+	}
+	pl, err := GetWatcher().getWatchlistByID(watchlistID)
+	if err != nil {
+		return fmt.Errorf("watchlist not found")
+	}
+	if pl.UserID != "" && pl.UserID != user.UserID && !user.IsAdmin {
+		return fmt.Errorf("access denied")
+	}
+	return nil
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
@@ -235,6 +249,9 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
+		if err := checkWatchlistOwnership(params.ID, user); err != nil {
+			return nil, err
+		}
 		return nil, GetWatcher().RemoveWatchlist(params.ID)
 	})
 
@@ -276,6 +293,9 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, err
 		}
+		if err := checkWatchlistOwnership(req.ID, user); err != nil {
+			return nil, err
+		}
 		return nil, GetWatcher().UpdateWatchlist(req)
 	})
 
@@ -286,6 +306,9 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
+		if err := checkWatchlistOwnership(params.ID, user); err != nil {
+			return nil, err
+		}
 		return GetWatcher().GetWatchlistStats(params.ID)
 	})
 
@@ -294,6 +317,9 @@ func (s *Server) registerHandlers() {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(p, &params); err != nil {
+			return nil, err
+		}
+		if err := checkWatchlistOwnership(params.ID, user); err != nil {
 			return nil, err
 		}
 		return GetWatcher().GetWatchlistHistory(params.ID)
@@ -318,6 +344,9 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
+		if err := checkWatchlistOwnership(params.ID, user); err != nil {
+			return nil, err
+		}
 		return nil, GetWatcher().RedownloadWatchlist(params.ID)
 	})
 
@@ -326,6 +355,9 @@ func (s *Server) registerHandlers() {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(p, &params); err != nil {
+			return nil, err
+		}
+		if err := checkWatchlistOwnership(params.ID, user); err != nil {
 			return nil, err
 		}
 		return nil, GetWatcher().ForceSyncWatchlist(params.ID)
@@ -581,6 +613,16 @@ func (s *Server) registerHandlers() {
 
 	// ── Settings ──────────────────────────────────────────────────────────
 	s.handle("LoadSettings", func(p json.RawMessage, user *JWTClaims) (interface{}, error) {
+		// Settings par user si authentifié
+		if user != nil {
+			auth := GetAuthManager()
+			if auth != nil {
+				profile, err := auth.GetUser(user.UserID)
+				if err == nil && profile != nil && len(profile.Settings) > 0 {
+					return profile.Settings, nil
+				}
+			}
+		}
 		return a.LoadSettings()
 	})
 
@@ -591,6 +633,14 @@ func (s *Server) registerHandlers() {
 		if err := json.Unmarshal(p, &params); err != nil {
 			return nil, err
 		}
+		// Sauver dans user profile si authentifié
+		if user != nil {
+			auth := GetAuthManager()
+			if auth != nil {
+				return nil, auth.SaveUserSettings(user.UserID, params.Settings)
+			}
+		}
+		// Fallback global config.json
 		return nil, a.SaveSettings(params.Settings)
 	})
 
