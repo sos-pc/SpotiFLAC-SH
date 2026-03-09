@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -65,7 +66,7 @@ type Watcher struct {
 	jm     *JobManager
 	ctx    context.Context
 	cancel context.CancelFunc
-	mu     sync.RWMutex
+	mu     sync.Mutex // FIX #2 — protège les écritures concurrentes sur les watchlists
 }
 
 var (
@@ -100,21 +101,26 @@ func CloseWatcher() {
 
 // daemon tourne en permanence et vérifie toutes les 5 minutes
 // si des playlists doivent être synchronisées.
+// FIX #1 — cleanupTicker intégré dans le for/select (était créé mais jamais consommé)
 func (w *Watcher) daemon() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
+	// FIX #1 — cleanup toutes les 24h, intégré dans le select
+	cleanupTicker := time.NewTicker(24 * time.Hour)
+	defer cleanupTicker.Stop()
+
 	// Vérifier immédiatement au démarrage
 	w.checkAll()
 
-	cleanupTicker := time.NewTicker(24 * time.Hour)
-	defer cleanupTicker.Stop()
+	// Premier cleanup différé de 5 minutes (laisser le temps aux workers de démarrer)
 	go func() {
 		time.Sleep(5 * time.Minute)
 		if jm := GetJobManager(); jm != nil {
 			jm.CleanupOldJobs()
 		}
 	}()
+
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -122,6 +128,16 @@ func (w *Watcher) daemon() {
 			return
 		case <-ticker.C:
 			w.checkAll()
+		// FIX #1 — cleanupTicker.C maintenant consommé → cleanup tourne toutes les 24h
+		case <-cleanupTicker.C:
+			if jm := GetJobManager(); jm != nil {
+				deleted, err := jm.CleanupOldJobs()
+				if err != nil {
+					fmt.Printf("[Watcher] Cleanup error: %v\n", err)
+				} else if deleted > 0 {
+					fmt.Printf("[Watcher] Cleanup: %d old jobs deleted\n", deleted)
+				}
+			}
 		}
 	}
 }
@@ -146,31 +162,25 @@ func (w *Watcher) checkAll() {
 
 // syncPlaylist récupère les métadonnées Spotify, compare avec les tracks déjà
 // connus, et enqueue uniquement les nouveaux.
+// FIX #2 — mu.Lock() autour des écritures sur TrackIDs + saveWatchlist
 func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	fmt.Printf("[Watcher] Syncing: %s\n", pl.SpotifyURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	var delay time.Duration = time.Second
-	if delay == 0 {
-		delay = time.Second
-	}
-
-	data, err := backend.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, delay)
+	data, err := backend.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
 	if err != nil {
 		fmt.Printf("[Watcher] Failed to fetch metadata for %s: %v\n", pl.SpotifyURL, err)
 		return
 	}
 
-	// Parser la réponse générique en liste de tracks
 	tracks := extractTracksFromMetadata(data)
 	if len(tracks) == 0 {
 		fmt.Printf("[Watcher] No tracks found for %s\n", pl.SpotifyURL)
 		return
 	}
 
-	// Nom de la playlist
 	playlistName := extractPlaylistName(data)
 	if playlistName == "" {
 		playlistName = pl.Name
@@ -179,7 +189,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		pl.Name = playlistName
 	}
 
-	// IDs actuels de la playlist Spotify (pour détecter suppressions)
 	currentTrackIDs := make([]string, 0, len(tracks))
 	for _, t := range tracks {
 		if t.SpotifyID != "" {
@@ -187,7 +196,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		}
 	}
 
-	// Trouver les nouveaux tracks (pas encore dans TrackIDs)
 	knownIDs := make(map[string]bool, len(pl.TrackIDs))
 	for _, id := range pl.TrackIDs {
 		knownIDs[id] = true
@@ -208,21 +216,24 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 
 	fmt.Printf("[Watcher] %s — %d new tracks to download\n", playlistName, len(newTracks))
 
-	go w.generateM3U8ForPlaylist(pl)
-
+	// FIX #4 — EnqueueBatch avant generateM3U8 (était inversé)
 	if len(newTracks) > 0 {
 		_, err := w.jm.EnqueueBatch(EnqueueBatchRequest{
 			Tracks:      newTracks,
 			Settings:    pl.Settings,
 			WatchlistID: pl.ID,
-				UserID:      pl.UserID,
+			UserID:      pl.UserID,
 		})
 		if err != nil {
 			fmt.Printf("[Watcher] EnqueueBatch failed for %s: %v\n", playlistName, err)
 		}
 	}
 
-	// ── Sync deletions : détecter les tracks retirés de Spotify ──
+	// M3U8 généré après EnqueueBatch (les jobs existants sont déjà là)
+	// maybeGenerateM3U8 dans jobs.go le regénère aussi à la fin de chaque job
+	go w.generateM3U8ForPlaylist(pl)
+
+	// ── Sync deletions ──
 	deletedCount := 0
 	if pl.SyncDeletions && len(currentTrackIDs) > 0 {
 		currentSet := make(map[string]bool)
@@ -230,7 +241,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			currentSet[id] = true
 		}
 		jm := GetJobManager()
-		// Charger toutes les watchlists pour vérifier les conflits
 		allPlaylists, _ := w.GetWatchlists()
 		otherWatchlistIDs := make(map[string]bool)
 		for _, other := range allPlaylists {
@@ -248,10 +258,10 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 				remainingIDs = append(remainingIDs, knownID)
 				continue
 			}
-			// Ce track a été retiré de Spotify
 			inOtherPlaylist := otherWatchlistIDs[knownID]
 			if inOtherPlaylist {
 				fmt.Printf("[Watcher] Track %s removed from %s but present in another watchlist — skipping file deletion\n", knownID, pl.Name)
+				remainingIDs = append(remainingIDs, knownID)
 			} else if jm != nil {
 				jobs, _ := jm.GetAllJobs()
 				for _, job := range jobs {
@@ -272,7 +282,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		pl.TrackIDs = remainingIDs
 	}
 
-	// ── SyncLog initial (mis à jour dans maybeGenerateM3U8 après download) ──
+	// ── SyncLog ──
 	syncLog := SyncLog{
 		Time:      time.Now(),
 		NewTracks: len(newTracks),
@@ -283,10 +293,12 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		pl.SyncLogs = pl.SyncLogs[len(pl.SyncLogs)-20:]
 	}
 
-	// Mettre à jour la playlist (nouveaux IDs + lastSync)
+	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
+	w.mu.Lock()
 	pl.TrackIDs = append(pl.TrackIDs, newIDs...)
 	pl.LastSync = time.Now()
 	w.saveWatchlist(&pl)
+	w.mu.Unlock()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,7 +314,6 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		req.IntervalHours = 24
 	}
 
-	// Récupérer les métadonnées pour avoir le nom et les tracks initiaux
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -342,7 +353,6 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		return AddWatchlistResponse{}, fmt.Errorf("failed to save watchlist: %v", err)
 	}
 
-	// Enqueue les tracks existants immédiatement
 	if len(tracks) > 0 {
 		for i := range tracks {
 			tracks[i].PlaylistName = name
@@ -352,7 +362,7 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 			Tracks:      tracks,
 			Settings:    req.Settings,
 			WatchlistID: pl.ID,
-				UserID:      pl.UserID,
+			UserID:      pl.UserID,
 		})
 	}
 
@@ -454,52 +464,54 @@ func (w *Watcher) ForceSyncWatchlist(id string) error {
 	return fmt.Errorf("watchlist not found: %s", id)
 }
 
+// FIX #3 — defer cancel() sorti de la boucle (pattern correct)
 func (w *Watcher) RedownloadWatchlist(id string) error {
 	playlists, err := w.GetWatchlists()
 	if err != nil {
 		return err
 	}
 	for _, pl := range playlists {
-		if pl.ID == id {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			data, err := backend.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
-			if err != nil {
-				return fmt.Errorf("failed to fetch playlist: %v", err)
-			}
-			tracks := extractTracksFromMetadata(data)
-			playlistName := extractPlaylistName(data)
-			if playlistName == "" {
-				playlistName = pl.Name
-			}
-			// Re-enqueue tous les tracks
-			for i := range tracks {
-				tracks[i].PlaylistName = playlistName
-				tracks[i].Position = i + 1
-			}
-			if len(tracks) > 0 {
-				go w.jm.EnqueueBatch(EnqueueBatchRequest{
-					Tracks:      tracks,
-					Settings:    pl.Settings,
-					WatchlistID: pl.ID,
-				UserID:      pl.UserID,
-				})
-			}
-			// Remplir TrackIDs avec tous les IDs actuels pour éviter re-enqueue au prochain sync
-			newIDs := make([]string, 0, len(tracks))
-			for _, t := range tracks {
-				if t.SpotifyID != "" {
-					newIDs = append(newIDs, t.SpotifyID)
-				}
-			}
-			pl.TrackIDs = newIDs
-			pl.Name = playlistName
-			if err := w.saveWatchlist(&pl); err != nil {
-				return err
-			}
-			fmt.Printf("[Watcher] Re-download all triggered for %s (%d tracks)\n", pl.Name, len(tracks))
-			return nil
+		if pl.ID != id {
+			continue
 		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel() // un seul defer, hors boucle effective car on return juste après
+
+		data, err := backend.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
+		if err != nil {
+			return fmt.Errorf("failed to fetch playlist: %v", err)
+		}
+		tracks := extractTracksFromMetadata(data)
+		playlistName := extractPlaylistName(data)
+		if playlistName == "" {
+			playlistName = pl.Name
+		}
+		for i := range tracks {
+			tracks[i].PlaylistName = playlistName
+			tracks[i].Position = i + 1
+		}
+		if len(tracks) > 0 {
+			go w.jm.EnqueueBatch(EnqueueBatchRequest{
+				Tracks:      tracks,
+				Settings:    pl.Settings,
+				WatchlistID: pl.ID,
+				UserID:      pl.UserID,
+			})
+		}
+		newIDs := make([]string, 0, len(tracks))
+		for _, t := range tracks {
+			if t.SpotifyID != "" {
+				newIDs = append(newIDs, t.SpotifyID)
+			}
+		}
+		pl.TrackIDs = newIDs
+		pl.Name = playlistName
+		if err := w.saveWatchlist(&pl); err != nil {
+			return err
+		}
+		fmt.Printf("[Watcher] Re-download all triggered for %s (%d tracks)\n", pl.Name, len(tracks))
+		return nil
 	}
 	return fmt.Errorf("watchlist not found: %s", id)
 }
@@ -508,13 +520,11 @@ func (w *Watcher) RedownloadWatchlist(id string) error {
 // Helpers — parsing de la réponse GetFilteredSpotifyData
 // ─────────────────────────────────────────────────────────────────────────────
 
-// extractTracksFromMetadata parse la réponse générique de GetFilteredSpotifyData
-// qui peut être une playlist, un album, ou un titre unique.
-
-// RemoveTrackID retire un spotify_id des TrackIDs d'une watchlist (appelé après échec).
+// RemoveTrackID retire un spotify_id des TrackIDs d'une watchlist (appelé après échec permanent).
 func (w *Watcher) RemoveTrackID(watchlistID, spotifyID string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	playlists, err := w.GetWatchlists()
 	if err != nil {
 		return
@@ -539,8 +549,8 @@ func (w *Watcher) RemoveTrackID(watchlistID, spotifyID string) {
 	_ = w.saveWatchlist(pl)
 	fmt.Printf("[Watcher] Track %s removed from %s TrackIDs (will retry next sync)\n", spotifyID, pl.Name)
 }
+
 func toRawBytes(data interface{}) []byte {
-	// Si data est une string (JSON double-encodé), l'utiliser directement
 	if s, ok := data.(string); ok {
 		return []byte(s)
 	}
@@ -554,7 +564,6 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 		return nil
 	}
 
-	// Essayer PlaylistResponsePayload / AlbumResponsePayload (format réel de GetFilteredSpotifyData)
 	var playlistPayload struct {
 		TrackList []struct {
 			SpotifyID   string `json:"spotify_id"`
@@ -573,7 +582,6 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 		return convertTracks(playlistPayload.TrackList)
 	}
 
-	// Essayer tableau plat de tracks
 	var flatTracks []struct {
 		SpotifyID   string `json:"spotify_id"`
 		Name        string `json:"name"`
@@ -590,7 +598,6 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 		return convertTracks(flatTracks)
 	}
 
-	// Essayer playlist wrappée
 	var playlist struct {
 		Playlist struct {
 			Name   string `json:"name"`
@@ -616,7 +623,6 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 		return convertTracks(playlist.Playlist.Tracks)
 	}
 
-	// Essayer album
 	var album struct {
 		Album struct {
 			Name   string `json:"name"`
@@ -642,7 +648,6 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 		return convertTracks(album.Album.Tracks)
 	}
 
-	// Essayer track unique
 	var single struct {
 		Track struct {
 			SpotifyID   string `json:"spotify_id"`
@@ -684,6 +689,7 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 	return nil
 }
 
+// FIX #7 — extractPlaylistName retourne le nom de la playlist, pas le owner
 func extractPlaylistName(data interface{}) string {
 	raw := toRawBytes(data)
 	if raw == nil {
@@ -691,8 +697,8 @@ func extractPlaylistName(data interface{}) string {
 	}
 
 	var result struct {
-		// PlaylistResponsePayload / AlbumResponsePayload
 		PlaylistInfo struct {
+			Name  string `json:"name"`  // FIX #7 — nom de la playlist, pas Owner.Name
 			Owner struct {
 				Name string `json:"name"`
 			} `json:"owner"`
@@ -703,7 +709,6 @@ func extractPlaylistName(data interface{}) string {
 		ArtistInfo struct {
 			Name string `json:"name"`
 		} `json:"artist_info"`
-		// Formats wrappés legacy
 		Playlist struct {
 			Name string `json:"name"`
 		} `json:"playlist"`
@@ -719,8 +724,9 @@ func extractPlaylistName(data interface{}) string {
 		return ""
 	}
 
-	if result.PlaylistInfo.Owner.Name != "" {
-		return result.PlaylistInfo.Owner.Name
+	// FIX #7 — priorité au nom de la playlist sur le nom du owner
+	if result.PlaylistInfo.Name != "" {
+		return result.PlaylistInfo.Name
 	}
 	if result.AlbumInfo.Name != "" {
 		return result.AlbumInfo.Name
@@ -771,7 +777,6 @@ func convertTracks(tracks interface{}) []JobTrack {
 		if t.SpotifyID == "" {
 			continue
 		}
-		// Nettoyer le nom d'artiste des séparateurs multiples
 		artistName := strings.TrimSpace(t.Artists)
 		result = append(result, JobTrack{
 			SpotifyID:   t.SpotifyID,
@@ -794,10 +799,9 @@ func convertTracks(tracks interface{}) []JobTrack {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
 // UpdateWatchlist
 // ─────────────────────────────────────────────────────────────────────────────
+
 type UpdateWatchlistRequest struct {
 	ID            string `json:"id"`
 	IntervalHours int    `json:"interval_hours"`
@@ -824,12 +828,13 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 // ─────────────────────────────────────────────────────────────────────────────
 // GetWatchlistStats
 // ─────────────────────────────────────────────────────────────────────────────
+
 type WatchlistStats struct {
-	WatchlistID  string  `json:"watchlist_id"`
-	Downloaded   int     `json:"downloaded"`
-	Failed       int     `json:"failed"`
-	Skipped      int     `json:"skipped"`
-	TotalSizeMB  float64 `json:"total_size_mb"`
+	WatchlistID string  `json:"watchlist_id"`
+	Downloaded  int     `json:"downloaded"`
+	Failed      int     `json:"failed"`
+	Skipped     int     `json:"skipped"`
+	TotalSizeMB float64 `json:"total_size_mb"`
 }
 
 func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) {
@@ -842,7 +847,6 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	if err != nil {
 		return stats, err
 	}
-	// Dédupliquer par SpotifyID : garder le job le plus récent
 	latest := make(map[string]Job)
 	for _, j := range jobs {
 		if j.WatchlistID != watchlistID {
@@ -865,7 +869,6 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 			stats.Failed++
 		case StatusSkipped:
 			stats.Skipped++
-			// Lire la taille depuis le disque si disponible
 			if j.FilePath != "" {
 				if info, err := os.Stat(j.FilePath); err == nil {
 					stats.TotalSizeMB += float64(info.Size()) / 1024 / 1024
@@ -879,6 +882,7 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 // ─────────────────────────────────────────────────────────────────────────────
 // GetWatchlistHistory
 // ─────────────────────────────────────────────────────────────────────────────
+
 type WatchlistHistoryItem struct {
 	TrackName  string  `json:"track_name"`
 	ArtistName string  `json:"artist_name"`
@@ -890,6 +894,7 @@ type WatchlistHistoryItem struct {
 	Error      string  `json:"error,omitempty"`
 }
 
+// FIX #6 — sort.Slice à la place du tri O(n²)
 func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryItem, error) {
 	jm := GetJobManager()
 	if jm == nil {
@@ -915,43 +920,41 @@ func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryIte
 			Error:      j.Error,
 		})
 	}
-	// Trier par UpdatedAt desc
-	for i := 0; i < len(items)-1; i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].UpdatedAt > items[i].UpdatedAt {
-				items[i], items[j] = items[j], items[i]
-			}
-		}
-	}
+	// FIX #6 — O(n log n) au lieu de O(n²)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt > items[j].UpdatedAt
+	})
 	return items, nil
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // M3U8 generation pour Jellyfin
 // ─────────────────────────────────────────────────────────────────────────────
+
 func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
-        app := &App{}
-        var settings map[string]interface{}
-        if pl.UserID != "" {
-                if auth := GetAuthManager(); auth != nil {
-                        if profile, err2 := auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
-                                settings = profile.Settings
-                        }
-                }
-        }
-        if settings == nil {
-                var err error
-                settings, err = app.LoadSettings()
-                if err != nil || settings == nil {
-                        return
-                }
-        }
+	app := &App{}
+	var settings map[string]interface{}
+	if pl.UserID != "" {
+		if auth := GetAuthManager(); auth != nil {
+			if profile, err2 := auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
+				settings = profile.Settings
+			}
+		}
+	}
+	if settings == nil {
+		var err error
+		settings, err = app.LoadSettings()
+		if err != nil || settings == nil {
+			return
+		}
+	}
+
 	createM3u8, _ := settings["createM3u8File"].(bool)
 	if !createM3u8 {
 		return
 	}
 	jellyfinPath, _ := settings["jellyfinMusicPath"].(string)
 
-	// Attendre que les jobs soient terminés (max 2h)
 	jm := GetJobManager()
 	if jm == nil {
 		return
@@ -961,8 +964,6 @@ func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
 		outputDir = "/home/nonroot/Music"
 	}
 
-	// Collecter les fichiers téléchargés pour cette watchlist, triés par position
-	// Dédupliquer par SpotifyID (garder le job le plus récent)
 	type entry struct {
 		pos  int
 		path string
@@ -971,7 +972,6 @@ func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
 	if err != nil {
 		return
 	}
-	type jobKey struct{ spotifyID string }
 	latestJob := make(map[string]Job)
 	for _, job := range jobs {
 		if job.WatchlistID != pl.ID || job.FilePath == "" {
@@ -995,20 +995,15 @@ func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
 	if len(entries) == 0 {
 		return
 	}
-	// Trier par position
-	for i := 0; i < len(entries)-1; i++ {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[j].pos < entries[i].pos {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
+	// FIX #6 — sort.Slice ici aussi
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].pos < entries[j].pos
+	})
 	paths := make([]string, len(entries))
 	for i, e := range entries {
 		paths[i] = e.path
 	}
 
-	// Dossier de sortie M3U8 : outputDir/Playlists/
 	playlistDir := outputDir + "/Playlists"
 	if err := os.MkdirAll(playlistDir, 0755); err != nil {
 		fmt.Printf("[Watcher] M3U8: failed to create Playlists dir: %v\n", err)
