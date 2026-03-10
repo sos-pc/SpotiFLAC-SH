@@ -182,7 +182,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	}
 
 	playlistName := extractPlaylistName(data)
-	fmt.Printf("[Watcher] DEBUG extractPlaylistName result: %q (raw type: %T, raw[:200]: %s)\n", playlistName, data, func() string { r := fmt.Sprintf("%v", data); if len(r) > 200 { return r[:200] }; return r }())
 	if playlistName == "" {
 		playlistName = pl.Name
 	}
@@ -730,9 +729,9 @@ func extractPlaylistName(data interface{}) string {
 
 	var result struct {
 		PlaylistInfo struct {
-			Name  string `json:"name"`  // FIX #7 — nom de la playlist, pas Owner.Name
 			Owner struct {
-				Name string `json:"name"`
+				DisplayName string `json:"display_name"`
+				Name        string `json:"name"`
 			} `json:"owner"`
 		} `json:"playlist_info"`
 		AlbumInfo struct {
@@ -757,8 +756,9 @@ func extractPlaylistName(data interface{}) string {
 	}
 
 	// FIX #7 — priorité au nom de la playlist sur le nom du owner
-	if result.PlaylistInfo.Name != "" {
-		return result.PlaylistInfo.Name
+	// PlaylistInfo.Owner.Name contient le nom de la playlist (pas PlaylistInfo.Name)
+	if result.PlaylistInfo.Owner.Name != "" {
+		return result.PlaylistInfo.Owner.Name
 	}
 	if result.AlbumInfo.Name != "" {
 		return result.AlbumInfo.Name
