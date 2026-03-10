@@ -1,0 +1,194 @@
+name: Check Upstream Changes
+
+on:
+  schedule:
+    # Chaque lundi à 8h UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+    # Déclenchement manuel depuis l'interface GitHub
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/afkarxyz/SpotiFLAC.git
+          git fetch upstream --quiet
+
+      - name: Check for changes in tracked files
+        id: check
+        run: |
+          # Fichiers à surveiller (pure upstream)
+          TRACKED_FILES=(
+            "backend/tidal.go"
+            "backend/deezer.go"
+            "backend/amazon.go"
+            "backend/qobuz.go"
+            "backend/spotify.go"
+            "backend/metadata.go"
+            "backend/musicbrainz.go"
+            "backend/songlink.go"
+            "backend/uploader.go"
+            "backend/cover.go"
+            "backend/lyrics.go"
+            "backend/downloader.go"
+          )
+
+          MIXED_FILES=(
+            "app.go"
+            "go.mod"
+          )
+
+          UPSTREAM_HEAD=$(git rev-parse upstream/main)
+          UPSTREAM_DATE=$(git log -1 --format="%ci" upstream/main)
+          UPSTREAM_MSG=$(git log -1 --format="%s" upstream/main)
+          COMMON_ANCESTOR=$(git merge-base HEAD upstream/main)
+          COMMIT_COUNT=$(git rev-list --count "${COMMON_ANCESTOR}..upstream/main")
+
+          echo "upstream_head=${UPSTREAM_HEAD:0:8}" >> $GITHUB_OUTPUT
+          echo "upstream_date=${UPSTREAM_DATE:0:10}" >> $GITHUB_OUTPUT
+          echo "upstream_msg=${UPSTREAM_MSG}" >> $GITHUB_OUTPUT
+          echo "commit_count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
+
+          if [[ "$COMMIT_COUNT" -eq 0 ]]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Construire le rapport de diff
+          CHANGED_FILES=""
+          UNCHANGED_FILES=""
+          MIXED_CHANGED=""
+
+          for FILE in "${TRACKED_FILES[@]}"; do
+            if ! git show "upstream/main:${FILE}" &>/dev/null 2>&1; then
+              continue
+            fi
+            DIFF=$(git diff HEAD upstream/main -- "${FILE}" 2>/dev/null || true)
+            if [[ -n "$DIFF" ]]; then
+              ADDED=$(echo "$DIFF" | grep -c '^+[^+]' || true)
+              REMOVED=$(echo "$DIFF" | grep -c '^-[^-]' || true)
+              CHANGED_FILES="${CHANGED_FILES}\n- \`${FILE}\` (+${ADDED} / -${REMOVED} lignes)"
+            else
+              UNCHANGED_FILES="${UNCHANGED_FILES}\n- \`${FILE}\`"
+            fi
+          done
+
+          for FILE in "${MIXED_FILES[@]}"; do
+            if ! git show "upstream/main:${FILE}" &>/dev/null 2>&1; then
+              continue
+            fi
+            DIFF=$(git diff HEAD upstream/main -- "${FILE}" 2>/dev/null || true)
+            if [[ -n "$DIFF" ]]; then
+              ADDED=$(echo "$DIFF" | grep -c '^+[^+]' || true)
+              REMOVED=$(echo "$DIFF" | grep -c '^-[^-]' || true)
+              MIXED_CHANGED="${MIXED_CHANGED}\n- \`${FILE}\` (+${ADDED} / -${REMOVED} lignes) ⚠️ merge manuel"
+            fi
+          done
+
+          # Commits récents upstream
+          RECENT_COMMITS=$(git log "${COMMON_ANCESTOR}..upstream/main" --oneline | head -10)
+
+          # Écrire le rapport dans un fichier (pour éviter les problèmes de quotes dans $GITHUB_OUTPUT)
+          cat > /tmp/issue_body.md << EOF
+          ## 🔄 Changements détectés dans [afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC)
+
+          **Upstream HEAD :** \`${UPSTREAM_HEAD:0:8}\` — ${UPSTREAM_DATE:0:10}
+          **Dernier commit :** ${UPSTREAM_MSG}
+          **Commits non intégrés :** ${COMMIT_COUNT}
+
+          ---
+
+          ### Commits upstream récents
+          \`\`\`
+          ${RECENT_COMMITS}
+          \`\`\`
+
+          ---
+
+          ### Fichiers PURE UPSTREAM modifiés (action requise)
+          $(echo -e "$CHANGED_FILES")
+
+          ### Fichiers MIXED modifiés (inspection manuelle)
+          $(echo -e "$MIXED_CHANGED")
+
+          ---
+
+          ### Actions recommandées
+
+          \`\`\`bash
+          # 1. Fetch upstream
+          git fetch upstream
+
+          # 2. Voir les diffs
+          git diff HEAD upstream/main -- backend/tidal.go | less
+
+          # 3. Intégrer un fichier pure upstream
+          git checkout upstream/main -- backend/FICHIER.go
+          git commit -m "chore: sync backend/FICHIER.go from upstream $(date +%Y-%m-%d)"
+
+          # 4. Ou lancer le script local
+          ./check-upstream.sh --verbose
+          \`\`\`
+
+          ---
+          *Issue créée automatiquement par le workflow [upstream-check.yml](../.github/workflows/upstream-check.yml)*
+          EOF
+
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "changed_count=$(echo -e "$CHANGED_FILES" | grep -c '^\-' || true)" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Issue if changes detected
+        if: steps.check.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/issue_body.md', 'utf8');
+
+            // Vérifier si une issue similaire est déjà ouverte
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'upstream-sync'
+            });
+
+            const upstreamHead = '${{ steps.check.outputs.upstream_head }}';
+            const alreadyExists = existingIssues.data.some(issue =>
+              issue.title.includes(upstreamHead)
+            );
+
+            if (alreadyExists) {
+              console.log('Issue already exists for this upstream commit, skipping.');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Upstream Sync] ${${{ steps.check.outputs.commit_count }}} nouveaux commits — upstream/${{ steps.check.outputs.upstream_head }} (${${{ steps.check.outputs.upstream_date }}})`,
+              body: body,
+              labels: ['upstream-sync']
+            });
+
+            console.log('Issue créée avec succès.');
+
+      - name: Summary
+        run: |
+          if [[ "${{ steps.check.outputs.has_changes }}" == "false" ]]; then
+            echo "✅ Aucun changement upstream détecté. Tout est à jour."
+          else
+            echo "⚠️ Changements détectés ! Issue GitHub créée."
+            echo "Commits non intégrés : ${{ steps.check.outputs.commit_count }}"
+          fi
