@@ -19,9 +19,9 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 const (
-	jobWorkers    = 3           // workers de téléchargement en parallèle
-	songLinkDelay = 600         // ms entre deux requêtes song.link
-	dbFile        = "jobs.db"   // chemin relatif au configDir
+	jobWorkers    = 3         // workers de téléchargement en parallèle
+	songLinkDelay = 600       // ms entre deux requêtes song.link
+	dbFile        = "jobs.db" // chemin relatif au configDir
 )
 
 var (
@@ -66,34 +66,34 @@ type JobSettings struct {
 
 // Job représente un téléchargement individuel persisté en BoltDB.
 type Job struct {
-	ID          string      `json:"id"`
-	SpotifyID   string      `json:"spotify_id"`
-	TrackName   string      `json:"track_name"`
-	ArtistName  string      `json:"artist_name"`
-	AlbumName   string      `json:"album_name"`
-	AlbumArtist string      `json:"album_artist"`
-	ReleaseDate string      `json:"release_date"`
-	CoverURL    string      `json:"cover_url"`
-	TrackNumber int         `json:"track_number"`
-	DiscNumber  int         `json:"disc_number"`
-	TotalTracks int         `json:"total_tracks"`
-	TotalDiscs  int         `json:"total_discs"`
-	Copyright   string      `json:"copyright"`
-	Publisher   string      `json:"publisher"`
-	Position    int         `json:"position"`
-	PlaylistName string     `json:"playlist_name"`
-	DurationMs  int         `json:"duration_ms"`
-	Settings    JobSettings `json:"settings"`
-	WatchlistID string      `json:"watchlist_id,omitempty"`
-	UserID      string      `json:"user_id,omitempty"`
-	Status      JobStatus   `json:"status"`
-	FilePath    string      `json:"file_path,omitempty"`
-	TotalSize   float64     `json:"total_size,omitempty"`
-	Progress    float64     `json:"progress,omitempty"`
-	Error       string      `json:"error,omitempty"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
-	StartedAt   time.Time   `json:"started_at"`
+	ID           string      `json:"id"`
+	SpotifyID    string      `json:"spotify_id"`
+	TrackName    string      `json:"track_name"`
+	ArtistName   string      `json:"artist_name"`
+	AlbumName    string      `json:"album_name"`
+	AlbumArtist  string      `json:"album_artist"`
+	ReleaseDate  string      `json:"release_date"`
+	CoverURL     string      `json:"cover_url"`
+	TrackNumber  int         `json:"track_number"`
+	DiscNumber   int         `json:"disc_number"`
+	TotalTracks  int         `json:"total_tracks"`
+	TotalDiscs   int         `json:"total_discs"`
+	Copyright    string      `json:"copyright"`
+	Publisher    string      `json:"publisher"`
+	Position     int         `json:"position"`
+	PlaylistName string      `json:"playlist_name"`
+	DurationMs   int         `json:"duration_ms"`
+	Settings     JobSettings `json:"settings"`
+	WatchlistID  string      `json:"watchlist_id,omitempty"`
+	UserID       string      `json:"user_id,omitempty"`
+	Status       JobStatus   `json:"status"`
+	FilePath     string      `json:"file_path,omitempty"`
+	TotalSize    float64     `json:"total_size,omitempty"`
+	Progress     float64     `json:"progress,omitempty"`
+	Error        string      `json:"error,omitempty"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	StartedAt    time.Time   `json:"started_at"`
 }
 
 // EnqueueBatchRequest est reçu depuis le frontend.
@@ -106,22 +106,22 @@ type EnqueueBatchRequest struct {
 
 // JobTrack est la représentation d'un titre dans la requête EnqueueBatch.
 type JobTrack struct {
-	SpotifyID   string `json:"spotify_id"`
-	TrackName   string `json:"track_name"`
-	ArtistName  string `json:"artist_name"`
-	AlbumName   string `json:"album_name"`
-	AlbumArtist string `json:"album_artist"`
-	ReleaseDate string `json:"release_date"`
-	CoverURL    string `json:"cover_url"`
-	TrackNumber int    `json:"track_number"`
-	DiscNumber  int    `json:"disc_number"`
-	TotalTracks int    `json:"total_tracks"`
-	TotalDiscs  int    `json:"total_discs"`
-	Copyright   string `json:"copyright"`
-	Publisher   string `json:"publisher"`
-	Position    int    `json:"position"`
+	SpotifyID    string `json:"spotify_id"`
+	TrackName    string `json:"track_name"`
+	ArtistName   string `json:"artist_name"`
+	AlbumName    string `json:"album_name"`
+	AlbumArtist  string `json:"album_artist"`
+	ReleaseDate  string `json:"release_date"`
+	CoverURL     string `json:"cover_url"`
+	TrackNumber  int    `json:"track_number"`
+	DiscNumber   int    `json:"disc_number"`
+	TotalTracks  int    `json:"total_tracks"`
+	TotalDiscs   int    `json:"total_discs"`
+	Copyright    string `json:"copyright"`
+	Publisher    string `json:"publisher"`
+	Position     int    `json:"position"`
 	PlaylistName string `json:"playlist_name"`
-	DurationMs  int    `json:"duration_ms"`
+	DurationMs   int    `json:"duration_ms"`
 }
 
 type EnqueueBatchResponse struct {
@@ -135,13 +135,16 @@ type EnqueueBatchResponse struct {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type JobManager struct {
-	db           *bolt.DB
-	queue        chan string // job IDs à traiter
-	songLinkSem  chan struct{}
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
+	db          *bolt.DB
+	queue       chan string // job IDs à traiter
+	songLinkSem chan struct{}
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.RWMutex
+	// FIX #1 — guard contre double CloseJobManager
+	closed     bool
+	closedOnce sync.Once
 }
 
 var (
@@ -165,7 +168,6 @@ func InitJobManager(configDir string) error {
 			return
 		}
 
-		// Créer les buckets si inexistants
 		err = db.Update(func(tx *bolt.Tx) error {
 			if _, err := tx.CreateBucketIfNotExists(bucketJobs); err != nil {
 				return err
@@ -185,17 +187,15 @@ func InitJobManager(configDir string) error {
 		jm := &JobManager{
 			db:          db,
 			queue:       make(chan string, 10000),
-			songLinkSem: make(chan struct{}, 1), // 1 seule goroutine sur song.link
+			songLinkSem: make(chan struct{}, 1),
 			ctx:         ctx,
 			cancel:      cancel,
 		}
 
 		globalJobManager = jm
 
-		// Reprendre les jobs interrompus (crash recovery)
 		jm.recoverPendingJobs()
 
-		// Démarrer les workers
 		for i := 0; i < jobWorkers; i++ {
 			jm.wg.Add(1)
 			go jm.worker(i)
@@ -207,25 +207,39 @@ func InitJobManager(configDir string) error {
 }
 
 // CloseJobManager arrête proprement les workers et ferme la DB.
+// FIX #1 — closedOnce garantit qu'on ne ferme jamais le canal deux fois.
 func CloseJobManager() {
 	if globalJobManager == nil {
 		return
 	}
-	fmt.Println("[Jobs] Shutting down...")
-	globalJobManager.cancel()
-	close(globalJobManager.queue)
-	globalJobManager.wg.Wait()
-	globalJobManager.db.Close()
-	fmt.Println("[Jobs] Shutdown complete")
+	globalJobManager.closedOnce.Do(func() {
+		fmt.Println("[Jobs] Shutting down...")
+		globalJobManager.closed = true
+		globalJobManager.cancel()
+		close(globalJobManager.queue)
+		globalJobManager.wg.Wait()
+		globalJobManager.db.Close()
+		fmt.Println("[Jobs] Shutdown complete")
+	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EnqueueBatch — appelé depuis l'API HTTP
+// FIX #4 — vérification des doublons actifs avant d'enqueuer
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchResponse, error) {
 	if len(req.Tracks) == 0 {
 		return EnqueueBatchResponse{}, fmt.Errorf("no tracks provided")
+	}
+
+	// FIX #4 — charger les jobs actifs pour détecter les doublons
+	existingJobs, _ := jm.GetAllJobs()
+	activeJobs := make(map[string]bool) // clé: spotifyID+watchlistID
+	for _, j := range existingJobs {
+		if j.Status == StatusPending || j.Status == StatusDownloading {
+			activeJobs[j.SpotifyID+"|"+j.WatchlistID] = true
+		}
 	}
 
 	enqueued := 0
@@ -237,43 +251,47 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 			continue
 		}
 
-		job := &Job{
-			ID:          fmt.Sprintf("%s-%d", track.SpotifyID, time.Now().UnixNano()),
-			SpotifyID:   track.SpotifyID,
-			TrackName:   track.TrackName,
-			ArtistName:  track.ArtistName,
-			AlbumName:   track.AlbumName,
-			AlbumArtist: track.AlbumArtist,
-			ReleaseDate: track.ReleaseDate,
-			CoverURL:    track.CoverURL,
-			TrackNumber: track.TrackNumber,
-			DiscNumber:  track.DiscNumber,
-			TotalTracks: track.TotalTracks,
-			TotalDiscs:  track.TotalDiscs,
-			Copyright:   track.Copyright,
-			Publisher:   track.Publisher,
-			Position:    track.Position,
-			PlaylistName: track.PlaylistName,
-			DurationMs:  track.DurationMs,
-			Settings:    req.Settings,
-			WatchlistID: req.WatchlistID,
-			UserID:      req.UserID,
-			Status:      StatusPending,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+		// FIX #4 — ignorer si déjà actif en queue pour cette watchlist
+		dupKey := track.SpotifyID + "|" + req.WatchlistID
+		if activeJobs[dupKey] {
+			skipped++
+			continue
 		}
 
-		// Ajouter à la queue en mémoire (pour l'UI)
+		job := &Job{
+			ID:           fmt.Sprintf("%s-%d", track.SpotifyID, time.Now().UnixNano()),
+			SpotifyID:    track.SpotifyID,
+			TrackName:    track.TrackName,
+			ArtistName:   track.ArtistName,
+			AlbumName:    track.AlbumName,
+			AlbumArtist:  track.AlbumArtist,
+			ReleaseDate:  track.ReleaseDate,
+			CoverURL:     track.CoverURL,
+			TrackNumber:  track.TrackNumber,
+			DiscNumber:   track.DiscNumber,
+			TotalTracks:  track.TotalTracks,
+			TotalDiscs:   track.TotalDiscs,
+			Copyright:    track.Copyright,
+			Publisher:    track.Publisher,
+			Position:     track.Position,
+			PlaylistName: track.PlaylistName,
+			DurationMs:   track.DurationMs,
+			Settings:     req.Settings,
+			WatchlistID:  req.WatchlistID,
+			UserID:       req.UserID,
+			Status:       StatusPending,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+
 		backend.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
 
-		// Persister en BoltDB
 		if err := jm.saveJob(job); err != nil {
 			fmt.Printf("[Jobs] Failed to persist job %s: %v\n", job.ID, err)
 			skipped++
 			continue
 		}
 
-		// Envoyer au canal du worker pool
 		select {
 		case jm.queue <- job.ID:
 			enqueued++
@@ -332,10 +350,8 @@ func (jm *JobManager) processJob(jobID string) {
 	jm.saveJob(job)
 	backend.StartDownloadItem(job.ID)
 
-	// Construire le outputDir
 	outputDir := jm.buildOutputDir(job)
 
-	// Vérifier si le fichier existe déjà
 	if existingPath := jm.checkFileExists(job, outputDir); existingPath != "" {
 		fmt.Printf("[Jobs] Already exists: %s\n", existingPath)
 		job.Status = StatusSkipped
@@ -346,13 +362,10 @@ func (jm *JobManager) processJob(jobID string) {
 		return
 	}
 
-	// Récupérer les streaming URLs via song.link (rate limité)
 	streamingURLs := jm.getStreamingURLs(job)
 
-	// Construire la DownloadRequest
 	req := jm.buildDownloadRequest(job, outputDir, streamingURLs)
 
-	// Exécuter le téléchargement
 	app := &App{}
 	resp, err := app.DownloadTrack(req)
 	if err != nil || !resp.Success {
@@ -367,8 +380,6 @@ func (jm *JobManager) processJob(jobID string) {
 		job.Error = errMsg
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
-		// Retirer de la watchlist SEULEMENT pour les erreurs permanentes
-		// (pas pour rate limit 429, timeout, réseau temporaire)
 		if job.WatchlistID != "" && job.SpotifyID != "" {
 			isPermanentFailure := true
 			temporaryPatterns := []string{"429", "rate limit", "timeout", "connection refused", "context deadline"}
@@ -397,7 +408,6 @@ func (jm *JobManager) processJob(jobID string) {
 	jm.saveJob(job)
 	fmt.Printf("[Jobs] Done: %s\n", job.TrackName)
 
-	// Générer M3U8 si c'est le dernier job de la watchlist
 	if job.WatchlistID != "" {
 		jm.maybeGenerateM3U8(job.WatchlistID)
 	}
@@ -407,16 +417,23 @@ func (jm *JobManager) processJob(jobID string) {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// FIX #2 — getStreamingURLs respecte le contexte d'annulation pendant l'attente du semaphore
 func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	s := job.Settings
 
-	// Si pas besoin de song.link (service direct sans URL)
 	if s.Service != "auto" && s.Service != "tidal" && s.Service != "amazon" {
 		return nil
 	}
 
-	// Acquérir le semaphore song.link (1 à la fois)
-	jm.songLinkSem <- struct{}{}
+	// FIX #2 — select avec ctx.Done() pour ne pas bloquer le shutdown
+	select {
+	case jm.songLinkSem <- struct{}{}:
+		// slot acquis
+	case <-jm.ctx.Done():
+		fmt.Printf("[Jobs] song.link skipped for %s (shutdown)\n", job.TrackName)
+		return nil
+	}
+
 	defer func() {
 		time.Sleep(time.Duration(songLinkDelay) * time.Millisecond)
 		<-jm.songLinkSem
@@ -442,7 +459,6 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 		outputDir = backend.GetDefaultMusicPath()
 	}
 
-	// Dossier playlist
 	if s.CreatePlaylistFolder && job.PlaylistName != "" {
 		if !strings.Contains(s.FolderTemplate, "{album}") &&
 			!strings.Contains(s.FolderTemplate, "{album_artist}") &&
@@ -451,7 +467,6 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 		}
 	}
 
-	// Folder template
 	if s.FolderTemplate != "" {
 		releaseYear := ""
 		if len(job.ReleaseDate) >= 4 {
@@ -510,8 +525,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 	case "deezer":
 		audioFormat = "flac"
 	case "auto":
-		is24bit := s.AutoQuality == "24"
-		if is24bit {
+		if s.AutoQuality == "24" {
 			audioFormat = "HI_RES_LOSSLESS"
 		} else {
 			audioFormat = "LOSSLESS"
@@ -633,6 +647,7 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 }
 
 // recoverPendingJobs remet dans la queue les jobs interrompus au dernier démarrage.
+// FIX #6 — Progress remis à 0 pour les jobs qui n'ont pas fini
 func (jm *JobManager) recoverPendingJobs() {
 	recovered := 0
 	var toRecover []Job
@@ -648,6 +663,7 @@ func (jm *JobManager) recoverPendingJobs() {
 			}
 			if job.Status == StatusPending || job.Status == StatusDownloading {
 				job.Status = StatusPending
+				job.Progress = 0 // FIX #6 — reset progress pour éviter affichage incorrect
 				job.UpdatedAt = time.Now()
 				toRecover = append(toRecover, job)
 			}
@@ -728,7 +744,6 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 		return 0, err
 	}
 
-	// ── 1. Dédupliquer par SpotifyID+WatchlistID : garder le plus récent ──
 	type key struct{ spotifyID, watchlistID string }
 	latest := make(map[key]Job)
 	noSpotifyID := []Job{}
@@ -743,26 +758,23 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 		}
 	}
 
-	// ── 2. Construire la liste des IDs à garder ──
 	keepIDs := make(map[string]bool)
 	for _, j := range latest {
 		keepIDs[j.ID] = true
 	}
-	// Garder les jobs sans SpotifyID récents (< 7 jours)
 	cutoff := time.Now().AddDate(0, 0, -7)
 	for _, j := range noSpotifyID {
 		if j.UpdatedAt.After(cutoff) {
 			keepIDs[j.ID] = true
 		}
 	}
-	// Toujours garder les jobs pending/downloading
+	// Toujours garder les jobs actifs
 	for _, j := range jobs {
 		if j.Status == StatusPending || j.Status == StatusDownloading {
 			keepIDs[j.ID] = true
 		}
 	}
 
-	// ── 3. Supprimer les jobs non gardés ──
 	deleted := 0
 	err = jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketJobs)
@@ -784,7 +796,6 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 	})
 
 	if err == nil && deleted > 0 {
-		// Compacter le BoltDB
 		jm.db.Update(func(tx *bolt.Tx) error { return nil })
 		fmt.Printf("[Jobs] Cleanup: deleted %d duplicate/old jobs\n", deleted)
 	}
@@ -815,18 +826,28 @@ func (jm *JobManager) ClearCompletedJobs() error {
 	})
 }
 
+// FIX #5 — ClearAllJobs : itère et supprime clé par clé au lieu de DeleteBucket
+// (même pattern que ClearHistory corrigé en v1.2.1)
 func (jm *JobManager) ClearAllJobs() error {
 	return jm.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(bucketJobs); err != nil && err.Error() != "bucket not found" {
-			return err
+		b := tx.Bucket(bucketJobs)
+		if b == nil {
+			return nil
 		}
-		_, err := tx.CreateBucketIfNotExists(bucketJobs)
-		return err
+		var toDelete [][]byte
+		b.ForEach(func(k, v []byte) error {
+			toDelete = append(toDelete, k)
+			return nil
+		})
+		for _, k := range toDelete {
+			b.Delete(k)
+		}
+		return nil
 	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers statiques (pas de receiver)
+// Helpers statiques
 // ─────────────────────────────────────────────────────────────────────────────
 
 func getFirstArtistStatic(artistString string) string {
@@ -842,20 +863,25 @@ func getFirstArtistStatic(artistString string) string {
 	return artistString
 }
 
-// maybeGenerateM3U8 génère le M3U8 si tous les jobs de la watchlist sont terminés
+// maybeGenerateM3U8 génère le M3U8 si tous les jobs de la watchlist sont terminés.
+// FIX #3 — whitelist des statuts terminaux au lieu de blacklist (plus robuste)
 func (jm *JobManager) maybeGenerateM3U8(watchlistID string) {
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return
 	}
+
+	// FIX #3 — un job est "en cours" seulement s'il est Pending ou Downloading
+	// (évite qu'un état inconnu/corrompu bloque indéfiniment la génération)
 	for _, j := range jobs {
-		if j.WatchlistID == watchlistID &&
-			j.Status != StatusDone && j.Status != StatusFailed &&
-			j.Status != StatusSkipped {
+		if j.WatchlistID != watchlistID {
+			continue
+		}
+		if j.Status == StatusPending || j.Status == StatusDownloading {
 			return // encore des jobs en cours
 		}
 	}
-	// Tous terminés — calculer les stats du sync
+
 	var downloaded, skipped, failed int
 	for _, j := range jobs {
 		if j.WatchlistID != watchlistID {
@@ -881,7 +907,6 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID string) {
 	}
 	for _, pl := range playlists {
 		if pl.ID == watchlistID {
-			// Mettre à jour le dernier SyncLog avec les vraies stats
 			if len(pl.SyncLogs) > 0 {
 				last := &pl.SyncLogs[len(pl.SyncLogs)-1]
 				last.Downloaded = downloaded
