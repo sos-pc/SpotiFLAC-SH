@@ -113,8 +113,11 @@ export const SelectImageVideo = () => Promise.resolve([] as string[]);
 export const AddToWatchlist      = (req: any) => call<any>("AddToWatchlist", req);
 export const RemoveFromWatchlist = (id: string) => call<void>("RemoveFromWatchlist", { id });
 export const GetWatchlists       = () => call<any[]>("GetWatchlists");
-export const UpdateWatchlist      = (req: {id: string, interval_hours: number, sync_deletions: boolean}) => call<void>("UpdateWatchlist", req);
-export const GetWatchlistStats    = (id: string) => call<{watchlist_id: string, downloaded: number, failed: number, skipped: number, total_size_mb: number}>("GetWatchlistStats", { id });
-export const GetWatchlistHistory  = (id: string) => call<{track_name: string, artist_name: string, album_name: string, status: string, total_size: number, updated_at: number, file_path: string, error: string}[]>("GetWatchlistHistory", { id });
-export const RedownloadWatchlist  = (id: string) => call<void>("RedownloadWatchlist", { id });
+export const UpdateWatchlist     = (req: { id: string; interval_hours: number; sync_deletions: boolean }) => call<void>("UpdateWatchlist", req);
+export const GetWatchlistStats   = (id: string) => call<{ watchlist_id: string; downloaded: number; failed: number; skipped: number; total_size_mb: number }>("GetWatchlistStats", { id });
+export const GetWatchlistHistory = (id: string) => call<{ track_name: string; artist_name: string; album_name: string; status: string; total_size: number; updated_at: number; file_path: string; error: string }[]>("GetWatchlistHistory", { id });
+// SyncWatchlist = nouveaux tracks Spotify + retry des jobs failed (remplace ForceSyncWatchlist + RedownloadWatchlist)
+export const SyncWatchlist       = (id: string) => call<void>("SyncWatchlist", { id });
+// Gardés pour compatibilité (ne plus utiliser dans l'UI)
+export const RedownloadWatchlist = (id: string) => call<void>("RedownloadWatchlist", { id });
 export const ForceSyncWatchlist  = (id: string) => call<void>("ForceSyncWatchlist", { id });

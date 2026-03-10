@@ -464,6 +464,34 @@ func (w *Watcher) ForceSyncWatchlist(id string) error {
 	return fmt.Errorf("watchlist not found: %s", id)
 }
 
+// SyncWatchlist combine :
+//  1. Nouveaux tracks Spotify (pas encore dans TrackIDs) → enqueue
+//  2. Jobs StatusFailed de cette watchlist → reset + remise en queue
+//
+// C'est le seul bouton "Sync" exposé au frontend (remplace ForceSyncWatchlist + RedownloadWatchlist).
+func (w *Watcher) SyncWatchlist(id string) error {
+	pl, err := w.getWatchlistByID(id)
+	if err != nil {
+		return err
+	}
+
+	// ── 1. Nouveaux tracks depuis Spotify ────────────────────────────────
+	go w.syncPlaylist(*pl)
+
+	// ── 2. Retry des jobs failed ─────────────────────────────────────────
+	jm := GetJobManager()
+	if jm != nil {
+		requeued, err := jm.RequeueFailedJobs(id)
+		if err != nil {
+			fmt.Printf("[Watcher] SyncWatchlist: RequeueFailedJobs error: %v\n", err)
+		} else if requeued > 0 {
+			fmt.Printf("[Watcher] SyncWatchlist: %d failed jobs requeued for %s\n", requeued, pl.Name)
+		}
+	}
+
+	return nil
+}
+
 // FIX #3 — defer cancel() sorti de la boucle (pattern correct)
 func (w *Watcher) RedownloadWatchlist(id string) error {
 	playlists, err := w.GetWatchlists()

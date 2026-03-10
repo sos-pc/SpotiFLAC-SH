@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { AddToWatchlist, RemoveFromWatchlist, GetWatchlists, ForceSyncWatchlist, RedownloadWatchlist, UpdateWatchlist, GetWatchlistStats, GetWatchlistHistory } from "@/lib/rpc";
+import { AddToWatchlist, RemoveFromWatchlist, GetWatchlists, SyncWatchlist, UpdateWatchlist, GetWatchlistStats, GetWatchlistHistory } from "@/lib/rpc";
 import { getSettings } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Trash2, Plus, Clock, RefreshCw, Settings2, Eye, RotateCcw, Pencil, ChevronDown, ChevronUp, CheckCircle2, XCircle, SkipForward } from "lucide-react";
+import { Trash2, Plus, Clock, RefreshCw, Settings2, Eye, Pencil, ChevronDown, ChevronUp, CheckCircle2, XCircle, SkipForward } from "lucide-react";
 
 interface SyncLog {
   time: string;
@@ -47,6 +47,11 @@ interface WatchedPlaylist {
   sync_logs?: SyncLog[];
 }
 
+// Retourne true si la "name" ressemble encore à une URL (cas juste après ajout)
+function isURL(str: string): boolean {
+  return str.startsWith("http://") || str.startsWith("https://") || str.startsWith("spotify:");
+}
+
 export function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<WatchedPlaylist[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -69,7 +74,6 @@ export function WatchlistPage() {
     try {
       const lists = await GetWatchlists();
       setWatchlists(lists || []);
-      // Charger les stats pour chaque watchlist
       const statsMap: Record<string, WatchlistStats> = {};
       await Promise.all((lists || []).map(async (l) => {
         try { statsMap[l.id] = await GetWatchlistStats(l.id); } catch {}
@@ -89,14 +93,8 @@ export function WatchlistPage() {
   }, []);
 
   const handleAdd = async () => {
-    if (!newUrl.trim()) {
-      toast.error("Please enter a Spotify URL");
-      return;
-    }
-    if (!newUrl.includes("spotify.com")) {
-      toast.error("Please enter a valid Spotify URL");
-      return;
-    }
+    if (!newUrl.trim()) { toast.error("Please enter a Spotify URL"); return; }
+    if (!newUrl.includes("spotify.com")) { toast.error("Please enter a valid Spotify URL"); return; }
     try {
       const settings = getSettings();
       const res = await AddToWatchlist({
@@ -173,22 +171,12 @@ export function WatchlistPage() {
     }
   };
 
-  const handleRedownload = async (id: string, name: string) => {
-    if (!confirm(`Re-download all tracks for "${name}"? This will re-enqueue all tracks.`)) return;
-    try {
-      await RedownloadWatchlist(id);
-      toast.success("Re-download triggered");
-      setTimeout(loadWatchlists, 2000);
-    } catch (err) {
-      toast.error(`Failed: ${err}`);
-    }
-  };
-
-  const handleForceSync = async (id: string) => {
+  // Bouton unique Sync : nouveaux tracks Spotify + retry des failed
+  const handleSync = async (id: string) => {
     setSyncing(id);
     try {
-      await ForceSyncWatchlist(id);
-      toast.success("Sync triggered");
+      await SyncWatchlist(id);
+      toast.success("Sync triggered — new tracks + failed tracks requeued");
       setTimeout(loadWatchlists, 2000);
     } catch (err) {
       toast.error(`Sync failed: ${err}`);
@@ -196,10 +184,11 @@ export function WatchlistPage() {
       setSyncing(null);
     }
   };
-  const handleRefreshAll = async () => {
+
+  const handleSyncAll = async () => {
     setLoading(true);
     try {
-      await Promise.all(watchlists.map((l) => ForceSyncWatchlist(l.id)));
+      await Promise.all(watchlists.map((l) => SyncWatchlist(l.id)));
       toast.success(`Sync triggered for ${watchlists.length} playlist(s)`);
       setTimeout(loadWatchlists, 2000);
     } catch (err) {
@@ -214,14 +203,24 @@ export function WatchlistPage() {
     return new Date(lastSync).toLocaleString();
   };
 
+  // Stats : total = track_ids.length, téléchargés = downloaded + skipped, manquants = failed
+  const getPlaylistStats = (list: WatchedPlaylist) => {
+    const s = stats[list.id];
+    const total = list.track_ids?.length ?? 0;
+    const downloaded = s ? (s.downloaded + s.skipped) : 0;
+    const missing = s ? s.failed : 0;
+    const sizeMB = s ? s.total_size_mb : 0;
+    return { total, downloaded, missing, sizeMB };
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Auto-Sync Playlists</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleRefreshAll} disabled={loading || watchlists.length === 0}>
+          <Button variant="outline" onClick={handleSyncAll} disabled={loading || watchlists.length === 0}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
+            Sync All
           </Button>
           <Button onClick={() => setIsAddModalOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
@@ -247,114 +246,129 @@ export function WatchlistPage() {
             <p className="text-sm mt-1">Add a Spotify playlist to start auto-syncing new tracks.</p>
           </div>
         ) : (
-          watchlists.map((list) => (
-            <div key={list.id} className="p-4 border rounded-lg bg-card/50 flex flex-col gap-3">
-              <div className="flex justify-between items-start">
-                <div className="min-w-0 pr-2">
-                  <h3 className="font-bold truncate" title={list.name}>{list.name}</h3>
-                  <a href={list.spotify_url} target="_blank" rel="noreferrer"
-                    className="text-xs text-blue-500 hover:underline truncate block mt-1">
-                    {list.spotify_url}
-                  </a>
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  <Button variant="ghost" size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-primary"
-                    onClick={() => handleForceSync(list.id)}
-                    disabled={syncing === list.id}
-                    title="Force sync now">
-                    <RefreshCw className={`h-4 w-4 ${syncing === list.id ? "animate-spin" : ""}`} />
-                  </Button>
-                  <Button variant="ghost" size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-blue-500"
-                    onClick={() => handleEdit(list)}
-                    title="Edit watchlist settings">
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-orange-500"
-                    onClick={() => handleRedownload(list.id, list.name)}
-                    title="Re-download all tracks">
-                    <RotateCcw className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon"
-                    className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                    onClick={() => handleRemove(list.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+          watchlists.map((list) => {
+            const { total, downloaded, missing, sizeMB } = getPlaylistStats(list);
+            const displayName = isURL(list.name) ? "Loading..." : list.name;
 
-              <div className="text-sm text-muted-foreground bg-background p-3 rounded border space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-3.5 w-3.5" />
-                  <span>Checks every <strong>{list.interval_hours}h</strong></span>
+            return (
+              <div key={list.id} className="p-4 border rounded-lg bg-card/50 flex flex-col gap-3">
+                <div className="flex justify-between items-start">
+                  <div className="min-w-0 pr-2">
+                    <h3 className={`font-bold truncate ${isURL(list.name) ? "text-muted-foreground italic text-sm" : ""}`} title={list.name}>
+                      {displayName}
+                    </h3>
+                    <a href={list.spotify_url} target="_blank" rel="noreferrer"
+                      className="text-xs text-blue-500 hover:underline truncate block mt-1">
+                      {list.spotify_url}
+                    </a>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    {/* Bouton Sync unique : nouveaux tracks + retry failed */}
+                    <Button variant="ghost" size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-primary"
+                      onClick={() => handleSync(list.id)}
+                      disabled={syncing === list.id}
+                      title="Sync: fetch new tracks + retry failed">
+                      <RefreshCw className={`h-4 w-4 ${syncing === list.id ? "animate-spin" : ""}`} />
+                    </Button>
+                    <Button variant="ghost" size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-blue-500"
+                      onClick={() => handleEdit(list)}
+                      title="Edit watchlist settings">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon"
+                      className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                      onClick={() => handleRemove(list.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap gap-y-1">
-                  <span className="text-xs">{list.track_ids?.length ?? 0} tracks known</span>
-                  {list.sync_deletions && (
-                    <span className="text-xs bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded">sync deletions</span>
+
+                <div className="text-sm text-muted-foreground bg-background p-3 rounded border space-y-1.5">
+                  {/* Stats : total / téléchargés / manquants */}
+                  <div className="flex items-center gap-3 text-xs pb-1.5 border-b">
+                    <span className="text-foreground font-medium">{total} tracks</span>
+                    <span className="text-green-500 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      {downloaded} downloaded
+                    </span>
+                    {missing > 0 && (
+                      <span className="text-red-500 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" />
+                        {missing} missing
+                      </span>
+                    )}
+                    {sizeMB > 0 && (
+                      <span className="text-muted-foreground ml-auto">{sizeMB.toFixed(1)} MB</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>Checks every <strong>{list.interval_hours}h</strong></span>
+                    {list.sync_deletions && (
+                      <span className="text-xs bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded ml-2">sync deletions</span>
+                    )}
+                  </div>
+
+                  {list.sync_logs && list.sync_logs.length > 0 && (
+                    <div className="text-xs border-t pt-1.5 mt-1 space-y-0.5">
+                      <span className="text-muted-foreground font-medium">Recent syncs:</span>
+                      {[...list.sync_logs].reverse().slice(0, 5).map((log, i) => (
+                        <div key={i} className="flex gap-2 text-xs text-muted-foreground flex-wrap">
+                          <span className="shrink-0">{new Date(log.time).toLocaleDateString()}</span>
+                          {log.downloaded > 0 && <span className="text-green-500">+{log.downloaded}</span>}
+                          {log.failed > 0 && <span className="text-red-500">⚠{log.failed} failed</span>}
+                          {log.skipped > 0 && <span className="text-yellow-500/70">={log.skipped} skipped</span>}
+                          {log.deleted > 0 && <span className="text-red-400">-{log.deleted}</span>}
+                          {log.downloaded === 0 && log.failed === 0 && log.deleted === 0 && (
+                            <span className="text-muted-foreground italic">no changes</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
 
+                  <div className="text-xs border-t pt-1.5 mt-1">
+                    Last sync: {formatLastSync(list.last_sync)}
+                  </div>
                 </div>
-                {list.sync_logs && list.sync_logs.length > 0 && (
-                  <div className="text-xs border-t pt-1.5 mt-1 space-y-0.5">
-                    <span className="text-muted-foreground font-medium">Recent syncs:</span>
-                    {[...list.sync_logs].reverse().slice(0, 5).map((log, i) => (
-                      <div key={i} className="flex gap-2 text-xs text-muted-foreground flex-wrap">
-                        <span className="shrink-0">{new Date(log.time).toLocaleDateString()}</span>
-                        {log.downloaded > 0 && <span className="text-green-500">+{log.downloaded}</span>}
-                        {log.failed > 0 && <span className="text-red-500">⚠{log.failed} failed</span>}
-                        {log.skipped > 0 && <span className="text-yellow-500/70">={log.skipped} skipped</span>}
-                        {log.deleted > 0 && <span className="text-red-400">-{log.deleted}</span>}
-                        {log.downloaded === 0 && log.failed === 0 && log.deleted === 0 && (
-                          <span className="text-muted-foreground italic">no changes</span>
+
+                <button
+                  onClick={() => toggleHistory(list.id)}
+                  className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 w-full pt-1 border-t">
+                  {expandedHistory === list.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  History
+                </button>
+                {expandedHistory === list.id && (
+                  <div className="max-h-48 overflow-y-auto space-y-1 border rounded p-2 bg-background">
+                    {(history[list.id] || []).length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-2">No history</p>
+                    ) : (history[list.id] || []).map((item, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs py-0.5 border-b last:border-0">
+                        {item.status === "done" && <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />}
+                        {item.status === "failed" && <XCircle className="h-3 w-3 text-red-500 shrink-0" />}
+                        {item.status === "skipped" && <SkipForward className="h-3 w-3 text-yellow-500 shrink-0" />}
+                        <div className="min-w-0 flex-1">
+                          <span className="truncate block font-medium">{item.track_name}</span>
+                          <span className="text-muted-foreground truncate block">{item.artist_name}</span>
+                        </div>
+                        {item.total_size > 0 && <span className="text-muted-foreground shrink-0">{item.total_size.toFixed(1)}MB</span>}
+                        {item.status === "failed" && item.error && (
+                          <span className="text-red-400 truncate max-w-[120px]" title={item.error}>{item.error}</span>
                         )}
                       </div>
                     ))}
                   </div>
                 )}
-                <div className="text-xs border-t pt-1.5 mt-1">
-                  Last sync: {formatLastSync(list.last_sync)}
-                </div>
-                {stats[list.id] && (
-                  <div className="flex gap-3 text-xs pt-1 border-t flex-wrap">
-                    <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />{stats[list.id].downloaded}</span>
-                    <span className="text-red-500 flex items-center gap-1"><XCircle className="h-3 w-3" />{stats[list.id].failed}</span>
-                    <span className="text-yellow-500 flex items-center gap-1"><SkipForward className="h-3 w-3" />{stats[list.id].skipped}</span>
-                    <span className="text-muted-foreground ml-auto">{stats[list.id].total_size_mb.toFixed(1)} MB</span>
-                  </div>
-                )}
               </div>
-              <button
-                onClick={() => toggleHistory(list.id)}
-                className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 w-full pt-1 border-t">
-                {expandedHistory === list.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                History
-              </button>
-              {expandedHistory === list.id && (
-                <div className="max-h-48 overflow-y-auto space-y-1 border rounded p-2 bg-background">
-                  {(history[list.id] || []).length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-2">No history</p>
-                  ) : (history[list.id] || []).map((item, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs py-0.5 border-b last:border-0">
-                      {item.status === "done" && <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />}
-                      {item.status === "failed" && <XCircle className="h-3 w-3 text-red-500 shrink-0" />}
-                      {item.status === "skipped" && <SkipForward className="h-3 w-3 text-yellow-500 shrink-0" />}
-                      <div className="min-w-0 flex-1">
-                        <span className="truncate block font-medium">{item.track_name}</span>
-                        <span className="text-muted-foreground truncate block">{item.artist_name}</span>
-                      </div>
-                      {item.total_size > 0 && <span className="text-muted-foreground shrink-0">{item.total_size.toFixed(1)}MB</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
+      {/* Modal edit */}
       <Dialog open={!!editingId} onOpenChange={(o) => !o && setEditingId(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -391,6 +405,7 @@ export function WatchlistPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Modal add */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -431,7 +446,6 @@ export function WatchlistPage() {
                   Sync deletions <span className="text-xs text-muted-foreground">(delete file if removed from Spotify)</span>
                 </label>
               </div>
-
             </div>
           </div>
           <DialogFooter>

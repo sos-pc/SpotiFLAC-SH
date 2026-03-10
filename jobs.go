@@ -863,6 +863,41 @@ func getFirstArtistStatic(artistString string) string {
 	return artistString
 }
 
+// RequeueFailedJobs remet en queue tous les jobs StatusFailed d'une watchlist.
+// Appelé par SyncWatchlist pour combiner nouveaux tracks + retry des échecs.
+func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
+	jobs, err := jm.GetAllJobs()
+	if err != nil {
+		return 0, err
+	}
+	requeued := 0
+	for _, job := range jobs {
+		if job.WatchlistID != watchlistID || job.Status != StatusFailed {
+			continue
+		}
+		job.Status = StatusPending
+		job.Error = ""
+		job.Progress = 0
+		job.UpdatedAt = time.Now()
+		if err := jm.saveJob(&job); err != nil {
+			fmt.Printf("[Jobs] RequeueFailed: failed to save job %s: %v\n", job.ID, err)
+			continue
+		}
+		backend.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
+		select {
+		case jm.queue <- job.ID:
+			requeued++
+		default:
+			fmt.Printf("[Jobs] Queue full, failed job %s will be picked up later\n", job.ID)
+			requeued++
+		}
+	}
+	if requeued > 0 {
+		fmt.Printf("[Jobs] Requeued %d failed jobs for watchlist %s\n", requeued, watchlistID)
+	}
+	return requeued, nil
+}
+
 // maybeGenerateM3U8 génère le M3U8 si tous les jobs de la watchlist sont terminés.
 // FIX #3 — whitelist des statuts terminaux au lieu de blacklist (plus robuste)
 func (jm *JobManager) maybeGenerateM3U8(watchlistID string) {
