@@ -182,6 +182,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	}
 
 	playlistName := extractPlaylistName(data)
+	fmt.Printf("[Watcher] DEBUG extractPlaylistName result: %q (raw type: %T, raw[:200]: %s)\n", playlistName, data, func() string { r := fmt.Sprintf("%v", data); if len(r) > 200 { return r[:200] }; return r }())
 	if playlistName == "" {
 		playlistName = pl.Name
 	}
