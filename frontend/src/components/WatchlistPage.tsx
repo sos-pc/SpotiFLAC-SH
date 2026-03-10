@@ -208,7 +208,7 @@ export function WatchlistPage() {
     const s = stats[list.id];
     const total = list.track_ids?.length ?? 0;
     const downloaded = s ? (s.downloaded + s.skipped) : 0;
-    const missing = s ? s.failed : 0;
+    const missing = Math.max(0, total - downloaded);
     const sizeMB = s ? s.total_size_mb : 0;
     return { total, downloaded, missing, sizeMB };
   };
