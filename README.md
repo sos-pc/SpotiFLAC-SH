@@ -1,5 +1,9 @@
 # SpotiFLAC Web
 
+[![Latest Release](https://img.shields.io/github/v/release/methammer/SpotiFLAC?style=flat-square)](https://github.com/methammer/SpotiFLAC/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/methammer/SpotiFLAC/docker.yml?style=flat-square)](https://github.com/methammer/SpotiFLAC/actions/workflows/docker.yml)
+[![Docker Image](https://img.shields.io/badge/ghcr.io-methammer%2Fspotiflac-blue?style=flat-square&logo=docker)](https://github.com/methammer/SpotiFLAC/pkgs/container/spotiflac)
+
 A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz, Amazon Music & Deezer — no account required.
 
 > **Based on [SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC) by afkarxyz** — rewritten as a web server with multi-user support and Jellyfin integration.
