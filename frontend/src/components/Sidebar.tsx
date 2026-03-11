@@ -15,10 +15,8 @@ export type PageType = "main" | "settings" | "debug" | "audio-analysis" | "audio
 interface SidebarProps {
     currentPage: PageType;
     onPageChange: (page: PageType) => void;
-    onLogout?: () => void;
-    userName?: string;
 }
-export function Sidebar({ currentPage, onPageChange, onLogout, userName }: SidebarProps) {
+export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
     return (<div className="fixed left-0 top-0 h-full w-14 bg-card border-r border-border flex flex-col items-center py-14 z-30">
       <div className="flex flex-col gap-2 flex-1">
         <Tooltip delayDuration={0}>
