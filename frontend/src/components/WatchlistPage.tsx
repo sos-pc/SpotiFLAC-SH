@@ -203,14 +203,13 @@ export function WatchlistPage() {
     return new Date(lastSync).toLocaleString();
   };
 
-  // Stats : total = track_ids.length, téléchargés = downloaded + skipped, manquants = failed
   const getPlaylistStats = (list: WatchedPlaylist) => {
     const s = stats[list.id];
     const total = list.track_ids?.length ?? 0;
-    const downloaded = s ? (s.downloaded + s.skipped) : 0;
-    const missing = Math.max(0, total - downloaded);
+    const present = s ? (s.downloaded + s.skipped) : 0;
+    const absent = Math.max(0, total - present);
     const sizeMB = s ? s.total_size_mb : 0;
-    return { total, downloaded, missing, sizeMB };
+    return { total, present, absent, sizeMB };
   };
 
   return (
@@ -247,7 +246,7 @@ export function WatchlistPage() {
           </div>
         ) : (
           watchlists.map((list) => {
-            const { total, downloaded, missing, sizeMB } = getPlaylistStats(list);
+            const { total, present, absent, sizeMB } = getPlaylistStats(list);
             const displayName = isURL(list.name) ? "Loading..." : list.name;
 
             return (
@@ -291,12 +290,12 @@ export function WatchlistPage() {
                     <span className="text-foreground font-medium">{total} tracks</span>
                     <span className="text-green-500 flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3" />
-                      {downloaded} downloaded
+                      {present} present
                     </span>
-                    {missing > 0 && (
-                      <span className="text-red-500 flex items-center gap-1">
+                    {absent > 0 && (
+                      <span className="text-muted-foreground flex items-center gap-1">
                         <XCircle className="h-3 w-3" />
-                        {missing} missing
+                        {absent} absent
                       </span>
                     )}
                     {sizeMB > 0 && (
