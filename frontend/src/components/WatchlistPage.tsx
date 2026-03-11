@@ -172,12 +172,19 @@ export function WatchlistPage() {
   };
 
   // Bouton unique Sync : nouveaux tracks Spotify + retry des failed
+  const reloadStats = async (id: string) => {
+    try {
+      const s = await GetWatchlistStats(id);
+      setStats(prev => ({ ...prev, [id]: s }));
+    } catch {}
+  };
+
   const handleSync = async (id: string) => {
     setSyncing(id);
     try {
       await SyncWatchlist(id);
       toast.success("Sync triggered — new tracks + failed tracks requeued");
-      setTimeout(loadWatchlists, 2000);
+      setTimeout(() => reloadStats(id), 2000);
     } catch (err) {
       toast.error(`Sync failed: ${err}`);
     } finally {
