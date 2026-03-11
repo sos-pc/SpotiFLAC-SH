@@ -1,3 +1,5 @@
+//go:build wails
+
 package backend
 
 import (
