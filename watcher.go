@@ -875,6 +875,15 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	if jm == nil {
 		return stats, nil
 	}
+
+	// Source de vérité : TrackIDs de la playlist
+	pl, err := w.getWatchlistByID(watchlistID)
+	if err != nil {
+		return stats, err
+	}
+	total := len(pl.TrackIDs)
+
+	// Jobs en DB : uniquement pour compter les failed actifs
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return stats, err
@@ -893,20 +902,16 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 		}
 	}
 	for _, j := range latest {
-		switch j.Status {
-		case StatusDone:
-			stats.Downloaded++
-			stats.TotalSizeMB += j.TotalSize
-		case StatusFailed:
+		if j.Status == StatusFailed {
 			stats.Failed++
-		case StatusSkipped:
-			stats.Skipped++
-			if j.FilePath != "" {
-				if info, err := os.Stat(j.FilePath); err == nil {
-					stats.TotalSizeMB += float64(info.Size()) / 1024 / 1024
-				}
-			}
 		}
+	}
+
+	// present = total - failed
+	// Tracks sans job = téléchargées avant tracking ou après CleanupOldJobs → considérées présentes
+	stats.Skipped = total - stats.Failed
+	if stats.Skipped < 0 {
+		stats.Skipped = 0
 	}
 	return stats, nil
 }
