@@ -19,13 +19,21 @@ type SongLinkClient struct {
 }
 
 // isRateLimited retourne true si on est en fenêtre de rate limit
+func (s *SongLinkClient) IsRateLimited() bool {
+	return s.isRateLimited()
+}
+
+func (s *SongLinkClient) RateLimitedUntil() time.Time {
+	return s.rateLimitedUntil
+}
+
 func (s *SongLinkClient) isRateLimited() bool {
 	return !s.rateLimitedUntil.IsZero() && time.Now().Before(s.rateLimitedUntil)
 }
 
 // markRateLimited enregistre un 429 et bloque les appels pendant 60s
 func (s *SongLinkClient) markRateLimited() {
-	s.rateLimitedUntil = time.Now().Add(60 * time.Second)
+	s.rateLimitedUntil = time.Now().Add(5 * time.Minute)
 	fmt.Printf("[Songlink] Rate limited — skipping calls for 60s\n")
 }
 

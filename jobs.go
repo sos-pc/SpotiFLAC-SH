@@ -441,6 +441,19 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	}()
 
 	client := jm.songLinkClient
+
+	// Attendre si rate-limité plutôt qu'échouer en cascade
+	if client.IsRateLimited() {
+		if waitDur := time.Until(client.RateLimitedUntil()); waitDur > 0 {
+			fmt.Printf("[Jobs] Songlink rate-limited, waiting %v for: %s\n", waitDur.Round(time.Second), job.TrackName)
+			select {
+			case <-time.After(waitDur):
+			case <-jm.ctx.Done():
+				return nil
+			}
+		}
+	}
+
 	urls, err := client.GetAllURLsFromSpotify(job.SpotifyID, s.Region)
 	if err != nil {
 		fmt.Printf("[Jobs] song.link failed for %s: %v\n", job.TrackName, err)
