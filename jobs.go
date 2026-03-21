@@ -367,6 +367,23 @@ func (jm *JobManager) processJob(jobID string) {
 	streamingURLs := jm.getStreamingURLs(job)
 
 	req := jm.buildDownloadRequest(job, outputDir, streamingURLs)
+	// Si Songlink a échoué (streamingURLs nil), forcer un service sans Songlink
+	if streamingURLs == nil && (req.Service == "auto" || req.Service == "tidal" || req.Service == "") {
+		fmt.Printf("[Jobs] Songlink unavailable for %s, using Deezer/Amazon fallback\n", job.TrackName)
+		req.Service = "auto" // forcer le mode auto pour utiliser AutoOrder
+		origOrder := strings.Split(req.AutoOrder, "-")
+		var noSonglink []string
+		for _, svc := range origOrder {
+			if svc == "amazon" {
+				noSonglink = append(noSonglink, svc)
+			}
+		}
+		if len(noSonglink) > 0 {
+			req.AutoOrder = strings.Join(noSonglink, "-")
+		} else {
+			req.AutoOrder = "amazon"
+		}
+	}
 
 	app := &App{}
 	resp, err := app.DownloadTrack(req)
@@ -384,7 +401,7 @@ func (jm *JobManager) processJob(jobID string) {
 		jm.saveJob(job)
 		if job.WatchlistID != "" && job.SpotifyID != "" {
 			isPermanentFailure := true
-			temporaryPatterns := []string{"429", "rate limit", "timeout", "connection refused", "context deadline"}
+			temporaryPatterns := []string{"429", "rate limit", "timeout", "connection refused", "context deadline", "no such host", "dial tcp", "yoinkify", "lookup"}
 			for _, pattern := range temporaryPatterns {
 				if strings.Contains(strings.ToLower(errMsg), strings.ToLower(pattern)) {
 					isPermanentFailure = false
@@ -443,21 +460,8 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 
 	client := jm.songLinkClient
 	urls, err := client.GetAllURLsFromSpotify(job.SpotifyID, s.Region)
-	needsFallback := err != nil || (urls != nil && urls.TidalURL == "" && (s.Service == "tidal" || s.Service == "auto"))
 	if err != nil {
 		fmt.Printf("[Jobs] song.link failed for %s: %v\n", job.TrackName, err)
-	}
-	if needsFallback && job.TrackName != "" && job.ArtistName != "" {
-		fmt.Printf("[Jobs] Trying Deezer fallback for %s - %s\n", job.TrackName, job.ArtistName)
-		if fallback, ferr := backend.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil {
-			urls = fallback
-		} else {
-			fmt.Printf("[Jobs] Deezer fallback failed for %s: %v\n", job.TrackName, ferr)
-			if err != nil {
-				return nil
-			}
-		}
-	} else if err != nil {
 		return nil
 	}
 
@@ -596,6 +600,8 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		EmbedLyrics:          s.EmbedLyrics,
 		EmbedMaxQualityCover: s.EmbedMaxQualityCover,
 		ServiceURL:           serviceURL,
+		ISRC:                 func() string { if streamingURLs != nil { return streamingURLs["isrc"] }; return "" }(),
+		AutoOrder:            s.AutoOrder,
 		Duration:             durationSeconds,
 		ItemID:               job.ID,
 		SpotifyTrackNumber:   job.TrackNumber,

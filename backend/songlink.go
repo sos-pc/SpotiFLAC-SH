@@ -11,10 +11,22 @@ import (
 )
 
 type SongLinkClient struct {
-	client           *http.Client
-	lastAPICallTime  time.Time
-	apiCallCount     int
-	apiCallResetTime time.Time
+	client            *http.Client
+	lastAPICallTime   time.Time
+	apiCallCount      int
+	apiCallResetTime  time.Time
+	rateLimitedUntil  time.Time // si non-zero, skip les appels jusqu'à cette heure
+}
+
+// isRateLimited retourne true si on est en fenêtre de rate limit
+func (s *SongLinkClient) isRateLimited() bool {
+	return !s.rateLimitedUntil.IsZero() && time.Now().Before(s.rateLimitedUntil)
+}
+
+// markRateLimited enregistre un 429 et bloque les appels pendant 60s
+func (s *SongLinkClient) markRateLimited() {
+	s.rateLimitedUntil = time.Now().Add(60 * time.Second)
+	fmt.Printf("[Songlink] Rate limited — skipping calls for 60s\n")
 }
 
 type SongLinkURLs struct {
@@ -45,7 +57,9 @@ func NewSongLinkClient() *SongLinkClient {
 }
 
 func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region string) (*SongLinkURLs, error) {
-
+	if s.isRateLimited() {
+		return nil, fmt.Errorf("songlink rate limited, skipping call")
+	}
 	now := time.Now()
 	if now.Sub(s.apiCallResetTime) >= time.Minute {
 		s.apiCallCount = 0
@@ -100,13 +114,8 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
-			if i < maxRetries-1 {
-				waitTime := 15 * time.Second
-				fmt.Printf("Rate limited by API, waiting %v before retry...\n", waitTime)
-				time.Sleep(waitTime)
-				continue
-			}
-			return nil, fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
+			s.markRateLimited()
+			return nil, fmt.Errorf("API returned status 429")
 		}
 
 		if resp.StatusCode != 200 {
@@ -223,13 +232,8 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
-			if i < maxRetries-1 {
-				waitTime := 15 * time.Second
-				fmt.Printf("Rate limited by API, waiting %v before retry...\n", waitTime)
-				time.Sleep(waitTime)
-				continue
-			}
-			return nil, fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
+			s.markRateLimited()
+			return nil, fmt.Errorf("API returned status 429")
 		}
 
 		if resp.StatusCode != 200 {
@@ -374,13 +378,8 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
-			if i < maxRetries-1 {
-				waitTime := 15 * time.Second
-				fmt.Printf("Rate limited by API, waiting %v before retry...\n", waitTime)
-				time.Sleep(waitTime)
-				continue
-			}
-			return "", fmt.Errorf("API rate limit exceeded after %d retries", maxRetries)
+			s.markRateLimited()
+			return "", fmt.Errorf("API returned status 429")
 		}
 
 		if resp.StatusCode != 200 {
@@ -462,86 +461,4 @@ func (s *SongLinkClient) GetISRC(spotifyID string) (string, error) {
 		return "", err
 	}
 	return getDeezerISRC(deezerURL)
-}
-
-// GetDeezerSearchFallback — fallback quand Songlink est rate-limited
-// Cherche la track via l'API Deezer publique (pas de clé requise)
-// et retourne l'ISRC pour que tidal.go puisse trouver l'URL Tidal
-func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error) {
-	query := url.QueryEscape(trackName + " " + artistName)
-	searchURL := fmt.Sprintf("https://api.deezer.com/search?q=%s&limit=1", query)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(searchURL)
-	if err != nil {
-		return nil, fmt.Errorf("deezer search failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var searchResp struct {
-		Data []struct {
-			ID int64 `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, fmt.Errorf("deezer search decode failed: %w", err)
-	}
-	if len(searchResp.Data) == 0 {
-		return nil, fmt.Errorf("deezer search: no results for %s - %s", trackName, artistName)
-	}
-
-	trackID := searchResp.Data[0].ID
-	trackURL := fmt.Sprintf("https://api.deezer.com/track/%d", trackID)
-	resp2, err := client.Get(trackURL)
-	if err != nil {
-		return nil, fmt.Errorf("deezer track fetch failed: %w", err)
-	}
-	defer resp2.Body.Close()
-
-	var trackResp struct {
-		ISRC string `json:"isrc"`
-		Link string `json:"link"`
-	}
-	if err := json.NewDecoder(resp2.Body).Decode(&trackResp); err != nil {
-		return nil, fmt.Errorf("deezer track decode failed: %w", err)
-	}
-	if trackResp.ISRC == "" {
-		return nil, fmt.Errorf("deezer: no ISRC for track %d", trackID)
-	}
-
-	isrc := trackResp.ISRC
-	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", isrc, trackName, artistName)
-
-	// Tenter Songlink avec l'ISRC — potentiellement mieux caché que par Spotify URL
-	slClient := &http.Client{Timeout: 10 * time.Second}
-	slURL := fmt.Sprintf("https://api.song.link/v1-alpha.1/links?platform=isrc&type=song&id=%s", url.QueryEscape(isrc))
-	slResp, err := slClient.Get(slURL)
-	if err == nil {
-		defer slResp.Body.Close()
-		if slResp.StatusCode == 200 {
-			var slData struct {
-				LinksByPlatform map[string]struct {
-					URL string `json:"url"`
-				} `json:"linksByPlatform"`
-			}
-			if err := json.NewDecoder(slResp.Body).Decode(&slData); err == nil {
-				result := &SongLinkURLs{ISRC: isrc}
-				if tidal, ok := slData.LinksByPlatform["tidal"]; ok && tidal.URL != "" {
-					result.TidalURL = tidal.URL
-					fmt.Printf("[Deezer fallback] Got Tidal URL via ISRC: %s\n", tidal.URL)
-				}
-				if amazon, ok := slData.LinksByPlatform["amazonMusic"]; ok && amazon.URL != "" {
-					result.AmazonURL = amazon.URL
-				}
-				return result, nil
-			}
-		} else {
-			fmt.Printf("[Deezer fallback] Songlink ISRC also rate-limited (%d), using ISRC only\n", slResp.StatusCode)
-		}
-	}
-
-	// Fallback final : retourner juste l'ISRC (utile pour Qobuz)
-	return &SongLinkURLs{
-		ISRC: isrc,
-	}, nil
 }

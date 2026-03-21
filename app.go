@@ -57,6 +57,8 @@ type DownloadRequest struct {
 	EmbedLyrics          bool   `json:"embed_lyrics,omitempty"`
 	EmbedMaxQualityCover bool   `json:"embed_max_quality_cover,omitempty"`
 	ServiceURL           string `json:"service_url,omitempty"`
+	ISRC                 string `json:"isrc,omitempty"`
+	AutoOrder            string `json:"auto_order,omitempty"`
 	Duration             int    `json:"duration,omitempty"`
 	ItemID               string `json:"item_id,omitempty"`
 	SpotifyTrackNumber   int    `json:"spotify_track_number,omitempty"`
@@ -333,6 +335,11 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			close(lyricsChan)
 		}
 		go func() {
+			if req.ISRC != "" {
+				fmt.Printf("[ISRC] Using pre-fetched ISRC: %s\n", req.ISRC)
+				isrcChan <- req.ISRC
+				return
+			}
 			client := backend.NewSongLinkClient()
 			isrc, _ := client.GetISRC(req.SpotifyID)
 			isrcChan <- isrc
@@ -383,7 +390,12 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		filename, err = downloader.Download(req.SpotifyID, req.OutputDir, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 
 	case "auto":
-		order := []string{"tidal", "amazon", "qobuz"}
+		// Respecter l'ordre configuré par l'user (AutoOrder)
+		orderStr := req.AutoOrder
+		if orderStr == "" {
+			orderStr = "tidal-amazon-qobuz"
+		}
+		order := strings.Split(orderStr, "-")
 		var lastErr error
 		for _, svc := range order {
 			switch svc {
@@ -409,6 +421,9 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 					quality = "6"
 				}
 				filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+			case "deezer":
+				downloader := backend.NewDeezerDownloader()
+				filename, err = downloader.Download(req.SpotifyID, req.OutputDir, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			default:
 				continue
 			}
