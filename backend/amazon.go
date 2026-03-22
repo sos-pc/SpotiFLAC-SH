@@ -32,9 +32,7 @@ type AmazonStreamResponse struct {
 
 func NewAmazonDownloader() *AmazonDownloader {
 	return &AmazonDownloader{
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		client: NewHTTPClient(120 * time.Second),
 		regions: []string{"us", "eu"},
 	}
 }

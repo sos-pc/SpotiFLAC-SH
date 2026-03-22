@@ -53,9 +53,7 @@ type TidalBTSManifest struct {
 func NewTidalDownloader(apiURL string) *TidalDownloader {
 	if apiURL == "" {
 		downloader := &TidalDownloader{
-			client: &http.Client{
-				Timeout: 5 * time.Second,
-			},
+			client: NewHTTPClient(5 * time.Second),
 			timeout:    5 * time.Second,
 			maxRetries: 3,
 			apiURL:     "",
@@ -68,9 +66,7 @@ func NewTidalDownloader(apiURL string) *TidalDownloader {
 	}
 
 	return &TidalDownloader{
-		client: &http.Client{
-			Timeout: 5 * time.Second,
-		},
+		client: NewHTTPClient(5 * time.Second),
 		timeout:    5 * time.Second,
 		maxRetries: 3,
 		apiURL:     apiURL,
@@ -268,9 +264,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		return fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	client := &http.Client{
-		Timeout: 120 * time.Second,
-	}
+	client := NewHTTPClient(120 * time.Second)
 
 	doRequest := func(url string) (*http.Response, error) {
 		req, err := http.NewRequest("GET", url, nil)
@@ -948,9 +942,7 @@ func getDownloadURLRotated(apis []string, trackID int64, quality string) (string
 	for _, apiURL := range apis {
 		fmt.Printf("Trying API: %s\n", apiURL)
 
-		client := &http.Client{
-			Timeout: 15 * time.Second,
-		}
+		client := NewHTTPClient(15 * time.Second)
 
 		url := fmt.Sprintf("%s/track/?id=%d&quality=%s", apiURL, trackID, quality)
 		req, _ := http.NewRequest("GET", url, nil)

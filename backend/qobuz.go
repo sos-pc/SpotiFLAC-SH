@@ -70,9 +70,7 @@ type QobuzStreamResponse struct {
 
 func NewQobuzDownloader() *QobuzDownloader {
 	return &QobuzDownloader{
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client: NewHTTPClient(60 * time.Second),
 		appID: "798273057",
 	}
 }
@@ -248,9 +246,7 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	fmt.Println("Starting file download...")
 
-	downloadClient := &http.Client{
-		Timeout: 5 * time.Minute,
-	}
+	downloadClient := NewHTTPClient(5 * time.Minute)
 
 	resp, err := downloadClient.Get(url)
 	if err != nil {

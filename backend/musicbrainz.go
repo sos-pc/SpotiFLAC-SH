@@ -65,9 +65,7 @@ func FetchMusicBrainzMetadata(isrc, title, artist, album string, useSingleGenre 
 		return meta, fmt.Errorf("no ISRC provided")
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+	client := NewHTTPClient(10 * time.Second)
 
 	query := fmt.Sprintf("isrc:%s", isrc)
 	reqURL := fmt.Sprintf("%s/recording?query=%s&fmt=json&inc=releases+artist-credits+tags+media+release-groups+labels", musicBrainzAPIBase, url.QueryEscape(query))

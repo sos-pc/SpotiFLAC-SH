@@ -18,9 +18,7 @@ type DeezerDownloader struct {
 
 func NewDeezerDownloader() *DeezerDownloader {
 	return &DeezerDownloader{
-		client: &http.Client{
-			Timeout: 300 * time.Second,
-		},
+		client: NewHTTPClient(300 * time.Second),
 	}
 }
 
