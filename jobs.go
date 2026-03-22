@@ -557,7 +557,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 
 	// Si Songlink a échoué et que le service nécessite une URL (tidal/amazon/auto), fail immédiatement
 	// sans lancer un 2ème appel Songlink dans les downloaders
-	if serviceURL == "" && (service == "tidal" || service == "amazon") {
+	if serviceURL == "" && (service == "tidal" || service == "amazon" || service == "auto") {
 		fmt.Printf("[Jobs] No streaming URL for %s (Songlink unavailable), skipping\n", job.TrackName)
 		job.Status = StatusFailed
 		job.Error = "songlink unavailable: no streaming URL"
