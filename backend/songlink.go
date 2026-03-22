@@ -484,3 +484,51 @@ func (s *SongLinkClient) GetISRC(spotifyID string) (string, error) {
 	}
 	return getDeezerISRC(deezerURL)
 }
+
+// GetDeezerSearchFallback — fallback quand Songlink est rate-limited
+// Cherche la track via l'API Deezer publique (pas de clé requise)
+// et retourne l'ISRC pour que qobuz.go puisse télécharger
+func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error) {
+	query := url.QueryEscape(trackName + " " + artistName)
+	searchURL := fmt.Sprintf("https://api.deezer.com/search?q=%s&limit=1", query)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(searchURL)
+	if err != nil {
+		return nil, fmt.Errorf("deezer search failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var searchResp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, fmt.Errorf("deezer search decode failed: %w", err)
+	}
+	if len(searchResp.Data) == 0 {
+		return nil, fmt.Errorf("deezer search: no results for %s - %s", trackName, artistName)
+	}
+
+	trackID := searchResp.Data[0].ID
+	trackURL := fmt.Sprintf("https://api.deezer.com/track/%d", trackID)
+	resp2, err := client.Get(trackURL)
+	if err != nil {
+		return nil, fmt.Errorf("deezer track fetch failed: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	var trackResp struct {
+		ISRC string `json:"isrc"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&trackResp); err != nil {
+		return nil, fmt.Errorf("deezer track decode failed: %w", err)
+	}
+	if trackResp.ISRC == "" {
+		return nil, fmt.Errorf("deezer: no ISRC for track %d", trackID)
+	}
+
+	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", trackResp.ISRC, trackName, artistName)
+	return &SongLinkURLs{ISRC: trackResp.ISRC}, nil
+}

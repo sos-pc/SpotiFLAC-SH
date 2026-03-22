@@ -453,28 +453,46 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 
 	client := jm.songLinkClient
 
-	// Attendre si rate-limité plutôt qu'échouer en cascade
-	if client.IsRateLimited() {
-		if waitDur := time.Until(client.RateLimitedUntil()); waitDur > 0 {
-			fmt.Printf("[Jobs] Songlink rate-limited, waiting %v for: %s\n", waitDur.Round(time.Second), job.TrackName)
-			select {
-			case <-time.After(waitDur):
-			case <-jm.ctx.Done():
-				return nil
+	// Songlink disponible → essayer en priorité
+	if !client.IsRateLimited() {
+		urls, err := client.GetAllURLsFromSpotify(job.SpotifyID, s.Region)
+		if err == nil && urls != nil {
+			result := make(map[string]string)
+			data, _ := json.Marshal(urls)
+			json.Unmarshal(data, &result)
+			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
+				return result
 			}
 		}
+		if err != nil {
+			fmt.Printf("[Jobs] song.link failed for %s: %v\n", job.TrackName, err)
+		}
+	} else {
+		fmt.Printf("[Jobs] Songlink rate-limited, using Deezer fallback for %s\n", job.TrackName)
 	}
 
-	urls, err := client.GetAllURLsFromSpotify(job.SpotifyID, s.Region)
-	if err != nil {
-		fmt.Printf("[Jobs] song.link failed for %s: %v\n", job.TrackName, err)
-		return nil
+	// Fallback : api.deezer.com (public, sans auth) → ISRC pour Qobuz
+	if job.TrackName != "" && job.ArtistName != "" {
+		if fallback, ferr := backend.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil && fallback != nil {
+			result := make(map[string]string)
+			if fallback.ISRC != "" {
+				result["isrc"] = fallback.ISRC
+			}
+			if fallback.TidalURL != "" {
+				result["tidal_url"] = fallback.TidalURL
+			}
+			if fallback.AmazonURL != "" {
+				result["amazon_url"] = fallback.AmazonURL
+			}
+			if len(result) > 0 {
+				fmt.Printf("[Jobs] Deezer fallback OK for %s (ISRC: %s)\n", job.TrackName, result["isrc"])
+				return result
+			}
+		} else if ferr != nil {
+			fmt.Printf("[Jobs] Deezer fallback failed for %s: %v\n", job.TrackName, ferr)
+		}
 	}
-
-	result := make(map[string]string)
-	data, _ := json.Marshal(urls)
-	json.Unmarshal(data, &result)
-	return result
+	return nil
 }
 
 func (jm *JobManager) buildOutputDir(job *Job) string {
@@ -558,13 +576,21 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 	}
 
 	serviceURL := ""
+	isrcOnly := false
 	if streamingURLs != nil {
 		if service == "tidal" || service == "auto" {
 			serviceURL = streamingURLs["tidal_url"]
 		} else if service == "amazon" {
 			serviceURL = streamingURLs["amazon_url"]
 		}
+		// Si on a seulement l'ISRC (fallback Deezer), forcer Qobuz
+		if serviceURL == "" && streamingURLs["isrc"] != "" && service != "qobuz" {
+			fmt.Printf("[Jobs] Only ISRC available for %s, switching to Qobuz\n", job.TrackName)
+			service = "qobuz"
+			isrcOnly = true
+		}
 	}
+	_ = isrcOnly
 
 	// Le check Songlink est fait dans processJob avant cet appel
 
@@ -590,8 +616,15 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		durationSeconds = job.DurationMs / 1000
 	}
 
+	// ISRC depuis streamingURLs (Songlink ou fallback Deezer)
+	isrc := ""
+	if streamingURLs != nil {
+		isrc = streamingURLs["isrc"]
+	}
+
 	return DownloadRequest{
 		Service:              service,
+		ISRC:                 isrc,
 		TrackName:            job.TrackName,
 		ArtistName:           artist,
 		AlbumName:            job.AlbumName,
@@ -608,7 +641,6 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		EmbedLyrics:          s.EmbedLyrics,
 		EmbedMaxQualityCover: s.EmbedMaxQualityCover,
 		ServiceURL:           serviceURL,
-		ISRC:                 func() string { if streamingURLs != nil { return streamingURLs["isrc"] }; return "" }(),
 		AutoOrder:            s.AutoOrder,
 		Duration:             durationSeconds,
 		ItemID:               job.ID,
