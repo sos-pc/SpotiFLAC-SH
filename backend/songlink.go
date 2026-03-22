@@ -501,7 +501,8 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 
 	var searchResp struct {
 		Data []struct {
-			ID int64 `json:"id"`
+			ID   int64  `json:"id"`
+			ISRC string `json:"isrc"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
@@ -511,24 +512,11 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 		return nil, fmt.Errorf("deezer search: no results for %s - %s", trackName, artistName)
 	}
 
-	trackID := searchResp.Data[0].ID
-	trackURL := fmt.Sprintf("https://api.deezer.com/track/%d", trackID)
-	resp2, err := client.Get(trackURL)
-	if err != nil {
-		return nil, fmt.Errorf("deezer track fetch failed: %w", err)
-	}
-	defer resp2.Body.Close()
-
-	var trackResp struct {
-		ISRC string `json:"isrc"`
-	}
-	if err := json.NewDecoder(resp2.Body).Decode(&trackResp); err != nil {
-		return nil, fmt.Errorf("deezer track decode failed: %w", err)
-	}
-	if trackResp.ISRC == "" {
-		return nil, fmt.Errorf("deezer: no ISRC for track %d", trackID)
+	isrc := searchResp.Data[0].ISRC
+	if isrc == "" {
+		return nil, fmt.Errorf("deezer: no ISRC in search result for %s - %s", trackName, artistName)
 	}
 
-	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", trackResp.ISRC, trackName, artistName)
-	return &SongLinkURLs{ISRC: trackResp.ISRC}, nil
+	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", isrc, trackName, artistName)
+	return &SongLinkURLs{ISRC: isrc}, nil
 }

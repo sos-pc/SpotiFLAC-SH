@@ -433,7 +433,7 @@ func (jm *JobManager) processJob(jobID string) {
 func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	s := job.Settings
 
-	if s.Service != "auto" && s.Service != "tidal" && s.Service != "amazon" {
+	if s.Service == "deezer" {
 		return nil
 	}
 
