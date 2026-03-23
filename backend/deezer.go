@@ -183,42 +183,6 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 		}
 	}
 
-	type mbResult struct {
-		ISRC     string
-		Metadata Metadata
-	}
-
-	metaChan := make(chan mbResult, 1)
-	if (embedGenre || true) && spotifyURL != "" {
-		go func() {
-			res := mbResult{}
-			var isrc string
-			parts := strings.Split(spotifyURL, "/")
-			if len(parts) > 0 {
-				sID := strings.Split(parts[len(parts)-1], "?")[0]
-				if sID != "" {
-					client := GetSongLinkClient()
-					if val, err := client.GetISRC(sID); err == nil {
-						isrc = val
-					}
-				}
-			}
-			res.ISRC = isrc
-			if isrc != "" && embedGenre {
-				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := FetchMusicBrainzMetadata(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName, useSingleGenre, embedGenre); err == nil {
-					res.Metadata = fetchedMeta
-					fmt.Println("✓ MusicBrainz metadata fetched")
-				} else {
-					fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
-				}
-			}
-			metaChan <- res
-		}()
-	} else {
-		close(metaChan)
-	}
-
 	// api.deezmate.com et yoinkify.lol sont tous les deux morts (domaines expirés).
 	// TODO: remplacer par un nouveau provider Deezer quand disponible.
 	fmt.Printf("[Deezer] No working download provider available (deezmate + yoinkify both dead)\n")
