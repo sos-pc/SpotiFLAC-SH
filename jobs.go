@@ -498,7 +498,23 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 			fmt.Printf("[Jobs] song.link failed for %s: %v\n", job.TrackName, err)
 		}
 	} else {
-		fmt.Printf("[Jobs] Songlink rate-limited for %s\n", job.TrackName)
+		fmt.Printf("[Jobs] Songlink rate-limited for %s — trying HTML scraping\n", job.TrackName)
+	}
+
+	// Fallback : HTML scraping song.link (bypass rate-limit API JSON)
+	if job.SpotifyID != "" {
+		htmlURLs, hErr := client.ScrapeSongLinkHTML(job.SpotifyID)
+		if hErr == nil && htmlURLs != nil {
+			result := make(map[string]string)
+			data, _ := json.Marshal(htmlURLs)
+			json.Unmarshal(data, &result)
+			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
+				fmt.Printf("[Jobs] ✓ HTML scraping OK for %s\n", job.TrackName)
+				return result
+			}
+		} else if hErr != nil {
+			fmt.Printf("[Jobs] HTML scraping failed for %s: %v\n", job.TrackName, hErr)
+		}
 	}
 	return nil
 }

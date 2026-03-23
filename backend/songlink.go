@@ -15,10 +15,10 @@ type SongLinkClient struct {
 	lastAPICallTime   time.Time
 	apiCallCount      int
 	apiCallResetTime  time.Time
-	rateLimitedUntil  time.Time // si non-zero, skip les appels jusqu'à cette heure
+	rateLimitedUntil  time.Time // si non-zero, skip les appels jusqu'Ã  cette heure
 }
 
-// isRateLimited retourne true si on est en fenêtre de rate limit
+// isRateLimited retourne true si on est en fenÃªtre de rate limit
 func (s *SongLinkClient) IsRateLimited() bool {
 	return s.isRateLimited()
 }
@@ -34,7 +34,7 @@ func (s *SongLinkClient) isRateLimited() bool {
 // markRateLimited enregistre un 429 et bloque les appels pendant 60s
 func (s *SongLinkClient) markRateLimited() {
 	s.rateLimitedUntil = time.Now().Add(5 * time.Minute)
-	fmt.Printf("[Songlink] Rate limited — skipping calls for 60s\n")
+	fmt.Printf("[Songlink] Rate limited â€” skipping calls for 60s\n")
 }
 
 type SongLinkURLs struct {
@@ -171,7 +171,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 	if tidalLink, ok := songLinkResp.LinksByPlatform["tidal"]; ok && tidalLink.URL != "" {
 		urls.TidalURL = tidalLink.URL
-		fmt.Printf("✓ Tidal URL found\n")
+		fmt.Printf("âœ“ Tidal URL found\n")
 	}
 
 	if amazonLink, ok := songLinkResp.LinksByPlatform["amazonMusic"]; ok && amazonLink.URL != "" {
@@ -179,7 +179,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 		if len(amazonURL) > 0 {
 			urls.AmazonURL = amazonURL
-			fmt.Printf("✓ Amazon URL found\n")
+			fmt.Printf("âœ“ Amazon URL found\n")
 		}
 	}
 
@@ -483,11 +483,11 @@ func (s *SongLinkClient) GetISRC(spotifyID string) (string, error) {
 	return getDeezerISRC(deezerURL)
 }
 
-// GetDeezerSearchFallback — fallback quand Songlink est rate-limited
-// Cherche la track via l'API Deezer publique (pas de clé requise)
-// et retourne l'ISRC pour que qobuz.go puisse télécharger
+// GetDeezerSearchFallback â€” fallback quand Songlink est rate-limited
+// Cherche la track via l'API Deezer publique (pas de clÃ© requise)
+// et retourne l'ISRC pour que qobuz.go puisse tÃ©lÃ©charger
 func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error) {
-	// Premier artiste seulement pour éviter les échecs sur les collaborations
+	// Premier artiste seulement pour Ã©viter les Ã©checs sur les collaborations
 	cleanArtist := artistName
 	for _, sep := range []string{", ", " & ", " feat.", " ft.", " featuring "} {
 		if idx := strings.Index(cleanArtist, sep); idx > 0 {
@@ -533,4 +533,122 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 
 	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", isrc, trackName, artistName)
 	return &SongLinkURLs{ISRC: isrc}, nil
+}
+
+// ScrapeSongLinkHTML — bypass rate-limit via scraping de la page song.link
+// Utilise https://song.link/s/{spotifyID} et parse le blob __NEXT_DATA__ Next.js
+// qui contient linksByPlatform avec la même structure que l'API JSON — endpoint
+// distinct donc soumis à un quota différent.
+func (s *SongLinkClient) ScrapeSongLinkHTML(spotifyTrackID string) (*SongLinkURLs, error) {
+	pageURL := fmt.Sprintf("https://song.link/s/%s", spotifyTrackID)
+
+	req, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("scrape: failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("scrape: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		s.markRateLimited()
+		return nil, fmt.Errorf("scrape: song.link returned 429 (rate limited)")
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("scrape: song.link returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("scrape: failed to read body: %w", err)
+	}
+
+	html := string(body)
+
+	// Extraire le blob JSON __NEXT_DATA__ embarqué dans la page Next.js
+	const marker = `__NEXT_DATA__" type="application/json">`
+	start := strings.Index(html, marker)
+	if start == -1 {
+		return nil, fmt.Errorf("scrape: __NEXT_DATA__ not found in song.link page")
+	}
+	start += len(marker)
+	end := strings.Index(html[start:], "</script>")
+	if end == -1 {
+		return nil, fmt.Errorf("scrape: __NEXT_DATA__ closing tag not found")
+	}
+	jsonRaw := html[start : start+end]
+
+	// Structure du blob Next.js de song.link
+	var nextData struct {
+		Props struct {
+			PageProps struct {
+				Error *struct {
+					StatusCode int `json:"statusCode"`
+				} `json:"error"`
+				PageData *struct {
+					LinksByPlatform map[string]struct {
+						URL string `json:"url"`
+					} `json:"linksByPlatform"`
+				} `json:"pageData"`
+			} `json:"pageProps"`
+		} `json:"props"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonRaw), &nextData); err != nil {
+		return nil, fmt.Errorf("scrape: failed to parse __NEXT_DATA__: %w", err)
+	}
+
+	// Vérifier si song.link a retourné une erreur dans le JSON (ex: 429 interne)
+	if nextData.Props.PageProps.Error != nil {
+		code := nextData.Props.PageProps.Error.StatusCode
+		if code == 429 {
+			s.markRateLimited()
+			return nil, fmt.Errorf("scrape: song.link NEXT_DATA error 429 (rate limited)")
+		}
+		return nil, fmt.Errorf("scrape: song.link NEXT_DATA error %d", code)
+	}
+
+	if nextData.Props.PageProps.PageData == nil {
+		return nil, fmt.Errorf("scrape: no pageData in song.link NEXT_DATA")
+	}
+
+	links := nextData.Props.PageProps.PageData.LinksByPlatform
+	if len(links) == 0 {
+		return nil, fmt.Errorf("scrape: no linksByPlatform in song.link NEXT_DATA for %s", spotifyTrackID)
+	}
+
+	urls := &SongLinkURLs{}
+	found := false
+
+	if tidalLink, ok := links["tidal"]; ok && tidalLink.URL != "" {
+		urls.TidalURL = tidalLink.URL
+		found = true
+		fmt.Printf("[Songlink HTML] ✓ Tidal: %s\n", tidalLink.URL)
+	}
+
+	if amazonLink, ok := links["amazonMusic"]; ok && amazonLink.URL != "" {
+		urls.AmazonURL = amazonLink.URL
+		found = true
+		fmt.Printf("[Songlink HTML] ✓ Amazon: %s\n", amazonLink.URL)
+	}
+
+	if deezerLink, ok := links["deezer"]; ok && deezerLink.URL != "" {
+		if isrc, iErr := getDeezerISRC(deezerLink.URL); iErr == nil && isrc != "" {
+			urls.ISRC = isrc
+			found = true
+			fmt.Printf("[Songlink HTML] ✓ ISRC via Deezer: %s\n", isrc)
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("scrape: no usable URLs in song.link NEXT_DATA for %s", spotifyTrackID)
+	}
+
+	return urls, nil
 }
