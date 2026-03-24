@@ -33,9 +33,9 @@ var (
 	tidalTokenMutex sync.Mutex
 )
 
-// Clés de secours (encodées base64 pour éviter les scanners basiques)
-var defaultClientID = "ZlgySnhkbW50WldLMGl4VA=="
-var defaultClientSecret = "MU5tNUFmREFqeHJnSkZKYktOV0xlQXlLR1ZHbUlOdVhQUExIVlhBdnhBZz0="
+// Clé Android Auto (garantit les droits r_usr pour la recherche)
+var defaultClientID = "elU0WEhWVmtjMnREUG80dA==" // zU4XHVVkc2tDPo4t
+var defaultClientSecret = "VkpLaERGcUpQcXZzUFZOQlY2dWtYVEptd2x2YnR0UDd3bE1scmM3MnNlND0=" // VJKhDFqJPqvsPVNBV6ukXTJmwlvbttP7wlMlrc72se4=
 
 // GetTidalTokenPath retourne le chemin absolu du fichier de configuration du token Tidal
 func GetTidalTokenPath() string {
@@ -147,11 +147,6 @@ func FetchTidalCredentials() ([]TidalCreds, error) {
 	var hifiCreds []TidalCreds
 	var otherCreds []TidalCreds
 
-	// Ajout des clés de secours décodées
-	decID, _ := base64.StdEncoding.DecodeString(defaultClientID)
-	decSec, _ := base64.StdEncoding.DecodeString(defaultClientSecret)
-	hifiCreds = append(hifiCreds, TidalCreds{ClientID: string(decID), ClientSecret: string(decSec)})
-
 	for _, k := range keysData.Keys {
 		if strings.ToLower(k.Valid) == "true" {
 			cred := TidalCreds{ClientID: k.ClientID, ClientSecret: k.ClientSecret}
@@ -168,8 +163,16 @@ func FetchTidalCredentials() ([]TidalCreds, error) {
 	rand.Shuffle(len(hifiCreds), func(i, j int) { hifiCreds[i], hifiCreds[j] = hifiCreds[j], hifiCreds[i] })
 	rand.Shuffle(len(otherCreds), func(i, j int) { otherCreds[i], otherCreds[j] = otherCreds[j], otherCreds[i] })
 
-	// Prioriser les clés HiFi
-	return append(hifiCreds, otherCreds...), nil
+	// Forcer la clé Android Auto (reconnue pour avoir r_usr) en toute première position
+	decID, _ := base64.StdEncoding.DecodeString(defaultClientID)
+	decSec, _ := base64.StdEncoding.DecodeString(defaultClientSecret)
+	bestCred := TidalCreds{ClientID: string(decID), ClientSecret: string(decSec)}
+
+	finalCreds := []TidalCreds{bestCred}
+	finalCreds = append(finalCreds, hifiCreds...)
+	finalCreds = append(finalCreds, otherCreds...)
+
+	return finalCreds	, nil
 }
 
 // RefreshTidalToken rafraîchit le jeton d'accès en utilisant le refresh_token
@@ -181,10 +184,13 @@ func RefreshTidalToken(tokenData *TidalTokenData) (*TidalTokenData, error) {
 	urlStr := "https://auth.tidal.com/v1/oauth2/token"
 
 	// Form encoded data
-	data := fmt.Sprintf("client_id=%s&refresh_token=%s&grant_type=refresh_token&scope=r_usr%%20w_usr%%20w_sub",
-		tokenData.ClientID, tokenData.RefreshToken)
+	v := url.Values{}
+	v.Set("client_id", tokenData.ClientID)
+	v.Set("refresh_token", tokenData.RefreshToken)
+	v.Set("grant_type", "refresh_token")
+	v.Set("scope", "r_usr+w_usr+w_sub")
 
-	req, err := http.NewRequest("POST", urlStr, strings.NewReader(data))
+	req, err := http.NewRequest("POST", urlStr, strings.NewReader(v.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -249,9 +255,11 @@ func PerformDeviceAuthorization() (*TidalTokenData, error) {
 	// Essayer chaque clé jusqu'à ce qu'une fonctionne pour l'étape 1
 	for _, cred := range creds {
 		urlStr := "https://auth.tidal.com/v1/oauth2/device_authorization"
-		data := fmt.Sprintf("client_id=%s&scope=r_usr%%20w_usr%%20w_sub", cred.ClientID)
+		v := url.Values{}
+		v.Set("client_id", cred.ClientID)
+		v.Set("scope", "r_usr w_usr w_sub")
 
-		req, _ := http.NewRequest("POST", urlStr, strings.NewReader(data))
+		req, _ := http.NewRequest("POST", urlStr, strings.NewReader(v.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 		resp, err := client.Do(req)
@@ -295,10 +303,12 @@ func PerformDeviceAuthorization() (*TidalTokenData, error) {
 	for time.Now().Before(timeoutTime) {
 		time.Sleep(pollInterval)
 
-		data := fmt.Sprintf("client_id=%s&device_code=%s&grant_type=urn:ietf:params:oauth:grant-type:device_code",
-			selectedCred.ClientID, deviceRespData.DeviceCode)
+		v := url.Values{}
+		v.Set("client_id", selectedCred.ClientID)
+		v.Set("device_code", deviceRespData.DeviceCode)
+		v.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 
-		req, _ := http.NewRequest("POST", tokenUrl, strings.NewReader(data))
+		req, _ := http.NewRequest("POST", tokenUrl, strings.NewReader(v.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		if selectedCred.ClientSecret != "" {
 			req.SetBasicAuth(selectedCred.ClientID, selectedCred.ClientSecret)
