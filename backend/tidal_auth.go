@@ -275,13 +275,13 @@ func PerformDeviceAuthorization() (*TidalTokenData, error) {
 	}
 
 	// Afficher l'instruction critique à l'utilisateur
-	fmt.Println("\n=======================================================================")
+	fmt.Println("=======================================================================")
 	fmt.Println("🚨 TIDAL AUTHENTICATION REQUIRED 🚨")
 	fmt.Println("SpotiFLAC needs to authenticate with Tidal to download Lossless FLAC.")
 	fmt.Printf("1. Open this link in your browser: %s\n", deviceRespData.VerificationURIComplete)
 	fmt.Printf("2. Log in with ANY Tidal account (even a free one works).\n")
 	fmt.Println("Waiting for authorization... (Timeout in 5 minutes)")
-	fmt.Println("=======================================================================\n")
+	fmt.Println("=======================================================================")
 
 	// Polling : on demande le token toutes les `Interval` secondes
 	pollInterval := time.Duration(deviceRespData.Interval) * time.Second
