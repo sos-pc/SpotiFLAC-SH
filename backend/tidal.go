@@ -246,6 +246,13 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 			"https://triton.squid.wtf",
 			"https://hifi-one.spotisaver.net",
 			"https://hifi-two.spotisaver.net",
+			"https://ohio-1.monochrome.tf",
+			"https://singapore-1.monochrome.tf",
+			"https://wolf.qqdl.site",
+			"https://maus.qqdl.site",
+			"https://vogel.qqdl.site",
+			"https://katze.qqdl.site",
+			"https://hund.qqdl.site",
 			"https://api.monochrome.tf",
 		}
 		for _, apiBase := range apis {
@@ -1221,13 +1228,18 @@ func GetTidalIDFromISRC(trackName, artistName, isrc string) (int64, string, erro
 func oldGetTidalIDFromISRC(trackName, artistName, isrc string) (int64, string, error) {
 	apis := []string{
 		"https://triton.squid.wtf",
-		"https://eu-central.monochrome.tf",
 		"https://hifi-one.spotisaver.net",
 		"https://hifi-two.spotisaver.net",
-		"https://tidal.kinoplus.online",
-		"https://monochrome-api.samidy.com",
-		"https://us-west.monochrome.tf",
+		"https://ohio-1.monochrome.tf",
+		"https://singapore-1.monochrome.tf",
+		"https://wolf.qqdl.site",
+		"https://maus.qqdl.site",
+		"https://vogel.qqdl.site",
+		"https://katze.qqdl.site",
+		"https://hund.qqdl.site",
 		"https://api.monochrome.tf",
+		"https://monochrome-api.samidy.com",
+		"https://tidal.kinoplus.online",
 	}
 
 	query := url.QueryEscape(trackName + " " + artistName)
