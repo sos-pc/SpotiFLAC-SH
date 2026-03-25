@@ -199,46 +199,88 @@ func (t *TidalDownloader) GetTrackIDFromURL(tidalURL string) (int64, error) {
 func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string, error) {
 	fmt.Println("Fetching URL...")
 
+	var body []byte
+	var respStatusCode int
+	success := false
+
 	token, err := GetValidTidalToken()
 	if err != nil {
-		return "", fmt.Errorf("tidal authentication failed: %w", err)
+		fmt.Printf("✗ Tidal authentication failed: %v. Falling back to public HiFi APIs...\n", err)
 	}
 
-	url := fmt.Sprintf("https://api.tidal.com/v1/tracks/%d/playbackinfopostpaywall?countryCode=US&audioquality=%s&playbackmode=STREAM&assetpresentation=FULL", trackID, quality)
-	fmt.Printf("Tidal API URL: %s\n", url)
+	if token != nil {
+		url := fmt.Sprintf("https://api.tidal.com/v1/tracks/%d/playbackinfopostpaywall?countryCode=US&audioquality=%s&playbackmode=STREAM&assetpresentation=FULL", trackID, quality)
+		fmt.Printf("Tidal API URL: %s\n", url)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		fmt.Printf("✗ failed to create request: %v\n", err)
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
+		req, err := http.NewRequest("GET", url, nil)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
 
-	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		fmt.Printf("✗ Tidal API request failed: %v\n", err)
-		return "", fmt.Errorf("failed to get download URL: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		fmt.Printf("✗ Tidal API returned status code: %d - %s\n", resp.StatusCode, string(bodyBytes))
-		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			// Token is probably invalid or expired, attempt refresh
-			if _, rErr := RefreshTidalToken(token); rErr != nil {
-				DeleteTidalToken()
+			resp, err := t.client.Do(req)
+			if err == nil {
+				respStatusCode = resp.StatusCode
+				if resp.StatusCode == 200 {
+					body, _ = io.ReadAll(resp.Body)
+					success = true
+				} else {
+					bodyBytes, _ := io.ReadAll(resp.Body)
+					fmt.Printf("✗ Tidal API returned status code: %d - %s\n", resp.StatusCode, string(bodyBytes))
+					if resp.StatusCode == 401 || resp.StatusCode == 403 {
+						if _, rErr := RefreshTidalToken(token); rErr != nil {
+							DeleteTidalToken()
+						}
+					}
+				}
+				resp.Body.Close()
+			} else {
+				fmt.Printf("✗ Tidal API request failed: %v\n", err)
 			}
 		}
-		return "", fmt.Errorf("API returned status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("✗ Failed to read response body: %v\n", err)
-		return "", fmt.Errorf("failed to read response: %w", err)
+	if !success {
+		fmt.Println("Falling back to public HiFi APIs...")
+		apis := []string{
+			"https://triton.squid.wtf",
+			"https://hifi-one.spotisaver.net",
+			"https://hifi-two.spotisaver.net",
+			"https://api.monochrome.tf",
+		}
+		for _, apiBase := range apis {
+			fallbackURL := fmt.Sprintf("%s/track/?id=%d&audioquality=%s", apiBase, trackID, quality)
+			fmt.Printf("Trying fallback API: %s\n", fallbackURL)
+			req, err := http.NewRequest("GET", fallbackURL, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := t.client.Do(req)
+			if err != nil {
+				continue
+			}
+			if resp.StatusCode == 200 {
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				bodyStr := string(bodyBytes)
+				if strings.Contains(bodyStr, "Upstream API error") || strings.Contains(bodyStr, "\"detail\"") {
+					fmt.Printf("✗ Fallback %s failed (upstream error)\n", apiBase)
+				} else if strings.Contains(bodyStr, "\"PREVIEW\"") {
+					fmt.Printf("✗ Fallback %s returned a PREVIEW (30s snippet), skipping\n", apiBase)
+				} else {
+					fmt.Printf("✓ Fallback API %s succeeded\n", apiBase)
+					body = bodyBytes
+					success = true
+					break
+				}
+			} else {
+				fmt.Printf("✗ Fallback %s returned status %d\n", apiBase, resp.StatusCode)
+				resp.Body.Close()
+			}
+		}
+	}
+
+	if !success {
+		return "", fmt.Errorf("failed to get download URL: API returned status code %d and fallbacks failed", respStatusCode)
 	}
 
 	var v2Response TidalAPIResponseV2
