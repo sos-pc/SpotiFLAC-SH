@@ -227,9 +227,10 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 					bodyBytes, _ := io.ReadAll(resp.Body)
 					fmt.Printf("✗ Tidal API returned status code: %d - %s\n", resp.StatusCode, string(bodyBytes))
 					if resp.StatusCode == 401 || resp.StatusCode == 403 {
-						if _, rErr := RefreshTidalToken(token); rErr != nil {
-							DeleteTidalToken()
-						}
+						// Ne plus supprimer le token sur une erreur 401/403 de streaming.
+						// Les anciens clients TV (utilisés ici) se voient refuser le scope playback
+						// même avec un compte valide. La suppression forcerait une boucle de reconnexion inutile.
+						_, _ = RefreshTidalToken(token)
 					}
 				}
 				resp.Body.Close()

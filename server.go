@@ -87,7 +87,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Local bypass — DISABLE_AUTH_ON_LAN=true
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,7 +154,10 @@ func localBypassMiddleware(next http.Handler) http.Handler {
 // Appelé par le frontend au démarrage pour bypass automatique.
 func (s *Server) handleLocalAuth(w http.ResponseWriter, r *http.Request) {
 	setCORSHeaders(w)
-	if r.Method == "OPTIONS" { w.WriteHeader(http.StatusOK); return }
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	if !localBypassEnabled() || !isLocalIP(r) {
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]string{"error": "local bypass not enabled"})
@@ -262,6 +264,8 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("/auth/me", corsMiddleware(localBypassMiddleware(RequireAuth(http.HandlerFunc(s.handleMe)))))
 	s.mux.Handle("/api/rpc", corsMiddleware(localBypassMiddleware(RequireAuth(http.HandlerFunc(s.handleRPC)))))
 	s.mux.Handle("/api/upload", corsMiddleware(localBypassMiddleware(RequireAuth(http.HandlerFunc(s.handleUpload)))))
+	s.mux.Handle("/api/auth/tidal/url", corsMiddleware(localBypassMiddleware(RequireAuth(http.HandlerFunc(s.handleTidalAuthURL)))))
+	s.mux.Handle("/api/auth/tidal/callback", corsMiddleware(localBypassMiddleware(RequireAuth(http.HandlerFunc(s.handleTidalAuthCallback)))))
 
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
@@ -280,6 +284,36 @@ func (s *Server) registerRoutes() {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) handleTidalAuthURL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	url := backend.GenerateTidalAuthURL()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"url": url})
+}
+
+func (s *Server) handleTidalAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if err := backend.ExchangeTidalAuthCode(req.URL); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
