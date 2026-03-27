@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -1063,77 +1062,6 @@ func getDownloadURLRotated(apis []string, trackID int64, quality string) (string
 	return "https://api.tidal.com", url, nil
 }
 
-// _
-func oldGetDownloadURLRotated(apis []string, trackID int64, quality string) (string, string, error) {
-	if len(apis) == 0 {
-		return "", "", fmt.Errorf("no APIs available")
-	}
-
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(apis), func(i, j int) { apis[i], apis[j] = apis[j], apis[i] })
-
-	fmt.Printf("Rotating through %d APIs...\n", len(apis))
-
-	var lastError error
-	var errors []string
-
-	for _, apiURL := range apis {
-		fmt.Printf("Trying API: %s\n", apiURL)
-
-		client := NewHTTPClient(15 * time.Second)
-
-		url := fmt.Sprintf("%s/track/?id=%d&quality=%s", apiURL, trackID, quality)
-		req, _ := http.NewRequest("GET", url, nil)
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-		resp, err := client.Do(req)
-		if err != nil {
-			lastError = err
-			errors = append(errors, fmt.Sprintf("%s: %v", apiURL, err))
-			continue
-		}
-
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			lastError = fmt.Errorf("HTTP %d", resp.StatusCode)
-			errors = append(errors, fmt.Sprintf("%s: %v", apiURL, lastError))
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			lastError = err
-			errors = append(errors, fmt.Sprintf("%s: read body failed", apiURL))
-			continue
-		}
-
-		var v2Response TidalAPIResponseV2
-		if err := json.Unmarshal(body, &v2Response); err == nil && v2Response.Data.Manifest != "" {
-			fmt.Printf("✓ Success with: %s\n", apiURL)
-			return apiURL, "MANIFEST:" + v2Response.Data.Manifest, nil
-		}
-
-		var v1Responses []TidalAPIResponse
-		if err := json.Unmarshal(body, &v1Responses); err == nil {
-			for _, item := range v1Responses {
-				if item.OriginalTrackURL != "" {
-					fmt.Printf("✓ Success with: %s\n", apiURL)
-					return apiURL, item.OriginalTrackURL, nil
-				}
-			}
-		}
-
-		lastError = fmt.Errorf("no download URL or manifest in response")
-		errors = append(errors, fmt.Sprintf("%s: %v", apiURL, lastError))
-	}
-
-	fmt.Println("All APIs failed:")
-	for _, e := range errors {
-		fmt.Printf("  ✗ %s\n", e)
-	}
-
-	return "", "", fmt.Errorf("all %d APIs failed. Last error: %v", len(apis), lastError)
-}
 
 func buildTidalFilename(title, artist, album, albumArtist, releaseDate string, trackNumber, discNumber int, format string, includeTrackNumber bool, position int, useAlbumTrackNumber bool) string {
 	var filename string
@@ -1224,58 +1152,3 @@ func GetTidalIDFromISRC(trackName, artistName, isrc string) (int64, string, erro
 	return 0, "", fmt.Errorf("ISRC not found on Tidal")
 }
 
-// _
-func oldGetTidalIDFromISRC(trackName, artistName, isrc string) (int64, string, error) {
-	apis := []string{
-		"https://triton.squid.wtf",
-		"https://hifi-one.spotisaver.net",
-		"https://hifi-two.spotisaver.net",
-		"https://ohio-1.monochrome.tf",
-		"https://singapore-1.monochrome.tf",
-		"https://wolf.qqdl.site",
-		"https://maus.qqdl.site",
-		"https://vogel.qqdl.site",
-		"https://katze.qqdl.site",
-		"https://hund.qqdl.site",
-		"https://api.monochrome.tf",
-		"https://monochrome-api.samidy.com",
-		"https://tidal.kinoplus.online",
-	}
-
-	query := url.QueryEscape(trackName + " " + artistName)
-
-	for _, api := range apis {
-		searchURL := fmt.Sprintf("%s/search?s=%s", api, query)
-		client := NewHTTPClient(10 * time.Second)
-		resp, err := client.Get(searchURL)
-		if err != nil {
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil || resp.StatusCode != 200 {
-			continue
-		}
-
-		var result struct {
-			Data struct {
-				Items []struct {
-					ID   int64  `json:"id"`
-					ISRC string `json:"isrc"`
-				} `json:"items"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(body, &result); err != nil {
-			continue
-		}
-
-		for _, item := range result.Data.Items {
-			if item.ISRC == isrc {
-				fmt.Printf("[Tidal] Found track by ISRC %s: ID=%d (via %s)\n", isrc, item.ID, api)
-				return item.ID, api, nil
-			}
-		}
-	}
-	return 0, "", fmt.Errorf("tidal track not found for ISRC: %s", isrc)
-}
