@@ -7,34 +7,40 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 type SongLinkClient struct {
-	client            *http.Client
-	lastAPICallTime   time.Time
-	apiCallCount      int
-	apiCallResetTime  time.Time
-	rateLimitedUntil  time.Time // si non-zero, skip les appels jusqu'Ã  cette heure
+	client           *http.Client
+	mu               sync.Mutex // protects all fields below
+	lastAPICallTime  time.Time
+	apiCallCount     int
+	apiCallResetTime time.Time
+	rateLimitedUntil time.Time
 }
 
-// isRateLimited retourne true si on est en fenÃªtre de rate limit
-func (s *SongLinkClient) IsRateLimited() bool {
-	return s.isRateLimited()
-}
-
-func (s *SongLinkClient) RateLimitedUntil() time.Time {
-	return s.rateLimitedUntil
-}
-
+// isRateLimited must be called with s.mu held.
 func (s *SongLinkClient) isRateLimited() bool {
 	return !s.rateLimitedUntil.IsZero() && time.Now().Before(s.rateLimitedUntil)
 }
 
-// markRateLimited enregistre un 429 et bloque les appels pendant 5 minutes
+func (s *SongLinkClient) IsRateLimited() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isRateLimited()
+}
+
+func (s *SongLinkClient) RateLimitedUntil() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rateLimitedUntil
+}
+
+// markRateLimited must be called with s.mu held.
 func (s *SongLinkClient) markRateLimited() {
 	s.rateLimitedUntil = time.Now().Add(5 * time.Minute)
-	fmt.Printf("[Songlink] Rate limited — skipping calls for 5 minutes\n")
+	fmt.Printf("[Songlink] Rate limited -- skipping calls for 5 minutes\n")
 }
 
 type SongLinkURLs struct {
@@ -73,7 +79,9 @@ func NewSongLinkClient() *SongLinkClient {
 }
 
 func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region string) (*SongLinkURLs, error) {
+	s.mu.Lock()
 	if s.isRateLimited() {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("songlink rate limited, skipping call")
 	}
 	now := time.Now()
@@ -81,19 +89,21 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 		s.apiCallCount = 0
 		s.apiCallResetTime = now
 	}
-
 	if s.apiCallCount >= 9 {
 		waitTime := time.Minute - now.Sub(s.apiCallResetTime)
+		s.mu.Unlock()
 		if waitTime > 0 {
 			fmt.Printf("Rate limit reached, waiting %v...\n", waitTime.Round(time.Second))
 			time.Sleep(waitTime)
-			s.apiCallCount = 0
-			s.apiCallResetTime = time.Now()
 		}
+		s.mu.Lock()
+		s.apiCallCount = 0
+		s.apiCallResetTime = time.Now()
 	}
-
-	if !s.lastAPICallTime.IsZero() {
-		timeSinceLastCall := now.Sub(s.lastAPICallTime)
+	lastCall := s.lastAPICallTime
+	s.mu.Unlock()
+	if !lastCall.IsZero() {
+		timeSinceLastCall := time.Now().Sub(lastCall)
 		minDelay := 7 * time.Second
 		if timeSinceLastCall < minDelay {
 			waitTime := minDelay - timeSinceLastCall
@@ -125,12 +135,16 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 			return nil, fmt.Errorf("failed to get URLs: %w", err)
 		}
 
+		s.mu.Lock()
 		s.lastAPICallTime = time.Now()
 		s.apiCallCount++
+		s.mu.Unlock()
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
+			s.mu.Lock()
 			s.markRateLimited()
+			s.mu.Unlock()
 			return nil, fmt.Errorf("API returned status 429")
 		}
 
@@ -197,7 +211,9 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 }
 
 func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAvailability, error) {
+	s.mu.Lock()
 	if s.isRateLimited() {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("songlink rate limited, skipping call")
 	}
 	now := time.Now()
@@ -205,19 +221,21 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 		s.apiCallCount = 0
 		s.apiCallResetTime = now
 	}
-
 	if s.apiCallCount >= 9 {
 		waitTime := time.Minute - now.Sub(s.apiCallResetTime)
+		s.mu.Unlock()
 		if waitTime > 0 {
 			fmt.Printf("Rate limit reached, waiting %v...\n", waitTime.Round(time.Second))
 			time.Sleep(waitTime)
-			s.apiCallCount = 0
-			s.apiCallResetTime = time.Now()
 		}
+		s.mu.Lock()
+		s.apiCallCount = 0
+		s.apiCallResetTime = time.Now()
 	}
-
-	if !s.lastAPICallTime.IsZero() {
-		timeSinceLastCall := now.Sub(s.lastAPICallTime)
+	lastCall := s.lastAPICallTime
+	s.mu.Unlock()
+	if !lastCall.IsZero() {
+		timeSinceLastCall := time.Now().Sub(lastCall)
 		minDelay := 7 * time.Second
 		if timeSinceLastCall < minDelay {
 			waitTime := minDelay - timeSinceLastCall
@@ -245,12 +263,16 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 			return nil, fmt.Errorf("failed to check availability: %w", err)
 		}
 
+		s.mu.Lock()
 		s.lastAPICallTime = time.Now()
 		s.apiCallCount++
+		s.mu.Unlock()
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
+			s.mu.Lock()
 			s.markRateLimited()
+			s.mu.Unlock()
 			return nil, fmt.Errorf("API returned status 429")
 		}
 
@@ -345,7 +367,9 @@ func checkQobuzAvailability(isrc string) bool {
 }
 
 func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string, error) {
+	s.mu.Lock()
 	if s.isRateLimited() {
+		s.mu.Unlock()
 		return "", fmt.Errorf("songlink rate limited, skipping call")
 	}
 	now := time.Now()
@@ -353,19 +377,21 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 		s.apiCallCount = 0
 		s.apiCallResetTime = now
 	}
-
 	if s.apiCallCount >= 9 {
 		waitTime := time.Minute - now.Sub(s.apiCallResetTime)
+		s.mu.Unlock()
 		if waitTime > 0 {
 			fmt.Printf("Rate limit reached, waiting %v...\n", waitTime.Round(time.Second))
 			time.Sleep(waitTime)
-			s.apiCallCount = 0
-			s.apiCallResetTime = time.Now()
 		}
+		s.mu.Lock()
+		s.apiCallCount = 0
+		s.apiCallResetTime = time.Now()
 	}
-
-	if !s.lastAPICallTime.IsZero() {
-		timeSinceLastCall := now.Sub(s.lastAPICallTime)
+	lastCall := s.lastAPICallTime
+	s.mu.Unlock()
+	if !lastCall.IsZero() {
+		timeSinceLastCall := time.Now().Sub(lastCall)
 		minDelay := 7 * time.Second
 		if timeSinceLastCall < minDelay {
 			waitTime := minDelay - timeSinceLastCall
@@ -393,12 +419,16 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 			return "", fmt.Errorf("failed to get Deezer URL: %w", err)
 		}
 
+		s.mu.Lock()
 		s.lastAPICallTime = time.Now()
 		s.apiCallCount++
+		s.mu.Unlock()
 
 		if resp.StatusCode == 429 {
 			resp.Body.Close()
+			s.mu.Lock()
 			s.markRateLimited()
+			s.mu.Unlock()
 			return "", fmt.Errorf("API returned status 429")
 		}
 
