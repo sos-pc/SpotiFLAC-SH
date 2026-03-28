@@ -140,9 +140,7 @@ export function useDownload(region: string) {
             let streamingURLs: any = null;
             if (spotifyId) {
                 try {
-                    // GetStreamingURLs from rpc.ts
-                    const urlsJson = await GetStreamingURLs(spotifyId, region);
-                    streamingURLs = JSON.parse(urlsJson);
+                    streamingURLs = await GetStreamingURLs(spotifyId, region);
                 }
                 catch (err) {
                     console.error("Failed to get streaming URLs:", err);

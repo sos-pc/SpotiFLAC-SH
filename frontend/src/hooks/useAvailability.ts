@@ -20,8 +20,7 @@ export function useAvailability() {
         setError(null);
         try {
             logger.info(`Checking availability for track: ${spotifyId}`);
-            const response = await CheckTrackAvailability(spotifyId);
-            const availability: TrackAvailability = JSON.parse(response);
+            const availability: TrackAvailability = await CheckTrackAvailability(spotifyId);
             setAvailabilityMap((prev) => {
                 const newMap = new Map(prev);
                 newMap.set(spotifyId, availability);

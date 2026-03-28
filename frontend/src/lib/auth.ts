@@ -32,7 +32,7 @@ export function isAuthenticated(): boolean {
 }
 
 export async function login(username: string, password: string): Promise<AuthUser> {
-  const resp = await fetch("/auth/login", {
+  const resp = await fetch("/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -47,7 +47,7 @@ export async function fetchMe(): Promise<AuthUser | null> {
   const token = getToken();
   if (!token) return null;
   try {
-    const resp = await fetch("/auth/me", {
+    const resp = await fetch("/api/v1/auth/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) { clearAuth(); return null; }

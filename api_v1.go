@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
@@ -120,7 +121,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, result)
+		writeV1JSON(w, http.StatusOK, json.RawMessage(result))
 	}))
 
 	s.mux.Handle("GET /api/v1/search/query", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -130,10 +131,24 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "q query param required")
 			return
 		}
+		limit := 10
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		offset := 0
+		if o := r.URL.Query().Get("offset"); o != "" {
+			if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+				offset = v
+			}
+		}
 		if searchType != "" {
 			result, err := a.SearchSpotifyByType(SpotifySearchByTypeRequest{
 				Query:      q,
 				SearchType: searchType,
+				Limit:      limit,
+				Offset:     offset,
 			})
 			if err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -141,7 +156,7 @@ func (s *Server) registerV1Routes() {
 			}
 			writeV1JSON(w, http.StatusOK, result)
 		} else {
-			result, err := a.SearchSpotify(SpotifySearchRequest{Query: q})
+			result, err := a.SearchSpotify(SpotifySearchRequest{Query: q, Limit: limit})
 			if err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return
@@ -167,7 +182,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, result)
+		writeV1JSON(w, http.StatusOK, json.RawMessage(result))
 	}))
 
 	s.mux.Handle("GET /api/v1/tracks/{id}/links", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +193,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, map[string]string{"urls": result})
+		writeV1JSON(w, http.StatusOK, map[string]json.RawMessage{"urls": json.RawMessage(result)})
 	}))
 
 	// ── Jobs ──────────────────────────────────────────────────────────────
