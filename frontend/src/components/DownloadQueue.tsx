@@ -1,47 +1,20 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive, Zap, Timer, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { GetDownloadQueue, ClearCompletedDownloads, ClearAllDownloads, ExportFailedDownloads } from "@/lib/rpc";
+import { ClearCompletedDownloads, ClearAllDownloads, ExportFailedDownloads } from "@/lib/rpc";
+import { useDownloadQueueData } from "@/hooks/useDownloadQueueData";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface DownloadQueueProps {
     isOpen: boolean;
     onClose: () => void;
 }
 export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
-    const [queueInfo, setQueueInfo] = useState<any>({
-        is_downloading: false,
-        queue: [],
-        current_speed: 0,
-        total_downloaded: 0,
-        session_start_time: 0,
-        queued_count: 0,
-        completed_count: 0,
-        failed_count: 0,
-        skipped_count: 0,
-    });
-    useEffect(() => {
-        if (!isOpen)
-            return;
-        const fetchQueue = async () => {
-            try {
-                const info = await GetDownloadQueue();
-                setQueueInfo(info);
-            }
-            catch (error) {
-                console.error("Failed to get download queue:", error);
-            }
-        };
-        fetchQueue();
-        const interval = setInterval(fetchQueue, 500);
-        return () => clearInterval(interval);
-    }, [isOpen]);
+    const queueInfo = useDownloadQueueData();
     const handleClearHistory = async () => {
         try {
             await ClearCompletedDownloads();
-            const info = await GetDownloadQueue();
-            setQueueInfo(info);
         }
         catch (error) {
             console.error("Failed to clear history:", error);
@@ -50,8 +23,6 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     const handleReset = async () => {
         try {
             await ClearAllDownloads();
-            const info = await GetDownloadQueue();
-            setQueueInfo(info);
             toast.success("Download queue reset");
         }
         catch (error) {
