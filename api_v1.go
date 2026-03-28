@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,33 @@ func writeV1JSON(w http.ResponseWriter, status int, v interface{}) {
 
 func writeV1Error(w http.ResponseWriter, status int, msg string) {
 	writeV1JSON(w, status, map[string]string{"error": msg})
+}
+
+// cleanAbsPath normalizes a filesystem path and rejects anything that is not
+// absolute after cleaning (prevents ../traversal tricks and relative paths).
+func cleanAbsPath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	clean := filepath.Clean(p)
+	if !filepath.IsAbs(clean) {
+		return "", fmt.Errorf("path must be absolute")
+	}
+	return clean, nil
+}
+
+// cleanAbsPaths validates a slice of paths, returning the cleaned slice or the
+// first error encountered.
+func cleanAbsPaths(paths []string) ([]string, error) {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		c, err := cleanAbsPath(p)
+		if err != nil {
+			return nil, fmt.Errorf("path[%d]: %w", i, err)
+		}
+		out[i] = c
+	}
+	return out, nil
 }
 
 // v1CORS gère les headers CORS pour l'API v1 (inclut X-API-Key).
@@ -518,9 +546,9 @@ func (s *Server) registerV1Routes() {
 
 	// ── Files ─────────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/files", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			writeV1Error(w, http.StatusBadRequest, "path query param required")
+		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		result, err := a.ListDirectoryFiles(path)
@@ -532,9 +560,9 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/files/audio", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			writeV1Error(w, http.StatusBadRequest, "path query param required")
+		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		result, err := a.ListAudioFilesInDir(path)
@@ -546,9 +574,9 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/files/metadata", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			writeV1Error(w, http.StatusBadRequest, "path query param required")
+		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		result, err := a.ReadFileMetadata(path)
@@ -566,6 +594,10 @@ func (s *Server) registerV1Routes() {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		if _, err := cleanAbsPath(params.OldPath); err != nil {
+			writeV1Error(w, http.StatusBadRequest, "old_path: "+err.Error())
 			return
 		}
 		if err := a.RenameFileTo(params.OldPath, params.NewName); err != nil {
@@ -789,13 +821,22 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.GetFileSizes(params.FilePaths))
+		cleaned, err := cleanAbsPaths(params.FilePaths)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, a.GetFileSizes(cleaned))
 	}))
 
+	// Admin-only: returns raw file contents.
 	s.mux.Handle("GET /api/v1/files/image", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			writeV1Error(w, http.StatusBadRequest, "path query param required")
+		if !v1RequireAdmin(w, r) {
+			return
+		}
+		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		data, err := a.ReadImageAsBase64(path)
@@ -806,7 +847,11 @@ func (s *Server) registerV1Routes() {
 		writeV1JSON(w, http.StatusOK, map[string]string{"data": data})
 	}))
 
+	// Admin-only: returns raw file contents.
 	s.mux.Handle("POST /api/v1/files/read", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
@@ -814,7 +859,12 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		content, err := a.ReadTextFile(params.FilePath)
+		path, err := cleanAbsPath(params.FilePath)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		content, err := a.ReadTextFile(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -831,7 +881,12 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.RenameFilesByMetadata(params.Files, params.Format))
+		cleaned, err := cleanAbsPaths(params.Files)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, a.RenameFilesByMetadata(cleaned, params.Format))
 	}))
 
 	s.mux.Handle("POST /api/v1/files/rename/preview", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -843,7 +898,12 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.PreviewRenameFiles(params.Files, params.Format))
+		cleaned, err := cleanAbsPaths(params.Files)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, a.PreviewRenameFiles(cleaned, params.Format))
 	}))
 
 	s.mux.Handle("POST /api/v1/files/upload/image", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -871,7 +931,12 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		url, err := a.UploadImage(params.FilePath)
+		path, err := cleanAbsPath(params.FilePath)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		url, err := a.UploadImage(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -890,7 +955,17 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		if err := a.CreateM3U8File(params.M3U8Name, params.OutputDir, params.FilePaths, params.JellyfinMusicPath); err != nil {
+		outputDir, err := cleanAbsPath(params.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		cleanedPaths, err := cleanAbsPaths(params.FilePaths)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := a.CreateM3U8File(params.M3U8Name, outputDir, cleanedPaths, params.JellyfinMusicPath); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -907,7 +982,17 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.CheckFilesExistence(params.OutputDir, params.RootDir, params.Tracks))
+		outputDir, err := cleanAbsPath(params.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		rootDir, err := cleanAbsPath(params.RootDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "root_dir: "+err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, a.CheckFilesExistence(outputDir, rootDir, params.Tracks))
 	}))
 
 	// ── Audio (batch) ─────────────────────────────────────────────────────
