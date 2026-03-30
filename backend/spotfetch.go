@@ -232,53 +232,72 @@ func (c *SpotifyClient) Initialize() error {
 }
 
 func (c *SpotifyClient) Query(payload map[string]interface{}) (map[string]interface{}, error) {
-	if c.accessToken == "" || c.clientToken == "" {
-		if err := c.Initialize(); err != nil {
-			return nil, err
-		}
-	}
-
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", "https://api-partner.spotify.com/pathfinder/v2/query", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
-	req.Header.Set("Client-Token", c.clientToken)
-	req.Header.Set("Spotify-App-Version", c.clientVersion)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != 200 {
-		errorText := string(body)
-		if len(errorText) > 200 {
-			errorText = errorText[:200]
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if c.accessToken == "" || c.clientToken == "" {
+			if err := c.Initialize(); err != nil {
+				return nil, err
+			}
 		}
-		return nil, fmt.Errorf("%w: API query failed: HTTP %d | %s", SpotifyError, resp.StatusCode, errorText)
-	}
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
+		req, err := http.NewRequest("POST", "https://api-partner.spotify.com/pathfinder/v2/query", bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, err
+		}
 
-	return result, nil
+		req.Header.Set("Authorization", "Bearer "+c.accessToken)
+		req.Header.Set("Client-Token", c.clientToken)
+		req.Header.Set("Spotify-App-Version", c.clientVersion)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		switch resp.StatusCode {
+		case 200:
+			var result map[string]interface{}
+			if err := json.Unmarshal(body, &result); err != nil {
+				return nil, err
+			}
+			return result, nil
+		case 401:
+			// Token expired — reset and retry with fresh tokens
+			c.accessToken = ""
+			c.clientToken = ""
+			continue
+		case 429:
+			// Rate limited — honour Retry-After if present, else use exponential backoff
+			wait := time.Duration(5*(attempt+1)) * time.Second
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if n, err := strconv.Atoi(ra); err == nil && n > 0 {
+					wait = time.Duration(n) * time.Second
+				}
+			}
+			fmt.Printf("⚠ Spotify API rate limited (429), retrying in %v (attempt %d/%d)...\n", wait, attempt+1, maxAttempts)
+			time.Sleep(wait)
+			continue
+		default:
+			errorText := string(body)
+			if len(errorText) > 200 {
+				errorText = errorText[:200]
+			}
+			return nil, fmt.Errorf("%w: API query failed: HTTP %d | %s", SpotifyError, resp.StatusCode, errorText)
+		}
+	}
+	return nil, fmt.Errorf("%w: API query failed after %d attempts", SpotifyError, maxAttempts)
 }
 
 func getString(m map[string]interface{}, key string) string {
