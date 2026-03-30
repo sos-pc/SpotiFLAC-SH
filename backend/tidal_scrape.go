@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 const (
 	tidalClientIDFallback = "CzET4vdadNUFQ5JU"
 	tidalClientIDTTL      = 24 * time.Hour
-	tidalBundleMaxBytes   = 15 * 1024 * 1024 // 15 MB
+	tidalBundleMaxBytes   = 20 * 1024 * 1024 // 20 MB
 )
 
 var (
@@ -21,10 +22,14 @@ var (
 	clientIDMu       sync.Mutex
 )
 
-// GetTidalClientID retourne le client_id OAuth du Tidal Web Player.
-// Il est scrapé depuis listen.tidal.com une fois toutes les 24h et mis en cache.
-// En cas d'échec, la valeur de fallback est utilisée.
+// GetTidalClientID retourne le client_id OAuth actuel du Tidal Web Player.
+// Priorité : override admin > cache > scraping live > fallback hardcodé.
 func GetTidalClientID() string {
+	// Vérifier l'override admin en premier (sans verrou — son propre mutex)
+	if override := GetTidalClientIDOverride(); override != "" {
+		return override
+	}
+
 	clientIDMu.Lock()
 	defer clientIDMu.Unlock()
 
@@ -51,13 +56,15 @@ func InvalidateTidalClientIDCache() {
 	clientIDMu.Unlock()
 }
 
+// ─── Scraping ──────────────────────────────────────────────────────────────
+
 func scrapeTidalClientID() (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	httpClient := &http.Client{Timeout: 12 * time.Second}
 
 	// ── Étape 1 : récupérer le HTML de listen.tidal.com ─────────────────────
 	req, _ := http.NewRequest("GET", "https://listen.tidal.com", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch listen.tidal.com: %w", err)
 	}
@@ -67,62 +74,107 @@ func scrapeTidalClientID() (string, error) {
 		return "", fmt.Errorf("read HTML: %w", err)
 	}
 
-	// ── Étape 2 : trouver l'URL du bundle JS principal ───────────────────────
-	// Vite génère : <script type="module" crossorigin src="/assets/index-HASH.js">
-	bundlePatterns := []*regexp.Regexp{
-		regexp.MustCompile(`src="(/assets/index[^"]+\.js)"`),
-		regexp.MustCompile(`src="(assets/index[^"]+\.js)"`),
-		regexp.MustCompile(`src="(/assets/main[^"]+\.js)"`),
+	// ── Étape 2 : collecter tous les bundles JS ──────────────────────────────
+	// Vite génère : <script type="module" crossorigin src="/assets/foo-HASH.js">
+	bundleRe := regexp.MustCompile(`src="(/assets/[^"]+\.js)"`)
+	bundleMatches := bundleRe.FindAllSubmatch(html, -1)
+	if len(bundleMatches) == 0 {
+		// Essayer sans leading slash
+		bundleRe = regexp.MustCompile(`src="(assets/[^"]+\.js)"`)
+		bundleMatches = bundleRe.FindAllSubmatch(html, -1)
+	}
+	if len(bundleMatches) == 0 {
+		return "", fmt.Errorf("no JS bundles found in listen.tidal.com HTML")
 	}
 
-	var bundleURL string
-	for _, re := range bundlePatterns {
-		if m := re.FindSubmatch(html); m != nil {
-			path := string(m[1])
-			if path[0] == '/' {
-				bundleURL = "https://listen.tidal.com" + path
-			} else {
-				bundleURL = "https://listen.tidal.com/" + path
-			}
-			break
+	var bundleURLs []string
+	for _, m := range bundleMatches {
+		path := string(m[1])
+		if len(path) > 0 && path[0] == '/' {
+			bundleURLs = append(bundleURLs, "https://listen.tidal.com"+path)
+		} else {
+			bundleURLs = append(bundleURLs, "https://listen.tidal.com/"+path)
 		}
 	}
-	if bundleURL == "" {
-		return "", fmt.Errorf("JS bundle not found in listen.tidal.com HTML")
+
+	// ── Étape 3 : chercher dans chaque bundle jusqu'à trouver le client_id ──
+	var lastErr error
+	for _, bundleURL := range bundleURLs {
+		id, err := searchBundleForClientID(httpClient, bundleURL, req.Header.Get("User-Agent"))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if id != "" {
+			return id, nil
+		}
 	}
 
-	// ── Étape 3 : télécharger le bundle ─────────────────────────────────────
-	req2, _ := http.NewRequest("GET", bundleURL, nil)
-	req2.Header.Set("User-Agent", req.Header.Get("User-Agent"))
-	resp2, err := client.Do(req2)
+	return "", fmt.Errorf("clientId not found in %d bundle(s); last error: %v", len(bundleURLs), lastErr)
+}
+
+func searchBundleForClientID(httpClient *http.Client, bundleURL, userAgent string) (string, error) {
+	req, _ := http.NewRequest("GET", bundleURL, nil)
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch JS bundle: %w", err)
+		return "", fmt.Errorf("fetch %s: %w", bundleURL, err)
 	}
-	defer resp2.Body.Close()
-	bundle, err := io.ReadAll(io.LimitReader(resp2.Body, tidalBundleMaxBytes))
+	defer resp.Body.Close()
+	bundle, err := io.ReadAll(io.LimitReader(resp.Body, tidalBundleMaxBytes))
 	if err != nil {
-		return "", fmt.Errorf("read JS bundle: %w", err)
+		return "", fmt.Errorf("read bundle: %w", err)
 	}
 
-	// ── Étape 4 : extraire le client_id ─────────────────────────────────────
-	// Patterns du plus spécifique au plus générique.
-	// Les client_ids Tidal font 14-20 caractères alphanumériques.
-	clientIDPatterns := []*regexp.Regexp{
-		// Minifié sans espace : clientId:"CzET4vdadNUFQ5JU"
-		regexp.MustCompile(`clientId:"([A-Za-z0-9]{14,20})"`),
-		// Avec espace : clientId: "CzET4vdadNUFQ5JU"
-		regexp.MustCompile(`clientId:\s*"([A-Za-z0-9]{14,20})"`),
-		// Forme JSON : "clientId":"CzET4vdadNUFQ5JU"
+	// ── Stratégie 1 : proximité avec la redirect_uri ─────────────────────────
+	// La redirect_uri est toujours un string literal, jamais renommée.
+	// Le client_id se trouve dans le même objet de config, juste avant elle.
+	redirectMarker := []byte("listen.tidal.com/login/auth")
+	if idx := bytes.Index(bundle, redirectMarker); idx > 200 {
+		start := idx - 600
+		if start < 0 {
+			start = 0
+		}
+		window := bundle[start:idx]
+
+		// Chercher des string literals alphanumériques de 14–20 chars
+		// dans la fenêtre précédant la redirect_uri.
+		// On prend le DERNIER (le plus proche de la redirect_uri).
+		litRe := regexp.MustCompile(`"([A-Za-z0-9]{14,20})"`)
+		matches := litRe.FindAllSubmatch(window, -1)
+		for i := len(matches) - 1; i >= 0; i-- {
+			candidate := string(matches[i][1])
+			// Exclure les faux positifs évidents (hashes hex, mots courants)
+			if !isProbablyNotClientID(candidate) {
+				return candidate, nil
+			}
+		}
+	}
+
+	// ── Stratégie 2 : patterns explicites (si le bundler préserve le nom) ────
+	explicitPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`clientId\s*:\s*"([A-Za-z0-9]{14,20})"`),
 		regexp.MustCompile(`"clientId"\s*:\s*"([A-Za-z0-9]{14,20})"`),
-		// Snake case : client_id:"..."
-		regexp.MustCompile(`client_id:\s*"([A-Za-z0-9]{14,20})"`),
+		regexp.MustCompile(`client_id\s*:\s*"([A-Za-z0-9]{14,20})"`),
 	}
-
-	for _, re := range clientIDPatterns {
+	for _, re := range explicitPatterns {
 		if m := re.FindSubmatch(bundle); m != nil {
 			return string(m[1]), nil
 		}
 	}
 
-	return "", fmt.Errorf("clientId pattern not found in JS bundle (%d bytes)", len(bundle))
+	return "", nil // bundle analysé, rien trouvé — essayer le suivant
+}
+
+// isProbablyNotClientID écarte les candidats clairement pas des client_ids.
+func isProbablyNotClientID(s string) bool {
+	// Hashes git/build hex purs (16+ chars tout en minuscules/chiffres hex seulement)
+	isHex := true
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			isHex = false
+			break
+		}
+	}
+	return isHex
 }

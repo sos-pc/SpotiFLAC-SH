@@ -10,6 +10,23 @@ import "sync"
 
 var proxyMu sync.RWMutex
 
+// tidalClientIDOverride permet à un admin de forcer un client_id spécifique
+// (utile quand le scraping automatique échoue).
+// Valeur vide = pas d'override, on utilise le scraping/fallback.
+var tidalClientIDOverride string
+
+func GetTidalClientIDOverride() string {
+	proxyMu.RLock()
+	defer proxyMu.RUnlock()
+	return tidalClientIDOverride
+}
+
+func SetTidalClientIDOverride(id string) {
+	proxyMu.Lock()
+	defer proxyMu.Unlock()
+	tidalClientIDOverride = id
+}
+
 // Tidal community proxies
 var tidalProxies = []string{
 	"https://triton.squid.wtf",

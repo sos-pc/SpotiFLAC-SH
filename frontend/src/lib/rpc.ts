@@ -206,6 +206,8 @@ export interface ProxyConfig {
   qobuz_providers: string[];
   amazon_proxies: string[];
   deezer_proxies: string[];
+  /** Override manuel du client_id OAuth Tidal. Vide = auto-découverte. */
+  tidal_client_id: string;
 }
 
 export const GetAPIProxies    = () => rest<ProxyConfig>("GET", "/apis/proxies");
