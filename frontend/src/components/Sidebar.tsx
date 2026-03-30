@@ -15,8 +15,9 @@ export type PageType = "main" | "settings" | "debug" | "audio-analysis" | "audio
 interface SidebarProps {
     currentPage: PageType;
     onPageChange: (page: PageType) => void;
+    isAdmin?: boolean;
 }
-export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
+export function Sidebar({ currentPage, onPageChange, isAdmin = false }: SidebarProps) {
     return (<div className="fixed left-0 top-0 h-full w-14 bg-card border-r border-border flex flex-col items-center py-14 z-30">
       <div className="flex flex-col gap-2 flex-1">
         <Tooltip delayDuration={0}>
@@ -74,7 +75,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
           </TooltipContent>
         </Tooltip>
 
-        <Tooltip delayDuration={0}>
+        {isAdmin && (<Tooltip delayDuration={0}>
           <TooltipTrigger asChild>
             <Button variant={currentPage === "file-manager" ? "secondary" : "ghost"} size="icon" className={`h-10 w-10 ${currentPage === "file-manager" ? "bg-primary/10 text-primary hover:bg-primary/20" : "hover:bg-primary/10 hover:text-primary"}`} onClick={() => onPageChange("file-manager")}>
               <FilePenIcon size={20}/>
@@ -83,7 +84,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
           <TooltipContent side="right">
             <p>File Manager</p>
           </TooltipContent>
-        </Tooltip>
+        </Tooltip>)}
 
         <Tooltip delayDuration={0}>
           <TooltipTrigger asChild>

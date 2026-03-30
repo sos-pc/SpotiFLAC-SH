@@ -151,6 +151,13 @@ func (s *Server) registerV1Routes() {
 	s.mux.Handle("GET /api/v1/auth/keys", s.v1Auth(s.v1ListAPIKeys))
 	s.mux.Handle("POST /api/v1/auth/keys", s.v1Auth(s.v1CreateAPIKey))
 	s.mux.Handle("DELETE /api/v1/auth/keys/{id}", s.v1Auth(s.v1RevokeAPIKey))
+	s.mux.Handle("GET /api/v1/auth/tidal/url", s.v1Auth(s.v1TidalAuthURL))
+	s.mux.Handle("POST /api/v1/auth/tidal/callback", s.v1Auth(s.v1TidalCallback))
+	s.mux.Handle("GET /api/v1/auth/tidal/status", s.v1Auth(s.v1TidalStatus))
+	s.mux.Handle("DELETE /api/v1/auth/tidal", s.v1Auth(s.v1TidalDisconnect))
+	s.mux.Handle("GET /api/v1/apis/status", s.v1Auth(s.v1APIStatus))
+	s.mux.Handle("GET /api/v1/apis/proxies", s.v1Auth(s.v1GetProxies))
+	s.mux.Handle("PUT /api/v1/apis/proxies", s.v1Auth(s.v1PutProxies))
 
 	// ── Search ────────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/search", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -1144,6 +1151,98 @@ func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	keyID := r.PathValue("id")
 	if err := s.ctr.Auth.RevokeAPIKey(keyID, user.UserID); err != nil {
 		writeV1Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tidal Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1TidalAuthURL(w http.ResponseWriter, r *http.Request) {
+	url := backend.GenerateTidalAuthURL()
+	writeV1JSON(w, http.StatusOK, map[string]string{"url": url})
+}
+
+func (s *Server) v1TidalCallback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CallbackURL string `json:"callback_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.CallbackURL == "" {
+		writeV1Error(w, http.StatusBadRequest, "callback_url is required")
+		return
+	}
+	if err := backend.ExchangeTidalAuthCode(req.CallbackURL); err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
+	token := backend.LoadTidalToken()
+	if token == nil {
+		writeV1JSON(w, http.StatusOK, map[string]interface{}{"connected": false})
+		return
+	}
+	writeV1JSON(w, http.StatusOK, map[string]interface{}{
+		"connected":  true,
+		"expires_at": token.ExpiresAt,
+	})
+}
+
+func (s *Server) v1TidalDisconnect(w http.ResponseWriter, r *http.Request) {
+	backend.DeleteTidalToken()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Status
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
+	// Serve from cache if still fresh
+	if cached, ok := getCachedStatuses(); ok {
+		writeV1JSON(w, http.StatusOK, cached)
+		return
+	}
+
+	// Read optional configured URLs from settings
+	spotFetchURL := ""
+	if settings, err := s.app.LoadSettings(); err == nil && settings != nil {
+		if useAPI, _ := settings["useSpotFetchAPI"].(bool); useAPI {
+			if u, _ := settings["spotFetchAPIUrl"].(string); u != "" {
+				spotFetchURL = u
+			}
+		}
+	}
+
+	results := CheckAllServices(jellyfinURL, spotFetchURL)
+	setCachedStatuses(results)
+	writeV1JSON(w, http.StatusOK, results)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy config
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1GetProxies(w http.ResponseWriter, r *http.Request) {
+	writeV1JSON(w, http.StatusOK, GetProxyConfig(s.ctr.DB))
+}
+
+func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {
+	var cfg ProxyConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if err := SaveProxyConfig(s.ctr.DB, cfg); err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

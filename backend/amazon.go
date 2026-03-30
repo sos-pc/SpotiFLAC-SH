@@ -109,7 +109,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		return "", fmt.Errorf("failed to extract ASIN from URL: %s", amazonURL)
 	}
 
-	apiURL := fmt.Sprintf("https://amzn.afkarxyz.fun/api/track/%s", asin)
+	apiURL := fmt.Sprintf("%s/api/track/%s", GetAmazonProxyBase(), asin)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return "", err

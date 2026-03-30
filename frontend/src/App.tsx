@@ -447,6 +447,7 @@ function App() {
             case "audio-converter":
                 return <AudioConverterPage />;
             case "file-manager":
+                if (!authUser?.is_admin) return null;
                 return <FileManagerPage />;
             default:
                 return (<>
@@ -513,7 +514,7 @@ function App() {
     return (<TooltipProvider>
         <div className="min-h-screen bg-background flex flex-col">
             <TitleBar onLogout={() => { clearAuth(); setAuthed(false); setAuthUser(null); }} userName={authUser?.display_name} />
-            <Sidebar currentPage={currentPage} onPageChange={handlePageChange}/>
+            <Sidebar currentPage={currentPage} onPageChange={handlePageChange} isAdmin={authUser?.is_admin ?? false}/>
 
 
             <div className="flex-1 ml-14 mt-10 p-4 md:p-8">

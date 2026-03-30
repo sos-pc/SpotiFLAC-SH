@@ -5,7 +5,7 @@ import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import { FolderOpen, Save, RotateCcw, Info, ArrowRight, Settings, FolderCog, } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, Info, ArrowRight, Settings, FolderCog, Key, Link, Copy, Check, Trash2, RefreshCw, ExternalLink, } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { FileBrowser } from "@/components/FileBrowser";
@@ -13,6 +13,7 @@ import { getSettings, loadSettings, getSettingsWithDefaults, saveSettings, reset
 import { themes, applyTheme } from "@/lib/themes";
 
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
+import { ListAPIKeys, CreateAPIKey, DeleteAPIKey, GetTidalAuthURL, SubmitTidalCallback, GetTidalStatus, DisconnectTidal, GetAPIStatuses, GetAPIProxies, UpdateAPIProxies, type APIKeyMeta, type CreatedAPIKey, type TidalStatus, type ServiceStatus, type ProxyConfig } from "@/lib/rpc";
 const TidalIcon = ({ className }: {
     className?: string;
 }) => (<svg viewBox="0 0 24 24" className={`inline-block w-[1.1em] h-[1.1em] mr-2 ${className || "fill-muted-foreground"}`}>
@@ -125,7 +126,145 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const handleAutoQualityChange = async (value: "16" | "24") => {
         setTempSettings((prev) => ({ ...prev, autoQuality: value }));
     };
-    const [activeTab, setActiveTab] = useState<"general" | "files">("general");
+    const [activeTab, setActiveTab] = useState<"general" | "files" | "keys" | "tidal" | "apis">("general");
+
+    // ── API Keys state ───────────────────────────────────────────────────────
+    const [apiKeys, setApiKeys] = useState<APIKeyMeta[]>([]);
+    const [newKeyName, setNewKeyName] = useState("");
+    const [createdKey, setCreatedKey] = useState<CreatedAPIKey | null>(null);
+    const [copiedKey, setCopiedKey] = useState(false);
+    const [keysLoading, setKeysLoading] = useState(false);
+
+    const loadApiKeys = useCallback(async () => {
+        setKeysLoading(true);
+        try { setApiKeys(await ListAPIKeys()); } catch { /* ignore */ } finally { setKeysLoading(false); }
+    }, []);
+
+    useEffect(() => { if (activeTab === "keys") loadApiKeys(); }, [activeTab, loadApiKeys]);
+
+    const handleCreateKey = async () => {
+        if (!newKeyName.trim()) return;
+        try {
+            const result = await CreateAPIKey(newKeyName.trim(), ["read", "download"]);
+            setCreatedKey(result);
+            setNewKeyName("");
+            loadApiKeys();
+        } catch (err) {
+            toast.error("Failed to create key", { description: err instanceof Error ? err.message : "Unknown error" });
+        }
+    };
+
+    const handleRevokeKey = async (id: string) => {
+        try {
+            await DeleteAPIKey(id);
+            setApiKeys(prev => prev.filter(k => k.id !== id));
+        } catch (err) {
+            toast.error("Failed to revoke key", { description: err instanceof Error ? err.message : "Unknown error" });
+        }
+    };
+
+    const handleCopyKey = () => {
+        if (!createdKey) return;
+        navigator.clipboard.writeText(createdKey.key);
+        setCopiedKey(true);
+        setTimeout(() => setCopiedKey(false), 2000);
+    };
+
+    // ── Tidal Auth state ─────────────────────────────────────────────────────
+    const [tidalStatus, setTidalStatus] = useState<TidalStatus | null>(null);
+    const [tidalCallbackURL, setTidalCallbackURL] = useState("");
+    const [tidalConnecting, setTidalConnecting] = useState(false);
+    const [showCallbackInput, setShowCallbackInput] = useState(false);
+
+    const loadTidalStatus = useCallback(async () => {
+        try { setTidalStatus(await GetTidalStatus()); } catch { /* ignore */ }
+    }, []);
+
+    useEffect(() => { if (activeTab === "tidal") loadTidalStatus(); }, [activeTab, loadTidalStatus]);
+
+    const handleTidalConnect = async () => {
+        try {
+            const url = await GetTidalAuthURL();
+            window.open(url, "_blank");
+            setShowCallbackInput(true);
+        } catch (err) {
+            toast.error("Failed to get Tidal auth URL", { description: err instanceof Error ? err.message : "Unknown error" });
+        }
+    };
+
+    const handleTidalCallback = async () => {
+        if (!tidalCallbackURL.trim()) return;
+        setTidalConnecting(true);
+        try {
+            await SubmitTidalCallback(tidalCallbackURL.trim());
+            setTidalCallbackURL("");
+            setShowCallbackInput(false);
+            await loadTidalStatus();
+            toast.success("Tidal account connected");
+        } catch (err) {
+            toast.error("Failed to connect Tidal", { description: err instanceof Error ? err.message : "Unknown error" });
+        } finally {
+            setTidalConnecting(false);
+        }
+    };
+
+    const handleTidalDisconnect = async () => {
+        try {
+            await DisconnectTidal();
+            setTidalStatus({ connected: false });
+            setShowCallbackInput(false);
+            toast.success("Tidal account disconnected");
+        } catch (err) {
+            toast.error("Failed to disconnect", { description: err instanceof Error ? err.message : "Unknown error" });
+        }
+    };
+
+    // ── API Statuses state ───────────────────────────────────────────────────
+    const [apiStatuses, setApiStatuses] = useState<ServiceStatus[] | null>(null);
+    const [apisLoading, setApisLoading] = useState(false);
+
+    const loadApiStatuses = useCallback(async () => {
+        setApisLoading(true);
+        try { setApiStatuses(await GetAPIStatuses()); }
+        catch (err) { toast.error("Status check failed", { description: err instanceof Error ? err.message : "Unknown error" }); }
+        finally { setApisLoading(false); }
+    }, []);
+
+    useEffect(() => { if (activeTab === "apis") { loadApiStatuses(); loadProxies(); } }, [activeTab, loadApiStatuses]);
+
+    // ── Proxy config state ───────────────────────────────────────────────────
+    const [proxies, setProxies] = useState<ProxyConfig | null>(null);
+    const [proxySaving, setProxySaving] = useState(false);
+    const [newTidalProxy, setNewTidalProxy] = useState("");
+
+    const loadProxies = useCallback(async () => {
+        try { setProxies(await GetAPIProxies()); } catch { /* ignore */ }
+    }, []);
+
+    const handleSaveProxies = async () => {
+        if (!proxies) return;
+        setProxySaving(true);
+        try {
+            await UpdateAPIProxies(proxies);
+            toast.success("Proxy configuration saved");
+        } catch (err) {
+            toast.error("Failed to save", { description: err instanceof Error ? err.message : "Unknown error" });
+        } finally {
+            setProxySaving(false);
+        }
+    };
+
+    const handleAddTidalProxy = () => {
+        const url = newTidalProxy.trim();
+        if (!url || !proxies) return;
+        setProxies(prev => prev ? { ...prev, tidal_proxies: [...prev.tidal_proxies, url] } : prev);
+        setNewTidalProxy("");
+    };
+
+    const handleRemoveTidalProxy = (idx: number) => {
+        setProxies(prev => prev ? { ...prev, tidal_proxies: prev.tidal_proxies.filter((_, i) => i !== idx) } : prev);
+    };
+
     return (<div className="space-y-4 h-full flex flex-col">
       <div className="flex items-center justify-between shrink-0">
         <h1 className="text-2xl font-bold">Settings</h1>
@@ -149,6 +288,18 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         <Button variant={activeTab === "files" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("files")} className="rounded-b-none gap-2">
           <FolderCog className="h-4 w-4"/>
           File Management
+        </Button>
+        <Button variant={activeTab === "keys" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("keys")} className="rounded-b-none gap-2">
+          <Key className="h-4 w-4"/>
+          API Keys
+        </Button>
+        <Button variant={activeTab === "tidal" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("tidal")} className="rounded-b-none gap-2">
+          <TidalIcon className={activeTab === "tidal" ? "fill-foreground" : undefined}/>
+          Tidal Account
+        </Button>
+        <Button variant={activeTab === "apis" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("apis")} className="rounded-b-none gap-2">
+          <Link className="h-4 w-4"/>
+          APIs
         </Button>
       </div>
 
@@ -791,6 +942,201 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 </p>)}
             </div>
           </div>)}
+
+        {activeTab === "keys" && (<div className="space-y-6 max-w-2xl">
+          <div>
+            <h2 className="text-base font-semibold mb-1">Personal API Keys</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Create API keys to use SpotiFLAC from external applications. Pass the key as the
+              <code className="mx-1 px-1 rounded bg-muted font-mono text-xs">X-API-Key</code> header.
+            </p>
+            <div className="flex gap-2">
+              <InputWithContext value={newKeyName} onChange={e => setNewKeyName(e.target.value)}
+                placeholder="Key name (e.g. my-app)" className="flex-1"
+                onKeyDown={e => e.key === "Enter" && handleCreateKey()}/>
+              <Button onClick={handleCreateKey} disabled={!newKeyName.trim()} className="gap-1.5">
+                <Key className="h-4 w-4"/>
+                Create Key
+              </Button>
+            </div>
+          </div>
+
+          {keysLoading ? (<div className="text-sm text-muted-foreground">Loading...</div>) : apiKeys.length === 0 ? (
+            <div className="text-sm text-muted-foreground border rounded-lg p-4 text-center">No API keys yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {apiKeys.map(key => (
+                <div key={key.id} className="flex items-center justify-between border rounded-lg px-4 py-3 bg-muted/20">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium">{key.name}</p>
+                    <p className="text-xs text-muted-foreground font-mono">
+                      ···{key.id.slice(-8)} &nbsp;·&nbsp;
+                      Created {new Date(key.created_at).toLocaleDateString()} &nbsp;·&nbsp;
+                      {key.permissions.join(", ")}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => handleRevokeKey(key.id)} className="text-destructive hover:text-destructive gap-1">
+                    <Trash2 className="h-4 w-4"/>
+                    Revoke
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={loadApiKeys} disabled={keysLoading} className="gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5"/>
+            Refresh
+          </Button>
+        </div>)}
+
+        {activeTab === "tidal" && (<div className="space-y-6 max-w-2xl">
+          <div>
+            <h2 className="text-base font-semibold mb-1">Tidal Account</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Connect your personal Tidal account to download tracks without relying on community proxies.
+            </p>
+          </div>
+
+          {tidalStatus === null ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : tidalStatus.connected ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 border rounded-lg px-4 py-3 bg-muted/20">
+                <span className="h-2.5 w-2.5 rounded-full bg-green-500 shrink-0"/>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Connected</p>
+                  {tidalStatus.expires_at && (
+                    <p className="text-xs text-muted-foreground">
+                      Expires {new Date(tidalStatus.expires_at * 1000).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={handleTidalDisconnect} className="gap-1.5 text-destructive hover:text-destructive">
+                  <Link className="h-4 w-4"/>
+                  Disconnect
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 border rounded-lg px-4 py-3 bg-muted/20">
+                <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground shrink-0"/>
+                <p className="text-sm flex-1">Not connected</p>
+                <Button size="sm" onClick={handleTidalConnect} className="gap-1.5">
+                  <ExternalLink className="h-4 w-4"/>
+                  Connect with Tidal
+                </Button>
+              </div>
+
+              {showCallbackInput && (
+                <div className="space-y-2">
+                  <Label className="text-sm">After authorizing, paste the full redirect URL here:</Label>
+                  <div className="flex gap-2">
+                    <InputWithContext value={tidalCallbackURL} onChange={e => setTidalCallbackURL(e.target.value)}
+                      placeholder="https://login.tidal.com/..." className="flex-1 font-mono text-xs"/>
+                    <Button onClick={handleTidalCallback} disabled={!tidalCallbackURL.trim() || tidalConnecting} className="gap-1.5">
+                      {tidalConnecting ? <RefreshCw className="h-4 w-4 animate-spin"/> : <Check className="h-4 w-4"/>}
+                      Submit
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={loadTidalStatus} className="gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5"/>
+            Refresh Status
+          </Button>
+        </div>)}
+
+        {activeTab === "apis" && (<div className="space-y-6 max-w-2xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold mb-1">External APIs</h2>
+              <p className="text-sm text-muted-foreground">Status of all external services used by SpotiFLAC. Results are cached for 30 seconds.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={loadApiStatuses} disabled={apisLoading} className="gap-1.5 shrink-0">
+              <RefreshCw className={`h-3.5 w-3.5 ${apisLoading ? "animate-spin" : ""}`}/>
+              {apisLoading ? "Checking..." : "Refresh"}
+            </Button>
+          </div>
+
+          {apiStatuses === null ? (
+            apisLoading
+              ? <div className="text-sm text-muted-foreground">Checking all services...</div>
+              : <div className="text-sm text-muted-foreground">Click Refresh to check service status.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {apiStatuses.map(svc => (
+                <div key={svc.name} className="flex items-center gap-3 border rounded-lg px-3 py-2.5 bg-muted/10">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${
+                    svc.status === "ok" ? "bg-green-500" :
+                    svc.status === "ratelimited" ? "bg-yellow-500" :
+                    svc.status === "unconfigured" ? "bg-muted-foreground" : "bg-red-500"
+                  }`}/>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{svc.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{svc.url}</p>
+                    {svc.error && <p className="text-xs text-destructive truncate">{svc.error}</p>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={`text-xs font-medium ${
+                      svc.status === "ok" ? "text-green-600 dark:text-green-400" :
+                      svc.status === "ratelimited" ? "text-yellow-600 dark:text-yellow-400" : "text-red-600 dark:text-red-400"
+                    }`}>
+                      {svc.status === "ok" ? "OK" : svc.status === "ratelimited" ? "Rate limited" : svc.status === "unconfigured" ? "—" : "Down"}
+                    </p>
+                    {svc.latency_ms !== undefined && <p className="text-xs text-muted-foreground">{svc.latency_ms}ms</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {proxies && (<div className="space-y-4 border-t pt-4">
+            <h3 className="text-sm font-semibold">Proxy Configuration</h3>
+
+            <div className="space-y-2">
+              <Label className="text-sm">Tidal Community Proxies</Label>
+              <div className="space-y-1.5">
+                {proxies.tidal_proxies.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">{p}</code>
+                    <Button variant="ghost" size="sm" onClick={() => handleRemoveTidalProxy(i)} className="text-destructive hover:text-destructive px-2">
+                      <Trash2 className="h-3.5 w-3.5"/>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <InputWithContext value={newTidalProxy} onChange={e => setNewTidalProxy(e.target.value)}
+                  placeholder="https://my-proxy.example.com" className="flex-1 font-mono text-xs"
+                  onKeyDown={e => e.key === "Enter" && handleAddTidalProxy()}/>
+                <Button variant="outline" size="sm" onClick={handleAddTidalProxy} disabled={!newTidalProxy.trim()}>Add</Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm">Amazon Music Proxy</Label>
+                <InputWithContext value={proxies.amazon_proxy_base} className="font-mono text-xs"
+                  onChange={e => setProxies(prev => prev ? { ...prev, amazon_proxy_base: e.target.value } : prev)}
+                  placeholder="https://amzn.afkarxyz.fun"/>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm">Deezer Proxy</Label>
+                <InputWithContext value={proxies.deezer_proxy_base} className="font-mono text-xs"
+                  onChange={e => setProxies(prev => prev ? { ...prev, deezer_proxy_base: e.target.value } : prev)}
+                  placeholder="https://api.deezmate.com"/>
+              </div>
+            </div>
+
+            <Button onClick={handleSaveProxies} disabled={proxySaving} className="gap-1.5">
+              <Save className="h-4 w-4"/>
+              {proxySaving ? "Saving..." : "Save Proxy Config"}
+            </Button>
+          </div>)}
+        </div>)}
       </div>
 
       <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
@@ -810,6 +1156,27 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!createdKey} onOpenChange={() => setCreatedKey(null)}>
+        <DialogContent className="max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle>API Key Created</DialogTitle>
+            <DialogDescription>
+              Copy this key now — it will not be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted p-3">
+            <code className="flex-1 text-xs font-mono break-all">{createdKey?.key}</code>
+            <Button variant="ghost" size="sm" onClick={handleCopyKey} className="shrink-0">
+              {copiedKey ? <Check className="h-4 w-4 text-green-500"/> : <Copy className="h-4 w-4"/>}
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setCreatedKey(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     <FileBrowser
         isOpen={showFileBrowser}
         onClose={() => setShowFileBrowser(false)}

@@ -77,6 +77,7 @@ func main() {
 	app := NewApp(ctr)
 	app.startup(context.Background())
 
+	LoadProxyConfig(db)
 	server := NewServer(app, ctr)
 
 	httpServer := &http.Server{

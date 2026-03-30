@@ -163,3 +163,58 @@ export const UpdateWatchlist     = (req: { id: string; interval_hours: number; s
 export const GetWatchlistStats   = (id: string) => rest<any>("GET", `/watchlists/${encodeURIComponent(id)}/stats`);
 export const GetWatchlistHistory = (id: string) => rest<any[]>("GET", `/watchlists/${encodeURIComponent(id)}/history`);
 export const SyncWatchlist       = (id: string) => rest<void>("POST", `/watchlists/${encodeURIComponent(id)}/sync`);
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+export interface APIKeyMeta {
+  id: string;
+  name: string;
+  permissions: string[];
+  created_at: string;
+  last_used_at?: string;
+}
+
+export interface CreatedAPIKey extends APIKeyMeta {
+  key: string; // clé brute, affichée une seule fois
+}
+
+export const ListAPIKeys   = () => rest<APIKeyMeta[]>("GET", "/auth/keys");
+export const CreateAPIKey  = (name: string, permissions: string[]) =>
+  rest<CreatedAPIKey>("POST", "/auth/keys", { name, permissions });
+export const DeleteAPIKey  = (id: string) => rest<void>("DELETE", `/auth/keys/${encodeURIComponent(id)}`);
+
+// ─── Tidal Auth ───────────────────────────────────────────────────────────────
+
+export interface TidalStatus {
+  connected: boolean;
+  expires_at?: number;   // unix timestamp
+  username?: string;
+}
+
+export const GetTidalAuthURL      = () => rest<{ url: string }>("GET", "/auth/tidal/url").then(r => r.url);
+export const SubmitTidalCallback  = (callbackURL: string) =>
+  rest<void>("POST", "/auth/tidal/callback", { callback_url: callbackURL });
+export const GetTidalStatus       = () => rest<TidalStatus>("GET", "/auth/tidal/status");
+export const DisconnectTidal      = () => rest<void>("DELETE", "/auth/tidal");
+
+// ─── API Library ──────────────────────────────────────────────────────────────
+
+export interface ServiceStatus {
+  name: string;
+  url: string;
+  status: "ok" | "down" | "ratelimited" | "unconfigured";
+  latency_ms?: number;
+  checked_at: number;
+  error?: string;
+}
+
+export const GetAPIStatuses = () => rest<ServiceStatus[]>("GET", "/apis/status");
+
+export interface ProxyConfig {
+  tidal_proxies: string[];
+  amazon_proxy_base: string;
+  deezer_proxy_base: string;
+}
+
+export const GetAPIProxies    = () => rest<ProxyConfig>("GET", "/apis/proxies");
+export const UpdateAPIProxies = (cfg: ProxyConfig) => rest<void>("PUT", "/apis/proxies", cfg);

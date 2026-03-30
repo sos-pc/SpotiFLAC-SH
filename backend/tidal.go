@@ -241,19 +241,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 
 	if !success {
 		fmt.Println("Falling back to public HiFi APIs...")
-		apis := []string{
-			"https://triton.squid.wtf",
-			"https://hifi-one.spotisaver.net",
-			"https://hifi-two.spotisaver.net",
-			"https://ohio-1.monochrome.tf",
-			"https://singapore-1.monochrome.tf",
-			"https://wolf.qqdl.site",
-			"https://maus.qqdl.site",
-			"https://vogel.qqdl.site",
-			"https://katze.qqdl.site",
-			"https://hund.qqdl.site",
-			"https://api.monochrome.tf",
-		}
+		apis := GetTidalProxies()
 		for _, apiBase := range apis {
 			fallbackURL := fmt.Sprintf("%s/track/?id=%d&audioquality=%s", apiBase, trackID, quality)
 			fmt.Printf("Trying fallback API: %s\n", fallbackURL)

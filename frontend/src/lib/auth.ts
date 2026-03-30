@@ -38,6 +38,7 @@ export async function login(username: string, password: string): Promise<AuthUse
     body: JSON.stringify({ username, password }),
   });
   const data = await resp.json();
+  if (resp.status === 429) throw Object.assign(new Error(data.error || "Too many login attempts"), { rateLimited: true });
   if (!resp.ok) throw new Error(data.error || "Login failed");
   saveAuth(data.token, data.user);
   return data.user;

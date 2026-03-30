@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { FileBrowser } from "@/components/FileBrowser";
 import { ListDirectoryFiles, PreviewRenameFiles, RenameFilesByMetadata } from "@/lib/rpc";
 import { ReadFileMetadata, ReadTextFile, RenameFileTo, ReadImageAsBase64 } from "@/lib/rpc";
+import { getUser } from "@/lib/auth";
 interface FileNode {
     name: string;
     path: string;
@@ -62,6 +63,7 @@ function formatFileSize(bytes: number): string {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 export function FileManagerPage() {
+    const isAdmin = getUser()?.is_admin ?? false;
     const [showFileBrowser, setShowFileBrowser] = useState(false);
     const [rootPath, setRootPath] = useState(() => {
         const settings = getSettings();
@@ -441,7 +443,7 @@ export function FileManagerPage() {
     };
     const renderLyricTree = (nodes: FileNode[], depth = 0) => {
         return nodes.map((node) => (<div key={node.path}>
-      <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer" style={{ paddingLeft: `${depth * 16 + 8}px` }} onClick={(e) => node.is_dir ? toggleExpand(node.path) : handleShowLyrics(node.path, e)}>
+      <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer" style={{ paddingLeft: `${depth * 16 + 8}px` }} onClick={(e) => node.is_dir ? toggleExpand(node.path) : (isAdmin ? handleShowLyrics(node.path, e) : undefined)}>
         {node.is_dir ? (<>
           {node.expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0"/> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0"/>}
           <Folder className="h-4 w-4 text-yellow-500 shrink-0"/>
@@ -467,7 +469,7 @@ export function FileManagerPage() {
     };
     const renderCoverTree = (nodes: FileNode[], depth = 0) => {
         return nodes.map((node) => (<div key={node.path}>
-      <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer" style={{ paddingLeft: `${depth * 16 + 8}px` }} onClick={(e) => node.is_dir ? toggleExpand(node.path) : handleShowCover(node.path, e)}>
+      <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer" style={{ paddingLeft: `${depth * 16 + 8}px` }} onClick={(e) => node.is_dir ? toggleExpand(node.path) : (isAdmin ? handleShowCover(node.path, e) : undefined)}>
         {node.is_dir ? (<>
           {node.expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0"/> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0"/>}
           <Folder className="h-4 w-4 text-yellow-500 shrink-0"/>

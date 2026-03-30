@@ -81,7 +81,7 @@ func (d *DeezerDownloader) getDeezerTrackID(trackName, artistName string) (strin
 
 // DownloadFromDeezmate — télécharge directement via api.deezmate.com avec l'ID Deezer
 func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string) (string, error) {
-	apiURL := fmt.Sprintf("https://api.deezmate.com/dl/%s", deezerTrackID)
+	apiURL := fmt.Sprintf("%s/dl/%s", GetDeezerProxyBase(), deezerTrackID)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
