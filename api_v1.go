@@ -155,6 +155,8 @@ func (s *Server) registerV1Routes() {
 	s.mux.Handle("POST /api/v1/auth/tidal/callback", s.v1Auth(s.v1TidalCallback))
 	s.mux.Handle("GET /api/v1/auth/tidal/status", s.v1Auth(s.v1TidalStatus))
 	s.mux.Handle("DELETE /api/v1/auth/tidal", s.v1Auth(s.v1TidalDisconnect))
+	s.mux.Handle("POST /api/v1/auth/tidal/device/start", s.v1Auth(s.v1TidalDeviceStart))
+	s.mux.Handle("POST /api/v1/auth/tidal/device/poll", s.v1Auth(s.v1TidalDevicePoll))
 	s.mux.Handle("GET /api/v1/apis/status", s.v1Auth(s.v1APIStatus))
 	s.mux.Handle("GET /api/v1/apis/proxies", s.v1Auth(s.v1GetProxies))
 	s.mux.Handle("PUT /api/v1/apis/proxies", s.v1Auth(s.v1PutProxies))
@@ -1194,6 +1196,27 @@ func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) v1TidalDisconnect(w http.ResponseWriter, r *http.Request) {
 	backend.DeleteTidalToken()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) v1TidalDeviceStart(w http.ResponseWriter, r *http.Request) {
+	resp, err := backend.StartTidalDeviceAuth()
+	if err != nil {
+		writeV1Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeV1JSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) v1TidalDevicePoll(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceCode == "" {
+		writeV1Error(w, http.StatusBadRequest, "device_code required")
+		return
+	}
+	result := backend.PollTidalDeviceAuth(req.DeviceCode)
+	writeV1JSON(w, http.StatusOK, result)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

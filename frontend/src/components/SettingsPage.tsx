@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { InputWithContext } from "@/components/ui/input-with-context";
@@ -13,7 +13,7 @@ import { getSettings, loadSettings, getSettingsWithDefaults, saveSettings, reset
 import { themes, applyTheme } from "@/lib/themes";
 
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { ListAPIKeys, CreateAPIKey, DeleteAPIKey, GetTidalAuthURL, SubmitTidalCallback, GetTidalStatus, DisconnectTidal, GetAPIStatuses, GetAPIProxies, UpdateAPIProxies, type APIKeyMeta, type CreatedAPIKey, type TidalStatus, type ServiceStatus, type ProxyConfig } from "@/lib/rpc";
+import { ListAPIKeys, CreateAPIKey, DeleteAPIKey, GetTidalStatus, DisconnectTidal, GetAPIStatuses, GetAPIProxies, UpdateAPIProxies, StartTidalDeviceAuth, PollTidalDeviceAuth, type APIKeyMeta, type CreatedAPIKey, type TidalStatus, type TidalDeviceAuth, type ServiceStatus, type ProxyConfig } from "@/lib/rpc";
 const TidalIcon = ({ className }: {
     className?: string;
 }) => (<svg viewBox="0 0 24 24" className={`inline-block w-[1.1em] h-[1.1em] mr-2 ${className || "fill-muted-foreground"}`}>
@@ -172,9 +172,14 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
 
     // ── Tidal Auth state ─────────────────────────────────────────────────────
     const [tidalStatus, setTidalStatus] = useState<TidalStatus | null>(null);
-    const [tidalCallbackURL, setTidalCallbackURL] = useState("");
-    const [tidalConnecting, setTidalConnecting] = useState(false);
-    const [tidalAuthURL, setTidalAuthURL] = useState("");
+    const [tidalDeviceAuth, setTidalDeviceAuth] = useState<TidalDeviceAuth | null>(null);
+    const [tidalPolling, setTidalPolling] = useState(false);
+    const tidalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const stopTidalPoll = useCallback(() => {
+        if (tidalPollRef.current) { clearInterval(tidalPollRef.current); tidalPollRef.current = null; }
+        setTidalPolling(false);
+    }, []);
 
     const loadTidalStatus = useCallback(async () => {
         try { setTidalStatus(await GetTidalStatus()); } catch { /* ignore */ }
@@ -182,36 +187,47 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
 
     useEffect(() => { if (activeTab === "tidal") loadTidalStatus(); }, [activeTab, loadTidalStatus]);
 
-    const handleTidalConnect = async () => {
-        try {
-            const url = await GetTidalAuthURL();
-            setTidalAuthURL(url);
-        } catch (err) {
-            toast.error("Failed to get Tidal auth URL", { description: err instanceof Error ? err.message : "Unknown error" });
-        }
-    };
+    // Nettoyer le poll si l'onglet change
+    useEffect(() => { if (activeTab !== "tidal") stopTidalPoll(); }, [activeTab, stopTidalPoll]);
 
-    const handleTidalCallback = async () => {
-        if (!tidalCallbackURL.trim()) return;
-        setTidalConnecting(true);
+    const handleTidalConnect = async () => {
+        stopTidalPoll();
+        setTidalDeviceAuth(null);
         try {
-            await SubmitTidalCallback(tidalCallbackURL.trim());
-            setTidalCallbackURL("");
-            setTidalAuthURL("");
-            await loadTidalStatus();
-            toast.success("Tidal account connected");
+            const auth = await StartTidalDeviceAuth();
+            setTidalDeviceAuth(auth);
+            setTidalPolling(true);
+
+            const interval = Math.max((auth.interval || 5), 5) * 1000;
+            tidalPollRef.current = setInterval(async () => {
+                try {
+                    const result = await PollTidalDeviceAuth(auth.device_code);
+                    if (result.status === "authorized") {
+                        stopTidalPoll();
+                        setTidalDeviceAuth(null);
+                        await loadTidalStatus();
+                        toast.success("Tidal account connected");
+                    } else if (result.status === "expired" || result.status === "denied" || result.status === "error") {
+                        stopTidalPoll();
+                        setTidalDeviceAuth(null);
+                        toast.error("Tidal connection failed", { description: result.error || result.status });
+                    }
+                    // "pending" → continuer à poller
+                } catch {
+                    // erreur réseau passagère → continuer
+                }
+            }, interval);
         } catch (err) {
-            toast.error("Failed to connect Tidal", { description: err instanceof Error ? err.message : "Unknown error" });
-        } finally {
-            setTidalConnecting(false);
+            toast.error("Failed to start Tidal authentication", { description: err instanceof Error ? err.message : "Unknown error" });
         }
     };
 
     const handleTidalDisconnect = async () => {
+        stopTidalPoll();
+        setTidalDeviceAuth(null);
         try {
             await DisconnectTidal();
             setTidalStatus({ connected: false });
-            setTidalAuthURL("");
             toast.success("Tidal account disconnected");
         } catch (err) {
             toast.error("Failed to disconnect", { description: err instanceof Error ? err.message : "Unknown error" });
@@ -1036,37 +1052,37 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               <div className="flex items-center gap-3 border rounded-lg px-4 py-3 bg-muted/20">
                 <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground shrink-0"/>
                 <p className="text-sm flex-1">Not connected</p>
-                <Button size="sm" onClick={handleTidalConnect} disabled={!!tidalAuthURL} className="gap-1.5">
+                <Button size="sm" onClick={handleTidalConnect} disabled={tidalPolling} className="gap-1.5">
                   <ExternalLink className="h-4 w-4"/>
-                  {tidalAuthURL ? "Link generated" : "Connect with Tidal"}
+                  {tidalPolling ? "Waiting for authorization..." : "Connect with Tidal"}
                 </Button>
               </div>
 
-              {tidalAuthURL && (
-                <div className="space-y-3">
+              {tidalDeviceAuth && (
+                <div className="space-y-3 border rounded-lg px-4 py-3 bg-muted/10">
                   <div className="space-y-1.5">
-                    <Label className="text-sm font-medium">Step 1 — Open this link in your browser and log in with your Tidal Premium account:</Label>
-                    <div className="flex items-center gap-2 border rounded px-3 py-2 bg-muted/20">
-                      <code className="flex-1 text-xs font-mono truncate text-muted-foreground">{tidalAuthURL}</code>
-                      <a href={tidalAuthURL} target="_blank" rel="noopener noreferrer">
-                        <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
+                    <Label className="text-sm font-medium">Step 1 — Open the Tidal authorization page:</Label>
+                    <div className="flex items-center gap-2">
+                      <a href={tidalDeviceAuth.verification_uri_complete} target="_blank" rel="noopener noreferrer" className="flex-1">
+                        <Button variant="outline" size="sm" className="w-full gap-1.5">
                           <ExternalLink className="h-3.5 w-3.5"/>
-                          Open
+                          Open Tidal authorization page
                         </Button>
                       </a>
                     </div>
+                    {tidalDeviceAuth.user_code && (
+                      <p className="text-xs text-muted-foreground">
+                        If asked for a code, enter: <code className="font-mono font-bold text-foreground">{tidalDeviceAuth.user_code}</code>
+                      </p>
+                    )}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium">Step 2 — After login, paste the full redirect URL from your browser's address bar:</Label>
-                    <div className="flex gap-2">
-                      <InputWithContext value={tidalCallbackURL} onChange={e => setTidalCallbackURL(e.target.value)}
-                        placeholder="https://listen.tidal.com/login/auth?code=..." className="flex-1 font-mono text-xs"/>
-                      <Button onClick={handleTidalCallback} disabled={!tidalCallbackURL.trim() || tidalConnecting} className="gap-1.5">
-                        {tidalConnecting ? <RefreshCw className="h-4 w-4 animate-spin"/> : <Check className="h-4 w-4"/>}
-                        Submit
-                      </Button>
-                    </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0"/>
+                    <span>Waiting for you to authorize… (checking every {Math.max(tidalDeviceAuth.interval || 5, 5)}s)</span>
                   </div>
+                  <Button variant="ghost" size="sm" onClick={() => { stopTidalPoll(); setTidalDeviceAuth(null); }} className="text-xs h-7">
+                    Cancel
+                  </Button>
                 </div>
               )}
             </div>

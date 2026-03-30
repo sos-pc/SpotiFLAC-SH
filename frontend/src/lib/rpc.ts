@@ -188,6 +188,24 @@ export const SubmitTidalCallback  = (callbackURL: string) =>
 export const GetTidalStatus       = () => rest<TidalStatus>("GET", "/auth/tidal/status");
 export const DisconnectTidal      = () => rest<void>("DELETE", "/auth/tidal");
 
+export interface TidalDeviceAuth {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface TidalDevicePollResult {
+  status: "pending" | "authorized" | "expired" | "denied" | "error";
+  error?: string;
+}
+
+export const StartTidalDeviceAuth = () => rest<TidalDeviceAuth>("POST", "/auth/tidal/device/start", {});
+export const PollTidalDeviceAuth  = (deviceCode: string) =>
+  rest<TidalDevicePollResult>("POST", "/auth/tidal/device/poll", { device_code: deviceCode });
+
 // ─── API Library ──────────────────────────────────────────────────────────────
 
 export interface ServiceStatus {
