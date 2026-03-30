@@ -234,6 +234,20 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 						// Les anciens clients TV (utilisés ici) se voient refuser le scope playback
 						// même avec un compte valide. La suppression forcerait une boucle de reconnexion inutile.
 						_, _ = RefreshTidalToken(token)
+					} else if resp.StatusCode == 404 && (quality == "HI_RES_LOSSLESS" || quality == "HI_RES") {
+						fmt.Printf("⚠ Tidal personal API: %s unavailable for track %d, retrying with LOSSLESS...\n", quality, trackID)
+						losslessURL := fmt.Sprintf("https://api.tidal.com/v1/tracks/%d/playbackinfopostpaywall?countryCode=%s&audioquality=LOSSLESS&playbackmode=STREAM&assetpresentation=FULL", trackID, countryCode)
+						if lreq, lerr := http.NewRequest("GET", losslessURL, nil); lerr == nil {
+							lreq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+							lreq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+							if lresp, lerr := t.client.Do(lreq); lerr == nil {
+								if lresp.StatusCode == 200 {
+									body, _ = io.ReadAll(lresp.Body)
+									success = true
+								}
+								lresp.Body.Close()
+							}
+						}
 					}
 				}
 				resp.Body.Close()
@@ -592,11 +606,11 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 
 	downloadURL, err := t.GetDownloadURL(trackID, quality)
 	if err != nil {
-		if quality == "HI_RES" && allowFallback {
-			fmt.Println("⚠ HI_RES unavailable/failed, falling back to LOSSLESS...")
+		if (quality == "HI_RES" || quality == "HI_RES_LOSSLESS") && allowFallback {
+			fmt.Printf("⚠ %s unavailable/failed, falling back to LOSSLESS...\n", quality)
 			downloadURL, err = t.GetDownloadURL(trackID, "LOSSLESS")
 			if err != nil {
-				return "", fmt.Errorf("failed to get download URL (HI_RES & LOSSLESS both failed): %w", err)
+				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", quality, err)
 			}
 		} else {
 			return "", err
@@ -750,11 +764,11 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 
 	successAPI, downloadURL, err := getDownloadURLRotated(apis, trackID, quality)
 	if err != nil {
-		if quality == "HI_RES" && allowFallback {
-			fmt.Println("⚠ HI_RES unavailable/failed on all APIs, falling back to LOSSLESS...")
+		if (quality == "HI_RES" || quality == "HI_RES_LOSSLESS") && allowFallback {
+			fmt.Printf("⚠ %s unavailable/failed on all APIs, falling back to LOSSLESS...\n", quality)
 			successAPI, downloadURL, err = getDownloadURLRotated(apis, trackID, "LOSSLESS")
 			if err != nil {
-				return "", fmt.Errorf("failed to get download URL (HI_RES & LOSSLESS both failed): %w", err)
+				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", quality, err)
 			}
 		} else {
 			return "", err

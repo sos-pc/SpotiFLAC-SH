@@ -290,16 +290,24 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			Service:              req.Service,
 			DownloadPath:         req.OutputDir,
 			FilenameTemplate:     req.FilenameFormat,
-			FolderTemplate:       "{artist}/{album}", // Default or load from global config if needed
+			FolderTemplate:       "", // outputDir is pre-built by the frontend (folder template already applied)
 			TrackNumber:          req.TrackNumber,
 			EmbedLyrics:          req.EmbedLyrics,
 			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
 			AutoOrder:            req.AutoOrder,
-			UseFirstArtistOnly:   req.UseFirstArtistOnly,
-			UseSingleGenre:       req.UseSingleGenre,
-			EmbedGenre:           req.EmbedGenre,
-			AllowFallback:        req.AllowFallback,
-			Region:               "", // Region is rarely used in manual download
+			TidalQuality:         req.AudioFormat,
+			QobuzQuality:         req.AudioFormat,
+			AutoQuality: func() string {
+				if req.AudioFormat == "HI_RES_LOSSLESS" || req.AudioFormat == "HI_RES" {
+					return "24"
+				}
+				return ""
+			}(),
+			UseFirstArtistOnly: req.UseFirstArtistOnly,
+			UseSingleGenre:     req.UseSingleGenre,
+			EmbedGenre:         req.EmbedGenre,
+			AllowFallback:      req.AllowFallback,
+			Region:             "", // Region is rarely used in manual download
 		},
 	}
 
