@@ -16,8 +16,6 @@ type ProxyConfig struct {
 	QobuzProviders []string `json:"qobuz_providers"`
 	AmazonProxies  []string `json:"amazon_proxies"`
 	DeezerProxies  []string `json:"deezer_proxies"`
-	// Override manuel du client_id OAuth Tidal (vide = auto-découverte).
-	TidalClientID string `json:"tidal_client_id,omitempty"`
 }
 
 func defaultProxyConfig() ProxyConfig {
@@ -57,7 +55,6 @@ func LoadProxyConfig(db *bolt.DB) {
 	if len(cfg.DeezerProxies) > 0 {
 		backend.SetDeezerProxies(cfg.DeezerProxies)
 	}
-	backend.SetTidalClientIDOverride(cfg.TidalClientID)
 }
 
 // GetProxyConfig lit la config courante depuis BoltDB (ou retourne les défauts).
@@ -120,10 +117,6 @@ func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
 	backend.SetQobuzProviders(cfg.QobuzProviders)
 	backend.SetAmazonProxies(cfg.AmazonProxies)
 	backend.SetDeezerProxies(cfg.DeezerProxies)
-	backend.SetTidalClientIDOverride(cfg.TidalClientID)
-	// Invalider le cache pour que le prochain GenerateTidalAuthURL utilise le nouvel ID
-	backend.InvalidateTidalClientIDCache()
-
 	// Invalider le cache de statut pour que le prochain refresh reflète la nouvelle config
 	invalidateStatusCache()
 

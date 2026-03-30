@@ -223,6 +223,83 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		req.Service = "auto"
 	}
 
+	// Apply global user settings as fallbacks for fields not provided by the caller.
+	// This ensures REST API callers (external apps) inherit the user's preferences
+	// without needing to send every setting field.
+	if settings, err := a.LoadSettings(); err == nil && settings != nil {
+		getBool := func(key string) (bool, bool) {
+			if v, ok := settings[key]; ok {
+				if b, ok := v.(bool); ok {
+					return b, true
+				}
+			}
+			return false, false
+		}
+		getString := func(key string) string {
+			if v, ok := settings[key]; ok {
+				if s, ok := v.(string); ok {
+					return s
+				}
+			}
+			return ""
+		}
+		if req.OutputDir == "" {
+			req.OutputDir = getString("downloadPath")
+		}
+		if req.FilenameFormat == "" {
+			req.FilenameFormat = getString("filenameTemplate")
+		}
+		if req.AudioFormat == "" {
+			switch req.Service {
+			case "qobuz":
+				req.AudioFormat = getString("qobuzQuality")
+			default:
+				req.AudioFormat = getString("tidalQuality")
+			}
+		}
+		if req.AutoOrder == "" {
+			req.AutoOrder = getString("autoOrder")
+		}
+		// For booleans: apply settings when the request carries the zero value (false).
+		// External callers that omit a field get false by default; settings act as the real default.
+		// The Wails frontend always mirrors the user's settings, so overwriting false with false is harmless.
+		if !req.EmbedLyrics {
+			if v, ok := getBool("embedLyrics"); ok {
+				req.EmbedLyrics = v
+			}
+		}
+		if !req.EmbedMaxQualityCover {
+			if v, ok := getBool("embedMaxQualityCover"); ok {
+				req.EmbedMaxQualityCover = v
+			}
+		}
+		if !req.AllowFallback {
+			if v, ok := getBool("allowFallback"); ok {
+				req.AllowFallback = v
+			}
+		}
+		if !req.UseFirstArtistOnly {
+			if v, ok := getBool("useFirstArtistOnly"); ok {
+				req.UseFirstArtistOnly = v
+			}
+		}
+		if !req.UseSingleGenre {
+			if v, ok := getBool("useSingleGenre"); ok {
+				req.UseSingleGenre = v
+			}
+		}
+		if !req.EmbedGenre {
+			if v, ok := getBool("embedGenre"); ok {
+				req.EmbedGenre = v
+			}
+		}
+		if !req.TrackNumber {
+			if v, ok := getBool("trackNumber"); ok {
+				req.TrackNumber = v
+			}
+		}
+	}
+
 	itemID := req.ItemID
 	if itemID == "" {
 		if req.SpotifyID != "" {

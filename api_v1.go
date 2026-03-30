@@ -151,8 +151,6 @@ func (s *Server) registerV1Routes() {
 	s.mux.Handle("GET /api/v1/auth/keys", s.v1Auth(s.v1ListAPIKeys))
 	s.mux.Handle("POST /api/v1/auth/keys", s.v1Auth(s.v1CreateAPIKey))
 	s.mux.Handle("DELETE /api/v1/auth/keys/{id}", s.v1Auth(s.v1RevokeAPIKey))
-	s.mux.Handle("GET /api/v1/auth/tidal/url", s.v1Auth(s.v1TidalAuthURL))
-	s.mux.Handle("POST /api/v1/auth/tidal/callback", s.v1Auth(s.v1TidalCallback))
 	s.mux.Handle("GET /api/v1/auth/tidal/status", s.v1Auth(s.v1TidalStatus))
 	s.mux.Handle("DELETE /api/v1/auth/tidal", s.v1Auth(s.v1TidalDisconnect))
 	s.mux.Handle("POST /api/v1/auth/tidal/device/start", s.v1Auth(s.v1TidalDeviceStart))
@@ -1156,30 +1154,6 @@ func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tidal Auth
 // ─────────────────────────────────────────────────────────────────────────────
-
-func (s *Server) v1TidalAuthURL(w http.ResponseWriter, r *http.Request) {
-	url := backend.GenerateTidalAuthURL()
-	writeV1JSON(w, http.StatusOK, map[string]string{"url": url})
-}
-
-func (s *Server) v1TidalCallback(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		CallbackURL string `json:"callback_url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.CallbackURL == "" {
-		writeV1Error(w, http.StatusBadRequest, "callback_url is required")
-		return
-	}
-	if err := backend.ExchangeTidalAuthCode(req.CallbackURL); err != nil {
-		writeV1Error(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
 
 func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
 	token := backend.LoadTidalToken()
