@@ -22,6 +22,18 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 - 🧹 Automatic BoltDB cleanup (deduplication every 24h)
 - 🐳 Docker-first deployment with GitHub Actions CI/CD
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [API Reference](docs/api-reference.md) | All REST endpoints with examples |
+| [Authentication](docs/authentication.md) | JWT, API keys, LAN bypass |
+| [Deployment](docs/deployment.md) | Docker, reverse proxy, env vars |
+| [Settings Reference](docs/settings-reference.md) | All configurable options |
+| [Watchlists](docs/watchlist.md) | Auto-sync playlists |
+| [Tidal Auth](docs/tidal-auth.md) | PKCE Premium account setup |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+
 ## Screenshots
 
 > *(add your screenshots here)*
@@ -134,39 +146,43 @@ By default SpotiFLAC uses **community HiFi API proxies** — no Tidal account re
 
 Optionally, authenticate with a **Premium Tidal account** for better reliability via **PKCE Web OIDC** (same flow as the official Tidal web player).
 
-**Automated (recommended):**
+**Via the UI (easiest):** Settings → Tidal Account → Connect with Tidal
+
+**Automated script:**
 ```bash
 python3 auth_tidal.py --host http://your-server:6890
 ```
 
 **Manual (curl):**
 ```bash
-# Step 1 — get the auth URL
-curl http://your-server:6890/api/auth/tidal/url
+# Step 1 — get the auth URL (requires a valid JWT)
+curl -H "Authorization: Bearer <token>" http://your-server:6890/api/v1/auth/tidal/url
 
 # Step 2 — open the URL in a browser and log in with your Tidal Premium account
 
 # Step 3 — copy the redirect URL (https://listen.tidal.com/login/auth?code=...) and exchange it
-curl -X POST http://your-server:6890/api/auth/tidal/callback \
+curl -X POST http://your-server:6890/api/v1/auth/tidal/callback \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://listen.tidal.com/login/auth?code=..."}'
+  -d '{"callback_url":"https://listen.tidal.com/login/auth?code=..."}'
 ```
 
 - Token cached in `tidal_token.json` and **auto-refreshed** before expiry
 - If no token is present (or it expires), the app falls back to community HiFi proxies automatically
-- See [`TIDAL_AUTH_PKCE.md`](TIDAL_AUTH_PKCE.md) for the full walkthrough
+- See [`docs/tidal-auth.md`](docs/tidal-auth.md) for the full walkthrough
 
 ## Architecture
 
 ```
-Browser → /auth/login     → Jellyfin auth → JWT (24h)
-Browser → /auth/local     → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true)
-Browser → /api/rpc + JWT  → handlers (per-user filtered)
-                          → BoltDB (jobs, watchlists, history, users)
-                          → JobManager (unified queue: manual + watchlist downloads)
-                            → Tidal  (PKCE token → Community HiFi proxies)
-                            → Qobuz  (community proxies)
-                            → Amazon (community proxy)
+Browser → /api/v1/auth/login  → Jellyfin auth → JWT (24h)
+Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true)
+Browser → /api/v1/* + JWT     → handlers (per-user filtered)
+                              → BoltDB (jobs, watchlists, history, users, settings)
+                              → JobManager (unified queue: manual + watchlist downloads)
+                                → Tidal  (PKCE token → Community HiFi proxies, fallback loop)
+                                → Qobuz  (community proxies, fallback loop)
+                                → Amazon (community proxies, fallback loop)
+                                → Deezer (community proxies, fallback loop)
 ```
 
 **Data isolation per user:**
@@ -213,6 +229,27 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 | Self-hosted | ❌ | ✅ |
 
 ## Changelog
+
+### v3.3.0 — 2026-03-30
+- **feat(proxies):** Amazon and Deezer now use multi-proxy lists with automatic fallback, identical to Tidal and Qobuz
+- **feat(deezer):** `DownloadFromDeezmate` restored with full fallback loop + metadata embedding
+- **feat(ui):** Proxy configuration UI shows all 4 services as editable lists
+
+### v3.2.0 — 2026-03-29
+- **feat(ui):** API Keys tab in Settings — create, list, revoke personal API keys
+- **feat(ui):** Tidal Account tab in Settings — PKCE connect/disconnect flow
+- **feat(ui):** APIs tab — external service health dashboard + configurable proxy lists
+- **feat(security):** Admin gating — File Manager hidden from non-admin users
+- **feat(security):** Rate limiting on `POST /api/v1/auth/login` (5 attempts / 5 min)
+- **feat(ui):** Login page shows distinct warning on 429
+
+### v3.1.0 — 2026-03-28
+- **feat(api):** Tidal auth routes migrated to `/api/v1/auth/tidal/*`
+- **feat(api):** New endpoints: `GET /api/v1/auth/tidal/status`, `DELETE /api/v1/auth/tidal`
+- **feat(api):** `GET/PUT /api/v1/apis/proxies` — BoltDB-backed proxy configuration, applied immediately without restart
+- **feat(api):** `GET /api/v1/apis/status` — parallel health check of all external services (30s cache)
+- **feat(api):** `GET/POST/DELETE /api/v1/auth/keys` — personal API key management (`sk_spotiflac_` prefix)
+- **feat(download):** Download queue switches to SSE (`/api/v1/jobs/stream`), replaces 500ms polling
 
 ### v3.0.6 — 2026-03-26
 - **fix(tidal):** Community HiFi proxy list refreshed with active instances
