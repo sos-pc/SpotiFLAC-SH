@@ -42,7 +42,10 @@ SpotiFLAC tries providers in order: **Tidal → Qobuz → Amazon → Deezer**. E
 * **`https://api.tidal.com/v1/tracks?isrc=...`** — Find Tidal tracks by ISRC.
 * **`https://api.tidal.com/v1/tracks/{id}/playbackinfopostpaywall`** — Returns the FLAC manifest. *Requires a valid Premium Token (PKCE).*
 
-**Community HiFi Proxies (fallback when no PKCE token):**
+**Tidal Device Code Credentials:**
+The OAuth 2.0 Device Code flow uses `client_id: fX2JxdmntZWK0ixT` — community-documented credentials shared across open-source Tidal clients (tiddl, TIDAL-Media-Downloader, etc.). See [CREDITS.md](CREDITS.md) for details.
+
+**Community HiFi Proxies (fallback when no personal token):**
 * `https://triton.squid.wtf`
 * `https://api.monochrome.tf`
 * `https://ohio-1.monochrome.tf` / `https://singapore-1.monochrome.tf`
@@ -84,3 +87,7 @@ Multiple proxies are supported; SpotiFLAC tries each in order until one succeeds
 ## 4. Dependencies & Binaries
 
 * **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — Used on first launch to auto-download the correct `ffmpeg` and `ffprobe` binaries for the host OS (Windows, Linux, macOS) if not already installed. In Docker deployments, FFmpeg is pre-installed and this step is skipped.
+
+---
+
+For full attribution of all sources, community tools, and libraries, see [CREDITS.md](CREDITS.md).
