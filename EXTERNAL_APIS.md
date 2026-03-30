@@ -47,6 +47,7 @@ The OAuth 2.0 Device Code flow uses `client_id: fX2JxdmntZWK0ixT` — community-
 
 **Community HiFi Proxies (fallback when no personal token):**
 * `https://triton.squid.wtf`
+* Self-hosted option: **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — fork of sachinsenal0x64/hifi, runs on port 8000, compatible with the Tidal proxy slot.
 * `https://api.monochrome.tf`
 * `https://ohio-1.monochrome.tf` / `https://singapore-1.monochrome.tf`
 * `https://wolf.qqdl.site` (along with maus, vogel, katze, hund variants)
@@ -55,7 +56,7 @@ The OAuth 2.0 Device Code flow uses `client_id: fX2JxdmntZWK0ixT` — community-
 ### 🟡 Qobuz (Fallback 1)
 
 * **`https://www.qobuz.com/api.json/0.2/track/search`** — Search tracks by ISRC.
-* **`https://qbz.afkarxyz.fun/api/track/`** — Primary community stream proxy.
+* **`https://qbz.afkarxyz.qzz.io/api/track/`** — Primary community stream proxy (afkarxyz).
 * **`https://dab.yeet.su/api/stream`** — Secondary community stream proxy.
 * **`https://dabmusic.xyz/api/stream`** — Tertiary community stream proxy.
 

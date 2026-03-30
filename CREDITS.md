@@ -21,8 +21,11 @@ These community-maintained services provide the "zero-account" FLAC streaming th
 - **qqdl.site** — wolf, maus, vogel, katze, hund nodes
 - **spotisaver.net** — `https://hifi-one.spotisaver.net` / `hifi-two.spotisaver.net`
 
+**Self-hostable Tidal Proxy**
+- **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — Fork of [sachinsenal0x64/hifi](https://github.com/sachinsenal0x64/hifi). A self-hostable Python proxy for Tidal supporting `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW` quality and Dolby Atmos. Compatible with SpotiFLAC's Tidal proxy slot (`Settings → APIs → Proxy Configuration`).
+
 **Qobuz Proxies**
-- **afkarxyz** — `https://qbz.afkarxyz.fun`
+- **afkarxyz** — `https://qbz.afkarxyz.qzz.io`
 - **yeet.su** — `https://dab.yeet.su`
 - **dabmusic.xyz** — `https://dabmusic.xyz`
 

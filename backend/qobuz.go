@@ -117,7 +117,7 @@ func (q *QobuzDownloader) searchByISRC(isrc string) (*QobuzTrack, error) {
 }
 
 func buildQobuzAPIURL(apiBase string, trackID int64, quality string) string {
-	if strings.Contains(apiBase, "qbz.afkarxyz.fun") {
+	if strings.Contains(apiBase, "qbz.afkarxyz.qzz.io") || strings.Contains(apiBase, "qbz.afkarxyz.fun") {
 		return fmt.Sprintf("%s%d?quality=%s", apiBase, trackID, quality)
 	}
 	return fmt.Sprintf("%s%d&quality=%s", apiBase, trackID, quality)

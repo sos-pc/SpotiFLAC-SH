@@ -52,7 +52,7 @@ var deezerProxies = []string{"https://api.deezmate.com"}
 var qobuzProviders = []string{
 	"https://dab.yeet.su/api/stream?trackId=",
 	"https://dabmusic.xyz/api/stream?trackId=",
-	"https://qbz.afkarxyz.fun/api/track/",
+	"https://qbz.afkarxyz.qzz.io/api/track/",
 }
 
 // ─── Getters (used by downloaders) ───────────────────────────────────────────
