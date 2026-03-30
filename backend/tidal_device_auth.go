@@ -106,6 +106,15 @@ func StartTidalDeviceAuth() (*DeviceAuthResponse, error) {
 	if result.VerificationURIComplete == "" {
 		result.VerificationURIComplete = result.VerificationURI
 	}
+	// Tidal omet parfois le schème (retourne "link.tidal.com/XXXX" au lieu de "https://...")
+	ensureHTTPS := func(u string) string {
+		if u != "" && !strings.HasPrefix(u, "http") {
+			return "https://" + u
+		}
+		return u
+	}
+	result.VerificationURI = ensureHTTPS(result.VerificationURI)
+	result.VerificationURIComplete = ensureHTTPS(result.VerificationURIComplete)
 
 	fmt.Printf("[Tidal] Device auth started — user_code=%q verification_uri_complete=%q device_code=%q\n",
 		result.UserCode, result.VerificationURIComplete, result.DeviceCode)
