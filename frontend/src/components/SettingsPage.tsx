@@ -1143,25 +1143,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               <p className="text-xs text-muted-foreground">Add proxies for each service. All services support multiple proxies with automatic fallback to the next one on failure.</p>
             </div>
 
-            {/* Tidal client_id override */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tidal OAuth Client ID</Label>
-              <p className="text-xs text-muted-foreground">Auto-discovered from the Tidal web player (refreshed every 24h). Set manually only if auto-discovery fails.</p>
-              <div className="flex gap-2">
-                <InputWithContext
-                  value={proxies.tidal_client_id}
-                  onChange={e => setProxies(prev => prev ? { ...prev, tidal_client_id: e.target.value } : prev)}
-                  placeholder="Auto (leave empty)"
-                  className="flex-1 font-mono text-xs"/>
-                {proxies.tidal_client_id && (
-                  <Button variant="outline" size="sm" className="shrink-0"
-                    onClick={() => setProxies(prev => prev ? { ...prev, tidal_client_id: "" } : prev)}>
-                    Clear
-                  </Button>
-                )}
-              </div>
-            </div>
-
             {/* Add proxy form */}
             <div className="flex gap-2">
               <Select value={newProxyService} onValueChange={(v: any) => setNewProxyService(v)}>
