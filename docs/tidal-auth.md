@@ -1,4 +1,4 @@
-# Tidal Authentication (PKCE)
+# Tidal Authentication
 
 SpotiFLAC works without any Tidal account — it falls back to community HiFi proxies automatically. Authenticating with a **personal Tidal Premium account** gives better reliability and access to Hi-Res FLAC.
 
@@ -6,69 +6,69 @@ SpotiFLAC works without any Tidal account — it falls back to community HiFi pr
 
 ---
 
-## Background
+## How it works
 
-Tidal's legacy Device Flow (TV/Android Auto client IDs) no longer grants the `playback` scope as of March 2026. SpotiFLAC uses the **PKCE Web OIDC flow**, which mimics the official Tidal Web Player (`listen.tidal.com`) and is not subject to this restriction.
+SpotiFLAC uses the **OAuth 2.0 Device Code flow**. No redirect URL to copy, no browser callback — you open a Tidal authorization page, confirm, and SpotiFLAC detects the authorization automatically.
 
 ---
 
 ## Option A — UI (recommended)
 
 1. Open SpotiFLAC → **Settings → Tidal Account**.
-2. Click **Connect with Tidal** — a new browser tab opens with the Tidal login page.
-3. Log in with your Tidal Premium account.
-4. After login, copy the full URL from your browser's address bar (it looks like `https://listen.tidal.com/login/auth?code=...`).
-5. Paste it into the **Callback URL** field in Settings and click **Submit**.
-6. Status changes to **Connected**.
+2. Click **Connect with Tidal**.
+3. Click **Open Tidal authorization page** — the Tidal login page opens in a new tab.
+4. Log in with your Tidal Premium account and confirm the authorization.
+5. SpotiFLAC detects the confirmation automatically (polling every 5 seconds). Status changes to **Connected**.
+
+No copy-paste required.
 
 ---
 
-## Option B — Automated script
+## Option B — Manual (curl)
+
+### Step 1 — Start the device auth flow
 
 ```bash
-python3 auth_tidal.py --host http://your-spotiflac-host:6890
-```
-
-The script opens the Tidal login page, prompts you to paste the callback URL, and handles all the API exchanges.
-
----
-
-## Option C — Manual (curl)
-
-### Step 1 — Get the login URL
-
-```bash
-curl -s http://your-spotiflac-host:6890/api/v1/auth/tidal/url \
-  -H "Authorization: Bearer <your-jwt>"
+curl -s -X POST http://your-spotiflac-host:6890/api/v1/auth/tidal/device/start \
+  -H "Authorization: Bearer <your-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
 Response:
 ```json
-{ "url": "https://login.tidal.com/authorize?appMode=web&client_id=txNoH4kkV41MfH25&code_challenge=...&response_type=code..." }
+{
+  "device_code": "abc123...",
+  "user_code": "LDANN",
+  "verification_uri": "https://link.tidal.com/LDANN",
+  "verification_uri_complete": "https://link.tidal.com/LDANN",
+  "expires_in": 300,
+  "interval": 5
+}
 ```
 
-### Step 2 — Log in
+### Step 2 — Open the authorization URL
 
-Open the `url` in a browser. Log in with your Tidal Premium account.
+Open `verification_uri_complete` in a browser. Log in with your Tidal Premium account and confirm.
 
-### Step 3 — Copy the callback URL
-
-After login, Tidal redirects your browser. Copy the full URL from the address bar:
-
-```
-https://listen.tidal.com/login/auth?code=abc123def456&lang=en
-```
-
-### Step 4 — Exchange the code
+### Step 3 — Poll until authorized
 
 ```bash
-curl -s -X POST http://your-spotiflac-host:6890/api/v1/auth/tidal/callback \
+curl -s -X POST http://your-spotiflac-host:6890/api/v1/auth/tidal/device/poll \
   -H "Authorization: Bearer <your-jwt>" \
   -H "Content-Type: application/json" \
-  -d '{"callback_url":"https://listen.tidal.com/login/auth?code=abc123def456&lang=en"}'
+  -d '{"device_code":"abc123..."}'
 ```
 
-Returns `204` on success.
+Repeat every 5 seconds. Possible responses:
+
+| `status` | Meaning |
+|---|---|
+| `pending` | User hasn't authorized yet — keep polling |
+| `authorized` | Token saved, connection established |
+| `expired` | The 5-minute window passed — start again |
+| `denied` | User refused — start again |
+| `error` | Unexpected error — see `error` field |
 
 ---
 
@@ -87,7 +87,7 @@ curl -s http://your-spotiflac-host:6890/api/v1/auth/tidal/status \
 
 ## Token lifecycle
 
-- Tokens are cached in `tidal_token.json` in the config directory.
+- Tokens are stored in `tidal_token.json` in the config directory.
 - SpotiFLAC **automatically refreshes** the token before it expires — no re-authentication needed.
 - If the refresh fails (e.g. subscription lapsed), SpotiFLAC falls back to community proxies transparently.
 
@@ -107,10 +107,10 @@ curl -s -X DELETE http://your-spotiflac-host:6890/api/v1/auth/tidal \
 
 ## Fallback behaviour
 
-If no Tidal token is present (or it has expired), SpotiFLAC seamlessly routes downloads through the community HiFi proxy pool:
+If no Tidal token is present (or it has expired), SpotiFLAC seamlessly routes downloads through the community proxy pool:
 
 ```
-Tidal PKCE token present → use official Tidal API
+Tidal personal token present → use official Tidal API
         ↓ (absent / expired)
 Community HiFi proxies  → triton.squid.wtf, api.monochrome.tf, wolf.qqdl.site, …
         ↓ (all proxies fail)

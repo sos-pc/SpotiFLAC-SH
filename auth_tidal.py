@@ -2,13 +2,14 @@
 import argparse
 import json
 import sys
+import time
 import urllib.request
 import webbrowser
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Authenticate SpotiFLAC with Tidal using PKCE Flow."
+        description="Authenticate SpotiFLAC with Tidal using Device Code Flow."
     )
     parser.add_argument(
         "--host",
@@ -25,7 +26,7 @@ def main():
     host = args.host.rstrip("/")
 
     print("==========================================")
-    print("  SpotiFLAC - Tidal PKCE Authentication   ")
+    print("  SpotiFLAC - Tidal Authentication        ")
     print("==========================================")
     print(f"Connecting to SpotiFLAC at: {host}")
 
@@ -37,82 +38,88 @@ def main():
         else:
             headers["Authorization"] = f"Bearer {token}"
 
-    # 1. Ask SpotiFLAC to generate the secure login URL
-    print("\n[1/3] Requesting secure authentication URL from SpotiFLAC...")
-    req = urllib.request.Request(f"{host}/api/v1/auth/tidal/url", headers=headers)
+    # 1. Start device auth flow
+    print("\n[1/3] Starting Tidal authentication...")
+    headers_with_ct = {**headers, "Content-Type": "application/json"}
+    req = urllib.request.Request(
+        f"{host}/api/v1/auth/tidal/device/start",
+        data=b"{}",
+        headers=headers_with_ct,
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(req) as response:
             data = json.loads(response.read().decode())
-            auth_url = data.get("url")
     except urllib.error.HTTPError as e:
         print(f"❌ Error: SpotiFLAC returned HTTP {e.code}.")
         if e.code in [401, 403]:
-            print(
-                "Hint: You need to provide a valid token using --token=YOUR_JWT_OR_API_KEY"
-            )
-        return
+            print("Hint: Provide a valid token with --token=YOUR_JWT_OR_API_KEY")
+        sys.exit(1)
     except Exception as e:
-        print(
-            f"❌ Error: Could not connect to SpotiFLAC. Is the server running at {host}?"
-        )
+        print(f"❌ Error: Could not connect to SpotiFLAC at {host}")
         print(f"Details: {e}")
-        return
+        sys.exit(1)
 
-    if not auth_url:
-        print("❌ Error: Invalid response from server (no URL provided).")
-        return
+    device_code = data.get("device_code")
+    verification_uri = data.get("verification_uri_complete") or data.get("verification_uri", "")
+    user_code = data.get("user_code", "")
+    interval = max(data.get("interval", 5), 5)
+    expires_in = data.get("expires_in", 300)
 
+    if not device_code or not verification_uri:
+        print("❌ Error: Invalid response from server.")
+        sys.exit(1)
+
+    # 2. Ask user to authorize
     print("\n------------------------------------------------------------------")
     print("🚨 ACTION REQUIRED 🚨")
-    print(
-        "1. Log in with your Tidal Premium account in the browser window that just opened."
-    )
-    print("   (If it didn't open, manually go to the link below)")
-    print("2. You will be redirected to a blank page or the web player.")
-    print("3. Copy the ENTIRE URL from your browser's address bar.")
-    print("   (It should look like: https://listen.tidal.com/login/auth?code=...)")
+    print(f"Open this link in your browser and log in with your Tidal Premium account:")
+    print(f"\n  {verification_uri}\n")
+    if user_code:
+        print(f"If asked for a code, enter: {user_code}")
     print("------------------------------------------------------------------\n")
-    print(f"Link: {auth_url}\n")
 
-    # Try to automatically open the browser
     try:
-        webbrowser.open(auth_url)
-    except:
+        webbrowser.open(verification_uri)
+    except Exception:
         pass
 
-    redirect_url = input("Paste the redirected URL here: ").strip()
-
-    if not redirect_url:
-        print("❌ Error: URL cannot be empty.")
-        return
-
-    # 2. Send the code back to SpotiFLAC
-    print("\n[2/3] Sending authorization code back to SpotiFLAC...")
-
-    payload = json.dumps({"callback_url": redirect_url}).encode("utf-8")
-    headers["Content-Type"] = "application/json"
-
-    req = urllib.request.Request(
-        f"{host}/api/v1/auth/tidal/callback", data=payload, headers=headers, method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req) as response:
-            # 204 No Content = success
-            print("[3/3] ✅ SUCCESS! Tidal token has been securely saved.")
-            print(
-                "SpotiFLAC can now download Lossless FLACs directly from the official Tidal API."
-            )
-            print("You can close this script.")
-    except urllib.error.HTTPError as e:
-        error_msg = e.read().decode()
-        print(f"❌ ERROR: Failed to authenticate (HTTP {e.code}).")
-        print(f"Server responded: {error_msg}")
-        print(
-            "Hint: Make sure you copied the ENTIRE url containing the 'code=' parameter."
+    # 3. Poll until authorized or expired
+    print(f"[2/3] Waiting for authorization (checking every {interval}s)...")
+    deadline = time.time() + expires_in
+    while time.time() < deadline:
+        time.sleep(interval)
+        poll_req = urllib.request.Request(
+            f"{host}/api/v1/auth/tidal/device/poll",
+            data=json.dumps({"device_code": device_code}).encode(),
+            headers=headers_with_ct,
+            method="POST",
         )
-    except Exception as e:
-        print(f"❌ ERROR: Failed to send code to SpotiFLAC.")
-        print(f"Details: {e}")
+        try:
+            with urllib.request.urlopen(poll_req) as response:
+                result = json.loads(response.read().decode())
+        except Exception:
+            continue
+
+        status = result.get("status")
+        if status == "authorized":
+            print("\n[3/3] ✅ SUCCESS! Tidal account connected.")
+            print("SpotiFLAC can now download Lossless FLACs directly from the official Tidal API.")
+            return
+        elif status == "expired":
+            print("\n❌ Authorization expired. Please run the script again.")
+            sys.exit(1)
+        elif status == "denied":
+            print("\n❌ Authorization denied by user.")
+            sys.exit(1)
+        elif status == "error":
+            print(f"\n❌ Error: {result.get('error', 'unknown')}")
+            sys.exit(1)
+        else:
+            print("  Still waiting...", end="\r")
+
+    print("\n❌ Timed out waiting for authorization.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

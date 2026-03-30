@@ -72,23 +72,37 @@ Revoke an API key. Returns `204`.
 
 ---
 
-### Tidal Auth (PKCE)
+### Tidal Auth (Device Code)
 
-#### `GET /api/v1/auth/tidal/url`
-Returns the Tidal PKCE login URL to open in a browser.
+#### `POST /api/v1/auth/tidal/device/start`
+Start the OAuth Device Code flow. Returns the authorization URL and device code.
 
 ```json
-{ "url": "https://login.tidal.com/authorize?appMode=web&client_id=..." }
+{
+  "device_code": "abc123...",
+  "user_code": "LDANN",
+  "verification_uri_complete": "https://link.tidal.com/LDANN",
+  "expires_in": 300,
+  "interval": 5
+}
 ```
 
-#### `POST /api/v1/auth/tidal/callback`
-Exchange the callback URL after Tidal login.
+#### `POST /api/v1/auth/tidal/device/poll`
+Poll for authorization status. Call every `interval` seconds with the `device_code` from the start response.
 
 **Body**
 ```json
-{ "callback_url": "https://listen.tidal.com/login/auth?code=abc123..." }
+{ "device_code": "abc123..." }
 ```
-Returns `204` on success.
+
+**Response**
+```json
+{ "status": "pending" }
+{ "status": "authorized" }
+{ "status": "expired", "error": "Authorization expired. Please start again." }
+```
+
+Statuses: `pending` · `authorized` · `expired` · `denied` · `error`
 
 #### `GET /api/v1/auth/tidal/status`
 Returns current Tidal token status.
