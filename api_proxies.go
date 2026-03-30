@@ -12,16 +12,18 @@ var bucketProxies = []byte("api_proxies")
 
 // ProxyConfig est la configuration persistée en BoltDB.
 type ProxyConfig struct {
-	TidalProxies    []string `json:"tidal_proxies"`
-	AmazonProxyBase string   `json:"amazon_proxy_base"`
-	DeezerProxyBase string   `json:"deezer_proxy_base"`
+	TidalProxies   []string `json:"tidal_proxies"`
+	QobuzProviders []string `json:"qobuz_providers"`
+	AmazonProxies  []string `json:"amazon_proxies"`
+	DeezerProxies  []string `json:"deezer_proxies"`
 }
 
 func defaultProxyConfig() ProxyConfig {
 	return ProxyConfig{
-		TidalProxies:    backend.GetTidalProxies(),
-		AmazonProxyBase: backend.GetAmazonProxyBase(),
-		DeezerProxyBase: backend.GetDeezerProxyBase(),
+		TidalProxies:   backend.GetTidalProxies(),
+		QobuzProviders: backend.GetQobuzProviders(),
+		AmazonProxies:  backend.GetAmazonProxies(),
+		DeezerProxies:  backend.GetDeezerProxies(),
 	}
 }
 
@@ -44,11 +46,14 @@ func LoadProxyConfig(db *bolt.DB) {
 	if len(cfg.TidalProxies) > 0 {
 		backend.SetTidalProxies(cfg.TidalProxies)
 	}
-	if cfg.AmazonProxyBase != "" {
-		backend.SetAmazonProxyBase(cfg.AmazonProxyBase)
+	if len(cfg.QobuzProviders) > 0 {
+		backend.SetQobuzProviders(cfg.QobuzProviders)
 	}
-	if cfg.DeezerProxyBase != "" {
-		backend.SetDeezerProxyBase(cfg.DeezerProxyBase)
+	if len(cfg.AmazonProxies) > 0 {
+		backend.SetAmazonProxies(cfg.AmazonProxies)
+	}
+	if len(cfg.DeezerProxies) > 0 {
+		backend.SetDeezerProxies(cfg.DeezerProxies)
 	}
 }
 
@@ -74,24 +79,24 @@ func GetProxyConfig(db *bolt.DB) ProxyConfig {
 
 // SaveProxyConfig persiste la config et applique immédiatement les setters.
 func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
-	// Nettoyer les entrées vides de la liste Tidal
-	clean := make([]string, 0, len(cfg.TidalProxies))
-	for _, p := range cfg.TidalProxies {
-		if p = strings.TrimSpace(p); p != "" {
-			clean = append(clean, p)
+	// Nettoyer les entrées vides des listes
+	cleanList := func(in []string, def []string) []string {
+		out := make([]string, 0, len(in))
+		for _, p := range in {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
 		}
+		if len(out) == 0 {
+			return def
+		}
+		return out
 	}
-	if len(clean) == 0 {
-		clean = defaultProxyConfig().TidalProxies
-	}
-	cfg.TidalProxies = clean
-
-	if cfg.AmazonProxyBase == "" {
-		cfg.AmazonProxyBase = defaultProxyConfig().AmazonProxyBase
-	}
-	if cfg.DeezerProxyBase == "" {
-		cfg.DeezerProxyBase = defaultProxyConfig().DeezerProxyBase
-	}
+	def := defaultProxyConfig()
+	cfg.TidalProxies = cleanList(cfg.TidalProxies, def.TidalProxies)
+	cfg.QobuzProviders = cleanList(cfg.QobuzProviders, def.QobuzProviders)
+	cfg.AmazonProxies = cleanList(cfg.AmazonProxies, def.AmazonProxies)
+	cfg.DeezerProxies = cleanList(cfg.DeezerProxies, def.DeezerProxies)
 
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -109,8 +114,9 @@ func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
 
 	// Appliquer immédiatement
 	backend.SetTidalProxies(cfg.TidalProxies)
-	backend.SetAmazonProxyBase(cfg.AmazonProxyBase)
-	backend.SetDeezerProxyBase(cfg.DeezerProxyBase)
+	backend.SetQobuzProviders(cfg.QobuzProviders)
+	backend.SetAmazonProxies(cfg.AmazonProxies)
+	backend.SetDeezerProxies(cfg.DeezerProxies)
 
 	// Invalider le cache de statut pour que le prochain refresh reflète la nouvelle config
 	invalidateStatusCache()

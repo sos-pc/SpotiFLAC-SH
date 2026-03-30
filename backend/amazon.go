@@ -101,6 +101,35 @@ func (a *AmazonDownloader) GetAmazonURLFromSpotify(spotifyTrackID string) (strin
 	return amazonURL, nil
 }
 
+func (a *AmazonDownloader) getStreamResponse(base, asin string) (*AmazonStreamResponse, error) {
+	apiURL := fmt.Sprintf("%s/api/track/%s", base, asin)
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var apiResp AmazonStreamResponse
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if apiResp.StreamURL == "" {
+		return nil, fmt.Errorf("no stream URL in response")
+	}
+	return &apiResp, nil
+}
+
 func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality string) (string, error) {
 
 	asinRegex := regexp.MustCompile(`(B[0-9A-Z]{9})`)
@@ -109,36 +138,20 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		return "", fmt.Errorf("failed to extract ASIN from URL: %s", amazonURL)
 	}
 
-	apiURL := fmt.Sprintf("%s/api/track/%s", GetAmazonProxyBase(), asin)
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-
 	fmt.Printf("Fetching from Amazon API (ASIN: %s)...\n", asin)
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return "", err
+	var apiResp *AmazonStreamResponse
+	var lastErr error
+	for _, proxy := range GetAmazonProxies() {
+		r, err := a.getStreamResponse(proxy, asin)
+		if err == nil {
+			apiResp = r
+			break
+		}
+		lastErr = err
+		fmt.Printf("[Amazon] Proxy %s failed: %v, trying next...\n", proxy, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Amazon API returned status %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var apiResp AmazonStreamResponse
-	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if apiResp.StreamURL == "" {
-		return "", fmt.Errorf("no stream URL found in response")
+	if apiResp == nil {
+		return "", fmt.Errorf("all Amazon proxies failed: %v", lastErr)
 	}
 
 	downloadURL := apiResp.StreamURL

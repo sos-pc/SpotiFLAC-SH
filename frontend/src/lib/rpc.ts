@@ -212,8 +212,9 @@ export const GetAPIStatuses = () => rest<ServiceStatus[]>("GET", "/apis/status")
 
 export interface ProxyConfig {
   tidal_proxies: string[];
-  amazon_proxy_base: string;
-  deezer_proxy_base: string;
+  qobuz_providers: string[];
+  amazon_proxies: string[];
+  deezer_proxies: string[];
 }
 
 export const GetAPIProxies    = () => rest<ProxyConfig>("GET", "/apis/proxies");

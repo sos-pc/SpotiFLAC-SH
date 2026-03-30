@@ -79,28 +79,22 @@ func (d *DeezerDownloader) getDeezerTrackID(trackName, artistName string) (strin
 	return fmt.Sprintf("%d", searchResp.Data[0].ID), nil
 }
 
-// DownloadFromDeezmate — télécharge directement via api.deezmate.com avec l'ID Deezer
-func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string) (string, error) {
-	apiURL := fmt.Sprintf("%s/dl/%s", GetDeezerProxyBase(), deezerTrackID)
-
+func (d *DeezerDownloader) getFlacURL(base, deezerTrackID string) (string, error) {
+	apiURL := fmt.Sprintf("%s/dl/%s", base, deezerTrackID)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("deezmate: failed to create request: %w", err)
+		return "", err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "application/json")
-
-	fmt.Printf("[Deezer] Fetching from deezmate.com (ID: %s)...\n", deezerTrackID)
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("deezmate: request failed: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("deezmate: returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("status %d", resp.StatusCode)
 	}
-
 	var deezResp struct {
 		Success bool `json:"success"`
 		Links   struct {
@@ -110,19 +104,38 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&deezResp); err != nil {
-		return "", fmt.Errorf("deezmate: failed to decode response: %w", err)
+		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 	if !deezResp.Success || deezResp.Links.FLAC == "" {
-		errMsg := deezResp.Error
-		if errMsg == "" {
-			errMsg = "no FLAC link in response"
+		if deezResp.Error != "" {
+			return "", fmt.Errorf("%s", deezResp.Error)
 		}
-		return "", fmt.Errorf("deezmate: %s", errMsg)
+		return "", fmt.Errorf("no FLAC link in response")
+	}
+	return deezResp.Links.FLAC, nil
+}
+
+// DownloadFromDeezmate — télécharge directement via un proxy compatible avec l'ID Deezer
+func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string) (string, error) {
+	fmt.Printf("[Deezer] Fetching FLAC URL for ID: %s...\n", deezerTrackID)
+	var flacURL string
+	var lastErr error
+	for _, proxy := range GetDeezerProxies() {
+		u, err := d.getFlacURL(proxy, deezerTrackID)
+		if err == nil {
+			flacURL = u
+			break
+		}
+		lastErr = err
+		fmt.Printf("[Deezer] Proxy %s failed: %v, trying next...\n", proxy, err)
+	}
+	if flacURL == "" {
+		return "", fmt.Errorf("all Deezer proxies failed: %v", lastErr)
 	}
 
 	fmt.Printf("[Deezer] Downloading FLAC from deezmate CDN...\n")
 
-	dlReq, err := http.NewRequest("GET", deezResp.Links.FLAC, nil)
+	dlReq, err := http.NewRequest("GET", flacURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("deezmate: failed to create download request: %w", err)
 	}
@@ -182,9 +195,78 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 		}
 	}
 
-	// api.deezmate.com et yoinkify.lol sont tous les deux morts (domaines expirés).
-	// TODO: remplacer par un nouveau provider Deezer quand disponible.
-	fmt.Printf("[Deezer] No working download provider available (deezmate + yoinkify both dead)\n")
-	return "", fmt.Errorf("deezer download unavailable: no working provider (deezmate and yoinkify domains expired)")
+	deezerTrackID, err := d.getDeezerTrackID(spotifyTrackName, spotifyArtistName)
+	if err != nil {
+		return "", fmt.Errorf("deezer: track lookup failed: %w", err)
+	}
 
+	filePath, err := d.DownloadFromDeezmate(deezerTrackID, outputDir)
+	if err != nil {
+		return "", err
+	}
+
+	if spotifyTrackName != "" && spotifyArtistName != "" {
+		filenameArtist := spotifyArtistName
+		filenameAlbumArtist := spotifyAlbumArtist
+		if useFirstArtistOnly {
+			filenameArtist = GetFirstArtist(spotifyArtistName)
+			filenameAlbumArtist = GetFirstArtist(spotifyAlbumArtist)
+		}
+		newFilename := BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
+		ext := filepath.Ext(filePath)
+		if ext == "" {
+			ext = ".flac"
+		}
+		newFilename = newFilename + ext
+		newFilePath := filepath.Join(outputDir, newFilename)
+		if err := os.Rename(filePath, newFilePath); err != nil {
+			fmt.Printf("Warning: Failed to rename file: %v\n", err)
+		} else {
+			filePath = newFilePath
+			fmt.Printf("Renamed to: %s\n", newFilename)
+		}
+	}
+
+	fmt.Println("Embedding Spotify metadata...")
+
+	coverPath := ""
+	if spotifyCoverURL != "" {
+		coverPath = filePath + ".cover.jpg"
+		coverClient := NewCoverClient()
+		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
+			fmt.Printf("Warning: Failed to download cover: %v\n", err)
+			coverPath = ""
+		} else {
+			defer os.Remove(coverPath)
+		}
+	}
+
+	trackNumberToEmbed := spotifyTrackNumber
+	if trackNumberToEmbed == 0 {
+		trackNumberToEmbed = 1
+	}
+
+	metadata := Metadata{
+		Title:       spotifyTrackName,
+		Artist:      spotifyArtistName,
+		Album:       spotifyAlbumName,
+		AlbumArtist: spotifyAlbumArtist,
+		Date:        spotifyReleaseDate,
+		TrackNumber: trackNumberToEmbed,
+		TotalTracks: spotifyTotalTracks,
+		DiscNumber:  spotifyDiscNumber,
+		TotalDiscs:  spotifyTotalDiscs,
+		URL:         spotifyURL,
+		Copyright:   spotifyCopyright,
+		Publisher:   spotifyPublisher,
+		Description: "https://github.com/afkarxyz/SpotiFLAC",
+	}
+	if err := EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
+		fmt.Printf("Warning: Failed to embed metadata: %v\n", err)
+	} else {
+		fmt.Println("Metadata embedded successfully")
+	}
+
+	fmt.Println("✓ Downloaded successfully from Deezer")
+	return filePath, nil
 }

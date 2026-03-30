@@ -235,7 +235,8 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     // ── Proxy config state ───────────────────────────────────────────────────
     const [proxies, setProxies] = useState<ProxyConfig | null>(null);
     const [proxySaving, setProxySaving] = useState(false);
-    const [newTidalProxy, setNewTidalProxy] = useState("");
+    const [newProxyURL, setNewProxyURL] = useState("");
+    const [newProxyService, setNewProxyService] = useState<"tidal" | "qobuz" | "amazon" | "deezer">("tidal");
 
     const loadProxies = useCallback(async () => {
         try { setProxies(await GetAPIProxies()); } catch { /* ignore */ }
@@ -254,15 +255,29 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         }
     };
 
-    const handleAddTidalProxy = () => {
-        const url = newTidalProxy.trim();
+    const handleAddProxy = () => {
+        const url = newProxyURL.trim();
         if (!url || !proxies) return;
-        setProxies(prev => prev ? { ...prev, tidal_proxies: [...prev.tidal_proxies, url] } : prev);
-        setNewTidalProxy("");
+        if (newProxyService === "tidal")
+            setProxies(prev => prev ? { ...prev, tidal_proxies: [...prev.tidal_proxies, url] } : prev);
+        else if (newProxyService === "qobuz")
+            setProxies(prev => prev ? { ...prev, qobuz_providers: [...prev.qobuz_providers, url] } : prev);
+        else if (newProxyService === "amazon")
+            setProxies(prev => prev ? { ...prev, amazon_proxies: [...prev.amazon_proxies, url] } : prev);
+        else if (newProxyService === "deezer")
+            setProxies(prev => prev ? { ...prev, deezer_proxies: [...prev.deezer_proxies, url] } : prev);
+        setNewProxyURL("");
     };
 
-    const handleRemoveTidalProxy = (idx: number) => {
-        setProxies(prev => prev ? { ...prev, tidal_proxies: prev.tidal_proxies.filter((_, i) => i !== idx) } : prev);
+    const handleRemoveProxy = (service: "tidal" | "qobuz" | "amazon" | "deezer", idx: number) => {
+        if (service === "tidal")
+            setProxies(prev => prev ? { ...prev, tidal_proxies: prev.tidal_proxies.filter((_, i) => i !== idx) } : prev);
+        else if (service === "qobuz")
+            setProxies(prev => prev ? { ...prev, qobuz_providers: prev.qobuz_providers.filter((_, i) => i !== idx) } : prev);
+        else if (service === "amazon")
+            setProxies(prev => prev ? { ...prev, amazon_proxies: prev.amazon_proxies.filter((_, i) => i !== idx) } : prev);
+        else
+            setProxies(prev => prev ? { ...prev, deezer_proxies: prev.deezer_proxies.filter((_, i) => i !== idx) } : prev);
     };
 
     return (<div className="space-y-4 h-full flex flex-col">
@@ -1093,42 +1108,81 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             </div>
           )}
 
-          {proxies && (<div className="space-y-4 border-t pt-4">
-            <h3 className="text-sm font-semibold">Proxy Configuration</h3>
-
-            <div className="space-y-2">
-              <Label className="text-sm">Tidal Community Proxies</Label>
-              <div className="space-y-1.5">
-                {proxies.tidal_proxies.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">{p}</code>
-                    <Button variant="ghost" size="sm" onClick={() => handleRemoveTidalProxy(i)} className="text-destructive hover:text-destructive px-2">
-                      <Trash2 className="h-3.5 w-3.5"/>
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <InputWithContext value={newTidalProxy} onChange={e => setNewTidalProxy(e.target.value)}
-                  placeholder="https://my-proxy.example.com" className="flex-1 font-mono text-xs"
-                  onKeyDown={e => e.key === "Enter" && handleAddTidalProxy()}/>
-                <Button variant="outline" size="sm" onClick={handleAddTidalProxy} disabled={!newTidalProxy.trim()}>Add</Button>
-              </div>
+          {proxies && (<div className="space-y-5 border-t pt-4">
+            <div>
+              <h3 className="text-sm font-semibold mb-1">Proxy Configuration</h3>
+              <p className="text-xs text-muted-foreground">Add proxies for each service. All services support multiple proxies with automatic fallback to the next one on failure.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-sm">Amazon Music Proxy</Label>
-                <InputWithContext value={proxies.amazon_proxy_base} className="font-mono text-xs"
-                  onChange={e => setProxies(prev => prev ? { ...prev, amazon_proxy_base: e.target.value } : prev)}
-                  placeholder="https://amzn.afkarxyz.fun"/>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-sm">Deezer Proxy</Label>
-                <InputWithContext value={proxies.deezer_proxy_base} className="font-mono text-xs"
-                  onChange={e => setProxies(prev => prev ? { ...prev, deezer_proxy_base: e.target.value } : prev)}
-                  placeholder="https://api.deezmate.com"/>
-              </div>
+            {/* Add proxy form */}
+            <div className="flex gap-2">
+              <Select value={newProxyService} onValueChange={(v: any) => setNewProxyService(v)}>
+                <SelectTrigger className="w-36 shrink-0">
+                  <SelectValue/>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tidal">Tidal</SelectItem>
+                  <SelectItem value="qobuz">Qobuz</SelectItem>
+                  <SelectItem value="amazon">Amazon Music</SelectItem>
+                  <SelectItem value="deezer">Deezer</SelectItem>
+                </SelectContent>
+              </Select>
+              <InputWithContext value={newProxyURL} onChange={e => setNewProxyURL(e.target.value)}
+                placeholder="https://my-proxy.example.com" className="flex-1 font-mono text-xs"
+                onKeyDown={e => e.key === "Enter" && handleAddProxy()}/>
+              <Button variant="outline" size="sm" onClick={handleAddProxy} disabled={!newProxyURL.trim()} className="shrink-0">Add</Button>
+            </div>
+
+            {/* Tidal list */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tidal ({proxies.tidal_proxies.length})</Label>
+              {proxies.tidal_proxies.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">{p}</code>
+                  <Button variant="ghost" size="sm" onClick={() => handleRemoveProxy("tidal", i)} className="text-destructive hover:text-destructive px-2 shrink-0">
+                    <Trash2 className="h-3.5 w-3.5"/>
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Qobuz list */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Qobuz ({proxies.qobuz_providers.length})</Label>
+              {proxies.qobuz_providers.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">{p}</code>
+                  <Button variant="ghost" size="sm" onClick={() => handleRemoveProxy("qobuz", i)} className="text-destructive hover:text-destructive px-2 shrink-0">
+                    <Trash2 className="h-3.5 w-3.5"/>
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Amazon list */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Amazon Music ({proxies.amazon_proxies.length})</Label>
+              {proxies.amazon_proxies.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">{p}</code>
+                  <Button variant="ghost" size="sm" onClick={() => handleRemoveProxy("amazon", i)} className="text-destructive hover:text-destructive px-2 shrink-0">
+                    <Trash2 className="h-3.5 w-3.5"/>
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {/* Deezer list */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Deezer ({proxies.deezer_proxies.length})</Label>
+              {proxies.deezer_proxies.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">{p}</code>
+                  <Button variant="ghost" size="sm" onClick={() => handleRemoveProxy("deezer", i)} className="text-destructive hover:text-destructive px-2 shrink-0">
+                    <Trash2 className="h-3.5 w-3.5"/>
+                  </Button>
+                </div>
+              ))}
             </div>
 
             <Button onClick={handleSaveProxies} disabled={proxySaving} className="gap-1.5">
