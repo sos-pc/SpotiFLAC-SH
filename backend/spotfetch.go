@@ -58,53 +58,75 @@ func (c *SpotifyClient) generateTOTP() (string, int, error) {
 }
 
 func (c *SpotifyClient) getAccessToken() error {
-	totpCode, version, err := c.generateTOTP()
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("GET", "https://open.spotify.com/api/token", nil)
-	if err != nil {
-		return err
-	}
-
-	q := req.URL.Query()
-	q.Add("reason", "init")
-	q.Add("productType", "web-player")
-	q.Add("totp", totpCode)
-	q.Add("totpVer", strconv.Itoa(version))
-	q.Add("totpServer", totpCode)
-	req.URL.RawQuery = q.Encode()
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("%w: access token request failed: HTTP %d", SpotifyError, resp.StatusCode)
-	}
-
-	var data map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return err
-	}
-
-	c.accessToken = getString(data, "accessToken")
-	c.clientID = getString(data, "clientId")
-
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == "sp_t" {
-			c.deviceID = cookie.Value
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Regenerate TOTP on each attempt — the code rotates every 30s,
+		// so a retry after a delay may land in a new window.
+		totpCode, version, err := c.generateTOTP()
+		if err != nil {
+			return err
 		}
-		c.cookies[cookie.Name] = cookie.Value
-	}
 
-	return nil
+		req, err := http.NewRequest("GET", "https://open.spotify.com/api/token", nil)
+		if err != nil {
+			return err
+		}
+
+		q := req.URL.Query()
+		q.Add("reason", "init")
+		q.Add("productType", "web-player")
+		q.Add("totp", totpCode)
+		q.Add("totpVer", strconv.Itoa(version))
+		q.Add("totpServer", totpCode)
+		req.URL.RawQuery = q.Encode()
+
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			// Network error — retry after a short delay
+			if attempt < maxAttempts-1 {
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			return err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxAttempts-1 {
+			// Transient server error — wait and retry
+			time.Sleep(time.Duration(3*(attempt+1)) * time.Second)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			// 4xx or exhausted retries — fail immediately
+			return fmt.Errorf("%w: access token request failed: HTTP %d", SpotifyError, resp.StatusCode)
+		}
+
+		var data map[string]interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			return err
+		}
+
+		c.accessToken = getString(data, "accessToken")
+		c.clientID = getString(data, "clientId")
+
+		for _, cookie := range resp.Cookies() {
+			if cookie.Name == "sp_t" {
+				c.deviceID = cookie.Value
+			}
+			c.cookies[cookie.Name] = cookie.Value
+		}
+
+		return nil
+	}
+	return fmt.Errorf("%w: access token request failed after %d attempts", SpotifyError, maxAttempts)
 }
 
 func (c *SpotifyClient) getSessionInfo() error {
@@ -279,8 +301,10 @@ func (c *SpotifyClient) Query(payload map[string]interface{}) (map[string]interf
 			c.clientToken = ""
 			continue
 		case 429:
-			// Rate limited — honour Retry-After if present, else use exponential backoff
-			wait := time.Duration(5*(attempt+1)) * time.Second
+			// Rate limited — honour Retry-After if present.
+			// Fallback: exponential backoff 10s / 30s / 60s.
+			backoffs := []time.Duration{10 * time.Second, 30 * time.Second, 60 * time.Second}
+			wait := backoffs[attempt]
 			if ra := resp.Header.Get("Retry-After"); ra != "" {
 				if n, err := strconv.Atoi(ra); err == nil && n > 0 {
 					wait = time.Duration(n) * time.Second

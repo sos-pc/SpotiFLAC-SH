@@ -713,6 +713,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		a.ApplySettingsFallbacks(&req)
 		result, err := a.DownloadTrack(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
