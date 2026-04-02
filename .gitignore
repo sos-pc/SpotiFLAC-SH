@@ -28,6 +28,9 @@ pnpm-debug.log*
 .yarn
 *.tsbuildinfo
 
+# Claude Code
+.claude/
+
 # IDE / Editors
 .vscode/
 .idea/
