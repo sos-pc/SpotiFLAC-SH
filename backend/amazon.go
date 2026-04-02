@@ -200,7 +200,6 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 				"-of", "default=noprint_wrappers=1:nokey=1",
 				filePath,
 			)
-			setHideWindow(cmdProbe)
 			codecOutput, _ := cmdProbe.Output()
 			codec = strings.TrimSpace(string(codecOutput))
 			fmt.Printf("Detected codec: %s\n", codec)
@@ -238,7 +237,6 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 			decryptedPath,
 		)
 
-		setHideWindow(cmd)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 

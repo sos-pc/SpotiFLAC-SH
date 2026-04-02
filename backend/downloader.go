@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -397,7 +398,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			quality := "Unknown"
 			durationStr := "--:--"
 
-			meta, err := GetTrackMetadata(fPath)
+			meta, err := audio.GetTrackMetadata(fPath)
 			if err == nil && meta != nil {
 				if meta.BitsPerSample > 0 {
 					quality = fmt.Sprintf("%d-bit/%.1fkHz", meta.BitsPerSample, float64(meta.SampleRate)/1000.0)

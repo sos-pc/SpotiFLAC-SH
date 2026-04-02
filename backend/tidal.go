@@ -550,7 +550,6 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 	}
 
 	cmd := exec.Command(ffmpegPath, "-y", "-i", tempPath, "-vn", "-c:a", "flac", outputPath)
-	setHideWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
@@ -643,7 +644,7 @@ func (a *App) AnalyzeTrack(filePath string) (string, error) {
 	if filePath == "" {
 		return "", fmt.Errorf("file path is required")
 	}
-	result, err := backend.AnalyzeTrack(filePath)
+	result, err := audio.AnalyzeTrack(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to analyze track: %v", err)
 	}
@@ -658,9 +659,9 @@ func (a *App) AnalyzeMultipleTracks(filePaths []string) (string, error) {
 	if len(filePaths) == 0 {
 		return "", fmt.Errorf("at least one file path is required")
 	}
-	results := make([]*backend.AnalysisResult, 0, len(filePaths))
+	results := make([]*audio.AnalysisResult, 0, len(filePaths))
 	for _, filePath := range filePaths {
-		result, err := backend.AnalyzeTrack(filePath)
+		result, err := audio.AnalyzeTrack(filePath)
 		if err != nil {
 			continue
 		}
@@ -865,10 +866,10 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 // FFmpeg
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (a *App) IsFFmpegInstalled() (bool, error)  { return backend.IsFFmpegInstalled() }
-func (a *App) IsFFprobeInstalled() (bool, error) { return backend.IsFFprobeInstalled() }
+func (a *App) IsFFmpegInstalled() (bool, error)  { return audio.IsFFmpegInstalled() }
+func (a *App) IsFFprobeInstalled() (bool, error) { return audio.IsFFprobeInstalled() }
 func (a *App) GetFFmpegPath() (string, error)    { return util.GetFFmpegPath() }
-func (a *App) CheckFFmpegInstalled() (bool, error) { return backend.IsFFmpegInstalled() }
+func (a *App) CheckFFmpegInstalled() (bool, error) { return audio.IsFFmpegInstalled() }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio / File tools
@@ -881,8 +882,8 @@ type ConvertAudioRequest struct {
 	Codec        string   `json:"codec"`
 }
 
-func (a *App) ConvertAudio(req ConvertAudioRequest) ([]backend.ConvertAudioResult, error) {
-	return backend.ConvertAudio(backend.ConvertAudioRequest{
+func (a *App) ConvertAudio(req ConvertAudioRequest) ([]audio.ConvertAudioResult, error) {
+	return audio.ConvertAudio(audio.ConvertAudioRequest{
 		InputFiles:   req.InputFiles,
 		OutputFormat: req.OutputFormat,
 		Bitrate:      req.Bitrate,

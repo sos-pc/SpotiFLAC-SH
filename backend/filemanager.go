@@ -243,7 +243,6 @@ func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
 		filePath,
 	)
 
-	setHideWindow(cmd)
 
 	output, err := cmd.Output()
 	if err != nil {
