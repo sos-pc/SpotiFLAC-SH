@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type DownloadRequest struct {
@@ -69,7 +71,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	if req.OutputDir == "" {
 		req.OutputDir = "."
 	} else {
-		req.OutputDir = SanitizeFolderPath(req.OutputDir)
+		req.OutputDir = util.SanitizeFolderPath(req.OutputDir)
 	}
 	if req.AudioFormat == "" {
 		req.AudioFormat = "LOSSLESS"
@@ -88,12 +90,12 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		} else {
 			itemID = fmt.Sprintf("%s-%s-%d", req.TrackName, req.ArtistName, time.Now().UnixNano())
 		}
-		AddToQueue(itemID, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID)
+		util.AddToQueue(itemID, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID)
 	}
 
-	SetDownloading(true)
-	StartDownloadItem(itemID)
-	defer SetDownloading(false)
+	util.SetDownloading(true)
+	util.StartDownloadItem(itemID)
+	defer util.SetDownloading(false)
 
 	spotifyURL := ""
 	if req.SpotifyID != "" {
@@ -144,10 +146,10 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	if req.TrackName != "" && req.ArtistName != "" {
-		expectedFilename := BuildExpectedFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.SpotifyDiscNumber, req.UseAlbumTrackNumber)
+		expectedFilename := util.BuildExpectedFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.SpotifyDiscNumber, req.UseAlbumTrackNumber)
 		expectedPath := filepath.Join(req.OutputDir, expectedFilename)
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 100*1024 {
-			SkipDownloadItem(itemID, expectedPath)
+			util.SkipDownloadItem(itemID, expectedPath)
 			return DownloadResponse{
 				Success:       true,
 				Message:       "File already exists",
@@ -332,7 +334,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	if err != nil {
-		FailDownloadItem(itemID, fmt.Sprintf("Download failed: %v", err))
+		util.FailDownloadItem(itemID, fmt.Sprintf("Download failed: %v", err))
 		if filename != "" && !strings.HasPrefix(filename, "EXISTS:") {
 			if _, statErr := os.Stat(filename); statErr == nil {
 				fmt.Printf("Removing corrupted/partial file after failed download: %s\n", filename)
@@ -380,13 +382,13 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	message := "Download completed successfully"
 	if alreadyExists {
 		message = "File already exists"
-		SkipDownloadItem(itemID, filename)
+		util.SkipDownloadItem(itemID, filename)
 	} else {
 		if fileInfo, statErr := os.Stat(filename); statErr == nil {
 			finalSize := float64(fileInfo.Size()) / (1024 * 1024)
-			CompleteDownloadItem(itemID, filename, finalSize)
+			util.CompleteDownloadItem(itemID, filename, finalSize)
 		} else {
-			CompleteDownloadItem(itemID, filename, 0)
+			util.CompleteDownloadItem(itemID, filename, 0)
 		}
 
 		// FIX #4 — capture req.UserID pour le taguer dans l'item d'historique

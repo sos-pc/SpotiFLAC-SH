@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type QobuzDownloader struct {
@@ -70,7 +72,7 @@ type QobuzStreamResponse struct {
 
 func NewQobuzDownloader() *QobuzDownloader {
 	return &QobuzDownloader{
-		client: NewHTTPClient(60 * time.Second),
+		client: util.NewHTTPClient(60 * time.Second),
 		appID: "798273057",
 	}
 }
@@ -179,7 +181,7 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 
 	fmt.Printf("Getting download URL for track ID: %d with requested quality: %s\n", trackID, qualityCode)
 
-	standardAPIs := GetQobuzProviders()
+	standardAPIs := util.GetQobuzProviders()
 
 	downloadFunc := func(qual string) (string, error) {
 		type Provider struct {
@@ -252,7 +254,7 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	fmt.Println("Starting file download...")
 
-	downloadClient := NewHTTPClient(5 * time.Minute)
+	downloadClient := util.NewHTTPClient(5 * time.Minute)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -278,7 +280,7 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 
 	fmt.Println("Downloading...")
 
-	pw := NewProgressWriter(out)
+	pw := util.NewProgressWriter(out)
 	_, err = io.Copy(pw, resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
@@ -333,7 +335,7 @@ func buildQobuzFilename(title, artist, album, albumArtist, releaseDate string, t
 		filename = strings.ReplaceAll(filename, "{album}", album)
 		filename = strings.ReplaceAll(filename, "{album_artist}", albumArtist)
 		filename = strings.ReplaceAll(filename, "{year}", year)
-		filename = strings.ReplaceAll(filename, "{date}", SanitizeFilename(releaseDate))
+		filename = strings.ReplaceAll(filename, "{date}", util.SanitizeFilename(releaseDate))
 
 		if discNumber > 0 {
 			filename = strings.ReplaceAll(filename, "{disc}", fmt.Sprintf("%d", discNumber))
@@ -443,16 +445,16 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(deezerISRC, spotifyID, outputDir
 	}
 	fmt.Printf("Download URL obtained: %s\n", urlPreview)
 
-	safeArtist := sanitizeFilename(artists)
-	safeAlbumArtist := sanitizeFilename(spotifyAlbumArtist)
+	safeArtist := util.SanitizeFilename(artists)
+	safeAlbumArtist := util.SanitizeFilename(spotifyAlbumArtist)
 
 	if useFirstArtistOnly {
-		safeArtist = sanitizeFilename(GetFirstArtist(artists))
-		safeAlbumArtist = sanitizeFilename(GetFirstArtist(spotifyAlbumArtist))
+		safeArtist = util.SanitizeFilename(util.GetFirstArtist(artists))
+		safeAlbumArtist = util.SanitizeFilename(util.GetFirstArtist(spotifyAlbumArtist))
 	}
 
-	safeTitle := sanitizeFilename(trackTitle)
-	safeAlbum := sanitizeFilename(albumTitle)
+	safeTitle := util.SanitizeFilename(trackTitle)
+	safeAlbum := util.SanitizeFilename(albumTitle)
 
 	filename := buildQobuzFilename(safeTitle, safeArtist, safeAlbum, safeAlbumArtist, spotifyReleaseDate, spotifyTrackNumber, spotifyDiscNumber, filenameFormat, includeTrackNumber, position, useAlbumTrackNumber)
 	filepath := filepath.Join(outputDir, filename)

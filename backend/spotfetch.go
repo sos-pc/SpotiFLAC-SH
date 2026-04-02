@@ -16,6 +16,7 @@ import (
 
 	"sort"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )
@@ -34,7 +35,7 @@ type SpotifyClient struct {
 
 func NewSpotifyClient() *SpotifyClient {
 	return &SpotifyClient{
-		client:  NewHTTPClient(30 * time.Second),
+		client:  util.NewHTTPClient(30 * time.Second),
 		cookies: make(map[string]string),
 	}
 }

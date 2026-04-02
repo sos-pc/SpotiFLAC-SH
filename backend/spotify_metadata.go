@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 var (
@@ -24,7 +26,7 @@ type SpotifyMetadataClient struct {
 
 func NewSpotifyMetadataClient() *SpotifyMetadataClient {
 	return &SpotifyMetadataClient{
-		httpClient: NewHTTPClient(30 * time.Second),
+		httpClient: util.NewHTTPClient(30 * time.Second),
 	}
 }
 
@@ -1618,7 +1620,7 @@ func GetPreviewURL(trackID string) (string, error) {
 
 	embedURL := fmt.Sprintf("https://open.spotify.com/embed/track/%s", trackID)
 
-	client := NewHTTPClient(15 * time.Second)
+	client := util.NewHTTPClient(15 * time.Second)
 	resp, err := client.Get(embedURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch embed page: %w", err)

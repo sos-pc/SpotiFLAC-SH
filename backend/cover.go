@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 const (
@@ -59,15 +61,15 @@ type CoverClient struct {
 
 func NewCoverClient() *CoverClient {
 	return &CoverClient{
-		httpClient: NewHTTPClient(30 * time.Second),
+		httpClient: util.NewHTTPClient(30 * time.Second),
 	}
 }
 
 func buildCoverFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat string, includeTrackNumber bool, position, discNumber int) string {
-	safeTitle := sanitizeFilename(trackName)
-	safeArtist := sanitizeFilename(artistName)
-	safeAlbum := sanitizeFilename(albumName)
-	safeAlbumArtist := sanitizeFilename(albumArtist)
+	safeTitle := util.SanitizeFilename(trackName)
+	safeArtist := util.SanitizeFilename(artistName)
+	safeAlbum := util.SanitizeFilename(albumName)
+	safeAlbumArtist := util.SanitizeFilename(albumArtist)
 
 	year := ""
 	if len(releaseDate) >= 4 {
@@ -83,7 +85,7 @@ func buildCoverFilename(trackName, artistName, albumName, albumArtist, releaseDa
 		filename = strings.ReplaceAll(filename, "{album}", safeAlbum)
 		filename = strings.ReplaceAll(filename, "{album_artist}", safeAlbumArtist)
 		filename = strings.ReplaceAll(filename, "{year}", year)
-		filename = strings.ReplaceAll(filename, "{date}", sanitizeFilename(releaseDate))
+		filename = strings.ReplaceAll(filename, "{date}", util.SanitizeFilename(releaseDate))
 
 		if discNumber > 0 {
 			filename = strings.ReplaceAll(filename, "{disc}", fmt.Sprintf("%d", discNumber))
@@ -180,9 +182,9 @@ func (c *CoverClient) DownloadCover(req CoverDownloadRequest) (*CoverDownloadRes
 
 	outputDir := req.OutputDir
 	if outputDir == "" {
-		outputDir = GetDefaultMusicPath()
+		outputDir = util.GetDefaultMusicPath()
 	} else {
-		outputDir = NormalizePath(outputDir)
+		outputDir = util.NormalizePath(outputDir)
 	}
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -267,12 +269,12 @@ func (c *CoverClient) DownloadHeader(req HeaderDownloadRequest) (*HeaderDownload
 
 	outputDir := req.OutputDir
 	if outputDir == "" {
-		outputDir = GetDefaultMusicPath()
+		outputDir = util.GetDefaultMusicPath()
 	} else {
-		outputDir = NormalizePath(outputDir)
+		outputDir = util.NormalizePath(outputDir)
 	}
 
-	artistFolder := filepath.Join(outputDir, sanitizeFilename(req.ArtistName))
+	artistFolder := filepath.Join(outputDir, util.SanitizeFilename(req.ArtistName))
 	if err := os.MkdirAll(artistFolder, 0755); err != nil {
 		return &HeaderDownloadResponse{
 			Success: false,
@@ -280,7 +282,7 @@ func (c *CoverClient) DownloadHeader(req HeaderDownloadRequest) (*HeaderDownload
 		}, err
 	}
 
-	filename := sanitizeFilename(req.ArtistName) + "_Header.jpg"
+	filename := util.SanitizeFilename(req.ArtistName) + "_Header.jpg"
 	filePath := filepath.Join(artistFolder, filename)
 
 	if fileInfo, err := os.Stat(filePath); err == nil && fileInfo.Size() > 0 {
@@ -364,12 +366,12 @@ func (c *CoverClient) DownloadGalleryImage(req GalleryImageDownloadRequest) (*Ga
 
 	outputDir := req.OutputDir
 	if outputDir == "" {
-		outputDir = GetDefaultMusicPath()
+		outputDir = util.GetDefaultMusicPath()
 	} else {
-		outputDir = NormalizePath(outputDir)
+		outputDir = util.NormalizePath(outputDir)
 	}
 
-	artistFolder := filepath.Join(outputDir, sanitizeFilename(req.ArtistName))
+	artistFolder := filepath.Join(outputDir, util.SanitizeFilename(req.ArtistName))
 	if err := os.MkdirAll(artistFolder, 0755); err != nil {
 		return &GalleryImageDownloadResponse{
 			Success: false,
@@ -377,7 +379,7 @@ func (c *CoverClient) DownloadGalleryImage(req GalleryImageDownloadRequest) (*Ga
 		}, err
 	}
 
-	filename := sanitizeFilename(req.ArtistName) + fmt.Sprintf("_Gallery_%d.jpg", req.ImageIndex+1)
+	filename := util.SanitizeFilename(req.ArtistName) + fmt.Sprintf("_Gallery_%d.jpg", req.ImageIndex+1)
 	filePath := filepath.Join(artistFolder, filename)
 
 	if fileInfo, err := os.Stat(filePath); err == nil && fileInfo.Size() > 0 {
@@ -460,12 +462,12 @@ func (c *CoverClient) DownloadAvatar(req AvatarDownloadRequest) (*AvatarDownload
 
 	outputDir := req.OutputDir
 	if outputDir == "" {
-		outputDir = GetDefaultMusicPath()
+		outputDir = util.GetDefaultMusicPath()
 	} else {
-		outputDir = NormalizePath(outputDir)
+		outputDir = util.NormalizePath(outputDir)
 	}
 
-	artistFolder := filepath.Join(outputDir, sanitizeFilename(req.ArtistName))
+	artistFolder := filepath.Join(outputDir, util.SanitizeFilename(req.ArtistName))
 	if err := os.MkdirAll(artistFolder, 0755); err != nil {
 		return &AvatarDownloadResponse{
 			Success: false,
@@ -473,7 +475,7 @@ func (c *CoverClient) DownloadAvatar(req AvatarDownloadRequest) (*AvatarDownload
 		}, err
 	}
 
-	filename := sanitizeFilename(req.ArtistName) + "_Avatar.jpg"
+	filename := util.SanitizeFilename(req.ArtistName) + "_Avatar.jpg"
 	filePath := filepath.Join(artistFolder, filename)
 
 	if fileInfo, err := os.Stat(filePath); err == nil && fileInfo.Size() > 0 {

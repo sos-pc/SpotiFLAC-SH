@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -20,10 +20,10 @@ type ProxyConfig struct {
 
 func defaultProxyConfig() ProxyConfig {
 	return ProxyConfig{
-		TidalProxies:   backend.GetTidalProxies(),
-		QobuzProviders: backend.GetQobuzProviders(),
-		AmazonProxies:  backend.GetAmazonProxies(),
-		DeezerProxies:  backend.GetDeezerProxies(),
+		TidalProxies:   util.GetTidalProxies(),
+		QobuzProviders: util.GetQobuzProviders(),
+		AmazonProxies:  util.GetAmazonProxies(),
+		DeezerProxies:  util.GetDeezerProxies(),
 	}
 }
 
@@ -44,16 +44,16 @@ func LoadProxyConfig(db *bolt.DB) {
 	})
 
 	if len(cfg.TidalProxies) > 0 {
-		backend.SetTidalProxies(cfg.TidalProxies)
+		util.SetTidalProxies(cfg.TidalProxies)
 	}
 	if len(cfg.QobuzProviders) > 0 {
-		backend.SetQobuzProviders(cfg.QobuzProviders)
+		util.SetQobuzProviders(cfg.QobuzProviders)
 	}
 	if len(cfg.AmazonProxies) > 0 {
-		backend.SetAmazonProxies(cfg.AmazonProxies)
+		util.SetAmazonProxies(cfg.AmazonProxies)
 	}
 	if len(cfg.DeezerProxies) > 0 {
-		backend.SetDeezerProxies(cfg.DeezerProxies)
+		util.SetDeezerProxies(cfg.DeezerProxies)
 	}
 }
 
@@ -113,10 +113,10 @@ func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
 	}
 
 	// Appliquer immédiatement
-	backend.SetTidalProxies(cfg.TidalProxies)
-	backend.SetQobuzProviders(cfg.QobuzProviders)
-	backend.SetAmazonProxies(cfg.AmazonProxies)
-	backend.SetDeezerProxies(cfg.DeezerProxies)
+	util.SetTidalProxies(cfg.TidalProxies)
+	util.SetQobuzProviders(cfg.QobuzProviders)
+	util.SetAmazonProxies(cfg.AmazonProxies)
+	util.SetDeezerProxies(cfg.DeezerProxies)
 	// Invalider le cache de statut pour que le prochain refresh reflète la nouvelle config
 	invalidateStatusCache()
 

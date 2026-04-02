@@ -1,4 +1,4 @@
-package backend
+package util
 
 import (
 	"fmt"
@@ -159,17 +159,11 @@ func SanitizeFolderPath(folderPath string) string {
 			continue
 		}
 
-		sanitized := sanitizeFolderName(part)
+		sanitized := SanitizeFilename(part)
 		if sanitized != "" {
 			sanitizedParts = append(sanitizedParts, sanitized)
 		}
 	}
 
 	return strings.Join(sanitizedParts, sep)
-}
-
-func sanitizeFolderName(name string) string { return SanitizeFilename(name) }
-
-func sanitizeFilename(name string) string {
-	return SanitizeFilename(name)
 }

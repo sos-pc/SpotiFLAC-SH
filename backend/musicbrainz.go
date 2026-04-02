@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -65,7 +66,7 @@ func FetchMusicBrainzMetadata(isrc, title, artist, album string, useSingleGenre 
 		return meta, fmt.Errorf("no ISRC provided")
 	}
 
-	client := NewHTTPClient(10 * time.Second)
+	client := util.NewHTTPClient(10 * time.Second)
 
 	query := fmt.Sprintf("isrc:%s", isrc)
 	reqURL := fmt.Sprintf("%s/recording?query=%s&fmt=json&inc=releases+artist-credits+tags+media+release-groups+labels", musicBrainzAPIBase, url.QueryEscape(query))
@@ -144,7 +145,7 @@ func FetchMusicBrainzMetadata(isrc, title, artist, album string, useSingleGenre 
 			if len(genres) > 5 {
 				genres = genres[:5]
 			}
-			meta.Genre = strings.Join(genres, GetSeparator())
+			meta.Genre = strings.Join(genres, util.GetSeparator())
 		}
 	}
 

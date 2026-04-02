@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -317,7 +318,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 			UpdatedAt:    time.Now(),
 		}
 
-		backend.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
+		util.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
 
 		if err := jm.saveJob(job); err != nil {
 			fmt.Printf("[Jobs] Failed to persist job %s: %v\n", job.ID, err)
@@ -383,7 +384,7 @@ func (jm *JobManager) processJob(jobID string) {
 	job.StartedAt = time.Now()
 	jm.saveJob(job)
 	jm.notifyJob(job)
-	backend.StartDownloadItem(job.ID)
+	util.StartDownloadItem(job.ID)
 
 	outputDir := jm.buildOutputDir(job)
 
@@ -394,7 +395,7 @@ func (jm *JobManager) processJob(jobID string) {
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
-		backend.SkipDownloadItem(job.ID, existingPath)
+		util.SkipDownloadItem(job.ID, existingPath)
 		return
 	}
 
@@ -567,14 +568,14 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 	s := job.Settings
 	outputDir := s.DownloadPath
 	if outputDir == "" {
-		outputDir = backend.GetDefaultMusicPath()
+		outputDir = util.GetDefaultMusicPath()
 	}
 
 	if s.CreatePlaylistFolder && job.PlaylistName != "" {
 		if !strings.Contains(s.FolderTemplate, "{album}") &&
 			!strings.Contains(s.FolderTemplate, "{album_artist}") &&
 			!strings.Contains(s.FolderTemplate, "{playlist}") {
-			outputDir = filepath.Join(outputDir, backend.SanitizeFilename(job.PlaylistName))
+			outputDir = filepath.Join(outputDir, util.SanitizeFilename(job.PlaylistName))
 		}
 	}
 
@@ -596,11 +597,11 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 		}
 
 		tpl := s.FolderTemplate
-		tpl = strings.ReplaceAll(tpl, "{artist}", backend.SanitizeFilename(artist))
-		tpl = strings.ReplaceAll(tpl, "{album}", backend.SanitizeFilename(job.AlbumName))
-		tpl = strings.ReplaceAll(tpl, "{album_artist}", backend.SanitizeFilename(albumArtist))
+		tpl = strings.ReplaceAll(tpl, "{artist}", util.SanitizeFilename(artist))
+		tpl = strings.ReplaceAll(tpl, "{album}", util.SanitizeFilename(job.AlbumName))
+		tpl = strings.ReplaceAll(tpl, "{album_artist}", util.SanitizeFilename(albumArtist))
 		tpl = strings.ReplaceAll(tpl, "{year}", releaseYear)
-		tpl = strings.ReplaceAll(tpl, "{playlist}", backend.SanitizeFilename(job.PlaylistName))
+		tpl = strings.ReplaceAll(tpl, "{playlist}", util.SanitizeFilename(job.PlaylistName))
 
 		for _, part := range strings.Split(tpl, "/") {
 			part = strings.TrimSpace(part)
@@ -610,7 +611,7 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 		}
 	}
 
-	return backend.SanitizeFolderPath(outputDir)
+	return util.SanitizeFolderPath(outputDir)
 }
 
 func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streamingURLs map[string]string) DownloadRequest {
@@ -790,7 +791,7 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 		trackNumber = job.TrackNumber
 	}
 
-	expectedFilename := backend.BuildExpectedFilename(
+	expectedFilename := util.BuildExpectedFilename(
 		job.TrackName,
 		artist,
 		job.AlbumName,
@@ -839,7 +840,7 @@ func (jm *JobManager) recoverPendingJobs() {
 	for _, job := range toRecover {
 		jobCopy := job
 		jm.saveJob(&jobCopy)
-		backend.AddToQueue(jobCopy.ID, jobCopy.TrackName, jobCopy.ArtistName, jobCopy.AlbumName, jobCopy.SpotifyID)
+		util.AddToQueue(jobCopy.ID, jobCopy.TrackName, jobCopy.ArtistName, jobCopy.AlbumName, jobCopy.SpotifyID)
 		select {
 		case jm.queue <- jobCopy.ID:
 			recovered++
@@ -1100,7 +1101,7 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
 			continue
 		}
 		jm.notifyJob(&job)
-		backend.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
+		util.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
 		select {
 		case jm.queue <- job.ID:
 			requeued++

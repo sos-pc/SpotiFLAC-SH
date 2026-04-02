@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type App struct {
@@ -426,14 +427,14 @@ func (a *App) OpenFolder(path string) error {
 
 func (a *App) GetDefaults() map[string]string {
 	return map[string]string{
-		"downloadPath": backend.GetDefaultMusicPath(),
+		"downloadPath": util.GetDefaultMusicPath(),
 	}
 }
 
-func (a *App) GetDownloadProgress() backend.ProgressInfo {
+func (a *App) GetDownloadProgress() util.ProgressInfo {
 	jm := a.ctr.Jobs
 	if jm == nil {
-		return backend.GetDownloadProgress()
+		return util.GetDownloadProgress()
 	}
 	jobs, _ := jm.GetAllJobs()
 	var total, done int
@@ -443,42 +444,42 @@ func (a *App) GetDownloadProgress() backend.ProgressInfo {
 			done++
 		}
 	}
-	return backend.ProgressInfo{IsDownloading: total > 0 && done < total}
+	return util.ProgressInfo{IsDownloading: total > 0 && done < total}
 }
 
-func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
+func (a *App) GetDownloadQueue() util.DownloadQueueInfo {
 	jm := a.ctr.Jobs
 	if jm == nil {
-		return backend.GetDownloadQueue()
+		return util.GetDownloadQueue()
 	}
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
-		return backend.DownloadQueueInfo{}
+		return util.DownloadQueueInfo{}
 	}
-	items := make([]backend.DownloadItem, 0, len(jobs))
+	items := make([]util.DownloadItem, 0, len(jobs))
 	var queued, completed, failed, skipped int
 	isDownloading := false
 	for _, job := range jobs {
 		ds := jobStatusToDownloadStatus(job.Status)
 		switch ds {
-		case backend.StatusQueued:
+		case util.StatusQueued:
 			queued++
-		case backend.StatusDownloading:
+		case util.StatusDownloading:
 			isDownloading = true
-		case backend.StatusCompleted:
+		case util.StatusCompleted:
 			completed++
-		case backend.StatusFailed:
+		case util.StatusFailed:
 			failed++
-		case backend.StatusSkipped:
+		case util.StatusSkipped:
 			skipped++
 		}
-		liveProgress, liveSpeed := backend.GetItemProgress(job.ID)
+		liveProgress, liveSpeed := util.GetItemProgress(job.ID)
 		progress := job.Progress
 		speed := liveSpeed
-		if ds == backend.StatusDownloading && liveProgress > 0 {
+		if ds == util.StatusDownloading && liveProgress > 0 {
 			progress = liveProgress
 		}
-		items = append(items, backend.DownloadItem{
+		items = append(items, util.DownloadItem{
 			ID:           job.ID,
 			TrackName:    job.TrackName,
 			ArtistName:   job.ArtistName,
@@ -495,10 +496,10 @@ func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
 			Speed:        speed,
 		})
 	}
-	progInfo := backend.GetDownloadProgress()
+	progInfo := util.GetDownloadProgress()
 	var totalDL float64
 	for _, item := range items {
-		if item.Status == backend.StatusCompleted && item.TotalSize > 0 {
+		if item.Status == util.StatusCompleted && item.TotalSize > 0 {
 			totalDL += item.TotalSize
 		}
 	}
@@ -508,7 +509,7 @@ func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
 			sessionStart = item.StartTime
 		}
 	}
-	return backend.DownloadQueueInfo{
+	return util.DownloadQueueInfo{
 		IsDownloading:    isDownloading,
 		Queue:            items,
 		QueuedCount:      queued,
@@ -524,7 +525,7 @@ func (a *App) GetDownloadQueue() backend.DownloadQueueInfo {
 func (a *App) ClearCompletedDownloads() {
 	jm := a.ctr.Jobs
 	if jm == nil {
-		backend.ClearDownloadQueue()
+		util.ClearDownloadQueue()
 		return
 	}
 	jm.ClearCompletedJobs()
@@ -533,7 +534,7 @@ func (a *App) ClearCompletedDownloads() {
 func (a *App) ClearAllDownloads() {
 	jm := a.ctr.Jobs
 	if jm == nil {
-		backend.ClearAllDownloads()
+		util.ClearAllDownloads()
 		return
 	}
 	jm.ClearAllJobs()
@@ -541,27 +542,27 @@ func (a *App) ClearAllDownloads() {
 
 func (a *App) AddToDownloadQueue(spotifyID, trackName, artistName, albumName string) string {
 	itemID := fmt.Sprintf("%s-%d", spotifyID, time.Now().UnixNano())
-	backend.AddToQueue(itemID, trackName, artistName, albumName, "")
+	util.AddToQueue(itemID, trackName, artistName, albumName, "")
 	return itemID
 }
 
 func (a *App) MarkDownloadItemFailed(itemID, errorMsg string) {
-	backend.FailDownloadItem(itemID, errorMsg)
+	util.FailDownloadItem(itemID, errorMsg)
 }
 
 func (a *App) CancelAllQueuedItems() {
-	backend.CancelAllQueuedItems()
+	util.CancelAllQueuedItems()
 }
 
 // FIX ExportFailedDownloads — utilise a.GetDownloadQueue() (lit le JobManager BoltDB)
-// au lieu de backend.GetDownloadQueue() (queue in-memory uniquement)
+// au lieu de util.GetDownloadQueue() (queue in-memory uniquement)
 func (a *App) ExportFailedDownloads() (string, error) {
 	queueInfo := a.GetDownloadQueue()
 	var failedItems []string
 
 	hasFailed := false
 	for _, item := range queueInfo.Queue {
-		if item.Status == backend.StatusFailed {
+		if item.Status == util.StatusFailed {
 			hasFailed = true
 			break
 		}
@@ -577,7 +578,7 @@ func (a *App) ExportFailedDownloads() (string, error) {
 
 	count := 0
 	for _, item := range queueInfo.Queue {
-		if item.Status == backend.StatusFailed {
+		if item.Status == util.StatusFailed {
 			count++
 			line := fmt.Sprintf("%d. %s - %s", count, item.TrackName, item.ArtistName)
 			if item.AlbumName != "" {
@@ -996,9 +997,9 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 		return []CheckFileExistenceResult{}
 	}
 
-	outputDir = backend.NormalizePath(outputDir)
+	outputDir = util.NormalizePath(outputDir)
 	if rootDir != "" {
-		rootDir = backend.NormalizePath(rootDir)
+		rootDir = util.NormalizePath(rootDir)
 	}
 
 	defaultFilenameFormat := "title-artist"
@@ -1058,7 +1059,7 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 			if t.AudioFormat == "mp3" {
 				fileExt = ".mp3"
 			}
-			expectedFilenameBase := backend.BuildExpectedFilename(
+			expectedFilenameBase := util.BuildExpectedFilename(
 				t.TrackName, t.ArtistName, t.AlbumName, t.AlbumArtist, t.ReleaseDate,
 				filenameFormat, "", "", t.IncludeTrackNumber, trackNumber, t.DiscNumber, t.UseAlbumTrackNumber,
 			)
@@ -1164,7 +1165,7 @@ func (a *App) LoadSettings() (map[string]interface{}, error) {
 	return settings, nil
 }
 
-func (a *App) GetOSInfo() (string, error) { return backend.GetOSInfo() }
+func (a *App) GetOSInfo() (string, error) { return util.GetOSInfo() }
 
 func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []string, jellyfinMusicPath string) error {
 	if len(filePaths) == 0 {
@@ -1173,7 +1174,7 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return err
 	}
-	safeName := backend.SanitizeFilename(m3u8Name)
+	safeName := util.SanitizeFilename(m3u8Name)
 	if safeName == "" {
 		safeName = "playlist"
 	}
@@ -1212,23 +1213,23 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 // Misc helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (a *App) SkipDownloadItem(itemID, filePath string) { backend.SkipDownloadItem(itemID, filePath) }
+func (a *App) SkipDownloadItem(itemID, filePath string) { util.SkipDownloadItem(itemID, filePath) }
 func (a *App) GetPreviewURL(trackID string) (string, error) { return backend.GetPreviewURL(trackID) }
 
-func jobStatusToDownloadStatus(s JobStatus) backend.DownloadStatus {
+func jobStatusToDownloadStatus(s JobStatus) util.DownloadStatus {
 	switch s {
 	case StatusPending:
-		return backend.StatusQueued
+		return util.StatusQueued
 	case StatusDownloading:
-		return backend.StatusDownloading
+		return util.StatusDownloading
 	case StatusDone:
-		return backend.StatusCompleted
+		return util.StatusCompleted
 	case StatusFailed:
-		return backend.StatusFailed
+		return util.StatusFailed
 	case StatusSkipped:
-		return backend.StatusSkipped
+		return util.StatusSkipped
 	default:
-		return backend.StatusQueued
+		return util.StatusQueued
 	}
 }
 

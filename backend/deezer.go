@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type DeezerDownloader struct {
@@ -18,7 +20,7 @@ type DeezerDownloader struct {
 
 func NewDeezerDownloader() *DeezerDownloader {
 	return &DeezerDownloader{
-		client: NewHTTPClient(300 * time.Second),
+		client: util.NewHTTPClient(300 * time.Second),
 	}
 }
 
@@ -120,7 +122,7 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 	fmt.Printf("[Deezer] Fetching FLAC URL for ID: %s...\n", deezerTrackID)
 	var flacURL string
 	var lastErr error
-	for _, proxy := range GetDeezerProxies() {
+	for _, proxy := range util.GetDeezerProxies() {
 		u, err := d.getFlacURL(proxy, deezerTrackID)
 		if err == nil {
 			flacURL = u
@@ -160,7 +162,7 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 	}
 	defer out.Close()
 
-	pw := NewProgressWriter(out)
+	pw := util.NewProgressWriter(out)
 	if _, err = io.Copy(pw, dlResp.Body); err != nil {
 		out.Close()
 		os.Remove(filePath)
@@ -183,10 +185,10 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 		filenameArtist := spotifyArtistName
 		filenameAlbumArtist := spotifyAlbumArtist
 		if useFirstArtistOnly {
-			filenameArtist = GetFirstArtist(spotifyArtistName)
-			filenameAlbumArtist = GetFirstArtist(spotifyAlbumArtist)
+			filenameArtist = util.GetFirstArtist(spotifyArtistName)
+			filenameAlbumArtist = util.GetFirstArtist(spotifyAlbumArtist)
 		}
-		expectedFilename := BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
+		expectedFilename := util.BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
 		expectedPath := filepath.Join(outputDir, expectedFilename)
 
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
@@ -209,10 +211,10 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 		filenameArtist := spotifyArtistName
 		filenameAlbumArtist := spotifyAlbumArtist
 		if useFirstArtistOnly {
-			filenameArtist = GetFirstArtist(spotifyArtistName)
-			filenameAlbumArtist = GetFirstArtist(spotifyAlbumArtist)
+			filenameArtist = util.GetFirstArtist(spotifyArtistName)
+			filenameAlbumArtist = util.GetFirstArtist(spotifyAlbumArtist)
 		}
-		newFilename := BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
+		newFilename := util.BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
 		ext := filepath.Ext(filePath)
 		if ext == "" {
 			ext = ".flac"

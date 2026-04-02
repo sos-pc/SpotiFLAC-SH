@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 func GetSpotifyDataWithAPI(ctx context.Context, spotifyURL string, useAPI bool, apiBaseURL string, batch bool, delay time.Duration) (interface{}, error) {
@@ -29,7 +31,7 @@ func GetSpotifyDataWithAPI(ctx context.Context, spotifyURL string, useAPI bool, 
 		return nil, fmt.Errorf("failed to create API request: %w", err)
 	}
 
-	client := NewHTTPClient(30 * time.Second)
+	client := util.NewHTTPClient(30 * time.Second)
 
 	resp, err := client.Do(req)
 	if err != nil {

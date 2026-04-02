@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type SendNowResponse []struct {
@@ -81,7 +83,7 @@ func uploadToService(filename string, fileReader io.Reader) (string, error) {
 	req.Header.Set("Referer", "https://send.now/")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := NewHTTPClient(60 * time.Second)
+	client := util.NewHTTPClient(60 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("upload failed: %v", err)
@@ -125,7 +127,7 @@ func getUploadURL() (string, error) {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
 
-	client := NewHTTPClient(30 * time.Second)
+	client := util.NewHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -164,7 +166,7 @@ func fetchDirectImageLink(url string) (string, error) {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
 
-	client := NewHTTPClient(30 * time.Second)
+	client := util.NewHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

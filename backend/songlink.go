@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type SongLinkClient struct {
@@ -73,7 +75,7 @@ func GetSongLinkClient() *SongLinkClient {
 
 func NewSongLinkClient() *SongLinkClient {
 	return &SongLinkClient{
-		client: NewHTTPClient(30 * time.Second),
+		client: util.NewHTTPClient(30 * time.Second),
 		apiCallResetTime: time.Now(),
 	}
 }
@@ -339,7 +341,7 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 }
 
 func checkQobuzAvailability(isrc string) bool {
-	client := NewHTTPClient(10 * time.Second)
+	client := util.NewHTTPClient(10 * time.Second)
 	appID := "798273057"
 
 	searchURL := fmt.Sprintf("https://www.qobuz.com/api.json/0.2/track/search?query=%s&limit=1&app_id=%s", isrc, appID)
@@ -477,7 +479,7 @@ func getDeezerISRC(deezerURL string) (string, error) {
 
 	apiURL := fmt.Sprintf("https://api.deezer.com/track/%s", trackID)
 
-	client := NewHTTPClient(10 * time.Second)
+	client := util.NewHTTPClient(10 * time.Second)
 	resp, err := client.Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to call Deezer API: %w", err)
@@ -536,7 +538,7 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 	query := url.QueryEscape(cleanTrack + " " + cleanArtist)
 	searchURL := fmt.Sprintf("https://api.deezer.com/search?q=%s&limit=1", query)
 
-	client := NewHTTPClient(10 * time.Second)
+	client := util.NewHTTPClient(10 * time.Second)
 	resp, err := client.Get(searchURL)
 	if err != nil {
 		return nil, fmt.Errorf("deezer search failed: %w", err)

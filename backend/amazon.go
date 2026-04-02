@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type AmazonDownloader struct {
@@ -32,7 +34,7 @@ type AmazonStreamResponse struct {
 
 func NewAmazonDownloader() *AmazonDownloader {
 	return &AmazonDownloader{
-		client: NewHTTPClient(120 * time.Second),
+		client: util.NewHTTPClient(120 * time.Second),
 		regions: []string{"us", "eu"},
 	}
 }
@@ -141,7 +143,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	fmt.Printf("Fetching from Amazon API (ASIN: %s)...\n", asin)
 	var apiResp *AmazonStreamResponse
 	var lastErr error
-	for _, proxy := range GetAmazonProxies() {
+	for _, proxy := range util.GetAmazonProxies() {
 		r, err := a.getStreamResponse(proxy, asin)
 		if err == nil {
 			apiResp = r
@@ -174,7 +176,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	defer dlResp.Body.Close()
 
 	fmt.Printf("Downloading track: %s\n", fileName)
-	pw := NewProgressWriter(out)
+	pw := util.NewProgressWriter(out)
 	_, err = io.Copy(pw, dlResp.Body)
 	if err != nil {
 		out.Close()
@@ -282,10 +284,10 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 		filenameArtist := spotifyArtistName
 		filenameAlbumArtist := spotifyAlbumArtist
 		if useFirstArtistOnly {
-			filenameArtist = GetFirstArtist(spotifyArtistName)
-			filenameAlbumArtist = GetFirstArtist(spotifyAlbumArtist)
+			filenameArtist = util.GetFirstArtist(spotifyArtistName)
+			filenameAlbumArtist = util.GetFirstArtist(spotifyAlbumArtist)
 		}
-		expectedFilename := BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
+		expectedFilename := util.BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
 		expectedPath := filepath.Join(outputDir, expectedFilename)
 
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
@@ -349,16 +351,16 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 	originalFileBase := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 
 	if spotifyTrackName != "" && spotifyArtistName != "" {
-		safeArtist := sanitizeFilename(spotifyArtistName)
-		safeAlbumArtist := sanitizeFilename(spotifyAlbumArtist)
+		safeArtist := util.SanitizeFilename(spotifyArtistName)
+		safeAlbumArtist := util.SanitizeFilename(spotifyAlbumArtist)
 
 		if useFirstArtistOnly {
-			safeArtist = sanitizeFilename(GetFirstArtist(spotifyArtistName))
-			safeAlbumArtist = sanitizeFilename(GetFirstArtist(spotifyAlbumArtist))
+			safeArtist = util.SanitizeFilename(util.GetFirstArtist(spotifyArtistName))
+			safeAlbumArtist = util.SanitizeFilename(util.GetFirstArtist(spotifyAlbumArtist))
 		}
 
-		safeTitle := sanitizeFilename(spotifyTrackName)
-		safeAlbum := sanitizeFilename(spotifyAlbumName)
+		safeTitle := util.SanitizeFilename(spotifyTrackName)
+		safeAlbum := util.SanitizeFilename(spotifyAlbumName)
 
 		year := ""
 		if len(spotifyReleaseDate) >= 4 {
@@ -374,7 +376,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 			newFilename = strings.ReplaceAll(newFilename, "{album}", safeAlbum)
 			newFilename = strings.ReplaceAll(newFilename, "{album_artist}", safeAlbumArtist)
 			newFilename = strings.ReplaceAll(newFilename, "{year}", year)
-			newFilename = strings.ReplaceAll(newFilename, "{date}", SanitizeFilename(spotifyReleaseDate))
+			newFilename = strings.ReplaceAll(newFilename, "{date}", util.SanitizeFilename(spotifyReleaseDate))
 
 			if spotifyDiscNumber > 0 {
 				newFilename = strings.ReplaceAll(newFilename, "{disc}", fmt.Sprintf("%d", spotifyDiscNumber))

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/ulikunitz/xz"
 )
 
@@ -157,10 +158,10 @@ const (
 
 func DownloadFFmpeg(progressCallback func(int)) error {
 
-	SetDownloadProgress(0)
-	SetDownloadSpeed(0)
-	SetDownloading(true)
-	defer SetDownloading(false)
+	util.SetDownloadProgress(0)
+	util.SetDownloadSpeed(0)
+	util.SetDownloading(true)
+	defer util.SetDownloading(false)
 
 	ffmpegDir, err := GetFFmpegDir()
 	if err != nil {
@@ -250,7 +251,7 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
-	client := NewHTTPClient(30 * time.Second)
+	client := util.NewHTTPClient(30 * time.Second)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -301,9 +302,9 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 				lastBytes = downloaded
 			}
 
-			SetDownloadProgress(mbDownloaded)
+			util.SetDownloadProgress(mbDownloaded)
 			if speedMBps > 0 {
-				SetDownloadSpeed(speedMBps)
+				util.SetDownloadSpeed(speedMBps)
 			}
 
 			if totalSize > 0 && progressCallback != nil {

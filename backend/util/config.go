@@ -1,4 +1,4 @@
-package backend
+package util
 
 import (
 	"os"
@@ -6,12 +6,9 @@ import (
 )
 
 func GetDefaultMusicPath() string {
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-
-		return "C:\\Users\\Public\\Music"
+		return "/music"
 	}
-
 	return filepath.Join(homeDir, "Music")
 }

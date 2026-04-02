@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type LRCLibResponse struct {
@@ -66,7 +68,7 @@ type LyricsClient struct {
 
 func NewLyricsClient() *LyricsClient {
 	return &LyricsClient{
-		httpClient: NewHTTPClient(15 * time.Second),
+		httpClient: util.NewHTTPClient(15 * time.Second),
 	}
 }
 
@@ -364,10 +366,10 @@ func msToLRCTimestamp(msStr string) string {
 }
 
 func buildLyricsFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat string, includeTrackNumber bool, position, discNumber int) string {
-	safeTitle := sanitizeFilename(trackName)
-	safeArtist := sanitizeFilename(artistName)
-	safeAlbum := sanitizeFilename(albumName)
-	safeAlbumArtist := sanitizeFilename(albumArtist)
+	safeTitle := util.SanitizeFilename(trackName)
+	safeArtist := util.SanitizeFilename(artistName)
+	safeAlbum := util.SanitizeFilename(albumName)
+	safeAlbumArtist := util.SanitizeFilename(albumArtist)
 
 	year := ""
 	if len(releaseDate) >= 4 {
@@ -383,7 +385,7 @@ func buildLyricsFilename(trackName, artistName, albumName, albumArtist, releaseD
 		filename = strings.ReplaceAll(filename, "{album}", safeAlbum)
 		filename = strings.ReplaceAll(filename, "{album_artist}", safeAlbumArtist)
 		filename = strings.ReplaceAll(filename, "{year}", year)
-		filename = strings.ReplaceAll(filename, "{date}", sanitizeFilename(releaseDate))
+		filename = strings.ReplaceAll(filename, "{date}", util.SanitizeFilename(releaseDate))
 
 		if discNumber > 0 {
 			filename = strings.ReplaceAll(filename, "{disc}", fmt.Sprintf("%d", discNumber))
@@ -420,8 +422,8 @@ func buildLyricsFilename(trackName, artistName, albumName, albumArtist, releaseD
 
 func findAudioFileForLyrics(dir, trackName, artistName string) string {
 
-	safeTitle := sanitizeFilename(trackName)
-	safeArtist := sanitizeFilename(artistName)
+	safeTitle := util.SanitizeFilename(trackName)
+	safeArtist := util.SanitizeFilename(artistName)
 
 	audioExts := []string{".flac", ".mp3", ".m4a", ".FLAC", ".MP3", ".M4A"}
 
@@ -469,9 +471,9 @@ func (c *LyricsClient) DownloadLyrics(req LyricsDownloadRequest) (*LyricsDownloa
 
 	outputDir := req.OutputDir
 	if outputDir == "" {
-		outputDir = GetDefaultMusicPath()
+		outputDir = util.GetDefaultMusicPath()
 	} else {
-		outputDir = NormalizePath(outputDir)
+		outputDir = util.NormalizePath(outputDir)
 	}
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {

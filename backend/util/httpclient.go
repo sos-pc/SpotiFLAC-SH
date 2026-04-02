@@ -1,11 +1,11 @@
-package backend
+package util
 
 import (
 	"net/http"
 	"time"
 )
 
-// NewHTTPClient retourne un client qui respecte HTTP_PROXY/HTTPS_PROXY
+// NewHTTPClient returns an HTTP client that honours HTTP_PROXY/HTTPS_PROXY env vars.
 func NewHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,

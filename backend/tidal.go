@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type TidalDownloader struct {
@@ -52,7 +54,7 @@ type TidalBTSManifest struct {
 func NewTidalDownloader(apiURL string) *TidalDownloader {
 	if apiURL == "" {
 		downloader := &TidalDownloader{
-			client:     NewHTTPClient(5 * time.Second),
+			client:     util.NewHTTPClient(5 * time.Second),
 			timeout:    5 * time.Second,
 			maxRetries: 3,
 			apiURL:     "",
@@ -65,7 +67,7 @@ func NewTidalDownloader(apiURL string) *TidalDownloader {
 	}
 
 	return &TidalDownloader{
-		client:     NewHTTPClient(5 * time.Second),
+		client:     util.NewHTTPClient(5 * time.Second),
 		timeout:    5 * time.Second,
 		maxRetries: 3,
 		apiURL:     apiURL,
@@ -259,7 +261,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 
 	if !success {
 		fmt.Println("Falling back to public HiFi APIs...")
-		apis := GetTidalProxies()
+		apis := util.GetTidalProxies()
 		for _, apiBase := range apis {
 			fallbackURL := fmt.Sprintf("%s/track/?id=%d&audioquality=%s", apiBase, trackID, quality)
 			fmt.Printf("Trying fallback API: %s\n", fallbackURL)
@@ -367,7 +369,7 @@ func (t *TidalDownloader) DownloadFile(url, filepath string) error {
 	}
 	defer out.Close()
 
-	pw := NewProgressWriter(out)
+	pw := util.NewProgressWriter(out)
 	_, err = io.Copy(pw, resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
@@ -385,7 +387,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		return fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	client := NewHTTPClient(120 * time.Second)
+	client := util.NewHTTPClient(120 * time.Second)
 
 	doRequest := func(url string) (*http.Response, error) {
 		req, err := http.NewRequest("GET", url, nil)
@@ -415,7 +417,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		}
 		defer out.Close()
 
-		pw := NewProgressWriter(out)
+		pw := util.NewProgressWriter(out)
 		_, err = io.Copy(pw, resp.Body)
 		if err != nil {
 			return fmt.Errorf("failed to write file: %w", err)
@@ -446,7 +448,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
 
-		pw := NewProgressWriter(out)
+		pw := util.NewProgressWriter(out)
 		_, err = io.Copy(pw, resp.Body)
 		out.Close()
 
@@ -521,11 +523,11 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 			if timeDiff > 0.1 {
 				bytesDiff := float64(totalBytes - lastBytes)
 				speedMBps = (bytesDiff / (1024 * 1024)) / timeDiff
-				SetDownloadSpeed(speedMBps)
+				util.SetDownloadSpeed(speedMBps)
 				lastTime = now
 				lastBytes = totalBytes
 			}
-			SetDownloadProgress(mbDownloaded)
+			util.SetDownloadProgress(mbDownloaded)
 
 			fmt.Printf("\rDownloading: %.2f MB (%d/%d segments)", mbDownloaded, i+1, totalSegments)
 		}
@@ -585,16 +587,16 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 	trackTitle := spotifyTrackName
 	albumTitle := spotifyAlbumName
 
-	artistNameForFile := sanitizeFilename(artistName)
-	albumArtistForFile := sanitizeFilename(spotifyAlbumArtist)
+	artistNameForFile := util.SanitizeFilename(artistName)
+	albumArtistForFile := util.SanitizeFilename(spotifyAlbumArtist)
 
 	if useFirstArtistOnly {
-		artistNameForFile = sanitizeFilename(GetFirstArtist(artistName))
-		albumArtistForFile = sanitizeFilename(GetFirstArtist(spotifyAlbumArtist))
+		artistNameForFile = util.SanitizeFilename(util.GetFirstArtist(artistName))
+		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(spotifyAlbumArtist))
 	}
 
-	trackTitleForFile := sanitizeFilename(trackTitle)
-	albumTitleForFile := sanitizeFilename(albumTitle)
+	trackTitleForFile := util.SanitizeFilename(trackTitle)
+	albumTitleForFile := util.SanitizeFilename(albumTitle)
 
 	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, spotifyReleaseDate, spotifyTrackNumber, spotifyDiscNumber, filenameFormat, includeTrackNumber, position, useAlbumTrackNumber)
 	outputFilename := filepath.Join(outputDir, filename)
@@ -743,16 +745,16 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 	trackTitle := spotifyTrackName
 	albumTitle := spotifyAlbumName
 
-	artistNameForFile := sanitizeFilename(artistName)
-	albumArtistForFile := sanitizeFilename(spotifyAlbumArtist)
+	artistNameForFile := util.SanitizeFilename(artistName)
+	albumArtistForFile := util.SanitizeFilename(spotifyAlbumArtist)
 
 	if useFirstArtistOnly {
-		artistNameForFile = sanitizeFilename(GetFirstArtist(artistName))
-		albumArtistForFile = sanitizeFilename(GetFirstArtist(spotifyAlbumArtist))
+		artistNameForFile = util.SanitizeFilename(util.GetFirstArtist(artistName))
+		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(spotifyAlbumArtist))
 	}
 
-	trackTitleForFile := sanitizeFilename(trackTitle)
-	albumTitleForFile := sanitizeFilename(albumTitle)
+	trackTitleForFile := util.SanitizeFilename(trackTitle)
+	albumTitleForFile := util.SanitizeFilename(albumTitle)
 
 	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, spotifyReleaseDate, spotifyTrackNumber, spotifyDiscNumber, filenameFormat, includeTrackNumber, position, useAlbumTrackNumber)
 	outputFilename := filepath.Join(outputDir, filename)
@@ -1089,7 +1091,7 @@ func buildTidalFilename(title, artist, album, albumArtist, releaseDate string, t
 		filename = strings.ReplaceAll(filename, "{album}", album)
 		filename = strings.ReplaceAll(filename, "{album_artist}", albumArtist)
 		filename = strings.ReplaceAll(filename, "{year}", year)
-		filename = strings.ReplaceAll(filename, "{date}", SanitizeFilename(releaseDate))
+		filename = strings.ReplaceAll(filename, "{date}", util.SanitizeFilename(releaseDate))
 
 		if discNumber > 0 {
 			filename = strings.ReplaceAll(filename, "{disc}", fmt.Sprintf("%d", discNumber))
