@@ -1251,10 +1251,8 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 	// Read optional configured URLs from settings
 	spotFetchURL := ""
 	if settings, err := s.app.LoadSettings(); err == nil && settings != nil {
-		if useAPI, _ := settings["useSpotFetchAPI"].(bool); useAPI {
-			if u, _ := settings["spotFetchAPIUrl"].(string); u != "" {
-				spotFetchURL = u
-			}
+		if u, _ := settings["spotFetchAPIUrl"].(string); u != "" {
+			spotFetchURL = u
 		}
 	}
 

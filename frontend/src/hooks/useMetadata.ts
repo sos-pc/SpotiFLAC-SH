@@ -1,5 +1,4 @@
 import { useState, useRef } from "react";
-import { getSettings } from "@/lib/settings";
 import { fetchSpotifyMetadata } from "@/lib/api";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { logger } from "@/lib/logger";
@@ -10,7 +9,6 @@ export function useMetadata() {
     const [loading, setLoading] = useState(false);
     const [tracksLoading, setTracksLoading] = useState(false);
     const [metadata, setMetadata] = useState<SpotifyMetadataResponse | null>(null);
-    const [showApiModal, setShowApiModal] = useState(false);
     const [showAlbumDialog, setShowAlbumDialog] = useState(false);
     const activeStreamRef = useRef<EventSource | null>(null);
     const [selectedAlbum, setSelectedAlbum] = useState<{
@@ -139,12 +137,7 @@ export function useMetadata() {
                 setTracksLoading(false);
                 const msg = (() => { try { return JSON.parse(e.data).message; } catch { return "Failed to fetch artist data"; } })();
                 logger.error(`stream failed: ${msg}`);
-                const settings = getSettings();
-                if (!settings.useSpotFetchAPI) {
-                    setShowApiModal(true);
-                } else {
-                    toast.error(msg);
-                }
+                toast.error(msg);
                 reject(new Error(msg));
             });
 
@@ -213,13 +206,7 @@ export function useMetadata() {
         catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Failed to fetch metadata";
             logger.error(`fetch failed: ${errorMsg}`);
-            const settings = getSettings();
-            if (!settings.useSpotFetchAPI) {
-                setShowApiModal(true);
-            }
-            else {
-                toast.error(errorMsg);
-            }
+            toast.error(errorMsg);
         }
         finally {
             setLoading(false);
@@ -243,6 +230,12 @@ export function useMetadata() {
             return;
         }
         let urlToFetch = url.trim();
+        const isSpotifyUrl = urlToFetch.includes("spotify.com") || urlToFetch.startsWith("spotify:");
+        if (!isSpotifyUrl) {
+            logger.warning("not a valid spotify url");
+            toast.error("Please enter a valid Spotify URL (e.g. https://open.spotify.com/track/...)");
+            return;
+        }
         const isArtistUrl = urlToFetch.includes("/artist/");
         if (isArtistUrl && !urlToFetch.includes("/discography")) {
             urlToFetch = urlToFetch.replace(/\/$/, "") + "/discography/all";
@@ -314,13 +307,7 @@ export function useMetadata() {
         catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Failed to fetch album metadata";
             logger.error(`fetch failed: ${errorMsg}`);
-            const settings = getSettings();
-            if (!settings.useSpotFetchAPI) {
-                setShowApiModal(true);
-            }
-            else {
-                toast.error(errorMsg);
-            }
+            toast.error(errorMsg);
         }
         finally {
             setLoading(false);
@@ -340,8 +327,6 @@ export function useMetadata() {
         handleConfirmAlbumFetch,
         handleArtistClick,
         loadFromCache,
-        showApiModal,
-        setShowApiModal,
         resetMetadata: () => setMetadata(null),
     };
 }

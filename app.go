@@ -147,32 +147,38 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), time.Duration(req.Timeout*float64(time.Second)))
 	defer metaCancel()
 
+	var spotFetchAPIURL string
 	settings, err := a.LoadSettings()
 	if err == nil && settings != nil {
-		if useAPI, ok := settings["useSpotFetchAPI"].(bool); ok && useAPI {
-			if apiURL, ok := settings["spotFetchAPIUrl"].(string); ok && apiURL != "" {
-				data, err := backend.GetSpotifyDataWithAPI(metaCtx, req.URL, true, apiURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
-				if err != nil {
-					return "", fmt.Errorf("failed to fetch metadata from API: %v", err)
-				}
-				jsonData, err := json.MarshalIndent(data, "", "  ")
-				if err != nil {
-					return "", fmt.Errorf("failed to encode response: %v", err)
-				}
-				return string(jsonData), nil
-			}
+		if apiURL, ok := settings["spotFetchAPIUrl"].(string); ok {
+			spotFetchAPIURL = apiURL
 		}
 	}
 
-	data, err := backend.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch metadata: %v", err)
+	// Client natif Spotify (TOTP) — avec fallback automatique vers SpotFetch si échec
+	data, nativeErr := backend.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+	if nativeErr == nil {
+		jsonData, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to encode response: %v", err)
+		}
+		return string(jsonData), nil
 	}
-	jsonData, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to encode response: %v", err)
+
+	// Fallback automatique vers SpotFetch si disponible
+	if spotFetchAPIURL != "" {
+		data, err := backend.GetSpotifyDataWithAPI(metaCtx, req.URL, true, spotFetchAPIURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+		if err != nil {
+			return "", fmt.Errorf("failed to fetch metadata (native: %v, spotfetch: %v)", nativeErr, err)
+		}
+		jsonData, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to encode response: %v", err)
+		}
+		return string(jsonData), nil
 	}
-	return string(jsonData), nil
+
+	return "", fmt.Errorf("failed to fetch metadata: %v", nativeErr)
 }
 
 type SpotifySearchRequest struct {

@@ -26,7 +26,6 @@ export interface Settings {
     autoOrder: "tidal-qobuz-amazon-deezer" | "tidal-qobuz-deezer-amazon" | "tidal-amazon-qobuz-deezer" | "tidal-amazon-deezer-qobuz" | "tidal-deezer-qobuz-amazon" | "tidal-deezer-amazon-qobuz" | "qobuz-tidal-amazon-deezer" | "qobuz-tidal-deezer-amazon" | "qobuz-amazon-tidal-deezer" | "qobuz-amazon-deezer-tidal" | "qobuz-deezer-tidal-amazon" | "qobuz-deezer-amazon-tidal" | "amazon-tidal-qobuz-deezer" | "amazon-tidal-deezer-qobuz" | "amazon-qobuz-tidal-deezer" | "amazon-qobuz-deezer-tidal" | "amazon-deezer-tidal-qobuz" | "amazon-deezer-qobuz-tidal" | "deezer-tidal-qobuz-amazon" | "deezer-tidal-amazon-qobuz" | "deezer-qobuz-tidal-amazon" | "deezer-qobuz-amazon-tidal" | "deezer-amazon-tidal-qobuz" | "deezer-amazon-qobuz-tidal" | string;
     autoQuality: "16" | "24";
     allowFallback: boolean;
-    useSpotFetchAPI: boolean;
     spotFetchAPIUrl: string;
     createPlaylistFolder: boolean;
     createM3u8File: boolean;
@@ -111,7 +110,6 @@ export const DEFAULT_SETTINGS: Settings = {
     autoOrder: "tidal-qobuz-amazon-deezer",
     autoQuality: "16",
     allowFallback: true,
-    useSpotFetchAPI: false,
     spotFetchAPIUrl: "https://spotify.afkarxyz.fun/api",
     createPlaylistFolder: true,
     createM3u8File: false,

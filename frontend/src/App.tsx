@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Search, X, ArrowUp } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode, applyFont, updateSettings } from "@/lib/settings";
+import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode, applyFont } from "@/lib/settings";
 import { applyTheme } from "@/lib/themes";
 import { OpenFolder } from "@/lib/rpc";
 import { LoginPage } from "@/components/LoginPage";
@@ -132,17 +132,6 @@ function App() {
             window.removeEventListener("auth:expired", handleAuthExpired);
         };
     }, [authed]);
-    const handleEnableSpotFetchApi = async () => {
-        try {
-            await updateSettings({ useSpotFetchAPI: true });
-            metadata.setShowApiModal(false);
-            toast.success("SpotFetch API enabled! You can now try fetching again.");
-        }
-        catch (err) {
-            console.error("Failed to enable SpotFetch API:", err);
-            toast.error("Failed to update settings");
-        }
-    };
     const scrollToTop = useCallback(() => {
         window.scrollTo({ top: 0, behavior: "smooth" });
     }, []);
@@ -509,24 +498,6 @@ function App() {
             </Dialog>
 
             
-            <Dialog open={metadata.showApiModal} onOpenChange={metadata.setShowApiModal}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle>SpotFetch API Recommended</DialogTitle>
-                        <DialogDescription>
-                            Direct fetch failed. This usually happens when your <span className="text-foreground font-bold">country is blocked</span> by Spotify or your IP is restricted. Would you like to enable the <span className="text-foreground font-bold">SpotFetch API</span> to bypass this?
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => metadata.setShowApiModal(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleEnableSpotFetchApi}>
-                            Enable SpotFetch API
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
         </div>
     </TooltipProvider>);
 }

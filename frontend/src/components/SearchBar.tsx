@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { InputWithContext } from "@/components/ui/input-with-context";
-import { CloudDownload, XCircle, Link, Search, X, ChevronDown, Zap } from "lucide-react";
+import { CloudDownload, XCircle, Link, Search, X, ChevronDown } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { FetchHistory } from "@/components/FetchHistory";
@@ -9,7 +9,6 @@ import type { HistoryItem } from "@/components/FetchHistory";
 import { SearchSpotify, SearchSpotifyByType } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 import { useTypingEffect } from "@/hooks/useTypingEffect";
-import { getSettings, updateSettings } from "@/lib/settings";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 const FETCH_PLACEHOLDERS = [
@@ -242,12 +241,6 @@ interface SearchBarProps {
     onRegionChange: (region: string) => void;
 }
 export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, history, onHistorySelect, onHistoryRemove, hasResult, searchMode, onSearchModeChange, region, onRegionChange, }: SearchBarProps) {
-    const [useSpotFetchAPI, setUseSpotFetchAPI] = useState(() => getSettings()?.useSpotFetchAPI || false);
-    useEffect(() => {
-        const handler = (e: any) => { if (typeof e.detail?.useSpotFetchAPI !== "undefined") setUseSpotFetchAPI(e.detail.useSpotFetchAPI); };
-        window.addEventListener("settingsUpdated", handler);
-        return () => window.removeEventListener("settingsUpdated", handler);
-    }, []);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<any | null>(null);
     const [isSearching, setIsSearching] = useState(false);
@@ -525,19 +518,6 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
                   Fetch
                 </>)}
             </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => { const v = !useSpotFetchAPI; setUseSpotFetchAPI(v); updateSettings({ useSpotFetchAPI: v }); }}
-                  className={`w-9 h-9 flex items-center justify-center rounded transition-colors ${useSpotFetchAPI ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border border-input hover:bg-muted"}`}
-                  aria-label="Toggle SpotFetch API"
-                >
-                  <Zap className="h-4 w-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent><p>{useSpotFetchAPI ? "SpotFetch API: ON" : "SpotFetch API: OFF"}</p></TooltipContent>
-            </Tooltip>
           </>)}
       </div>
 
