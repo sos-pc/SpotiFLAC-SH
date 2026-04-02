@@ -14,6 +14,7 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
@@ -89,7 +90,7 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 					dl := backend.NewTidalDownloader("")
 					if tidalURL, tErr := dl.SearchTidalByName(trackName, artistName); tErr == nil && tidalURL != "" {
 						if urls == nil {
-							urls = &backend.SongLinkURLs{}
+							urls = &songlink.SongLinkURLs{}
 						}
 						urls.TidalURL = tidalURL
 						fmt.Printf("[GetStreamingURLs] ✓ Fallback successful: Found Tidal URL %s\n", tidalURL)

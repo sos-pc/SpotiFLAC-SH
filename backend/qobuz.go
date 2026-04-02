@@ -14,6 +14,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 )
 
 type QobuzDownloader struct {
@@ -374,7 +375,7 @@ func buildQobuzFilename(title, artist, album, albumArtist, releaseDate string, t
 func (q *QobuzDownloader) DownloadTrack(spotifyID, outputDir, quality, filenameFormat string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate string, useAlbumTrackNumber bool, spotifyCoverURL string, embedMaxQualityCover bool, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, allowFallback bool, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
 	var deezerISRC string
 	if spotifyID != "" {
-		songlinkClient := GetSongLinkClient()
+		songlinkClient := songlink.GetSongLinkClient()
 		isrc, err := songlinkClient.GetISRC(spotifyID)
 		if err != nil {
 			return "", fmt.Errorf("failed to get ISRC: %v", err)

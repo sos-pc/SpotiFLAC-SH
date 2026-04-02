@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
@@ -156,7 +157,7 @@ type JobManager struct {
 	db             *bolt.DB
 	queue          chan string // job IDs à traiter
 	songLinkSem    chan struct{}
-	songLinkClient *backend.SongLinkClient
+	songLinkClient *songlink.SongLinkClient
 	eventHandler   JobEventHandler
 	hub            *SSEHub
 	wg             sync.WaitGroup
@@ -195,7 +196,7 @@ func NewJobManager(configDir string, db *bolt.DB) (*JobManager, error) {
 		db:             db,
 		queue:          make(chan string, 10000),
 		songLinkSem:    make(chan struct{}, 1),
-		songLinkClient: backend.GetSongLinkClient(),
+		songLinkClient: songlink.GetSongLinkClient(),
 		hub:            newSSEHub(),
 		ctx:            ctx,
 		cancel:         cancel,
@@ -472,7 +473,7 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 
 	// 1. Deezer en priorité (API publique, pas de rate-limit)
 	if job.TrackName != "" && job.ArtistName != "" {
-		if fallback, ferr := backend.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil && fallback != nil {
+		if fallback, ferr := songlink.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil && fallback != nil {
 			result := make(map[string]string)
 			if fallback.ISRC != "" {
 				result["isrc"] = fallback.ISRC

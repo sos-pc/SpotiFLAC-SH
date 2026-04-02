@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,7 +291,7 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	wg.Wait()
 
 	// Override SongLink status if rate-limited in memory
-	sl := backend.GetSongLinkClient()
+	sl := songlink.GetSongLinkClient()
 	if sl.IsRateLimited() {
 		for i, r := range results {
 			if r.Name == "SongLink" {

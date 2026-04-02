@@ -11,6 +11,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/deezer"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -191,7 +192,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			var finalIsrc string
 			// 1. Tenter Deezer Fallback (rapide, sans compte, pas de rate-limit Songlink)
 			if req.TrackName != "" && req.ArtistName != "" {
-				if fallback, ferr := GetDeezerSearchFallback(req.TrackName, req.ArtistName); ferr == nil && fallback != nil && fallback.ISRC != "" {
+				if fallback, ferr := songlink.GetDeezerSearchFallback(req.TrackName, req.ArtistName); ferr == nil && fallback != nil && fallback.ISRC != "" {
 					finalIsrc = fallback.ISRC
 					fmt.Printf("[ISRC] Found via Deezer API: %s\n", finalIsrc)
 				}
@@ -199,7 +200,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 			// 2. Si Deezer a échoué, tenter Songlink (JSON ou HTML)
 			if finalIsrc == "" {
-				sl := GetSongLinkClient()
+				sl := songlink.GetSongLinkClient()
 					if sl != nil {
 					// L'appel GetAllURLs inclut le fallback HTML depuis la v1.3.6
 					urls, err := sl.GetAllURLsFromSpotify(req.SpotifyID, "")
