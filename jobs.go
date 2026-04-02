@@ -522,7 +522,24 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 		fmt.Printf("[Jobs] Songlink rate-limited for %s — trying HTML scraping\n", job.TrackName)
 	}
 
-	// Fallback : HTML scraping song.link (bypass rate-limit API JSON)
+	// Fallback 1 : scraping via iTunes Search + song.link /i/{appleMusicID}
+	// (quota distinct de /s/{spotifyID}, non affecté par le rate-limit Spotify)
+	if job.TrackName != "" && job.ArtistName != "" {
+		amURLs, amErr := client.ScrapeSongLinkViaAppleMusic(job.TrackName, job.ArtistName, job.AlbumName, job.Settings.Region, job.DurationMs)
+		if amErr == nil && amURLs != nil {
+			result := make(map[string]string)
+			data, _ := json.Marshal(amURLs)
+			json.Unmarshal(data, &result)
+			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
+				fmt.Printf("[Jobs] ✓ AppleMusic scraping OK for %s\n", job.TrackName)
+				return result
+			}
+		} else if amErr != nil {
+			fmt.Printf("[Jobs] AppleMusic scraping failed for %s: %v\n", job.TrackName, amErr)
+		}
+	}
+
+	// Fallback 2 : HTML scraping song.link /s/{spotifyID}
 	if job.SpotifyID != "" {
 		htmlURLs, hErr := client.ScrapeSongLinkHTML(job.SpotifyID)
 		if hErr == nil && htmlURLs != nil {

@@ -682,3 +682,235 @@ func (s *SongLinkClient) ScrapeSongLinkHTML(spotifyTrackID string) (*SongLinkURL
 
 	return urls, nil
 }
+
+// itunesResult est le résultat minimal retourné par l'iTunes Search API.
+type itunesResult struct {
+	TrackID         int64  `json:"trackId"`
+	TrackTimeMillis int64  `json:"trackTimeMillis"`
+	IsStreamable    bool   `json:"isStreamable"`
+}
+
+// searchITunes cherche un track sur iTunes et retourne le meilleur résultat selon la durée.
+// Essaie d'abord avec l'album puis sans si aucun résultat.
+func (s *SongLinkClient) searchITunes(trackName, artistName, albumName string, durationMs int) (*itunesResult, error) {
+	durationTolerance := int64(3000) // ±3 secondes
+
+	doSearch := func(term string) ([]itunesResult, error) {
+		q := url.QueryEscape(term)
+		searchURL := fmt.Sprintf("https://itunes.apple.com/search?term=%s&entity=song&limit=5", q)
+		req, err := http.NewRequest("GET", searchURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("iTunes status %d", resp.StatusCode)
+		}
+		var out struct {
+			ResultCount int             `json:"resultCount"`
+			Results     []itunesResult  `json:"results"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, err
+		}
+		return out.Results, nil
+	}
+
+	pickBest := func(results []itunesResult) *itunesResult {
+		if len(results) == 0 {
+			return nil
+		}
+		// Si on a une durée Spotify, on cherche le résultat le plus proche dans ±3s
+		if durationMs > 0 {
+			target := int64(durationMs)
+			var best *itunesResult
+			var bestDiff int64 = -1
+			for i := range results {
+				r := &results[i]
+				if r.TrackID == 0 {
+					continue
+				}
+				diff := r.TrackTimeMillis - target
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff <= durationTolerance && (bestDiff < 0 || diff < bestDiff) {
+					best = r
+					bestDiff = diff
+				}
+			}
+			if best != nil {
+				return best
+			}
+			return nil // aucun résultat dans la tolérance
+		}
+		// Pas de durée : premier résultat avec trackId non-nul
+		for i := range results {
+			if results[i].TrackID != 0 {
+				return &results[i]
+			}
+		}
+		return nil
+	}
+
+	// Tentative 1 : titre + artiste + album
+	if albumName != "" {
+		results, err := doSearch(trackName + " " + artistName + " " + albumName)
+		if err == nil {
+			if best := pickBest(results); best != nil {
+				return best, nil
+			}
+		}
+	}
+
+	// Tentative 2 : titre + artiste (sans album)
+	results, err := doSearch(trackName + " " + artistName)
+	if err != nil {
+		return nil, fmt.Errorf("applemusic: iTunes search failed: %w", err)
+	}
+	best := pickBest(results)
+	if best == nil {
+		return nil, fmt.Errorf("applemusic: no iTunes match within ±3s for %s - %s (duration: %dms)", trackName, artistName, durationMs)
+	}
+	return best, nil
+}
+
+// ScrapeSongLinkViaAppleMusic — bypass rate-limit via iTunes Search + page song.link /i/{id}
+// Flux : iTunes Search API (gratuit) → Apple Music track ID → song.link/{region}/i/{id}
+// La page /i/{id} a un quota distinct de /s/{spotifyID} et n'est pas affectée par le
+// rate-limit déclenché par les URL Spotify.
+func (s *SongLinkClient) ScrapeSongLinkViaAppleMusic(trackName, artistName, albumName, region string, durationMs int) (*SongLinkURLs, error) {
+	// ── Étape 1 : iTunes Search API ───────────────────────────────────────
+	itunes, err := s.searchITunes(trackName, artistName, albumName, durationMs)
+	if err != nil {
+		return nil, err
+	}
+
+	trackID := itunes.TrackID
+	fmt.Printf("[Songlink AppleMusic] iTunes track ID: %d for %s - %s\n", trackID, trackName, artistName)
+
+	// ── Étape 2 : scrape song.link/{region}/i/{trackID} ───────────────────
+	if region == "" {
+		region = "us"
+	}
+	pageURL := fmt.Sprintf("https://song.link/%s/i/%d", strings.ToLower(region), trackID)
+
+	req2, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("applemusic: failed to create song.link request: %w", err)
+	}
+	req2.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req2.Header.Set("Accept-Language", "en-US,en;q=0.5")
+
+	resp2, err := s.client.Do(req2)
+	if err != nil {
+		return nil, fmt.Errorf("applemusic: song.link request failed: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode == 429 {
+		return nil, fmt.Errorf("applemusic: song.link returned 429 for Apple Music ID %d", trackID)
+	}
+	if resp2.StatusCode != 200 {
+		return nil, fmt.Errorf("applemusic: song.link returned status %d for Apple Music ID %d", resp2.StatusCode, trackID)
+	}
+
+	body, err := io.ReadAll(resp2.Body)
+	if err != nil {
+		return nil, fmt.Errorf("applemusic: failed to read song.link body: %w", err)
+	}
+
+	html := string(body)
+	const marker = `__NEXT_DATA__" type="application/json">`
+	start := strings.Index(html, marker)
+	if start == -1 {
+		return nil, fmt.Errorf("applemusic: __NEXT_DATA__ not found in song.link page")
+	}
+	start += len(marker)
+	end := strings.Index(html[start:], "</script>")
+	if end == -1 {
+		return nil, fmt.Errorf("applemusic: __NEXT_DATA__ closing tag not found")
+	}
+
+	// Structure /i/{id} : sections[].links[] au lieu de linksByPlatform
+	var nextData struct {
+		Props struct {
+			PageProps struct {
+				Error *struct {
+					StatusCode int `json:"statusCode"`
+				} `json:"error"`
+				PageData *struct {
+					Sections []struct {
+						Links []struct {
+							Platform string `json:"platform"`
+							URL      string `json:"url"`
+						} `json:"links"`
+					} `json:"sections"`
+				} `json:"pageData"`
+			} `json:"pageProps"`
+		} `json:"props"`
+	}
+
+	if err := json.Unmarshal([]byte(html[start:start+end]), &nextData); err != nil {
+		return nil, fmt.Errorf("applemusic: failed to parse __NEXT_DATA__: %w", err)
+	}
+
+	if nextData.Props.PageProps.Error != nil {
+		code := nextData.Props.PageProps.Error.StatusCode
+		if code == 429 {
+			return nil, fmt.Errorf("applemusic: song.link NEXT_DATA error 429")
+		}
+		return nil, fmt.Errorf("applemusic: song.link NEXT_DATA error %d", code)
+	}
+
+	if nextData.Props.PageProps.PageData == nil {
+		return nil, fmt.Errorf("applemusic: no pageData in song.link NEXT_DATA")
+	}
+
+	// Indexer les URLs par platform à partir de toutes les sections
+	platformURLs := make(map[string]string)
+	for _, section := range nextData.Props.PageProps.PageData.Sections {
+		for _, link := range section.Links {
+			if link.Platform != "" && link.URL != "" {
+				platformURLs[link.Platform] = link.URL
+			}
+		}
+	}
+
+	if len(platformURLs) == 0 {
+		return nil, fmt.Errorf("applemusic: no platform URLs found for Apple Music ID %d", trackID)
+	}
+
+	urls := &SongLinkURLs{}
+	found := false
+
+	if tidalURL, ok := platformURLs["tidal"]; ok {
+		urls.TidalURL = tidalURL
+		found = true
+		fmt.Printf("[Songlink AppleMusic] ✓ Tidal: %s\n", tidalURL)
+	}
+	if amazonURL, ok := platformURLs["amazonMusic"]; ok {
+		urls.AmazonURL = amazonURL
+		found = true
+		fmt.Printf("[Songlink AppleMusic] ✓ Amazon: %s\n", amazonURL)
+	}
+	if deezerURL, ok := platformURLs["deezer"]; ok {
+		if isrc, iErr := getDeezerISRC(deezerURL); iErr == nil && isrc != "" {
+			urls.ISRC = isrc
+			found = true
+			fmt.Printf("[Songlink AppleMusic] ✓ ISRC via Deezer: %s\n", isrc)
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("applemusic: no usable URLs for Apple Music ID %d", trackID)
+	}
+
+	return urls, nil
+}
