@@ -18,6 +18,10 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
+// setHideWindow is a no-op on Linux (Docker target). On Windows it would hide
+// the console window of spawned subprocesses; that build target is not supported.
+func setHideWindow(_ *exec.Cmd) {}
+
 func ValidateExecutable(path string) error {
 	cleanedPath := filepath.Clean(path)
 	if cleanedPath == "" {
