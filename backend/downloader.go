@@ -13,6 +13,7 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/amazon"
 	"github.com/afkarxyz/SpotiFLAC/backend/deezer"
 	"github.com/afkarxyz/SpotiFLAC/backend/qobuz"
+	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -244,7 +245,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 	case "tidal":
 		if req.ServiceURL == "" && req.TrackName != "" && req.ArtistName != "" {
-			dl := NewTidalDownloader("")
+			dl := tidal.NewTidalDownloader("")
 			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
 				req.ServiceURL = tidalURL
 				fmt.Printf("[DownloadTrack] Found Tidal URL via fallback search: %s\n", tidalURL)
@@ -252,14 +253,14 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 
 		if req.ApiURL == "" || req.ApiURL == "auto" {
-			downloader := NewTidalDownloader("")
+			downloader := tidal.NewTidalDownloader("")
 			if req.ServiceURL != "" {
 				filename, err = downloader.DownloadByURLWithFallback(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			} else {
 				filename, err = downloader.Download(req.SpotifyID, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			}
 		} else {
-			downloader := NewTidalDownloader(req.ApiURL)
+			downloader := tidal.NewTidalDownloader(req.ApiURL)
 			if req.ServiceURL != "" {
 				filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			} else {
@@ -287,7 +288,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		order := strings.Split(orderStr, "-")
 
 		if req.ServiceURL == "" && req.TrackName != "" && req.ArtistName != "" {
-			dl := NewTidalDownloader("")
+			dl := tidal.NewTidalDownloader("")
 			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
 				req.ServiceURL = tidalURL
 				fmt.Printf("[DownloadTrack/Auto] Found Tidal URL via fallback search: %s\n", tidalURL)
@@ -298,7 +299,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		for _, svc := range order {
 			switch svc {
 			case "tidal":
-				downloader := NewTidalDownloader("")
+				downloader := tidal.NewTidalDownloader("")
 				if req.ServiceURL != "" {
 					filename, err = downloader.DownloadByURLWithFallback(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 				} else {

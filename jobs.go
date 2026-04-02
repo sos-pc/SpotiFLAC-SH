@@ -12,6 +12,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
@@ -655,7 +656,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		// Si pas d'URL Tidal/Amazon mais on a un ISRC, chercher Tidal via ISRC
 		if serviceURL == "" && streamingURLs["isrc"] != "" {
 			isrc := streamingURLs["isrc"]
-			tidalID, tidalAPI, err := backend.GetTidalIDFromISRC(job.TrackName, job.ArtistName, isrc)
+			tidalID, tidalAPI, err := tidal.GetTidalIDFromISRC(job.TrackName, job.ArtistName, isrc)
 			if err == nil && tidalID > 0 {
 				tidalURL := fmt.Sprintf("https://tidal.com/track/%d", tidalID)
 				streamingURLs["tidal_url"] = tidalURL
@@ -676,7 +677,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 
 	// Si toujours pas de serviceURL et qu'on veut Tidal (ou auto), on utilise la recherche directe Tidal
 	if serviceURL == "" && (service == "tidal" || service == "auto") {
-		downloader := backend.NewTidalDownloader("")
+		downloader := tidal.NewTidalDownloader("")
 		if tidalURL, serr := downloader.SearchTidalByName(job.TrackName, job.ArtistName); serr == nil && tidalURL != "" {
 			if streamingURLs == nil {
 				streamingURLs = make(map[string]string)

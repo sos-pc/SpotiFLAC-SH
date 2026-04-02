@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1200,7 +1201,7 @@ func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
-	token := backend.LoadTidalToken()
+	token := tidal.LoadTidalToken()
 	if token == nil {
 		writeV1JSON(w, http.StatusOK, map[string]interface{}{"connected": false})
 		return
@@ -1212,12 +1213,12 @@ func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) v1TidalDisconnect(w http.ResponseWriter, r *http.Request) {
-	backend.DeleteTidalToken()
+	tidal.DeleteTidalToken()
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) v1TidalDeviceStart(w http.ResponseWriter, r *http.Request) {
-	resp, err := backend.StartTidalDeviceAuth()
+	resp, err := tidal.StartTidalDeviceAuth()
 	if err != nil {
 		writeV1Error(w, http.StatusBadGateway, err.Error())
 		return
@@ -1233,7 +1234,7 @@ func (s *Server) v1TidalDevicePoll(w http.ResponseWriter, r *http.Request) {
 		writeV1Error(w, http.StatusBadRequest, "device_code required")
 		return
 	}
-	result := backend.PollTidalDeviceAuth(req.DeviceCode)
+	result := tidal.PollTidalDeviceAuth(req.DeviceCode)
 	writeV1JSON(w, http.StatusOK, result)
 }
 
