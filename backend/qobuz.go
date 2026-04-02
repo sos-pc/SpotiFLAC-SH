@@ -79,7 +79,12 @@ func (q *QobuzDownloader) searchByISRC(isrc string) (*QobuzTrack, error) {
 	apiBase := "https://www.qobuz.com/api.json/0.2/track/search?query="
 	url := fmt.Sprintf("%s%s&limit=1&app_id=%s", apiBase, isrc, q.appID)
 
-	resp, err := q.client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	resp, err := q.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search track: %w", err)
 	}
@@ -125,7 +130,12 @@ func buildQobuzAPIURL(apiBase string, trackID int64, quality string) string {
 
 func (q *QobuzDownloader) DownloadFromStandard(apiBase string, trackID int64, quality string) (string, error) {
 	apiURL := buildQobuzAPIURL(apiBase, trackID, quality)
-	resp, err := q.client.Get(apiURL)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	resp, err := q.client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -244,7 +254,12 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 
 	downloadClient := NewHTTPClient(5 * time.Minute)
 
-	resp, err := downloadClient.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create download request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
