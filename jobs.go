@@ -639,6 +639,11 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 				fmt.Printf("[Jobs] Tidal found via ISRC for %s: ID=%d\n", job.TrackName, tidalID)
 				if service != "tidal" && service != "auto" {
 					service = "tidal"
+					if s.TidalQuality != "" {
+						audioFormat = s.TidalQuality
+					} else {
+						audioFormat = "LOSSLESS"
+					}
 				}
 			}
 		}
@@ -656,6 +661,11 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 			fmt.Printf("[Jobs] Tidal found via direct search for %s\n", job.TrackName)
 			if service != "tidal" && service != "auto" {
 				service = "tidal"
+				if s.TidalQuality != "" {
+					audioFormat = s.TidalQuality
+				} else {
+					audioFormat = "LOSSLESS"
+				}
 			}
 		} else if streamingURLs != nil && streamingURLs["isrc"] != "" && service != "qobuz" {
 			service = "qobuz"
