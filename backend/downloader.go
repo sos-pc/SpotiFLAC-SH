@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
+	"github.com/afkarxyz/SpotiFLAC/backend/amazon"
 	"github.com/afkarxyz/SpotiFLAC/backend/deezer"
+	"github.com/afkarxyz/SpotiFLAC/backend/qobuz"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -233,7 +235,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 	switch req.Service {
 	case "amazon":
-		downloader := NewAmazonDownloader()
+		downloader := amazon.NewAmazonDownloader()
 		if req.ServiceURL != "" {
 			filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 		} else {
@@ -268,7 +270,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	case "qobuz":
 		fmt.Println("Waiting for ISRC (Qobuz dependency)...")
 		isrc := <-isrcChan
-		downloader := NewQobuzDownloader()
+		downloader := qobuz.NewQobuzDownloader()
 		quality := qobuzFmt
 		filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 
@@ -303,7 +305,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 					filename, err = downloader.Download(req.SpotifyID, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 				}
 			case "amazon":
-				downloader := NewAmazonDownloader()
+				downloader := amazon.NewAmazonDownloader()
 				if req.ServiceURL != "" {
 					filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 				} else {
@@ -311,7 +313,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				}
 			case "qobuz":
 				isrc := <-isrcChan
-				downloader := NewQobuzDownloader()
+				downloader := qobuz.NewQobuzDownloader()
 				quality := qobuzFmt
 				filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			case "deezer":
