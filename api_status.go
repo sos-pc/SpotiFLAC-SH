@@ -65,15 +65,15 @@ func invalidateStatusCache() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // statusFromCode maps an HTTP status code to a service status string.
-//   - 429           → "ratelimited"
-//   - 401 / 403     → "ok"  (server is up, just requires auth)
-//   - 2xx / 3xx     → "ok"
-//   - everything else → "down"
+//   - 429       → "ratelimited"
+//   - 4xx       → "ok"  (server is reachable; root URL may not exist for API-only services)
+//   - 2xx / 3xx → "ok"
+//   - 5xx       → "down"  (server error or unavailable)
 func statusFromCode(code int) string {
 	switch {
 	case code == 429:
 		return "ratelimited"
-	case code == 401 || code == 403:
+	case code >= 400 && code < 500:
 		return "ok"
 	case code >= 200 && code < 400:
 		return "ok"
