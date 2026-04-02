@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 )
 
@@ -210,7 +211,7 @@ func (s *Server) registerV1Routes() {
 			return nil
 		}
 
-		if err := backend.StreamArtistDiscography(r.Context(), spotifyURL, emit); err != nil {
+		if err := spotify.StreamArtistDiscography(r.Context(), spotifyURL, emit); err != nil {
 			// Only send error event if client is still connected
 			select {
 			case <-r.Context().Done():

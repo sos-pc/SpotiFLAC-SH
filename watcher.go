@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -138,7 +138,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	data, err := backend.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
+	data, err := spotify.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
 	if err != nil {
 		fmt.Printf("[Watcher] Failed to fetch metadata for %s: %v\n", pl.SpotifyURL, err)
 		return
@@ -317,7 +317,7 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	data, err := backend.GetFilteredSpotifyData(ctx, req.SpotifyURL, true, time.Second)
+	data, err := spotify.GetFilteredSpotifyData(ctx, req.SpotifyURL, true, time.Second)
 	if err != nil {
 		return AddWatchlistResponse{}, fmt.Errorf("failed to fetch playlist: %v", err)
 	}
@@ -505,7 +505,7 @@ func (w *Watcher) RedownloadWatchlist(id string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel() // un seul defer, hors boucle effective car on return juste après
 
-		data, err := backend.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
+		data, err := spotify.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to fetch playlist: %v", err)
 		}

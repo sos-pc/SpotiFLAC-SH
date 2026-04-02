@@ -13,6 +13,7 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/amazon"
 	"github.com/afkarxyz/SpotiFLAC/backend/deezer"
 	"github.com/afkarxyz/SpotiFLAC/backend/qobuz"
+	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
@@ -115,7 +116,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		defer detailCancel()
 
 		trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", req.SpotifyID)
-		trackData, err := GetFilteredSpotifyData(detailCtx, trackURL, false, 0)
+		trackData, err := spotify.GetFilteredSpotifyData(detailCtx, trackURL, false, 0)
 		if err == nil {
 			var trackResp struct {
 				Track struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
@@ -70,7 +71,7 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 		defer cancel()
 
 		trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotifyTrackID)
-		trackData, sErr := backend.GetFilteredSpotifyData(ctx, trackURL, false, 0)
+		trackData, sErr := spotify.GetFilteredSpotifyData(ctx, trackURL, false, 0)
 
 		if sErr == nil {
 			var trackResp struct {
@@ -161,7 +162,7 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 	}
 
 	// Client natif Spotify (TOTP) — avec fallback automatique vers SpotFetch si échec
-	data, nativeErr := backend.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+	data, nativeErr := spotify.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
 	if nativeErr == nil {
 		jsonData, err := json.MarshalIndent(data, "", "  ")
 		if err != nil {
@@ -172,7 +173,7 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 
 	// Fallback automatique vers SpotFetch si disponible
 	if spotFetchAPIURL != "" {
-		data, err := backend.GetSpotifyDataWithAPI(metaCtx, req.URL, true, spotFetchAPIURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+		data, err := spotify.GetSpotifyDataWithAPI(metaCtx, req.URL, true, spotFetchAPIURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch metadata (native: %v, spotfetch: %v)", nativeErr, err)
 		}
@@ -191,7 +192,7 @@ type SpotifySearchRequest struct {
 	Limit int    `json:"limit"`
 }
 
-func (a *App) SearchSpotify(req SpotifySearchRequest) (*backend.SearchResponse, error) {
+func (a *App) SearchSpotify(req SpotifySearchRequest) (*spotify.SearchResponse, error) {
 	if req.Query == "" {
 		return nil, fmt.Errorf("search query is required")
 	}
@@ -200,7 +201,7 @@ func (a *App) SearchSpotify(req SpotifySearchRequest) (*backend.SearchResponse, 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return backend.SearchSpotify(ctx, req.Query, req.Limit)
+	return spotify.SearchSpotify(ctx, req.Query, req.Limit)
 }
 
 type SpotifySearchByTypeRequest struct {
@@ -210,7 +211,7 @@ type SpotifySearchByTypeRequest struct {
 	Offset     int    `json:"offset"`
 }
 
-func (a *App) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([]backend.SearchResult, error) {
+func (a *App) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([]spotify.SearchResult, error) {
 	if req.Query == "" {
 		return nil, fmt.Errorf("search query is required")
 	}
@@ -222,7 +223,7 @@ func (a *App) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([]backend.Sea
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return backend.SearchSpotifyByType(ctx, req.Query, req.SearchType, req.Limit, req.Offset)
+	return spotify.SearchSpotifyByType(ctx, req.Query, req.SearchType, req.Limit, req.Offset)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -331,7 +332,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", req.SpotifyID)
-		if trackData, err := backend.GetFilteredSpotifyData(ctx, trackURL, false, 0); err == nil {
+		if trackData, err := spotify.GetFilteredSpotifyData(ctx, trackURL, false, 0); err == nil {
 			var trackResp struct {
 				Track struct {
 					Album struct {
@@ -1218,7 +1219,7 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (a *App) SkipDownloadItem(itemID, filePath string) { util.SkipDownloadItem(itemID, filePath) }
-func (a *App) GetPreviewURL(trackID string) (string, error) { return backend.GetPreviewURL(trackID) }
+func (a *App) GetPreviewURL(trackID string) (string, error) { return spotify.GetPreviewURL(trackID) }
 
 func jobStatusToDownloadStatus(s JobStatus) util.DownloadStatus {
 	switch s {
