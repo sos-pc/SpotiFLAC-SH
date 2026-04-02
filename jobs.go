@@ -669,6 +669,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 			}
 		} else if streamingURLs != nil && streamingURLs["isrc"] != "" && service != "qobuz" {
 			service = "qobuz"
+			audioFormat = qobuzQualityFromFormat(audioFormat)
 			fmt.Printf("[Jobs] Tidal search failed, but ISRC available for %s, switching to Qobuz\n", job.TrackName)
 		}
 	}
@@ -991,6 +992,32 @@ func (jm *JobManager) ClearAllJobs() error {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers statiques
 // ─────────────────────────────────────────────────────────────────────────────
+
+// tidalQualityFromFormat maps any quality string to the nearest valid Tidal quality.
+func tidalQualityFromFormat(format string) string {
+	switch format {
+	case "27", "7":
+		return "HI_RES_LOSSLESS"
+	case "6", "flac":
+		return "LOSSLESS"
+	case "LOSSLESS", "HI_RES_LOSSLESS", "HI_RES":
+		return format
+	default:
+		return "LOSSLESS"
+	}
+}
+
+// qobuzQualityFromFormat maps any quality string to the nearest valid Qobuz quality.
+func qobuzQualityFromFormat(format string) string {
+	switch format {
+	case "HI_RES_LOSSLESS", "HI_RES", "27":
+		return "27"
+	case "7":
+		return "7"
+	default:
+		return "6"
+	}
+}
 
 func getFirstArtistStatic(artistString string) string {
 	if artistString == "" {
