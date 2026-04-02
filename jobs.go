@@ -139,6 +139,9 @@ type JobEventHandler interface {
 	// OnPermanentFailure est appelé quand un job échoue de façon permanente
 	// (pas un timeout/rate-limit) pour qu'un retry automatique ne reboucle pas.
 	OnPermanentFailure(watchlistID, spotifyID string)
+	// OnTrackDownloaded est appelé quand un job watchlist se termine avec succès
+	// et un fichier sur disque. Permet de persister {spotifyID → filePath}.
+	OnTrackDownloaded(watchlistID, spotifyID, filePath string)
 	// OnBatchComplete est appelé quand tous les jobs d'une watchlist sont
 	// terminés : met à jour le SyncLog et génère le M3U8.
 	OnBatchComplete(watchlistID string, downloaded, skipped, failed int)
@@ -442,6 +445,9 @@ func (jm *JobManager) processJob(jobID string) {
 	fmt.Printf("[Jobs] Done: %s\n", job.TrackName)
 
 	if job.WatchlistID != "" {
+		if jm.eventHandler != nil && job.SpotifyID != "" && resp.File != "" {
+			jm.eventHandler.OnTrackDownloaded(job.WatchlistID, job.SpotifyID, resp.File)
+		}
 		jm.maybeGenerateM3U8(job.WatchlistID)
 	}
 }
@@ -896,6 +902,30 @@ func (jm *JobManager) GetAllJobs() ([]Job, error) {
 		})
 	})
 	return jobs, err
+}
+
+// GetDoneFilesByWatchlist retourne une map {spotifyID → filePath} pour tous les jobs
+// terminés (StatusDone) d'une watchlist donnée qui ont un FilePath enregistré.
+// Utilisé pour vérifier que les fichiers considérés comme "validés" existent encore sur disque.
+func (jm *JobManager) GetDoneFilesByWatchlist(watchlistID string) map[string]string {
+	result := make(map[string]string)
+	jm.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketJobs)
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			var job Job
+			if err := json.Unmarshal(v, &job); err != nil {
+				return nil
+			}
+			if job.WatchlistID == watchlistID && job.Status == StatusDone && job.FilePath != "" {
+				result[job.SpotifyID] = job.FilePath
+			}
+			return nil
+		})
+	})
+	return result
 }
 
 func (jm *JobManager) CleanupOldJobs() (int, error) {

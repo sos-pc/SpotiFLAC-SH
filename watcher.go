@@ -35,7 +35,8 @@ type WatchedPlaylist struct {
 	IntervalHours  int         `json:"interval_hours"`
 	Settings       JobSettings `json:"settings"`
 	LastSync       time.Time   `json:"last_sync"`
-	TrackIDs       []string    `json:"track_ids"`
+	TrackIDs       []string          `json:"track_ids"`
+	TrackedFiles   map[string]string `json:"tracked_files,omitempty"` // spotifyID → filePath absolu
 	CreatedAt      time.Time   `json:"created_at"`
 	SyncDeletions  bool        `json:"sync_deletions"`
 	UpgradeQuality bool        `json:"upgrade_quality"`
@@ -167,6 +168,37 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	knownIDs := make(map[string]bool, len(pl.TrackIDs))
 	for _, id := range pl.TrackIDs {
 		knownIDs[id] = true
+	}
+
+	// Vérifier que les fichiers téléchargés par SpotiFLAC existent encore sur disque.
+	// Seuls les tracks dans TrackedFiles (téléchargés avec succès) sont vérifiés —
+	// les tracks ajoutés à la création de la watchlist n'ont pas d'entrée dans TrackedFiles.
+	if len(pl.TrackedFiles) > 0 {
+		var missingIDs []string
+		for spotifyID, filePath := range pl.TrackedFiles {
+			if !knownIDs[spotifyID] {
+				continue
+			}
+			if _, err := os.Stat(filePath); err != nil {
+				fmt.Printf("[Watcher] File missing for %s (%s) — will re-download\n", spotifyID, filePath)
+				delete(knownIDs, spotifyID)
+				missingIDs = append(missingIDs, spotifyID)
+			}
+		}
+		if len(missingIDs) > 0 {
+			missingSet := make(map[string]bool, len(missingIDs))
+			for _, id := range missingIDs {
+				missingSet[id] = true
+			}
+			filtered := make([]string, 0, len(pl.TrackIDs))
+			for _, id := range pl.TrackIDs {
+				if !missingSet[id] {
+					filtered = append(filtered, id)
+				}
+			}
+			pl.TrackIDs = filtered
+			fmt.Printf("[Watcher] %d missing file(s) will be re-queued for %s\n", len(missingIDs), pl.Name)
+		}
 	}
 
 	var newTracks []JobTrack
@@ -523,6 +555,30 @@ func (w *Watcher) RedownloadWatchlist(id string) error {
 // Retire le track des TrackIDs pour qu'il soit réessayé au prochain sync.
 func (w *Watcher) OnPermanentFailure(watchlistID, spotifyID string) {
 	w.RemoveTrackID(watchlistID, spotifyID)
+}
+
+// OnTrackDownloaded implémente JobEventHandler.
+// Persiste {spotifyID → filePath} dans TrackedFiles pour pouvoir vérifier
+// l'existence du fichier lors des syncs futurs, indépendamment du cycle de vie des jobs.
+func (w *Watcher) OnTrackDownloaded(watchlistID, spotifyID, filePath string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	playlists, err := w.GetWatchlists()
+	if err != nil {
+		return
+	}
+	for i, pl := range playlists {
+		if pl.ID != watchlistID {
+			continue
+		}
+		if playlists[i].TrackedFiles == nil {
+			playlists[i].TrackedFiles = make(map[string]string)
+		}
+		playlists[i].TrackedFiles[spotifyID] = filePath
+		w.saveWatchlist(&playlists[i])
+		return
+	}
 }
 
 // OnBatchComplete implémente JobEventHandler.
