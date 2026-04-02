@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -166,7 +167,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	if req.SpotifyID != "" {
 		if req.EmbedLyrics {
 			go func() {
-				client := NewLyricsClient()
+				client := meta.NewLyricsClient()
 				resp, _, err := client.FetchLyricsAllSources(req.SpotifyID, req.TrackName, req.ArtistName, req.AlbumName, req.Duration)
 				if err == nil && resp != nil && len(resp.Lines) > 0 {
 					lrc := client.ConvertToLRC(resp, req.TrackName, req.ArtistName)
@@ -364,7 +365,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			fmt.Println(lyrics)
 			fmt.Printf("--- End LRC Content ---\n\n")
 			fmt.Printf("Embedding into: %s\n", filename)
-			if err := EmbedLyricsOnlyUniversal(filename, lyrics); err != nil {
+			if err := meta.EmbedLyricsOnlyUniversal(filename, lyrics); err != nil {
 				fmt.Printf("Failed to embed lyrics: %v\n", err)
 			} else {
 				fmt.Printf("Lyrics embedded successfully!\n")

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type TidalTokenData struct {
@@ -53,7 +55,7 @@ var (
 
 // GetTidalTokenPath retourne le chemin absolu du fichier de configuration du token Tidal
 func GetTidalTokenPath() string {
-	configDir, err := GetFFmpegDir() // Utilise le répertoire .spotiflac (homeDir)
+	configDir, err := util.GetFFmpegDir() // Utilise le répertoire .spotiflac (homeDir)
 	if err != nil {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".spotiflac", "tidal_token.json")

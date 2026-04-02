@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
 type AmazonDownloader struct {
@@ -189,7 +190,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	if apiResp.DecryptionKey != "" {
 		fmt.Printf("Decrypting file...\n")
 
-		ffprobePath, err := GetFFprobePath()
+		ffprobePath, err := util.GetFFprobePath()
 		var codec string
 		if err == nil {
 			cmdProbe := exec.Command(ffprobePath,
@@ -218,12 +219,12 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 
 		decryptedPath := filepath.Join(outputDir, decryptedFilename)
 
-		ffmpegPath, err := GetFFmpegPath()
+		ffmpegPath, err := util.GetFFmpegPath()
 		if err != nil {
 			return "", fmt.Errorf("ffmpeg not found for decryption: %w", err)
 		}
 
-		if err := ValidateExecutable(ffmpegPath); err != nil {
+		if err := util.ValidateExecutable(ffmpegPath); err != nil {
 			return "", fmt.Errorf("invalid ffmpeg executable: %w", err)
 		}
 
@@ -298,7 +299,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 
 	type mbResult struct {
 		ISRC     string
-		Metadata Metadata
+		Metadata meta.Metadata
 	}
 
 	metaChan := make(chan mbResult, 1)
@@ -319,7 +320,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 			res.ISRC = isrc
 			if isrc != "" {
 				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := FetchMusicBrainzMetadata(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName, useSingleGenre, embedGenre); err == nil {
+				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName, useSingleGenre, embedGenre); err == nil {
 					res.Metadata = fetchedMeta
 					fmt.Println("✓ MusicBrainz metadata fetched")
 				} else {
@@ -340,7 +341,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 	}
 
 	var isrc string
-	var mbMeta Metadata
+	var mbMeta meta.Metadata
 	if spotifyURL != "" {
 		result := <-metaChan
 		isrc = result.ISRC
@@ -429,7 +430,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 
 	if spotifyCoverURL != "" {
 		coverPath = filePath + ".cover.jpg"
-		coverClient := NewCoverClient()
+		coverClient := meta.NewCoverClient()
 		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
 			coverPath = ""
@@ -444,7 +445,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 		trackNumberToEmbed = 1
 	}
 
-	metadata := Metadata{
+	metadata := meta.Metadata{
 		Title:       spotifyTrackName,
 		Artist:      spotifyArtistName,
 		Album:       spotifyAlbumName,
@@ -462,7 +463,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 		Genre:       mbMeta.Genre,
 	}
 
-	if err := EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
+	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
 		fmt.Printf("Warning: Failed to embed metadata: %v\n", err)
 	} else {
 		fmt.Println("Metadata embedded successfully")

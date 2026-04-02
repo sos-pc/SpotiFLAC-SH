@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	id3v2 "github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
@@ -114,7 +115,7 @@ func ListAudioFiles(dirPath string) ([]FileInfo, error) {
 }
 
 func ReadAudioMetadata(filePath string) (*AudioMetadata, error) {
-	if !fileExists(filePath) {
+	if !util.FileExists(filePath) {
 		return nil, fmt.Errorf("file does not exist")
 	}
 
@@ -225,12 +226,12 @@ func readMp3Metadata(filePath string) (*AudioMetadata, error) {
 }
 
 func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
-	ffprobePath, err := GetFFprobePath()
+	ffprobePath, err := util.GetFFprobePath()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := ValidateExecutable(ffprobePath); err != nil {
+	if err := util.ValidateExecutable(ffprobePath); err != nil {
 		return nil, fmt.Errorf("invalid ffprobe executable: %w", err)
 	}
 

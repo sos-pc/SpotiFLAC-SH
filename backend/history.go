@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -123,7 +124,7 @@ func InitHistoryDBAt(configDir string) error {
 }
 
 func InitHistoryDB(appName string) error {
-	appDir, err := GetFFmpegDir()
+	appDir, err := util.GetFFmpegDir()
 	if err != nil {
 		return err
 	}

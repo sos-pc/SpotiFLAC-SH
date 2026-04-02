@@ -13,6 +13,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
 type App struct {
@@ -691,13 +692,13 @@ type LyricsDownloadRequest struct {
 	DiscNumber          int    `json:"disc_number"`
 }
 
-func (a *App) DownloadLyrics(req LyricsDownloadRequest) (backend.LyricsDownloadResponse, error) {
+func (a *App) DownloadLyrics(req LyricsDownloadRequest) (meta.LyricsDownloadResponse, error) {
 	if req.SpotifyID == "" {
-		return backend.LyricsDownloadResponse{Success: false, Error: "Spotify ID is required"},
+		return meta.LyricsDownloadResponse{Success: false, Error: "Spotify ID is required"},
 			fmt.Errorf("spotify ID is required")
 	}
-	client := backend.NewLyricsClient()
-	backendReq := backend.LyricsDownloadRequest{
+	client := meta.NewLyricsClient()
+	backendReq := meta.LyricsDownloadRequest{
 		SpotifyID:           req.SpotifyID,
 		TrackName:           req.TrackName,
 		ArtistName:          req.ArtistName,
@@ -713,7 +714,7 @@ func (a *App) DownloadLyrics(req LyricsDownloadRequest) (backend.LyricsDownloadR
 	}
 	resp, err := client.DownloadLyrics(backendReq)
 	if err != nil {
-		return backend.LyricsDownloadResponse{Success: false, Error: err.Error()}, err
+		return meta.LyricsDownloadResponse{Success: false, Error: err.Error()}, err
 	}
 	return *resp, nil
 }
@@ -732,13 +733,13 @@ type CoverDownloadRequest struct {
 	DiscNumber     int    `json:"disc_number"`
 }
 
-func (a *App) DownloadCover(req CoverDownloadRequest) (backend.CoverDownloadResponse, error) {
+func (a *App) DownloadCover(req CoverDownloadRequest) (meta.CoverDownloadResponse, error) {
 	if req.CoverURL == "" {
-		return backend.CoverDownloadResponse{Success: false, Error: "Cover URL is required"},
+		return meta.CoverDownloadResponse{Success: false, Error: "Cover URL is required"},
 			fmt.Errorf("cover URL is required")
 	}
-	client := backend.NewCoverClient()
-	backendReq := backend.CoverDownloadRequest{
+	client := meta.NewCoverClient()
+	backendReq := meta.CoverDownloadRequest{
 		CoverURL:       req.CoverURL,
 		TrackName:      req.TrackName,
 		ArtistName:     req.ArtistName,
@@ -753,7 +754,7 @@ func (a *App) DownloadCover(req CoverDownloadRequest) (backend.CoverDownloadResp
 	}
 	resp, err := client.DownloadCover(backendReq)
 	if err != nil {
-		return backend.CoverDownloadResponse{Success: false, Error: err.Error()}, err
+		return meta.CoverDownloadResponse{Success: false, Error: err.Error()}, err
 	}
 	return *resp, nil
 }
@@ -764,23 +765,23 @@ type HeaderDownloadRequest struct {
 	OutputDir  string `json:"output_dir"`
 }
 
-func (a *App) DownloadHeader(req HeaderDownloadRequest) (backend.HeaderDownloadResponse, error) {
+func (a *App) DownloadHeader(req HeaderDownloadRequest) (meta.HeaderDownloadResponse, error) {
 	if req.HeaderURL == "" {
-		return backend.HeaderDownloadResponse{Success: false, Error: "Header URL is required"},
+		return meta.HeaderDownloadResponse{Success: false, Error: "Header URL is required"},
 			fmt.Errorf("header URL is required")
 	}
 	if req.ArtistName == "" {
-		return backend.HeaderDownloadResponse{Success: false, Error: "Artist name is required"},
+		return meta.HeaderDownloadResponse{Success: false, Error: "Artist name is required"},
 			fmt.Errorf("artist name is required")
 	}
-	client := backend.NewCoverClient()
-	resp, err := client.DownloadHeader(backend.HeaderDownloadRequest{
+	client := meta.NewCoverClient()
+	resp, err := client.DownloadHeader(meta.HeaderDownloadRequest{
 		HeaderURL:  req.HeaderURL,
 		ArtistName: req.ArtistName,
 		OutputDir:  req.OutputDir,
 	})
 	if err != nil {
-		return backend.HeaderDownloadResponse{Success: false, Error: err.Error()}, err
+		return meta.HeaderDownloadResponse{Success: false, Error: err.Error()}, err
 	}
 	return *resp, nil
 }
@@ -792,24 +793,24 @@ type GalleryImageDownloadRequest struct {
 	OutputDir  string `json:"output_dir"`
 }
 
-func (a *App) DownloadGalleryImage(req GalleryImageDownloadRequest) (backend.GalleryImageDownloadResponse, error) {
+func (a *App) DownloadGalleryImage(req GalleryImageDownloadRequest) (meta.GalleryImageDownloadResponse, error) {
 	if req.ImageURL == "" {
-		return backend.GalleryImageDownloadResponse{Success: false, Error: "Image URL is required"},
+		return meta.GalleryImageDownloadResponse{Success: false, Error: "Image URL is required"},
 			fmt.Errorf("image URL is required")
 	}
 	if req.ArtistName == "" {
-		return backend.GalleryImageDownloadResponse{Success: false, Error: "Artist name is required"},
+		return meta.GalleryImageDownloadResponse{Success: false, Error: "Artist name is required"},
 			fmt.Errorf("artist name is required")
 	}
-	client := backend.NewCoverClient()
-	resp, err := client.DownloadGalleryImage(backend.GalleryImageDownloadRequest{
+	client := meta.NewCoverClient()
+	resp, err := client.DownloadGalleryImage(meta.GalleryImageDownloadRequest{
 		ImageURL:   req.ImageURL,
 		ArtistName: req.ArtistName,
 		ImageIndex: req.ImageIndex,
 		OutputDir:  req.OutputDir,
 	})
 	if err != nil {
-		return backend.GalleryImageDownloadResponse{Success: false, Error: err.Error()}, err
+		return meta.GalleryImageDownloadResponse{Success: false, Error: err.Error()}, err
 	}
 	return *resp, nil
 }
@@ -820,23 +821,23 @@ type AvatarDownloadRequest struct {
 	OutputDir  string `json:"output_dir"`
 }
 
-func (a *App) DownloadAvatar(req AvatarDownloadRequest) (backend.AvatarDownloadResponse, error) {
+func (a *App) DownloadAvatar(req AvatarDownloadRequest) (meta.AvatarDownloadResponse, error) {
 	if req.AvatarURL == "" {
-		return backend.AvatarDownloadResponse{Success: false, Error: "Avatar URL is required"},
+		return meta.AvatarDownloadResponse{Success: false, Error: "Avatar URL is required"},
 			fmt.Errorf("avatar URL is required")
 	}
 	if req.ArtistName == "" {
-		return backend.AvatarDownloadResponse{Success: false, Error: "Artist name is required"},
+		return meta.AvatarDownloadResponse{Success: false, Error: "Artist name is required"},
 			fmt.Errorf("artist name is required")
 	}
-	client := backend.NewCoverClient()
-	resp, err := client.DownloadAvatar(backend.AvatarDownloadRequest{
+	client := meta.NewCoverClient()
+	resp, err := client.DownloadAvatar(meta.AvatarDownloadRequest{
 		AvatarURL:  req.AvatarURL,
 		ArtistName: req.ArtistName,
 		OutputDir:  req.OutputDir,
 	})
 	if err != nil {
-		return backend.AvatarDownloadResponse{Success: false, Error: err.Error()}, err
+		return meta.AvatarDownloadResponse{Success: false, Error: err.Error()}, err
 	}
 	return *resp, nil
 }
@@ -866,7 +867,7 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 
 func (a *App) IsFFmpegInstalled() (bool, error)  { return backend.IsFFmpegInstalled() }
 func (a *App) IsFFprobeInstalled() (bool, error) { return backend.IsFFprobeInstalled() }
-func (a *App) GetFFmpegPath() (string, error)    { return backend.GetFFmpegPath() }
+func (a *App) GetFFmpegPath() (string, error)    { return util.GetFFmpegPath() }
 func (a *App) CheckFFmpegInstalled() (bool, error) { return backend.IsFFmpegInstalled() }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1121,7 +1122,7 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (a *App) GetConfigPath() (string, error) {
-	dir, err := backend.GetFFmpegDir()
+	dir, err := util.GetFFmpegDir()
 	if err != nil {
 		return "", err
 	}

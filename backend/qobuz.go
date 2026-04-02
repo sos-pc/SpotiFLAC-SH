@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
 type QobuzDownloader struct {
@@ -389,16 +390,16 @@ func (q *QobuzDownloader) DownloadTrack(spotifyID, outputDir, quality, filenameF
 func (q *QobuzDownloader) DownloadTrackWithISRC(deezerISRC, spotifyID, outputDir, quality, filenameFormat string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate string, useAlbumTrackNumber bool, spotifyCoverURL string, embedMaxQualityCover bool, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, allowFallback bool, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
 	fmt.Printf("Fetching track info for ISRC: %s\n", deezerISRC)
 
-	metaChan := make(chan Metadata, 1)
+	metaChan := make(chan meta.Metadata, 1)
 	if embedGenre && deezerISRC != "" {
 		go func() {
 			fmt.Println("Fetching MusicBrainz metadata...")
-			if fetchedMeta, err := FetchMusicBrainzMetadata(deezerISRC, spotifyTrackName, spotifyArtistName, spotifyAlbumName, useSingleGenre, embedGenre); err == nil {
+			if fetchedMeta, err := meta.FetchMusicBrainzMetadata(deezerISRC, spotifyTrackName, spotifyArtistName, spotifyAlbumName, useSingleGenre, embedGenre); err == nil {
 				fmt.Println("✓ MusicBrainz metadata fetched")
 				metaChan <- fetchedMeta
 			} else {
 				fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
-				metaChan <- Metadata{}
+				metaChan <- meta.Metadata{}
 			}
 		}()
 	} else {
@@ -475,7 +476,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(deezerISRC, spotifyID, outputDir
 
 	if spotifyCoverURL != "" {
 		coverPath = filepath + ".cover.jpg"
-		coverClient := NewCoverClient()
+		coverClient := meta.NewCoverClient()
 		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
 			coverPath = ""
@@ -485,7 +486,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(deezerISRC, spotifyID, outputDir
 		}
 	}
 
-	var mbMeta Metadata
+	var mbMeta meta.Metadata
 	if deezerISRC != "" {
 		mbMeta = <-metaChan
 	}
@@ -497,7 +498,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(deezerISRC, spotifyID, outputDir
 		trackNumberToEmbed = 1
 	}
 
-	metadata := Metadata{
+	metadata := meta.Metadata{
 		Title:       trackTitle,
 		Artist:      artists,
 		Album:       albumTitle,
@@ -515,7 +516,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(deezerISRC, spotifyID, outputDir
 		Genre:       mbMeta.Genre,
 	}
 
-	if err := EmbedMetadata(filepath, metadata, coverPath); err != nil {
+	if err := meta.EmbedMetadata(filepath, metadata, coverPath); err != nil {
 		return "", fmt.Errorf("failed to embed metadata: %w", err)
 	}
 

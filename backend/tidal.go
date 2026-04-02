@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
 type TidalDownloader struct {
@@ -539,12 +540,12 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 	}
 
 	fmt.Println("Converting to FLAC...")
-	ffmpegPath, err := GetFFmpegPath()
+	ffmpegPath, err := util.GetFFmpegPath()
 	if err != nil {
 		return fmt.Errorf("ffmpeg not found: %w", err)
 	}
 
-	if err := ValidateExecutable(ffmpegPath); err != nil {
+	if err := util.ValidateExecutable(ffmpegPath); err != nil {
 		return fmt.Errorf("invalid ffmpeg executable: %w", err)
 	}
 
@@ -621,7 +622,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 
 	type mbResult struct {
 		ISRC     string
-		Metadata Metadata
+		Metadata meta.Metadata
 	}
 
 	metaChan := make(chan mbResult, 1)
@@ -642,7 +643,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 			res.ISRC = isrc
 			if isrc != "" {
 				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
+				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
 					res.Metadata = fetchedMeta
 					fmt.Println("✓ MusicBrainz metadata fetched")
 				} else {
@@ -661,7 +662,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 	}
 
 	var isrc string
-	var mbMeta Metadata
+	var mbMeta meta.Metadata
 	if spotifyURL != "" {
 		result := <-metaChan
 		isrc = result.ISRC
@@ -674,7 +675,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 
 	if spotifyCoverURL != "" {
 		coverPath = outputFilename + ".cover.jpg"
-		coverClient := NewCoverClient()
+		coverClient := meta.NewCoverClient()
 		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
 			coverPath = ""
@@ -689,7 +690,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 		trackNumberToEmbed = 1
 	}
 
-	metadata := Metadata{
+	metadata := meta.Metadata{
 		Title:       trackTitle,
 		Artist:      artistName,
 		Album:       albumTitle,
@@ -707,7 +708,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 		Genre:       mbMeta.Genre,
 	}
 
-	if err := EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
+	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
 		fmt.Printf("Tagging failed: %v\n", err)
 	} else {
 		fmt.Println("Metadata saved")
@@ -779,7 +780,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 
 	type mbResultFallback struct {
 		ISRC     string
-		Metadata Metadata
+		Metadata meta.Metadata
 	}
 
 	metaChan := make(chan mbResultFallback, 1)
@@ -800,7 +801,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 			res.ISRC = isrc
 			if isrc != "" {
 				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
+				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
 					res.Metadata = fetchedMeta
 					fmt.Println("✓ MusicBrainz metadata fetched")
 				} else {
@@ -820,7 +821,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 	}
 
 	var isrc string
-	var mbMeta Metadata
+	var mbMeta meta.Metadata
 	if spotifyURL != "" {
 		result := <-metaChan
 		isrc = result.ISRC
@@ -833,7 +834,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 
 	if spotifyCoverURL != "" {
 		coverPath = outputFilename + ".cover.jpg"
-		coverClient := NewCoverClient()
+		coverClient := meta.NewCoverClient()
 		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
 			coverPath = ""
@@ -848,7 +849,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 		trackNumberToEmbed = 1
 	}
 
-	metadata := Metadata{
+	metadata := meta.Metadata{
 		Title:       trackTitle,
 		Artist:      artistName,
 		Album:       albumTitle,
@@ -866,7 +867,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 		Genre:       mbMeta.Genre,
 	}
 
-	if err := EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
+	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
 		fmt.Printf("Tagging failed: %v\n", err)
 	} else {
 		fmt.Println("Metadata saved")

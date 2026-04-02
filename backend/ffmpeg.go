@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/ulikunitz/xz"
 )
 
@@ -23,108 +24,15 @@ import (
 // the console window of spawned subprocesses; that build target is not supported.
 func setHideWindow(_ *exec.Cmd) {}
 
-func ValidateExecutable(path string) error {
-	cleanedPath := filepath.Clean(path)
-	if cleanedPath == "" {
-		return fmt.Errorf("empty path")
-	}
 
-	if !filepath.IsAbs(cleanedPath) {
-		return fmt.Errorf("path must be absolute: %s", path)
-	}
-
-	info, err := os.Stat(cleanedPath)
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	if info.IsDir() {
-		return fmt.Errorf("path is a directory: %s", path)
-	}
-
-	if runtime.GOOS != "windows" {
-		if info.Mode()&0111 == 0 {
-			return fmt.Errorf("file is not executable: %s", path)
-		}
-	}
-
-	base := filepath.Base(cleanedPath)
-	validNames := map[string]bool{
-		"ffmpeg":      true,
-		"ffmpeg.exe":  true,
-		"ffprobe":     true,
-		"ffprobe.exe": true,
-	}
-	if !validNames[base] {
-		return fmt.Errorf("invalid executable name: %s", base)
-	}
-
-	return nil
-}
-
-func GetFFmpegDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(homeDir, ".SpotiFLAC"), nil
-}
-
-func GetFFmpegPath() (string, error) {
-	ffmpegDir, err := GetFFmpegDir()
-	if err != nil {
-		return "", err
-	}
-
-	ffmpegName := "ffmpeg"
-	if runtime.GOOS == "windows" {
-		ffmpegName = "ffmpeg.exe"
-	}
-
-	localPath := filepath.Join(ffmpegDir, ffmpegName)
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath, nil
-	}
-
-	path, err := exec.LookPath(ffmpegName)
-	if err == nil {
-		return path, nil
-	}
-
-	return localPath, nil
-}
-
-func GetFFprobePath() (string, error) {
-	ffmpegDir, err := GetFFmpegDir()
-	if err != nil {
-		return "", err
-	}
-
-	ffprobeName := "ffprobe"
-	if runtime.GOOS == "windows" {
-		ffprobeName = "ffprobe.exe"
-	}
-
-	localPath := filepath.Join(ffmpegDir, ffprobeName)
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath, nil
-	}
-
-	path, err := exec.LookPath(ffprobeName)
-	if err == nil {
-		return path, nil
-	}
-
-	return localPath, fmt.Errorf("ffprobe not found in app directory or system path")
-}
 
 func IsFFprobeInstalled() (bool, error) {
-	ffprobePath, err := GetFFprobePath()
+	ffprobePath, err := util.GetFFprobePath()
 	if err != nil {
 		return false, nil
 	}
 
-	if err := ValidateExecutable(ffprobePath); err != nil {
+	if err := util.ValidateExecutable(ffprobePath); err != nil {
 		return false, nil
 	}
 
@@ -135,12 +43,12 @@ func IsFFprobeInstalled() (bool, error) {
 }
 
 func IsFFmpegInstalled() (bool, error) {
-	ffmpegPath, err := GetFFmpegPath()
+	ffmpegPath, err := util.GetFFmpegPath()
 	if err != nil {
 		return false, err
 	}
 
-	if err := ValidateExecutable(ffmpegPath); err != nil {
+	if err := util.ValidateExecutable(ffmpegPath); err != nil {
 		return false, nil
 	}
 
@@ -163,7 +71,7 @@ func DownloadFFmpeg(progressCallback func(int)) error {
 	util.SetDownloading(true)
 	defer util.SetDownloading(false)
 
-	ffmpegDir, err := GetFFmpegDir()
+	ffmpegDir, err := util.GetFFmpegDir()
 	if err != nil {
 		return err
 	}
@@ -519,12 +427,12 @@ type ConvertAudioResult struct {
 }
 
 func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
-	ffmpegPath, err := GetFFmpegPath()
+	ffmpegPath, err := util.GetFFmpegPath()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ffmpeg path: %w", err)
 	}
 
-	if err := ValidateExecutable(ffmpegPath); err != nil {
+	if err := util.ValidateExecutable(ffmpegPath); err != nil {
 		return nil, fmt.Errorf("invalid ffmpeg executable: %w", err)
 	}
 
@@ -578,15 +486,15 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 
 			var coverArtPath string
 			var lyrics string
-			var inputMetadata Metadata
+			var inputMetadata meta.Metadata
 
-			inputMetadata, err = ExtractFullMetadataFromFile(inputFile)
+			inputMetadata, err = meta.ExtractFullMetadataFromFile(inputFile)
 			if err != nil {
 				fmt.Printf("[FFmpeg] Warning: Failed to extract metadata from %s: %v\n", inputFile, err)
 			}
 
-			coverArtPath, _ = ExtractCoverArt(inputFile)
-			lyrics, err = ExtractLyrics(inputFile)
+			coverArtPath, _ = meta.ExtractCoverArt(inputFile)
+			lyrics, err = meta.ExtractLyrics(inputFile)
 			if err != nil {
 				fmt.Printf("[FFmpeg] Warning: Failed to extract lyrics from %s: %v\n", inputFile, err)
 			} else if lyrics != "" {
@@ -654,14 +562,14 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 				return
 			}
 
-			if err := EmbedMetadataToConvertedFile(outputFile, inputMetadata, coverArtPath); err != nil {
+			if err := meta.EmbedMetadataToConvertedFile(outputFile, inputMetadata, coverArtPath); err != nil {
 				fmt.Printf("[FFmpeg] Warning: Failed to embed metadata: %v\n", err)
 			} else {
 				fmt.Printf("[FFmpeg] Metadata embedded successfully\n")
 			}
 
 			if lyrics != "" {
-				if err := EmbedLyricsOnlyUniversal(outputFile, lyrics); err != nil {
+				if err := meta.EmbedLyricsOnlyUniversal(outputFile, lyrics); err != nil {
 					fmt.Printf("[FFmpeg] Warning: Failed to embed lyrics: %v\n", err)
 				} else {
 					fmt.Printf("[FFmpeg] Lyrics embedded successfully\n")

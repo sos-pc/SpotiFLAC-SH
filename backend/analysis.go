@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/go-flac/go-flac"
 	mewflac "github.com/mewkiz/flac"
 )
@@ -30,7 +31,7 @@ type AnalysisResult struct {
 }
 
 func AnalyzeTrack(filepath string) (*AnalysisResult, error) {
-	if !fileExists(filepath) {
+	if !util.FileExists(filepath) {
 		return nil, fmt.Errorf("file does not exist: %s", filepath)
 	}
 
@@ -169,7 +170,7 @@ func GetFileSize(filepath string) (int64, error) {
 }
 
 func GetTrackMetadata(filepath string) (*AnalysisResult, error) {
-	if !fileExists(filepath) {
+	if !util.FileExists(filepath) {
 		return nil, fmt.Errorf("file does not exist: %s", filepath)
 	}
 
@@ -177,7 +178,7 @@ func GetTrackMetadata(filepath string) (*AnalysisResult, error) {
 }
 
 func GetMetadataWithFFprobe(filePath string) (*AnalysisResult, error) {
-	ffprobePath, err := GetFFprobePath()
+	ffprobePath, err := util.GetFFprobePath()
 	if err != nil {
 		return nil, err
 	}
