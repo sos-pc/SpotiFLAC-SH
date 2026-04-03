@@ -398,6 +398,9 @@ func (jm *JobManager) processJob(jobID string) {
 		jm.saveJob(job)
 		jm.notifyJob(job)
 		util.SkipDownloadItem(job.ID, existingPath)
+		if job.WatchlistID != "" {
+			jm.maybeGenerateM3U8(job.WatchlistID)
+		}
 		return
 	}
 
