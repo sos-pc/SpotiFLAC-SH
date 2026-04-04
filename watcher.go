@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -129,11 +130,92 @@ func (w *Watcher) checkAll() {
 	}
 }
 
+// checkM3U8Integrity vérifie que le M3U8 sur disque correspond aux fichiers
+// réellement présents parmi les jobs done/skipped de cette watchlist.
+// Appelée au début de syncPlaylist : si un écart est détecté, generateM3U8ForPlaylist
+// le corrigera en fin de sync.
+func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
+	app := &App{}
+	settings, err := app.LoadSettings()
+	if err != nil || settings == nil {
+		return
+	}
+	createM3u8, _ := settings["createM3u8File"].(bool)
+	if !createM3u8 {
+		return
+	}
+
+	outputDir := pl.Settings.DownloadPath
+	if outputDir == "" {
+		outputDir = "/home/nonroot/Music"
+	}
+	safeName := util.SanitizeFilename(pl.Name)
+	if safeName == "" {
+		safeName = "playlist"
+	}
+	m3u8Path := filepath.Join(outputDir, "Playlists", safeName+".m3u8")
+
+	// Collecter les jobs done/skipped avec FilePath pour cette watchlist.
+	// Dédupliquer par SpotifyID (garder le plus récent).
+	jobs, err := w.jm.GetAllJobs()
+	if err != nil {
+		return
+	}
+	latestJob := make(map[string]Job)
+	for _, job := range jobs {
+		if job.WatchlistID != pl.ID || job.FilePath == "" {
+			continue
+		}
+		if job.Status != StatusDone && job.Status != StatusSkipped {
+			continue
+		}
+		key := job.SpotifyID
+		if key == "" {
+			key = job.ID
+		}
+		if prev, ok := latestJob[key]; !ok || job.UpdatedAt.After(prev.UpdatedAt) {
+			latestJob[key] = job
+		}
+	}
+
+	// Compter les fichiers effectivement présents sur disque.
+	validCount := 0
+	for _, job := range latestJob {
+		if _, err := os.Stat(job.FilePath); err == nil {
+			validCount++
+		}
+	}
+
+	// Lire le M3U8 existant et compter ses entrées.
+	m3u8Count := -1 // -1 = fichier absent
+	if data, err := os.ReadFile(m3u8Path); err == nil {
+		m3u8Count = 0
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				m3u8Count++
+			}
+		}
+	}
+
+	switch {
+	case validCount == 0:
+		// Rien de téléchargé : pas de M3U8 à vérifier.
+	case m3u8Count == -1:
+		fmt.Printf("[Watcher] Integrity %s: M3U8 absent, %d fichiers valides → sera regénéré\n", pl.Name, validCount)
+	case m3u8Count != validCount:
+		fmt.Printf("[Watcher] Integrity %s: M3U8=%d entrées, fichiers valides=%d → sera regénéré\n", pl.Name, m3u8Count, validCount)
+	default:
+		fmt.Printf("[Watcher] Integrity %s: OK (%d/%d)\n", pl.Name, m3u8Count, validCount)
+	}
+}
+
 // syncPlaylist récupère les métadonnées Spotify, compare avec les tracks déjà
 // connus, et enqueue uniquement les nouveaux.
 // FIX #2 — mu.Lock() autour des écritures sur TrackIDs + saveWatchlist
 func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	fmt.Printf("[Watcher] Syncing: %s\n", pl.SpotifyURL)
+	w.checkM3U8Integrity(pl)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -1069,6 +1151,9 @@ func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
 	}
 	var entries []entry
 	for _, job := range latestJob {
+		if _, err := os.Stat(job.FilePath); err != nil {
+			continue // fichier supprimé ou déplacé depuis le téléchargement
+		}
 		entries = append(entries, entry{pos: job.Position, path: job.FilePath})
 	}
 	if len(entries) == 0 {
