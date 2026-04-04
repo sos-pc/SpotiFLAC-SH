@@ -136,9 +136,18 @@ func (w *Watcher) checkAll() {
 // le corrigera en fin de sync.
 func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
 	app := &App{}
-	settings, err := app.LoadSettings()
-	if err != nil || settings == nil {
-		return
+	var settings map[string]interface{}
+	if pl.UserID != "" && w.auth != nil {
+		if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
+			settings = profile.Settings
+		}
+	}
+	if settings == nil {
+		var err error
+		settings, err = app.LoadSettings()
+		if err != nil || settings == nil {
+			return
+		}
 	}
 	createM3u8, _ := settings["createM3u8File"].(bool)
 	if !createM3u8 {
