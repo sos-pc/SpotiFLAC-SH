@@ -1140,11 +1140,24 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID string) {
 		}
 	}
 
-	var downloaded, skipped, failed int
+	// Dédupliquer par SpotifyID avant de compter pour éviter les doublons
+	// issus de retries multiples sur le même track.
+	latest := make(map[string]Job)
 	for _, j := range jobs {
 		if j.WatchlistID != watchlistID {
 			continue
 		}
+		key := j.SpotifyID
+		if key == "" {
+			key = j.ID
+		}
+		if prev, ok := latest[key]; !ok || j.UpdatedAt.After(prev.UpdatedAt) {
+			latest[key] = j
+		}
+	}
+
+	var downloaded, skipped, failed int
+	for _, j := range latest {
 		switch j.Status {
 		case StatusDone:
 			downloaded++

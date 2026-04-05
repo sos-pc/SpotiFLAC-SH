@@ -1049,9 +1049,11 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 
 type WatchlistStats struct {
 	WatchlistID string  `json:"watchlist_id"`
+	TotalTracks int     `json:"total_tracks"`
 	Downloaded  int     `json:"downloaded"`
-	Failed      int     `json:"failed"`
 	Skipped     int     `json:"skipped"`
+	Failed      int     `json:"failed"`
+	Pending     int     `json:"pending"`
 	TotalSizeMB float64 `json:"total_size_mb"`
 }
 
@@ -1059,18 +1061,18 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	jm := w.jm
 	stats := WatchlistStats{WatchlistID: watchlistID}
 
-	// Source de vérité : TrackIDs de la playlist
 	pl, err := w.getWatchlistByID(watchlistID)
 	if err != nil {
 		return stats, err
 	}
-	total := len(pl.TrackIDs)
+	stats.TotalTracks = len(pl.TrackIDs)
 
-	// Jobs en DB : uniquement pour compter les failed actifs
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return stats, err
 	}
+
+	// Dédupliquer par SpotifyID : garder le job le plus récent par track.
 	latest := make(map[string]Job)
 	for _, j := range jobs {
 		if j.WatchlistID != watchlistID {
@@ -1084,18 +1086,36 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 			latest[key] = j
 		}
 	}
+
+	// Compter par statut et cumuler la taille.
+	tracksWithJob := make(map[string]bool)
 	for _, j := range latest {
-		if j.Status == StatusFailed {
+		if j.SpotifyID != "" {
+			tracksWithJob[j.SpotifyID] = true
+		}
+		switch j.Status {
+		case StatusDone:
+			stats.Downloaded++
+			stats.TotalSizeMB += j.TotalSize
+		case StatusSkipped:
+			stats.Skipped++
+			stats.TotalSizeMB += j.TotalSize
+		case StatusFailed:
 			stats.Failed++
+		case StatusPending, StatusDownloading:
+			stats.Pending++
 		}
 	}
 
-	// present = total - failed
-	// Tracks sans job = téléchargées avant tracking ou après CleanupOldJobs → considérées présentes
-	stats.Skipped = total - stats.Failed
-	if stats.Skipped < 0 {
-		stats.Skipped = 0
+	// Tracks présentes dans TrackIDs mais sans job : téléchargées avant
+	// l'activation du tracking ou dont le job a été nettoyé (CleanupOldJobs).
+	// On les considère présentes et on les ajoute aux skipped.
+	for _, id := range pl.TrackIDs {
+		if !tracksWithJob[id] {
+			stats.Skipped++
+		}
 	}
+
 	return stats, nil
 }
 
