@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SearchAndSort } from "./SearchAndSort";
 import { TrackList } from "./TrackList";
 import { DownloadProgress } from "./DownloadProgress";
+import { DownloadModeToggle } from "./DownloadModeToggle";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
 import { downloadHeader, downloadGalleryImage, downloadAvatar } from "@/lib/api";
 import { getSettings } from "@/lib/settings";
@@ -450,7 +451,8 @@ export function ArtistInfo({ artistInfo, albumList, trackList, tracksLoading, se
       {activeTab === "albums" && albumList.length > 0 && (<div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="text-2xl font-bold">Discography</h3>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+                <DownloadModeToggle />
                 <Button onClick={onDownloadAll} size="sm" disabled={isDownloading}>
                     {isDownloading && bulkDownloadType === "all" ? (<Spinner />) : (<Download className="h-4 w-4"/>)}
                     Download Discography
@@ -539,6 +541,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, tracksLoading, se
                       </ScrollArea>
                   </DialogContent>
               </Dialog>
+              <DownloadModeToggle />
               <Button onClick={onDownloadAll} size="sm" disabled={isDownloading}>
                 {isDownloading && bulkDownloadType === "all" ? (<Spinner />) : (<Download className="h-4 w-4"/>)}
                 Download All

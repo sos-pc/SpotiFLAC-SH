@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
@@ -337,6 +338,50 @@ func (s *Server) registerV1Routes() {
 
 	// SSE — streaming temps réel de la progression
 	s.mux.Handle("GET /api/v1/jobs/stream", s.v1Auth(s.v1JobsStream))
+
+	// Téléchargement navigateur — sert le fichier et supprime du serveur après envoi
+	s.mux.Handle("GET /api/v1/jobs/{id}/download", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		job, err := s.ctr.Jobs.GetJob(id)
+		if err != nil {
+			writeV1Error(w, http.StatusNotFound, "job not found")
+			return
+		}
+		if user := GetUserFromContext(r); user != nil {
+			if !user.IsAdmin && job.UserID != "" && job.UserID != user.UserID {
+				writeV1Error(w, http.StatusForbidden, "forbidden")
+				return
+			}
+		}
+		if job.Status != StatusDone || job.FilePath == "" {
+			writeV1Error(w, http.StatusBadRequest, "file not available")
+			return
+		}
+		if _, statErr := os.Stat(job.FilePath); statErr != nil {
+			writeV1Error(w, http.StatusNotFound, "file not found on server")
+			return
+		}
+		f, err := os.Open(job.FilePath)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, "failed to open file")
+			return
+		}
+		defer f.Close()
+		defer os.Remove(job.FilePath)
+
+		filename := filepath.Base(job.FilePath)
+		if info, statErr := f.Stat(); statErr == nil {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		w.Header().Set("Content-Type", "audio/flac")
+		http.ServeContent(w, r, filename, time.Time{}, f)
+
+		job.FilePath = ""
+		job.UpdatedAt = time.Now()
+		_ = s.ctr.Jobs.saveJob(&job)
+		s.ctr.Jobs.notifyJob(&job)
+	}))
 
 	s.mux.Handle("DELETE /api/v1/jobs/completed", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		a.ClearCompletedDownloads()

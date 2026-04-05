@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SearchAndSort } from "./SearchAndSort";
 import { TrackList } from "./TrackList";
 import { DownloadProgress } from "./DownloadProgress";
+import { DownloadModeToggle } from "./DownloadModeToggle";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
 interface PlaylistInfoProps {
     playlistInfo: {
@@ -109,7 +110,8 @@ export function PlaylistInfo({ playlistInfo, trackList, searchQuery, sortBy, sel
                   <span>{playlistInfo.followers.total.toLocaleString()} {playlistInfo.followers.total === 1 ? "follower" : "followers"}</span>
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
+                <DownloadModeToggle />
                 <Button onClick={onDownloadAll} disabled={isDownloading}>
                   {isDownloading && bulkDownloadType === "all" ? (<Spinner />) : (<Download className="h-4 w-4"/>)}
                   Download All

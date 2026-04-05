@@ -1,9 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { downloadTrack, fetchSpotifyMetadata } from "@/lib/api";
 import { getSettings, parseTemplate, type TemplateData } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
 import { logger } from "@/lib/logger";
+import { getToken } from "@/lib/auth";
 import type { TrackMetadata } from "@/types/api";
 interface CheckFileExistenceRequest {
     spotify_id: string;
@@ -35,6 +36,56 @@ export function useDownload(region: string) {
         artists: string;
     } | null>(null);
     const shouldStopDownloadRef = useRef(false);
+
+    // ── Browser download mode ─────────────────────────────────────────────────
+    const [downloadMode, setDownloadModeInternal] = useState<"server" | "browser">(() =>
+        (localStorage.getItem("download_mode") as "server" | "browser") || "server"
+    );
+    const browserBatchIdsRef = useRef<Set<string>>(new Set());
+    const triggeredJobIdsRef = useRef<Set<string>>(new Set());
+
+    // Sync with DownloadModeToggle dispatching "spotif:downloadModeChange"
+    useEffect(() => {
+        const handler = (e: Event) => {
+            setDownloadModeInternal((e as CustomEvent<"server" | "browser">).detail);
+        };
+        window.addEventListener("spotif:downloadModeChange", handler);
+        return () => window.removeEventListener("spotif:downloadModeChange", handler);
+    }, []);
+
+    // SSE listener for browser-mode auto-download
+    useEffect(() => {
+        if (downloadMode !== "browser") return;
+        const token = getToken();
+        if (!token) return;
+
+        const es = new EventSource(`/api/v1/jobs/stream?token=${encodeURIComponent(token)}`);
+
+        es.addEventListener("job_update", (e: MessageEvent) => {
+            const job = JSON.parse(e.data) as { id: string; status: string; batch_id?: string; file_path?: string };
+            if (
+                job.status === "done" &&
+                job.batch_id &&
+                browserBatchIdsRef.current.has(job.batch_id) &&
+                job.file_path &&
+                !triggeredJobIdsRef.current.has(job.id)
+            ) {
+                triggeredJobIdsRef.current.add(job.id);
+                const t = getToken();
+                if (!t) return;
+                const a = document.createElement("a");
+                a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
+                a.download = "";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        });
+
+        es.onerror = () => es.close();
+
+        return () => es.close();
+    }, [downloadMode]);
     const downloadWithAutoFallback = async (id: string, settings: any, trackName?: string, artistName?: string, albumName?: string, playlistName?: string, position?: number, spotifyId?: string, durationMs?: number, releaseYear?: string, albumArtist?: string, releaseDate?: string, coverUrl?: string, spotifyTrackNumber?: number, spotifyDiscNumber?: number, spotifyTotalTracks?: number, spotifyTotalDiscs?: number, copyright?: string, publisher?: string) => {
         const service = settings.downloader;
         const query = trackName && artistName ? `${trackName} ${artistName} ` : undefined;
@@ -554,6 +605,9 @@ export function useDownload(region: string) {
             try {
                 const resp = await EnqueueBatch({ tracks: jobTracks, settings: jobSettings });
                 logger.success(`[EnqueueBatch] ${resp.enqueued} tracks queued, ${resp.skipped} skipped`);
+                if (downloadMode === "browser" && resp.batch_id) {
+                    browserBatchIdsRef.current.add(resp.batch_id);
+                }
                 if (skippedCount === 0) {
                     toast.success(`${resp.enqueued} tracks queued for background download`);
                 } else {
@@ -699,6 +753,9 @@ export function useDownload(region: string) {
             try {
                 const resp = await EnqueueBatch({ tracks: jobTracks, settings: jobSettings });
                 logger.success(`[EnqueueBatch] ${resp.enqueued} tracks queued, ${resp.skipped} skipped`);
+                if (downloadMode === "browser" && resp.batch_id) {
+                    browserBatchIdsRef.current.add(resp.batch_id);
+                }
                 if (skippedCount === 0) {
                     toast.success(`${resp.enqueued} tracks queued for background download`);
                 } else {
@@ -747,6 +804,7 @@ export function useDownload(region: string) {
         failedTracks,
         skippedTracks,
         currentDownloadInfo,
+        downloadMode,
         handleDownloadTrack,
         handleDownloadSelected,
         handleDownloadAll,

@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Download, FolderOpen, ImageDown, FileText, XCircle } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DownloadModeToggle } from "./DownloadModeToggle";
 import { SearchAndSort } from "./SearchAndSort";
 import { TrackList } from "./TrackList";
 import { DownloadProgress } from "./DownloadProgress";
@@ -100,7 +101,8 @@ export function AlbumInfo({ albumInfo, trackList, searchQuery, sortBy, selectedT
                   </span>
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
+                <DownloadModeToggle />
                 <Button onClick={onDownloadAll} disabled={isDownloading}>
                   {isDownloading && bulkDownloadType === "all" ? (<Spinner />) : (<Download className="h-4 w-4"/>)}
                   Download All

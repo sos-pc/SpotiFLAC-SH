@@ -902,6 +902,15 @@ func (jm *JobManager) loadJob(id string) (*Job, error) {
 	return &job, err
 }
 
+// GetJob retourne un job par son ID (lecture seule, depuis BoltDB).
+func (jm *JobManager) GetJob(id string) (Job, error) {
+	job, err := jm.loadJob(id)
+	if err != nil {
+		return Job{}, err
+	}
+	return *job, nil
+}
+
 func (jm *JobManager) GetAllJobs() ([]Job, error) {
 	var jobs []Job
 	err := jm.db.View(func(tx *bolt.Tx) error {

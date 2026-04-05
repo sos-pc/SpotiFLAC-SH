@@ -9,6 +9,7 @@ interface Job {
     album_name?: string;
     total_size: number;
     file_path?: string;
+    batch_id?: string;
     error?: string;
     progress: number;
 }
