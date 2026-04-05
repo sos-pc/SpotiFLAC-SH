@@ -88,6 +88,7 @@ type Job struct {
 	DurationMs   int         `json:"duration_ms"`
 	Settings     JobSettings `json:"settings"`
 	WatchlistID  string      `json:"watchlist_id,omitempty"`
+	BatchID      string      `json:"batch_id,omitempty"`
 	UserID       string      `json:"user_id,omitempty"`
 	Status       JobStatus   `json:"status"`
 	FilePath     string      `json:"file_path,omitempty"`
@@ -131,6 +132,7 @@ type EnqueueBatchResponse struct {
 	Enqueued int    `json:"enqueued"`
 	Skipped  int    `json:"skipped"`
 	Message  string `json:"message"`
+	BatchID  string `json:"batch_id,omitempty"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,7 +149,7 @@ type JobEventHandler interface {
 	OnTrackDownloaded(watchlistID, spotifyID, filePath string)
 	// OnBatchComplete est appelé quand tous les jobs d'une watchlist sont
 	// terminés : met à jour le SyncLog et génère le M3U8.
-	OnBatchComplete(watchlistID string, downloaded, skipped, failed int)
+	OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +280,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		}
 	}
 
+	batchID := fmt.Sprintf("%s-%d", req.WatchlistID, time.Now().UnixNano())
 	enqueued := 0
 	skipped := 0
 
@@ -314,6 +317,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 			DurationMs:   track.DurationMs,
 			Settings:     req.Settings,
 			WatchlistID:  req.WatchlistID,
+			BatchID:      batchID,
 			UserID:       req.UserID,
 			Status:       StatusPending,
 			CreatedAt:    time.Now(),
@@ -342,6 +346,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		Enqueued: enqueued,
 		Skipped:  skipped,
 		Message:  fmt.Sprintf("%d tracks enqueued for background download", enqueued),
+		BatchID:  batchID,
 	}, nil
 }
 
@@ -394,12 +399,15 @@ func (jm *JobManager) processJob(jobID string) {
 		fmt.Printf("[Jobs] Already exists: %s\n", existingPath)
 		job.Status = StatusSkipped
 		job.FilePath = existingPath
+		if info, err := os.Stat(existingPath); err == nil {
+			job.TotalSize = float64(info.Size()) / 1024 / 1024
+		}
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
 		util.SkipDownloadItem(job.ID, existingPath)
 		if job.WatchlistID != "" {
-			jm.maybeGenerateM3U8(job.WatchlistID)
+			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		}
 		return
 	}
@@ -434,6 +442,9 @@ func (jm *JobManager) processJob(jobID string) {
 				jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
 			}
 		}
+		if job.WatchlistID != "" {
+			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
+		}
 		return
 	}
 
@@ -454,7 +465,7 @@ func (jm *JobManager) processJob(jobID string) {
 		if jm.eventHandler != nil && job.SpotifyID != "" && resp.File != "" {
 			jm.eventHandler.OnTrackDownloaded(job.WatchlistID, job.SpotifyID, resp.File)
 		}
-		jm.maybeGenerateM3U8(job.WatchlistID)
+		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 	}
 }
 
@@ -1122,29 +1133,27 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
 }
 
 // maybeGenerateM3U8 génère le M3U8 si tous les jobs de la watchlist sont terminés.
-// FIX #3 — whitelist des statuts terminaux au lieu de blacklist (plus robuste)
-func (jm *JobManager) maybeGenerateM3U8(watchlistID string) {
+// batchID identifie le batch courant : seuls ses jobs sont comptés pour le SyncLog.
+func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return
 	}
 
-	// FIX #3 — un job est "en cours" seulement s'il est Pending ou Downloading
-	// (évite qu'un état inconnu/corrompu bloque indéfiniment la génération)
+	// Ne déclencher que quand tous les jobs de la watchlist sont terminaux.
 	for _, j := range jobs {
 		if j.WatchlistID != watchlistID {
 			continue
 		}
 		if j.Status == StatusPending || j.Status == StatusDownloading {
-			return // encore des jobs en cours
+			return
 		}
 	}
 
-	// Dédupliquer par SpotifyID avant de compter pour éviter les doublons
-	// issus de retries multiples sur le même track.
+	// Compter uniquement les jobs du batch courant, dédupliqués par SpotifyID.
 	latest := make(map[string]Job)
 	for _, j := range jobs {
-		if j.WatchlistID != watchlistID {
+		if j.WatchlistID != watchlistID || j.BatchID != batchID {
 			continue
 		}
 		key := j.SpotifyID
@@ -1169,6 +1178,6 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID string) {
 	}
 
 	if jm.eventHandler != nil {
-		jm.eventHandler.OnBatchComplete(watchlistID, downloaded, skipped, failed)
+		jm.eventHandler.OnBatchComplete(watchlistID, batchID, downloaded, skipped, failed)
 	}
 }

@@ -22,6 +22,7 @@ import (
 
 type SyncLog struct {
 	Time       time.Time `json:"time"`
+	BatchID    string    `json:"batch_id,omitempty"`
 	NewTracks  int       `json:"new_tracks"`
 	Downloaded int       `json:"downloaded"`
 	Skipped    int       `json:"skipped"`
@@ -308,8 +309,9 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	fmt.Printf("[Watcher] %s — %d new tracks to download\n", playlistName, len(newTracks))
 
 	// FIX #4 — EnqueueBatch avant generateM3U8 (était inversé)
+	var batchID string
 	if len(newTracks) > 0 {
-		_, err := w.jm.EnqueueBatch(EnqueueBatchRequest{
+		result, err := w.jm.EnqueueBatch(EnqueueBatchRequest{
 			Tracks:      newTracks,
 			Settings:    pl.Settings,
 			WatchlistID: pl.ID,
@@ -317,6 +319,8 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		})
 		if err != nil {
 			fmt.Printf("[Watcher] EnqueueBatch failed for %s: %v\n", playlistName, err)
+		} else {
+			batchID = result.BatchID
 		}
 	}
 
@@ -378,6 +382,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// ── SyncLog ──
 	syncLog := SyncLog{
 		Time:      time.Now(),
+		BatchID:   batchID,
 		NewTracks: len(newTracks),
 		Deleted:   deletedCount,
 	}
@@ -713,8 +718,8 @@ func (w *Watcher) OnTrackDownloaded(watchlistID, spotifyID, filePath string) {
 }
 
 // OnBatchComplete implémente JobEventHandler.
-// Met à jour le dernier SyncLog et génère le M3U8 si activé.
-func (w *Watcher) OnBatchComplete(watchlistID string, downloaded, skipped, failed int) {
+// Trouve le SyncLog par BatchID, met à jour ses compteurs, génère le M3U8.
+func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int) {
 	playlists, err := w.GetWatchlists()
 	if err != nil {
 		return
@@ -723,13 +728,18 @@ func (w *Watcher) OnBatchComplete(watchlistID string, downloaded, skipped, faile
 		if pl.ID != watchlistID {
 			continue
 		}
-		if len(pl.SyncLogs) > 0 {
-			last := &pl.SyncLogs[len(pl.SyncLogs)-1]
-			last.Downloaded = downloaded
-			last.Skipped = skipped
-			last.Failed = failed
-			if saveErr := w.saveWatchlist(&pl); saveErr != nil {
-				fmt.Printf("[Watcher] Failed to save sync log: %v\n", saveErr)
+		// Trouver le SyncLog correspondant au batchID plutôt que le dernier.
+		if batchID != "" {
+			for i := range pl.SyncLogs {
+				if pl.SyncLogs[i].BatchID == batchID {
+					pl.SyncLogs[i].Downloaded = downloaded
+					pl.SyncLogs[i].Skipped = skipped
+					pl.SyncLogs[i].Failed = failed
+					if saveErr := w.saveWatchlist(&pl); saveErr != nil {
+						fmt.Printf("[Watcher] Failed to save sync log: %v\n", saveErr)
+					}
+					break
+				}
 			}
 		}
 		go w.generateM3U8ForPlaylist(pl)
