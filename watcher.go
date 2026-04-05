@@ -364,11 +364,13 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 								os.Remove(dir)
 								fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
 							}
+							// FIX 2 — retirer de TrackedFiles pour éviter un re-téléchargement
+							delete(pl.TrackedFiles, knownID)
+							deletedCount++ // FIX 1 — compter seulement les suppressions effectives
 						}
 					}
 				}
 			}
-			deletedCount++
 		}
 		pl.TrackIDs = remainingIDs
 	}
@@ -471,6 +473,44 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 }
 
 func (w *Watcher) RemoveWatchlist(id string) error {
+	// FIX 3 — si SyncDeletions est activé, supprimer les fichiers orphelins
+	// avant de retirer la watchlist, en vérifiant qu'ils n'appartiennent pas
+	// à une autre watchlist active.
+	playlists, _ := w.GetWatchlists()
+	for _, pl := range playlists {
+		if pl.ID != id || !pl.SyncDeletions {
+			continue
+		}
+		otherIDs := make(map[string]bool)
+		for _, other := range playlists {
+			if other.ID == id {
+				continue
+			}
+			for _, tid := range other.TrackIDs {
+				otherIDs[tid] = true
+			}
+		}
+		jobs, _ := w.jm.GetAllJobs()
+		for _, job := range jobs {
+			if job.WatchlistID != id || job.FilePath == "" {
+				continue
+			}
+			if otherIDs[job.SpotifyID] {
+				fmt.Printf("[Watcher] Track %s in another watchlist — skipping file deletion\n", job.SpotifyID)
+				continue
+			}
+			if err := os.Remove(job.FilePath); err == nil {
+				fmt.Printf("[Watcher] Deleted file (watchlist removed): %s\n", job.FilePath)
+				dir := filepath.Dir(job.FilePath)
+				if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
+					os.Remove(dir)
+					fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
+				}
+			}
+		}
+		break
+	}
+
 	return w.jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWatchlist)
 		if b == nil {
