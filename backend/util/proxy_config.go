@@ -16,17 +16,16 @@ var proxyMu sync.RWMutex
 //
 // Sources: https://github.com/monochrome-music/monochrome/blob/main/INSTANCES.md
 var tidalProxies = []string{
-	// Official Monochrome instances
+	// Official Monochrome instances — confirmed UP by tidal-uptime.geeked.wtf
+	"https://us-west.monochrome.tf",
 	"https://monochrome-api.samidy.com",
 	"https://api.monochrome.tf",
-	// Community — TypeScript rewrite (geeked.wtf)
-	"https://hifi.geeked.wtf",
-	// Community — Lucida / QQDL
+	// Community — Lucida / QQDL — katze and hund confirmed UP + streaming
+	"https://katze.qqdl.site",
+	"https://hund.qqdl.site",
 	"https://wolf.qqdl.site",
 	"https://maus.qqdl.site",
 	"https://vogel.qqdl.site",
-	"https://katze.qqdl.site",
-	"https://hund.qqdl.site",
 	// Community — Limited/No-Sub accounts
 	"https://tidal.kinoplus.online",
 }
@@ -110,4 +109,39 @@ func SetQobuzProviders(providers []string) {
 	cp := make([]string, len(providers))
 	copy(cp, providers)
 	qobuzProviders = cp
+}
+
+// ─── Factory defaults (immutable hardcoded values) ────────────────────────────
+// Used by defaultProxyConfig() in api_proxies.go to enable true "reset to
+// defaults" behaviour — independent of the current in-memory state which may
+// have been overridden by a saved user configuration.
+
+func GetDefaultTidalProxies() []string {
+	return []string{
+		"https://us-west.monochrome.tf",
+		"https://monochrome-api.samidy.com",
+		"https://api.monochrome.tf",
+		"https://katze.qqdl.site",
+		"https://hund.qqdl.site",
+		"https://wolf.qqdl.site",
+		"https://maus.qqdl.site",
+		"https://vogel.qqdl.site",
+		"https://tidal.kinoplus.online",
+	}
+}
+
+func GetDefaultQobuzProviders() []string {
+	return []string{
+		"https://dab.yeet.su/api/stream?trackId=",
+		"https://dabmusic.xyz/api/stream?trackId=",
+		"https://qbz.afkarxyz.qzz.io/api/track/",
+	}
+}
+
+func GetDefaultAmazonProxies() []string {
+	return []string{"https://amzn.afkarxyz.fun"}
+}
+
+func GetDefaultDeezerProxies() []string {
+	return []string{"https://api.deezmate.com"}
 }

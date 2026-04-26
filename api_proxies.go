@@ -18,12 +18,16 @@ type ProxyConfig struct {
 	DeezerProxies  []string `json:"deezer_proxies"`
 }
 
+// defaultProxyConfig returns the factory defaults — hardcoded values that are
+// independent of the current in-memory state (which may have been overridden
+// by a saved user configuration).  Used by SaveProxyConfig as a fallback when
+// the user submits an empty list, enabling a true "reset to defaults".
 func defaultProxyConfig() ProxyConfig {
 	return ProxyConfig{
-		TidalProxies:   util.GetTidalProxies(),
-		QobuzProviders: util.GetQobuzProviders(),
-		AmazonProxies:  util.GetAmazonProxies(),
-		DeezerProxies:  util.GetDeezerProxies(),
+		TidalProxies:   util.GetDefaultTidalProxies(),
+		QobuzProviders: util.GetDefaultQobuzProviders(),
+		AmazonProxies:  util.GetDefaultAmazonProxies(),
+		DeezerProxies:  util.GetDefaultDeezerProxies(),
 	}
 }
 

@@ -169,25 +169,13 @@ func pingSpotFetch(name, baseURL string) ServiceStatus {
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 }
 
-// pingTidalProxy performs a real track-endpoint request to validate that a
-// community Tidal HiFi proxy is actually serving audio data — not just
-// reachable at its root URL.
-//
-// Format used by all community proxies:
-//
-//	{baseURL}/track/?id={testID}&audioquality=LOSSLESS
-//
-// Interpretation (strict — 4xx are NOT "ok" for API endpoints):
-//
-//	200               → ok   (proxy accepted the request and returned data)
-//	401 / 403         → down (proxy requires auth — unusable)
-//	429               → ratelimited
-//	5xx / network err → down
-func pingTidalProxy(name, baseURL string) ServiceStatus {
-	// Track ID 190909076 is a known Tidal track that reliably triggers a real
-	// proxy response — 200 if the proxy is open, 401/403 if auth-gated.
-	const testTrackID = "190909076"
-	testURL := strings.TrimSuffix(baseURL, "/") + "/track/?id=" + testTrackID + "&audioquality=LOSSLESS"
+// pingDeezerProxy validates a community Deezer download proxy by requesting
+// a known track from the /dl/ endpoint used by the downloader.
+// Unlike pingDeezer (which checks api.deezer.com), this tests community
+// proxies that serve FLAC files directly.
+func pingDeezerProxy(name, baseURL string) ServiceStatus {
+	const testTrackID = "3135556" // Get Lucky — Daft Punk
+	testURL := strings.TrimSuffix(baseURL, "/") + "/dl/" + testTrackID
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -205,7 +193,57 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d — auth required", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+	case resp.StatusCode >= 500:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+	case resp.StatusCode != http.StatusOK:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+	}
+
+	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+}
+
+// pingTidalProxy performs a real track-endpoint request to validate that a
+// community Tidal HiFi proxy is actually serving audio data — not just
+// reachable at its root URL.
+//
+// Format used by all community proxies:
+//
+//	{baseURL}/info?id={testID}
+//
+// Interpretation (strict — 4xx are NOT "ok" for API endpoints):
+//
+//	200               → ok   (proxy accepted the request and returned data)
+//	401 / 403         → down
+//	429               → ratelimited
+//	5xx / network err → down
+func pingTidalProxy(name, baseURL string) ServiceStatus {
+	// /info retourne les métadonnées du track sans demander de qualité.
+	// Compatible Python hifi-api et TypeScript hifi-api-workers.
+	// Évite les faux négatifs causés par le paramètre audioquality ignoré
+	// par les proxies TypeScript (qui défaut vers HI_RES_LOSSLESS).
+	const testTrackID = "190909076"
+	testURL := strings.TrimSuffix(baseURL, "/") + "/info?id=" + testTrackID
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
+	if err != nil {
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+	}
+	defer resp.Body.Close()
+
+	latency := int(elapsed.Milliseconds())
+
+	switch {
+	case resp.StatusCode == 429:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode >= 500:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
 			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
@@ -265,7 +303,7 @@ func pingQobuzProxy(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d — auth required", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode >= 500:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
 			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
@@ -353,7 +391,6 @@ type serviceEntry struct {
 var coreServices = []serviceEntry{
 	{"SongLink", "https://api.song.link", nil},
 	{"Deezer", "https://api.deezer.com", pingDeezer},
-	{"Amazon (afkarxyz)", "https://amzn.afkarxyz.fun", nil},
 	{"MusicBrainz", "https://musicbrainz.org", nil},
 	{"LRCLib", "https://lrclib.net", nil},
 	{"Tidal API", "https://api.tidal.com", nil},
@@ -398,6 +435,20 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	for _, proxyBase := range util.GetQobuzProviders() {
 		name := "Qobuz · " + proxyDisplayName(proxyBase)
 		all = append(all, serviceEntry{name, proxyBase, pingQobuzProxy})
+	}
+
+	// Amazon community proxies — read from live config.
+	// pingURL is used (no standard test ASIN available for Amazon Music).
+	for _, proxyURL := range util.GetAmazonProxies() {
+		name := "Amazon · " + proxyDisplayName(proxyURL)
+		all = append(all, serviceEntry{name, proxyURL, nil})
+	}
+
+	// Deezer community proxies — read from live config.
+	// pingDeezerProxy tests the actual /dl/ endpoint with a known track ID.
+	for _, proxyURL := range util.GetDeezerProxies() {
+		name := "Deezer · " + proxyDisplayName(proxyURL)
+		all = append(all, serviceEntry{name, proxyURL, pingDeezerProxy})
 	}
 
 	if jellyfinURL != "" {
