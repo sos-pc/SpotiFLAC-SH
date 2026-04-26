@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type DeezerDownloader struct {
-	client *http.Client
+	client        *http.Client
+	SpeedCallback func(mbDownloaded, speedMBps float64)
 }
 
 func NewDeezerDownloader() *DeezerDownloader {
@@ -163,7 +164,7 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 	}
 	defer out.Close()
 
-	pw := util.NewProgressWriter(out)
+	pw := util.NewProgressWriterWithCallback(out, d.SpeedCallback)
 	if _, err = io.Copy(pw, dlResp.Body); err != nil {
 		out.Close()
 		os.Remove(filePath)

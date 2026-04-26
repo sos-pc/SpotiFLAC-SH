@@ -230,6 +230,16 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 ## Changelog
 
+### v3.4.0 — 2026-04-06
+- **refactor(queue):** Unified progress tracking — removed dual queue system (`util/progress.go` global state eliminated); BoltDB + SSE is now the single source of truth for all download state
+- **feat(queue):** Live download speed now transmitted via SSE and displayed in the Download Queue UI (was always "—")
+- **fix(queue):** Clear History / Reset Queue now correctly updates the queue UI without requiring a page refresh
+- **fix(watchlist):** Pending track count now visible on watchlist cards
+- **fix(watchlist):** Sync log no longer shows "no changes" and "skipped" simultaneously
+- **fix(queue):** Session start time now calculated from active jobs instead of being hardcoded to 0
+- **refactor(backend):** `ProgressWriter` reduced to a pure io.Writer wrapper with optional `SpeedCallback`; all global queue state removed
+- **refactor(frontend):** Removed dead code — `useDownloadProgress` hook (200 ms polling) and legacy `/jobs/legacy/*` API calls deleted
+
 ### v3.3.0 — 2026-03-30
 - **feat(proxies):** Amazon and Deezer now use multi-proxy lists with automatic fallback, identical to Tidal and Qobuz
 - **feat(deezer):** `DownloadFromDeezmate` restored with full fallback loop + metadata embedding

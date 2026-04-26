@@ -2,22 +2,22 @@ package main
 
 import (
 	"context"
-	"net/url"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type App struct {
@@ -63,7 +63,7 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 	urls, err := jm.songLinkClient.GetAllURLsFromSpotify(spotifyTrackID, region)
 
 	// Si Songlink échoue ou ne trouve rien (ex: 429), on tente une recherche directe sur l'API Tidal
-	if (err != nil || urls == nil || (urls.TidalURL == "" && urls.AmazonURL == "")) {
+	if err != nil || urls == nil || (urls.TidalURL == "" && urls.AmazonURL == "") {
 		fmt.Printf("[GetStreamingURLs] Songlink failed/empty (%v), falling back to direct Tidal Search for ID: %s\n", err, spotifyTrackID)
 
 		// 1. Récupérer le nom de la piste et de l'artiste depuis Spotify via l'ID
@@ -114,7 +114,6 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 	}
 	return string(jsonData), nil
 }
-
 
 // normalizeSpotifyURL supprime le préfixe intl-xx/ et le paramètre ?si=
 // ex: https://open.spotify.com/intl-fr/album/ID?si=xxx → https://open.spotify.com/album/ID
@@ -336,7 +335,9 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			var trackResp struct {
 				Track struct {
 					Album struct {
-						Artists []struct{ Name string `json:"name"` } `json:"artists"`
+						Artists []struct {
+							Name string `json:"name"`
+						} `json:"artists"`
 					} `json:"album"`
 					DurationMs int `json:"duration_ms"`
 				} `json:"track"`
@@ -355,27 +356,27 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 
 	// Création du Job
 	job := &Job{
-		ID:          itemID,
-		SpotifyID:   req.SpotifyID,
-		TrackName:   req.TrackName,
-		ArtistName:  req.ArtistName,
-		AlbumName:   req.AlbumName,
-		AlbumArtist: req.AlbumArtist,
-		ReleaseDate: req.ReleaseDate,
-		CoverURL:    req.CoverURL,
-		TrackNumber: req.SpotifyTrackNumber,
-		DiscNumber:  req.SpotifyDiscNumber,
-		TotalTracks: req.SpotifyTotalTracks,
-		TotalDiscs:  req.SpotifyTotalDiscs,
-		Copyright:   req.Copyright,
-		Publisher:   req.Publisher,
-		Position:    req.Position,
+		ID:           itemID,
+		SpotifyID:    req.SpotifyID,
+		TrackName:    req.TrackName,
+		ArtistName:   req.ArtistName,
+		AlbumName:    req.AlbumName,
+		AlbumArtist:  req.AlbumArtist,
+		ReleaseDate:  req.ReleaseDate,
+		CoverURL:     req.CoverURL,
+		TrackNumber:  req.SpotifyTrackNumber,
+		DiscNumber:   req.SpotifyDiscNumber,
+		TotalTracks:  req.SpotifyTotalTracks,
+		TotalDiscs:   req.SpotifyTotalDiscs,
+		Copyright:    req.Copyright,
+		Publisher:    req.Publisher,
+		Position:     req.Position,
 		PlaylistName: req.PlaylistName,
-		DurationMs:  req.Duration * 1000,
-		UserID:      req.UserID,
-		Status:      StatusPending,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		DurationMs:   req.Duration * 1000,
+		UserID:       req.UserID,
+		Status:       StatusPending,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 		Settings: JobSettings{
 			Service:              req.Service,
 			DownloadPath:         req.OutputDir,
@@ -436,171 +437,48 @@ func (a *App) GetDefaults() map[string]string {
 	}
 }
 
-func (a *App) GetDownloadProgress() util.ProgressInfo {
-	jm := a.ctr.Jobs
-	if jm == nil {
-		return util.GetDownloadProgress()
-	}
-	jobs, _ := jm.GetAllJobs()
-	var total, done int
-	for _, j := range jobs {
-		total++
-		if j.Status == StatusDone || j.Status == StatusSkipped {
-			done++
-		}
-	}
-	return util.ProgressInfo{IsDownloading: total > 0 && done < total}
-}
-
-func (a *App) GetDownloadQueue() util.DownloadQueueInfo {
-	jm := a.ctr.Jobs
-	if jm == nil {
-		return util.GetDownloadQueue()
-	}
-	jobs, err := jm.GetAllJobs()
-	if err != nil {
-		return util.DownloadQueueInfo{}
-	}
-	items := make([]util.DownloadItem, 0, len(jobs))
-	var queued, completed, failed, skipped int
-	isDownloading := false
-	for _, job := range jobs {
-		ds := jobStatusToDownloadStatus(job.Status)
-		switch ds {
-		case util.StatusQueued:
-			queued++
-		case util.StatusDownloading:
-			isDownloading = true
-		case util.StatusCompleted:
-			completed++
-		case util.StatusFailed:
-			failed++
-		case util.StatusSkipped:
-			skipped++
-		}
-		liveProgress, liveSpeed := util.GetItemProgress(job.ID)
-		progress := job.Progress
-		speed := liveSpeed
-		if ds == util.StatusDownloading && liveProgress > 0 {
-			progress = liveProgress
-		}
-		items = append(items, util.DownloadItem{
-			ID:           job.ID,
-			TrackName:    job.TrackName,
-			ArtistName:   job.ArtistName,
-			AlbumName:    job.AlbumName,
-			SpotifyID:    job.SpotifyID,
-			Status:       ds,
-			ErrorMessage: job.Error,
-			FilePath:     job.FilePath,
-			StartTime:    func() int64 { if job.CreatedAt.IsZero() { return 0 }; return job.CreatedAt.Unix() }(),
-			EndTime:      func() int64 { if job.UpdatedAt.IsZero() { return 0 }; return job.UpdatedAt.Unix() }(),
-			StartedAt:    func() int64 { if job.StartedAt.IsZero() { return 0 }; return job.StartedAt.Unix() }(),
-			TotalSize:    job.TotalSize,
-			Progress:     progress,
-			Speed:        speed,
-		})
-	}
-	progInfo := util.GetDownloadProgress()
-	var totalDL float64
-	for _, item := range items {
-		if item.Status == util.StatusCompleted && item.TotalSize > 0 {
-			totalDL += item.TotalSize
-		}
-	}
-	var sessionStart int64
-	for _, item := range items {
-		if sessionStart == 0 || item.StartTime < sessionStart {
-			sessionStart = item.StartTime
-		}
-	}
-	return util.DownloadQueueInfo{
-		IsDownloading:    isDownloading,
-		Queue:            items,
-		QueuedCount:      queued,
-		CompletedCount:   completed,
-		FailedCount:      failed,
-		SkippedCount:     skipped,
-		CurrentSpeed:     progInfo.SpeedMBps,
-		TotalDownloaded:  totalDL,
-		SessionStartTime: sessionStart,
-	}
-}
-
 func (a *App) ClearCompletedDownloads() {
-	jm := a.ctr.Jobs
-	if jm == nil {
-		util.ClearDownloadQueue()
-		return
+	if jm := a.ctr.Jobs; jm != nil {
+		jm.ClearCompletedJobs()
 	}
-	jm.ClearCompletedJobs()
 }
 
 func (a *App) ClearAllDownloads() {
+	if jm := a.ctr.Jobs; jm != nil {
+		jm.ClearAllJobs()
+	}
+}
+
+func (a *App) ExportFailedDownloads() (string, error) {
 	jm := a.ctr.Jobs
 	if jm == nil {
-		util.ClearAllDownloads()
-		return
+		return "No failed downloads", nil
 	}
-	jm.ClearAllJobs()
-}
-
-func (a *App) AddToDownloadQueue(spotifyID, trackName, artistName, albumName string) string {
-	itemID := fmt.Sprintf("%s-%d", spotifyID, time.Now().UnixNano())
-	util.AddToQueue(itemID, trackName, artistName, albumName, "")
-	return itemID
-}
-
-func (a *App) MarkDownloadItemFailed(itemID, errorMsg string) {
-	util.FailDownloadItem(itemID, errorMsg)
-}
-
-func (a *App) CancelAllQueuedItems() {
-	util.CancelAllQueuedItems()
-}
-
-// FIX ExportFailedDownloads — utilise a.GetDownloadQueue() (lit le JobManager BoltDB)
-// au lieu de util.GetDownloadQueue() (queue in-memory uniquement)
-func (a *App) ExportFailedDownloads() (string, error) {
-	queueInfo := a.GetDownloadQueue()
+	jobs, err := jm.GetAllJobs()
+	if err != nil {
+		return "", err
+	}
 	var failedItems []string
-
 	hasFailed := false
-	for _, item := range queueInfo.Queue {
-		if item.Status == util.StatusFailed {
+	for _, job := range jobs {
+		if job.Status == StatusFailed {
 			hasFailed = true
 			break
 		}
 	}
-
 	if !hasFailed {
-		return "No failed downloads to export.", nil
+		return "No failed downloads to export", nil
 	}
-
-	failedItems = append(failedItems, fmt.Sprintf("Failed Downloads Report - %s", time.Now().Format("2006-01-02 15:04:05")))
-	failedItems = append(failedItems, strings.Repeat("-", 50))
-	failedItems = append(failedItems, "")
-
-	count := 0
-	for _, item := range queueInfo.Queue {
-		if item.Status == util.StatusFailed {
-			count++
-			line := fmt.Sprintf("%d. %s - %s", count, item.TrackName, item.ArtistName)
-			if item.AlbumName != "" {
-				line += fmt.Sprintf(" (%s)", item.AlbumName)
-			}
-			failedItems = append(failedItems, line)
-			failedItems = append(failedItems, fmt.Sprintf("   Error: %s", item.ErrorMessage))
-			if item.SpotifyID != "" {
-				failedItems = append(failedItems, fmt.Sprintf("   ID: %s", item.SpotifyID))
-				failedItems = append(failedItems, fmt.Sprintf("   URL: https://open.spotify.com/track/%s", item.SpotifyID))
-			}
-			failedItems = append(failedItems, "")
+	failedItems = append(failedItems, "Track,Artist,Album,Error")
+	for _, job := range jobs {
+		if job.Status == StatusFailed {
+			row := fmt.Sprintf("%q,%q,%q,%q",
+				job.TrackName, job.ArtistName, job.AlbumName, job.Error)
+			failedItems = append(failedItems, row)
 		}
 	}
-
-	content := strings.Join(failedItems, "\n")
-	return fmt.Sprintf("EXPORT:%s", content), nil
+	csvContent := strings.Join(failedItems, "\n")
+	return "EXPORT:" + csvContent, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -869,9 +747,9 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 // FFmpeg
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (a *App) IsFFmpegInstalled() (bool, error)  { return audio.IsFFmpegInstalled() }
-func (a *App) IsFFprobeInstalled() (bool, error) { return audio.IsFFprobeInstalled() }
-func (a *App) GetFFmpegPath() (string, error)    { return util.GetFFmpegPath() }
+func (a *App) IsFFmpegInstalled() (bool, error)    { return audio.IsFFmpegInstalled() }
+func (a *App) IsFFprobeInstalled() (bool, error)   { return audio.IsFFprobeInstalled() }
+func (a *App) GetFFmpegPath() (string, error)      { return util.GetFFmpegPath() }
 func (a *App) CheckFFmpegInstalled() (bool, error) { return audio.IsFFmpegInstalled() }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -894,7 +772,7 @@ func (a *App) ConvertAudio(req ConvertAudioRequest) ([]audio.ConvertAudioResult,
 	})
 }
 
-func (a *App) GetFileSizes(files []string) map[string]int64  { return backend.GetFileSizes(files) }
+func (a *App) GetFileSizes(files []string) map[string]int64 { return backend.GetFileSizes(files) }
 func (a *App) ListDirectoryFiles(dirPath string) ([]backend.FileInfo, error) {
 	if dirPath == "" {
 		return nil, fmt.Errorf("directory path is required")
@@ -1218,25 +1096,7 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 // Misc helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (a *App) SkipDownloadItem(itemID, filePath string) { util.SkipDownloadItem(itemID, filePath) }
 func (a *App) GetPreviewURL(trackID string) (string, error) { return spotify.GetPreviewURL(trackID) }
-
-func jobStatusToDownloadStatus(s JobStatus) util.DownloadStatus {
-	switch s {
-	case StatusPending:
-		return util.StatusQueued
-	case StatusDownloading:
-		return util.StatusDownloading
-	case StatusDone:
-		return util.StatusCompleted
-	case StatusFailed:
-		return util.StatusFailed
-	case StatusSkipped:
-		return util.StatusSkipped
-	default:
-		return util.StatusQueued
-	}
-}
 
 func (a *App) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchResponse, error) {
 	jm := a.ctr.Jobs

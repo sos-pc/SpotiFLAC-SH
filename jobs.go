@@ -93,6 +93,7 @@ type Job struct {
 	Status       JobStatus   `json:"status"`
 	FilePath     string      `json:"file_path,omitempty"`
 	TotalSize    float64     `json:"total_size,omitempty"`
+	Speed        float64     `json:"speed,omitempty"`
 	Progress     float64     `json:"progress,omitempty"`
 	Error        string      `json:"error,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
@@ -324,8 +325,6 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 			UpdatedAt:    time.Now(),
 		}
 
-		util.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
-
 		if err := jm.saveJob(job); err != nil {
 			fmt.Printf("[Jobs] Failed to persist job %s: %v\n", job.ID, err)
 			skipped++
@@ -391,7 +390,6 @@ func (jm *JobManager) processJob(jobID string) {
 	job.StartedAt = time.Now()
 	jm.saveJob(job)
 	jm.notifyJob(job)
-	util.StartDownloadItem(job.ID)
 
 	outputDir := jm.buildOutputDir(job)
 
@@ -405,7 +403,6 @@ func (jm *JobManager) processJob(jobID string) {
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
-		util.SkipDownloadItem(job.ID, existingPath)
 		if job.WatchlistID != "" {
 			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		}
@@ -415,6 +412,13 @@ func (jm *JobManager) processJob(jobID string) {
 	streamingURLs := jm.getStreamingURLs(job)
 
 	req := jm.buildDownloadRequest(job, outputDir, streamingURLs)
+	// SpeedCallback — publie la vitesse en temps réel via SSE
+	req.SpeedCallback = func(mbDownloaded, speedMBps float64) {
+		job.Speed = speedMBps
+		job.TotalSize = mbDownloaded
+		job.UpdatedAt = time.Now()
+		jm.notifyJob(job)
+	}
 	resp, err := backend.ExecuteDownload(req)
 	if err != nil || !resp.Success {
 		errMsg := ""
@@ -449,6 +453,7 @@ func (jm *JobManager) processJob(jobID string) {
 	}
 
 	job.Status = StatusDone
+	job.Speed = 0 // reset vitesse une fois terminé
 	job.FilePath = resp.File
 	job.Progress = 1.0
 	if resp.File != "" {
@@ -856,7 +861,7 @@ func (jm *JobManager) recoverPendingJobs() {
 	for _, job := range toRecover {
 		jobCopy := job
 		jm.saveJob(&jobCopy)
-		util.AddToQueue(jobCopy.ID, jobCopy.TrackName, jobCopy.ArtistName, jobCopy.AlbumName, jobCopy.SpotifyID)
+
 		select {
 		case jm.queue <- jobCopy.ID:
 			recovered++
@@ -1126,7 +1131,7 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
 			continue
 		}
 		jm.notifyJob(&job)
-		util.AddToQueue(job.ID, job.TrackName, job.ArtistName, job.AlbumName, job.SpotifyID)
+
 		select {
 		case jm.queue <- job.ID:
 			requeued++

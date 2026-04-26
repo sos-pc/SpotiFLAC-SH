@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/amazon"
+	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/deezer"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/qobuz"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -57,6 +57,9 @@ type DownloadRequest struct {
 	UseSingleGenre       bool   `json:"use_single_genre,omitempty"`
 	EmbedGenre           bool   `json:"embed_genre,omitempty"`
 	UserID               string `json:"user_id,omitempty"`
+	// SpeedCallback est appelé pendant le téléchargement avec (mbDownloaded, speedMBps).
+	// Nil si non requis. Non sérialisé.
+	SpeedCallback func(mbDownloaded, speedMBps float64) `json:"-"`
 }
 
 type DownloadResponse struct {
@@ -98,12 +101,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		} else {
 			itemID = fmt.Sprintf("%s-%s-%d", req.TrackName, req.ArtistName, time.Now().UnixNano())
 		}
-		util.AddToQueue(itemID, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID)
 	}
-
-	util.SetDownloading(true)
-	util.StartDownloadItem(itemID)
-	defer util.SetDownloading(false)
 
 	spotifyURL := ""
 	if req.SpotifyID != "" {
@@ -157,7 +155,6 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		expectedFilename := util.BuildExpectedFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.SpotifyDiscNumber, req.UseAlbumTrackNumber)
 		expectedPath := filepath.Join(req.OutputDir, expectedFilename)
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 100*1024 {
-			util.SkipDownloadItem(itemID, expectedPath)
 			return DownloadResponse{
 				Success:       true,
 				Message:       "File already exists",
@@ -205,7 +202,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			// 2. Si Deezer a échoué, tenter Songlink (JSON ou HTML)
 			if finalIsrc == "" {
 				sl := songlink.GetSongLinkClient()
-					if sl != nil {
+				if sl != nil {
 					// L'appel GetAllURLs inclut le fallback HTML depuis la v1.3.6
 					urls, err := sl.GetAllURLsFromSpotify(req.SpotifyID, "")
 					if err == nil && urls != nil && urls.ISRC != "" {
@@ -238,6 +235,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	switch req.Service {
 	case "amazon":
 		downloader := amazon.NewAmazonDownloader()
+		downloader.SpeedCallback = req.SpeedCallback
 		if req.ServiceURL != "" {
 			filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 		} else {
@@ -255,6 +253,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 		if req.ApiURL == "" || req.ApiURL == "auto" {
 			downloader := tidal.NewTidalDownloader("")
+			downloader.SpeedCallback = req.SpeedCallback
 			if req.ServiceURL != "" {
 				filename, err = downloader.DownloadByURLWithFallback(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			} else {
@@ -262,6 +261,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			}
 		} else {
 			downloader := tidal.NewTidalDownloader(req.ApiURL)
+			downloader.SpeedCallback = req.SpeedCallback
 			if req.ServiceURL != "" {
 				filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			} else {
@@ -273,11 +273,13 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		fmt.Println("Waiting for ISRC (Qobuz dependency)...")
 		isrc := <-isrcChan
 		downloader := qobuz.NewQobuzDownloader()
+		downloader.SpeedCallback = req.SpeedCallback
 		quality := qobuzFmt
 		filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 
 	case "deezer":
 		downloader := deezer.NewDeezerDownloader()
+		downloader.SpeedCallback = req.SpeedCallback
 		filename, err = downloader.Download(req.SpotifyID, req.OutputDir, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 
 	case "auto":
@@ -301,6 +303,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			switch svc {
 			case "tidal":
 				downloader := tidal.NewTidalDownloader("")
+				downloader.SpeedCallback = req.SpeedCallback
 				if req.ServiceURL != "" {
 					filename, err = downloader.DownloadByURLWithFallback(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 				} else {
@@ -308,6 +311,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				}
 			case "amazon":
 				downloader := amazon.NewAmazonDownloader()
+				downloader.SpeedCallback = req.SpeedCallback
 				if req.ServiceURL != "" {
 					filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 				} else {
@@ -316,10 +320,12 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			case "qobuz":
 				isrc := <-isrcChan
 				downloader := qobuz.NewQobuzDownloader()
+				downloader.SpeedCallback = req.SpeedCallback
 				quality := qobuzFmt
 				filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			case "deezer":
 				downloader := deezer.NewDeezerDownloader()
+				downloader.SpeedCallback = req.SpeedCallback
 				filename, err = downloader.Download(req.SpotifyID, req.OutputDir, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 			default:
 				continue
@@ -342,7 +348,6 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	if err != nil {
-		util.FailDownloadItem(itemID, fmt.Sprintf("Download failed: %v", err))
 		if filename != "" && !strings.HasPrefix(filename, "EXISTS:") {
 			if _, statErr := os.Stat(filename); statErr == nil {
 				fmt.Printf("Removing corrupted/partial file after failed download: %s\n", filename)
@@ -390,13 +395,9 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	message := "Download completed successfully"
 	if alreadyExists {
 		message = "File already exists"
-		util.SkipDownloadItem(itemID, filename)
 	} else {
-		if fileInfo, statErr := os.Stat(filename); statErr == nil {
-			finalSize := float64(fileInfo.Size()) / (1024 * 1024)
-			util.CompleteDownloadItem(itemID, filename, finalSize)
-		} else {
-			util.CompleteDownloadItem(itemID, filename, 0)
+		if _, statErr := os.Stat(filename); statErr != nil {
+			fmt.Printf("Warning: Could not stat completed file %s: %v\n", filename, statErr)
 		}
 
 		// FIX #4 — capture req.UserID pour le taguer dans l'item d'historique
@@ -489,4 +490,3 @@ func qobuzQualityFor(format string) string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Misc
 // ─────────────────────────────────────────────────────────────────────────────
-

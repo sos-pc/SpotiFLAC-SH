@@ -15,16 +15,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type TidalDownloader struct {
-	client     *http.Client
-	timeout    time.Duration
-	maxRetries int
-	apiURL     string
+	client        *http.Client
+	timeout       time.Duration
+	maxRetries    int
+	apiURL        string
+	SpeedCallback func(mbDownloaded, speedMBps float64)
 }
 
 type TidalAPIResponse struct {
@@ -371,7 +372,7 @@ func (t *TidalDownloader) DownloadFile(url, filepath string) error {
 	}
 	defer out.Close()
 
-	pw := util.NewProgressWriter(out)
+	pw := util.NewProgressWriterWithCallback(out, t.SpeedCallback)
 	_, err = io.Copy(pw, resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
@@ -419,7 +420,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		}
 		defer out.Close()
 
-		pw := util.NewProgressWriter(out)
+		pw := util.NewProgressWriterWithCallback(out, t.SpeedCallback)
 		_, err = io.Copy(pw, resp.Body)
 		if err != nil {
 			return fmt.Errorf("failed to write file: %w", err)
@@ -450,7 +451,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
 
-		pw := util.NewProgressWriter(out)
+		pw := util.NewProgressWriterWithCallback(out, t.SpeedCallback)
 		_, err = io.Copy(pw, resp.Body)
 		out.Close()
 
@@ -525,11 +526,12 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 			if timeDiff > 0.1 {
 				bytesDiff := float64(totalBytes - lastBytes)
 				speedMBps = (bytesDiff / (1024 * 1024)) / timeDiff
-				util.SetDownloadSpeed(speedMBps)
 				lastTime = now
 				lastBytes = totalBytes
 			}
-			util.SetDownloadProgress(mbDownloaded)
+			if t.SpeedCallback != nil {
+				t.SpeedCallback(mbDownloaded, speedMBps)
+			}
 
 			fmt.Printf("\rDownloading: %.2f MB (%d/%d segments)", mbDownloaded, i+1, totalSegments)
 		}
@@ -1071,7 +1073,6 @@ func getDownloadURLRotated(apis []string, trackID int64, quality string) (string
 	return "https://api.tidal.com", url, nil
 }
 
-
 func buildTidalFilename(title, artist, album, albumArtist, releaseDate string, trackNumber, discNumber int, format string, includeTrackNumber bool, position int, useAlbumTrackNumber bool) string {
 	var filename string
 
@@ -1160,4 +1161,3 @@ func GetTidalIDFromISRC(trackName, artistName, isrc string) (int64, string, erro
 
 	return 0, "", fmt.Errorf("ISRC not found on Tidal")
 }
-

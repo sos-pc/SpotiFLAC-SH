@@ -295,30 +295,6 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	// ── Jobs ──────────────────────────────────────────────────────────────
-	s.mux.Handle("GET /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		user := GetUserFromContext(r)
-		queue := a.GetDownloadQueue()
-		if user != nil {
-			jobs, err := s.ctr.Jobs.GetAllJobs()
-			if err == nil {
-				allowedIDs := make(map[string]bool)
-				for _, j := range jobs {
-					if j.UserID == "" || j.UserID == user.UserID {
-						allowedIDs[j.ID] = true
-					}
-				}
-				filtered := queue.Queue[:0]
-				for _, item := range queue.Queue {
-					if allowedIDs[item.ID] {
-						filtered = append(filtered, item)
-					}
-				}
-				queue.Queue = filtered
-			}
-		}
-		writeV1JSON(w, http.StatusOK, queue)
-	}))
-
 	s.mux.Handle("POST /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		var req EnqueueBatchRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -854,57 +830,6 @@ func (s *Server) registerV1Routes() {
 		writeV1JSON(w, http.StatusOK, result)
 	}))
 
-	// ── Jobs (legacy queue ops) ───────────────────────────────────────────
-	s.mux.Handle("GET /api/v1/jobs/progress", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		writeV1JSON(w, http.StatusOK, a.GetDownloadProgress())
-	}))
-
-	s.mux.Handle("DELETE /api/v1/jobs/pending", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		a.CancelAllQueuedItems()
-		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
-	}))
-
-	s.mux.Handle("POST /api/v1/jobs/legacy/enqueue", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		var params struct {
-			SpotifyID  string `json:"spotify_id"`
-			TrackName  string `json:"track_name"`
-			ArtistName string `json:"artist_name"`
-			AlbumName  string `json:"album_name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-			return
-		}
-		id := a.AddToDownloadQueue(params.SpotifyID, params.TrackName, params.ArtistName, params.AlbumName)
-		writeV1JSON(w, http.StatusOK, map[string]string{"id": id})
-	}))
-
-	s.mux.Handle("POST /api/v1/jobs/legacy/skip", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		var params struct {
-			ItemID   string `json:"item_id"`
-			FilePath string `json:"file_path"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-			return
-		}
-		a.SkipDownloadItem(params.ItemID, params.FilePath)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	s.mux.Handle("POST /api/v1/jobs/legacy/fail", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		var params struct {
-			ItemID   string `json:"item_id"`
-			ErrorMsg string `json:"error_msg"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-			return
-		}
-		a.MarkDownloadItemFailed(params.ItemID, params.ErrorMsg)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
 	// ── Files (extended) ──────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/files/sizes", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		var params struct {
@@ -1220,11 +1145,11 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 	// Retourner la clé brute une seule fois + les métadonnées
 	writeV1JSON(w, http.StatusCreated, map[string]interface{}{
-		"key":  rawKey,
-		"id":   key.ID,
-		"name": key.Name,
+		"key":         rawKey,
+		"id":          key.ID,
+		"name":        key.Name,
 		"permissions": key.Permissions,
-		"created_at": key.CreatedAt,
+		"created_at":  key.CreatedAt,
 	})
 }
 
@@ -1328,4 +1253,3 @@ func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-

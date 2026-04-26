@@ -15,16 +15,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/ulikunitz/xz"
 )
 
 // setHideWindow is a no-op on Linux (Docker target). On Windows it would hide
 // the console window of spawned subprocesses; that build target is not supported.
 func setHideWindow(_ *exec.Cmd) {}
-
-
 
 func IsFFprobeInstalled() (bool, error) {
 	ffprobePath, err := util.GetFFprobePath()
@@ -65,11 +63,6 @@ const (
 )
 
 func DownloadFFmpeg(progressCallback func(int)) error {
-
-	util.SetDownloadProgress(0)
-	util.SetDownloadSpeed(0)
-	util.SetDownloading(true)
-	defer util.SetDownloading(false)
 
 	ffmpegDir, err := util.GetFFmpegDir()
 	if err != nil {
@@ -208,11 +201,6 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 				speedMBps = (bytesDiff / (1024 * 1024)) / timeDiff
 				lastTime = now
 				lastBytes = downloaded
-			}
-
-			util.SetDownloadProgress(mbDownloaded)
-			if speedMBps > 0 {
-				util.SetDownloadSpeed(speedMBps)
 			}
 
 			if totalSize > 0 && progressCallback != nil {

@@ -13,14 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type AmazonDownloader struct {
-	client  *http.Client
-	regions []string
+	client        *http.Client
+	regions       []string
+	SpeedCallback func(mbDownloaded, speedMBps float64)
 }
 
 type SongLinkResponse struct {
@@ -36,7 +37,7 @@ type AmazonStreamResponse struct {
 
 func NewAmazonDownloader() *AmazonDownloader {
 	return &AmazonDownloader{
-		client: util.NewHTTPClient(120 * time.Second),
+		client:  util.NewHTTPClient(120 * time.Second),
 		regions: []string{"us", "eu"},
 	}
 }
@@ -178,7 +179,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	defer dlResp.Body.Close()
 
 	fmt.Printf("Downloading track: %s\n", fileName)
-	pw := util.NewProgressWriter(out)
+	pw := util.NewProgressWriterWithCallback(out, a.SpeedCallback)
 	_, err = io.Copy(pw, dlResp.Body)
 	if err != nil {
 		out.Close()

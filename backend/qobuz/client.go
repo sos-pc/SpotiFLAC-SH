@@ -12,14 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 type QobuzDownloader struct {
-	client *http.Client
-	appID  string
+	client        *http.Client
+	appID         string
+	SpeedCallback func(mbDownloaded, speedMBps float64)
 }
 
 type QobuzSearchResponse struct {
@@ -75,7 +76,7 @@ type QobuzStreamResponse struct {
 func NewQobuzDownloader() *QobuzDownloader {
 	return &QobuzDownloader{
 		client: util.NewHTTPClient(60 * time.Second),
-		appID: "798273057",
+		appID:  "798273057",
 	}
 }
 
@@ -282,7 +283,7 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 
 	fmt.Println("Downloading...")
 
-	pw := util.NewProgressWriter(out)
+	pw := util.NewProgressWriterWithCallback(out, q.SpeedCallback)
 	_, err = io.Copy(pw, resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
