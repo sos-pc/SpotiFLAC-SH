@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,40 +359,46 @@ var coreServices = []serviceEntry{
 	{"Tidal API", "https://api.tidal.com", nil},
 }
 
-var tidalProxies = []serviceEntry{
-	// pingTidalProxy tests /track/?id=…&audioquality=LOSSLESS so 401/403
-	// (auth-gated proxies) are correctly reported as "down" instead of "ok".
-	{"Tidal · triton.squid.wtf", "https://triton.squid.wtf", pingTidalProxy},
-	{"Tidal · spotisaver.net (1)", "https://hifi-one.spotisaver.net", pingTidalProxy},
-	{"Tidal · spotisaver.net (2)", "https://hifi-two.spotisaver.net", pingTidalProxy},
-	{"Tidal · monochrome.tf (ohio)", "https://ohio-1.monochrome.tf", pingTidalProxy},
-	{"Tidal · monochrome.tf (sg)", "https://singapore-1.monochrome.tf", pingTidalProxy},
-	{"Tidal · qqdl.site (wolf)", "https://wolf.qqdl.site", pingTidalProxy},
-	{"Tidal · qqdl.site (maus)", "https://maus.qqdl.site", pingTidalProxy},
-	{"Tidal · qqdl.site (vogel)", "https://vogel.qqdl.site", pingTidalProxy},
-	{"Tidal · qqdl.site (katze)", "https://katze.qqdl.site", pingTidalProxy},
-	{"Tidal · qqdl.site (hund)", "https://hund.qqdl.site", pingTidalProxy},
-	{"Tidal · monochrome.tf (api)", "https://api.monochrome.tf", pingTidalProxy},
-}
-
-var qobuzProviders = []serviceEntry{
-	// URLs here match proxy_config.go (full API base including path prefix).
-	// pingQobuzProxy appends the test track ID using the correct scheme per provider.
-	{"Qobuz · dab.yeet.su", "https://dab.yeet.su/api/stream?trackId=", pingQobuzProxy},
-	{"Qobuz · dabmusic.xyz", "https://dabmusic.xyz/api/stream?trackId=", pingQobuzProxy},
-	// Domain migrated from qbz.afkarxyz.fun → qbz.afkarxyz.qzz.io (v3.0 upstream)
-	{"Qobuz · afkarxyz (qzz.io)", "https://qbz.afkarxyz.qzz.io/api/track/", pingQobuzProxy},
+// proxyDisplayName extracts a short human-readable label from a proxy base URL.
+// "https://wolf.qqdl.site/track/?id=" → "wolf.qqdl.site"
+func proxyDisplayName(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		// Fallback: strip scheme manually
+		s := strings.TrimPrefix(rawURL, "https://")
+		s = strings.TrimPrefix(s, "http://")
+		if idx := strings.IndexAny(s, "/?"); idx > 0 {
+			return s[:idx]
+		}
+		return s
+	}
+	return u.Hostname()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CheckAllServices runs parallel health checks for every external service
+// including Tidal/Qobuz proxies as currently configured by the user.
+// User customisations made via Settings → APIs are reflected automatically.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	all := make([]serviceEntry, 0, 32)
 	all = append(all, coreServices...)
-	all = append(all, tidalProxies...)
-	all = append(all, qobuzProviders...)
+
+	// Build Tidal proxy entries from the live configuration so that any proxy
+	// the user has added or removed in Settings is reflected here.
+	for _, proxyURL := range util.GetTidalProxies() {
+		name := "Tidal · " + proxyDisplayName(proxyURL)
+		all = append(all, serviceEntry{name, proxyURL, pingTidalProxy})
+	}
+
+	// Build Qobuz entries from the live configuration.
+	// The stored URL is the full API base (includes path prefix) as used by
+	// the downloader — pingQobuzProxy appends the test track ID correctly.
+	for _, proxyBase := range util.GetQobuzProviders() {
+		name := "Qobuz · " + proxyDisplayName(proxyBase)
+		all = append(all, serviceEntry{name, proxyBase, pingQobuzProxy})
+	}
 
 	if jellyfinURL != "" {
 		all = append(all, serviceEntry{"Jellyfin", jellyfinURL, nil})

@@ -10,19 +10,25 @@ import "sync"
 
 var proxyMu sync.RWMutex
 
-// Tidal community proxies
+// Tidal community proxies — all implement the Hi-Fi API interface:
+//
+//	GET {base}/track/?id={tidalID}&audioquality=LOSSLESS
+//
+// Sources: https://github.com/monochrome-music/monochrome/blob/main/INSTANCES.md
 var tidalProxies = []string{
-	"https://triton.squid.wtf",
-	"https://hifi-one.spotisaver.net",
-	"https://hifi-two.spotisaver.net",
-	"https://ohio-1.monochrome.tf",
-	"https://singapore-1.monochrome.tf",
+	// Official Monochrome instances
+	"https://monochrome-api.samidy.com",
+	"https://api.monochrome.tf",
+	// Community — TypeScript rewrite (geeked.wtf)
+	"https://hifi.geeked.wtf",
+	// Community — Lucida / QQDL
 	"https://wolf.qqdl.site",
 	"https://maus.qqdl.site",
 	"https://vogel.qqdl.site",
 	"https://katze.qqdl.site",
 	"https://hund.qqdl.site",
-	"https://api.monochrome.tf",
+	// Community — Limited/No-Sub accounts
+	"https://tidal.kinoplus.online",
 }
 
 // Amazon Music proxies (tried in order, first success wins)
