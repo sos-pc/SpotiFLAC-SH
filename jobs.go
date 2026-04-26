@@ -233,7 +233,7 @@ func (jm *JobManager) cleanupLoop() {
 	case <-jm.ctx.Done():
 		return
 	}
-	if deleted, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
+	if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
 		fmt.Printf("[Jobs] Cleanup: %d old jobs deleted\n", deleted)
 	}
 	ticker := time.NewTicker(24 * time.Hour)
@@ -243,7 +243,7 @@ func (jm *JobManager) cleanupLoop() {
 		case <-jm.ctx.Done():
 			return
 		case <-ticker.C:
-			if deleted, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
+			if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
 				fmt.Printf("[Jobs] Cleanup: %d old jobs deleted\n", deleted)
 			}
 		}
@@ -403,6 +403,11 @@ func (jm *JobManager) processJob(jobID string) {
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
+		// Persister le filePath dans TrackedFiles pour la génération M3U8
+		// (même logique que StatusDone — les fichiers skipped appartiennent à la playlist)
+		if job.WatchlistID != "" && jm.eventHandler != nil && job.SpotifyID != "" && existingPath != "" {
+			jm.eventHandler.OnTrackDownloaded(job.WatchlistID, job.SpotifyID, existingPath)
+		}
 		if job.WatchlistID != "" {
 			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		}
@@ -959,10 +964,10 @@ func (jm *JobManager) GetDoneFilesByWatchlist(watchlistID string) map[string]str
 	return result
 }
 
-func (jm *JobManager) CleanupOldJobs() (int, error) {
+func (jm *JobManager) CleanupOldJobs() (int, []string, error) {
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	type key struct{ spotifyID, watchlistID string }
@@ -974,7 +979,22 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 			continue
 		}
 		k := key{j.SpotifyID, j.WatchlistID}
-		if prev, ok := latest[k]; !ok || j.UpdatedAt.After(prev.UpdatedAt) {
+		existing, ok := latest[k]
+		if !ok {
+			latest[k] = j
+			continue
+		}
+		// Préférer un job StatusDone sur un StatusFailed même si le Failed est plus récent :
+		// le fichier est toujours sur disque depuis le Done.
+		if existing.Status == StatusDone && j.Status == StatusFailed {
+			continue // garder le Done existant
+		}
+		if existing.Status == StatusFailed && j.Status == StatusDone {
+			latest[k] = j // remplacer le Failed par le Done
+			continue
+		}
+		// Pour statuts identiques ou autres cas, garder le plus récent
+		if j.UpdatedAt.After(existing.UpdatedAt) {
 			latest[k] = j
 		}
 	}
@@ -996,6 +1016,7 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 		}
 	}
 
+	var deletedIDs []string
 	deleted := 0
 	err = jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketJobs)
@@ -1011,6 +1032,7 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 		})
 		for _, k := range toDelete {
 			b.Delete(k)
+			deletedIDs = append(deletedIDs, string(k))
 			deleted++
 		}
 		return nil
@@ -1020,11 +1042,18 @@ func (jm *JobManager) CleanupOldJobs() (int, error) {
 		jm.db.Update(func(tx *bolt.Tx) error { return nil })
 		fmt.Printf("[Jobs] Cleanup: deleted %d duplicate/old jobs\n", deleted)
 	}
-	return deleted, err
+	// Publier les events SSE APRÈS la transaction
+	if err == nil && jm.hub != nil {
+		for _, id := range deletedIDs {
+			jm.hub.publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id}})
+		}
+	}
+	return deleted, deletedIDs, err
 }
 
-func (jm *JobManager) ClearCompletedJobs() error {
-	return jm.db.Update(func(tx *bolt.Tx) error {
+func (jm *JobManager) ClearCompletedJobs() ([]string, error) {
+	var deletedIDs []string
+	err := jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketJobs)
 		if b == nil {
 			return nil
@@ -1035,8 +1064,10 @@ func (jm *JobManager) ClearCompletedJobs() error {
 			if err := json.Unmarshal(v, &job); err != nil {
 				return nil
 			}
-			if job.Status == StatusDone || job.Status == StatusSkipped {
+			if job.Status == StatusDone ||
+				(job.Status == StatusSkipped && job.WatchlistID == "") {
 				toDelete = append(toDelete, k)
+				deletedIDs = append(deletedIDs, job.ID)
 			}
 			return nil
 		})
@@ -1045,12 +1076,19 @@ func (jm *JobManager) ClearCompletedJobs() error {
 		}
 		return nil
 	})
+	// Publier les events SSE APRÈS la transaction BoltDB
+	if jm.hub != nil {
+		for _, id := range deletedIDs {
+			jm.hub.publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id}})
+		}
+	}
+	return deletedIDs, err
 }
 
 // FIX #5 — ClearAllJobs : itère et supprime clé par clé au lieu de DeleteBucket
 // (même pattern que ClearHistory corrigé en v1.2.1)
 func (jm *JobManager) ClearAllJobs() error {
-	return jm.db.Update(func(tx *bolt.Tx) error {
+	err := jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketJobs)
 		if b == nil {
 			return nil
@@ -1065,6 +1103,11 @@ func (jm *JobManager) ClearAllJobs() error {
 		}
 		return nil
 	})
+	// Publier un event "queue_cleared" pour que le frontend vide sa Map
+	if jm.hub != nil {
+		jm.hub.publish(JobEvent{Type: "queue_cleared", Job: nil})
+	}
+	return err
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1156,7 +1199,7 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 
 	// Ne déclencher que quand tous les jobs de la watchlist sont terminaux.
 	for _, j := range jobs {
-		if j.WatchlistID != watchlistID {
+		if j.WatchlistID != watchlistID || j.BatchID != batchID {
 			continue
 		}
 		if j.Status == StatusPending || j.Status == StatusDownloading {

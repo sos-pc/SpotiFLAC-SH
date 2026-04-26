@@ -75,7 +75,7 @@ func GetSongLinkClient() *SongLinkClient {
 
 func NewSongLinkClient() *SongLinkClient {
 	return &SongLinkClient{
-		client: util.NewHTTPClient(30 * time.Second),
+		client:           util.NewHTTPClient(30 * time.Second),
 		apiCallResetTime: time.Now(),
 	}
 }
@@ -547,8 +547,7 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 
 	var searchResp struct {
 		Data []struct {
-			ID   int64  `json:"id"`
-			ISRC string `json:"isrc"`
+			ID int64 `json:"id"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
@@ -558,9 +557,16 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 		return nil, fmt.Errorf("deezer search: no results for %s - %s", trackName, artistName)
 	}
 
-	isrc := searchResp.Data[0].ISRC
-	if isrc == "" {
-		return nil, fmt.Errorf("deezer: no ISRC in search result for %s - %s", trackName, artistName)
+	trackID := searchResp.Data[0].ID
+	if trackID == 0 {
+		return nil, fmt.Errorf("deezer: no track found for %s - %s", trackName, artistName)
+	}
+
+	// Construire l'URL du track Deezer et réutiliser getDeezerISRC (déjà présente dans ce fichier)
+	deezerTrackURL := fmt.Sprintf("https://www.deezer.com/track/%d", trackID)
+	isrc, err := getDeezerISRC(deezerTrackURL)
+	if err != nil || isrc == "" {
+		return nil, fmt.Errorf("deezer: failed to get ISRC for track %d (%s - %s): %v", trackID, trackName, artistName, err)
 	}
 
 	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", isrc, trackName, artistName)
@@ -687,9 +693,9 @@ func (s *SongLinkClient) ScrapeSongLinkHTML(spotifyTrackID string) (*SongLinkURL
 
 // itunesResult est le résultat minimal retourné par l'iTunes Search API.
 type itunesResult struct {
-	TrackID         int64  `json:"trackId"`
-	TrackTimeMillis int64  `json:"trackTimeMillis"`
-	IsStreamable    bool   `json:"isStreamable"`
+	TrackID         int64 `json:"trackId"`
+	TrackTimeMillis int64 `json:"trackTimeMillis"`
+	IsStreamable    bool  `json:"isStreamable"`
 }
 
 // searchITunes cherche un track sur iTunes et retourne le meilleur résultat selon la durée.
@@ -714,8 +720,8 @@ func (s *SongLinkClient) searchITunes(trackName, artistName, albumName string, d
 			return nil, fmt.Errorf("iTunes status %d", resp.StatusCode)
 		}
 		var out struct {
-			ResultCount int             `json:"resultCount"`
-			Results     []itunesResult  `json:"results"`
+			ResultCount int            `json:"resultCount"`
+			Results     []itunesResult `json:"results"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return nil, err

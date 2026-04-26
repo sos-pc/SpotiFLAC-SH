@@ -58,6 +58,29 @@ export function useDownloadQueueData() {
         });
       });
 
+      es.addEventListener("job_deleted", (e: MessageEvent) => {
+        const { id } = JSON.parse(e.data) as { id: string };
+        setJobs((prev) => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+      });
+
+      es.addEventListener("queue_cleared", () => {
+        setJobs((prev) => {
+          const next = new Map(prev);
+          // Supprimer tous les jobs terminaux (done/skipped/failed)
+          // Garder pending et downloading (ils sont toujours actifs)
+          for (const [id, job] of next) {
+            if (job.status !== "pending" && job.status !== "downloading") {
+              next.delete(id);
+            }
+          }
+          return next;
+        });
+      });
+
       es.onerror = () => {
         es.close();
         esRef.current = null;

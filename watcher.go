@@ -31,19 +31,19 @@ type SyncLog struct {
 }
 
 type WatchedPlaylist struct {
-	ID             string      `json:"id"`
-	SpotifyURL     string      `json:"spotify_url"`
-	Name           string      `json:"name"`
-	IntervalHours  int         `json:"interval_hours"`
-	Settings       JobSettings `json:"settings"`
-	LastSync       time.Time   `json:"last_sync"`
+	ID             string            `json:"id"`
+	SpotifyURL     string            `json:"spotify_url"`
+	Name           string            `json:"name"`
+	IntervalHours  int               `json:"interval_hours"`
+	Settings       JobSettings       `json:"settings"`
+	LastSync       time.Time         `json:"last_sync"`
 	TrackIDs       []string          `json:"track_ids"`
 	TrackedFiles   map[string]string `json:"tracked_files,omitempty"` // spotifyID → filePath absolu
-	CreatedAt      time.Time   `json:"created_at"`
-	SyncDeletions  bool        `json:"sync_deletions"`
-	UpgradeQuality bool        `json:"upgrade_quality"`
-	SyncLogs       []SyncLog   `json:"sync_logs,omitempty"`
-	UserID         string      `json:"user_id,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	SyncDeletions  bool              `json:"sync_deletions"`
+	UpgradeQuality bool              `json:"upgrade_quality"`
+	SyncLogs       []SyncLog         `json:"sync_logs,omitempty"`
+	UserID         string            `json:"user_id,omitempty"`
 }
 
 type AddWatchlistRequest struct {
@@ -1077,6 +1077,12 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	}
 	stats.TotalTracks = len(pl.TrackIDs)
 
+	// Set des SpotifyIDs actuellement dans la watchlist
+	trackIDSet := make(map[string]bool, len(pl.TrackIDs))
+	for _, id := range pl.TrackIDs {
+		trackIDSet[id] = true
+	}
+
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return stats, err
@@ -1100,6 +1106,11 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	// Compter par statut et cumuler la taille.
 	tracksWithJob := make(map[string]bool)
 	for _, j := range latest {
+		// Ne compter que les jobs dont le track est encore dans la watchlist
+		// (OnPermanentFailure peut avoir retiré des tracks de TrackIDs)
+		if j.SpotifyID != "" && !trackIDSet[j.SpotifyID] {
+			continue
+		}
 		if j.SpotifyID != "" {
 			tracksWithJob[j.SpotifyID] = true
 		}
@@ -1208,32 +1219,28 @@ func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
 		pos  int
 		path string
 	}
-	jobs, err := w.jm.GetAllJobs()
-	if err != nil {
-		return
+	// Construire la map position depuis TrackIDs (ordre de la playlist Spotify)
+	posMap := make(map[string]int, len(pl.TrackIDs))
+	for i, id := range pl.TrackIDs {
+		posMap[id] = i
 	}
-	latestJob := make(map[string]Job)
-	for _, job := range jobs {
-		if job.WatchlistID != pl.ID || job.FilePath == "" {
-			continue
-		}
-		if job.Status != StatusDone && job.Status != StatusSkipped {
-			continue
-		}
-		key := job.SpotifyID
-		if key == "" {
-			key = job.ID
-		}
-		if prev, ok := latestJob[key]; !ok || job.UpdatedAt.After(prev.UpdatedAt) {
-			latestJob[key] = job
-		}
-	}
+
+	// Utiliser TrackedFiles comme source de vérité pour les chemins de fichiers.
+	// TrackedFiles contient tous les tracks téléchargés (StatusDone) et
+	// les tracks déjà présents sur disque (StatusSkipped) depuis la correction B12.
 	var entries []entry
-	for _, job := range latestJob {
-		if _, err := os.Stat(job.FilePath); err != nil {
-			continue // fichier supprimé ou déplacé depuis le téléchargement
+	for spotifyID, filePath := range pl.TrackedFiles {
+		if filePath == "" {
+			continue
 		}
-		entries = append(entries, entry{pos: job.Position, path: job.FilePath})
+		if _, err := os.Stat(filePath); err != nil {
+			continue // fichier supprimé ou déplacé
+		}
+		pos, ok := posMap[spotifyID]
+		if !ok {
+			pos = len(pl.TrackIDs) // tracks hors playlist → à la fin
+		}
+		entries = append(entries, entry{pos: pos, path: filePath})
 	}
 	if len(entries) == 0 {
 		return
