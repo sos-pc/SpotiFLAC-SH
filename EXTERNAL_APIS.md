@@ -43,7 +43,7 @@ SpotiFLAC tries providers in order: **Tidal → Qobuz → Amazon → Deezer**. E
 * **`https://api.tidal.com/v1/tracks/{id}/playbackinfopostpaywall`** — Returns the FLAC manifest. *Requires a valid Premium Token (PKCE).*
 
 **Tidal Device Code Credentials:**
-The OAuth 2.0 Device Code flow uses `client_id: fX2JxdmntZWK0ixT` — community-documented credentials shared across open-source Tidal clients (tiddl, TIDAL-Media-Downloader, etc.). See [CREDITS.md](CREDITS.md) for details.
+The OAuth 2.0 Device Code flow uses `client_id: 4N3n6Q1x95LL5K7p` — sourced from [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal). The previous TV client_id (`fX2JxdmntZWK0ixT`) conflicted with the Tidal desktop app. See [CREDITS.md](CREDITS.md) for details.
 
 **Community HiFi Proxies (fallback when no personal token):**
 * `https://triton.squid.wtf`

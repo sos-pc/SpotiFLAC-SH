@@ -43,13 +43,13 @@ All proxy lists are configurable at runtime in **Settings → APIs → Proxy Con
 
 The OAuth 2.0 Device Code flow uses application credentials shared across the community of Tidal client projects:
 
-- `client_id: fX2JxdmntZWK0ixT`
+- `client_id: 4N3n6Q1x95LL5K7p`
+- `client_secret: oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik=`
 
-These credentials are documented and used by open-source Tidal clients including:
-- **[tiddl](https://github.com/nicholaswmin/tiddl)** — Python Tidal downloader
-- **[TIDAL-Media-Downloader](https://github.com/yaronzz/Tidal-Media-Downloader)** — Multi-platform downloader
+These credentials are sourced from:
+- **[orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal)** — Tidal downloader module
 
-These are public application credentials (not tied to any user account) that have been stable across the community for years.
+These are public application credentials (not tied to any user account). The previous TV client_id (`fX2JxdmntZWK0ixT`) was replaced because it conflicts with the Tidal desktop application's client_id, causing the desktop app to be forcibly disconnected.
 
 ---
 

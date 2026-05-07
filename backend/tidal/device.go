@@ -13,8 +13,8 @@ import (
 // Credentials de l'application Tidal — identiques à ceux utilisés par les clients
 // communautaires (tiddl, etc.). N'appartiennent pas à un compte utilisateur.
 const (
-	tidalDeviceClientID     = "fX2JxdmntZWK0ixT"
-	tidalDeviceClientSecret = "1Nn5AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg="
+	tidalDeviceClientID     = "4N3n6Q1x95LL5K7p"
+	tidalDeviceClientSecret = "oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik="
 )
 
 // DeviceAuthResponse est la réponse de l'endpoint device_authorization.
