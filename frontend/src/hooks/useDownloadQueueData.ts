@@ -119,7 +119,7 @@ export function useDownloadQueueData() {
         (j) => j.status === "downloading" || j.status === "pending",
       );
       if (downloadingJobs.length === 0) return 0;
-      const oldest = jobsArray
+      const oldest = downloadingJobs
         .filter((j) => j.started_at)
         .map((j) => new Date(j.started_at!).getTime() / 1000)
         .filter((t) => t > 0);

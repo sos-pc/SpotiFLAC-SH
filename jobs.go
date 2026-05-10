@@ -145,11 +145,8 @@ type JobEventHandler interface {
 	// OnPermanentFailure est appelé quand un job échoue de façon permanente
 	// (pas un timeout/rate-limit) pour qu'un retry automatique ne reboucle pas.
 	OnPermanentFailure(watchlistID, spotifyID string)
-	// OnTrackDownloaded est appelé quand un job watchlist se termine avec succès
-	// et un fichier sur disque. Permet de persister {spotifyID → filePath}.
-	OnTrackDownloaded(watchlistID, spotifyID, filePath string)
-	// OnBatchComplete est appelé quand tous les jobs d'une watchlist sont
-	// terminés : met à jour le SyncLog et génère le M3U8.
+	// OnBatchComplete est appelé quand tous les jobs d'un batch sont terminaux.
+	// Met à jour le SyncLog et génère le M3U8.
 	OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int)
 }
 
@@ -170,6 +167,11 @@ type JobManager struct {
 	mu             sync.RWMutex
 	// guard contre double Close
 	closedOnce sync.Once
+	// compteurs en mémoire pour détecter la fin de batch en O(1)
+	// protégés par mu
+	batchTotals  map[string]int    // batchID → nombre de jobs enqueués
+	batchDone    map[string]int    // batchID → nombre de jobs terminaux
+	batchWatchID map[string]string // batchID → watchlistID
 }
 
 // SetEventHandler connecte le handler d'événements (typiquement *Watcher).
@@ -204,6 +206,9 @@ func NewJobManager(configDir string, db *bolt.DB) (*JobManager, error) {
 		hub:            newSSEHub(),
 		ctx:            ctx,
 		cancel:         cancel,
+		batchTotals:    make(map[string]int),
+		batchDone:      make(map[string]int),
+		batchWatchID:   make(map[string]string),
 	}
 
 	jm.recoverPendingJobs()
@@ -341,6 +346,15 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		}
 	}
 
+	// Enregistrer le compteur pour détecter la fin du batch en O(1)
+	if enqueued > 0 && req.WatchlistID != "" {
+		jm.mu.Lock()
+		jm.batchTotals[batchID] = enqueued
+		jm.batchDone[batchID] = 0
+		jm.batchWatchID[batchID] = req.WatchlistID
+		jm.mu.Unlock()
+	}
+
 	return EnqueueBatchResponse{
 		Enqueued: enqueued,
 		Skipped:  skipped,
@@ -403,11 +417,6 @@ func (jm *JobManager) processJob(jobID string) {
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
-		// Persister le filePath dans TrackedFiles pour la génération M3U8
-		// (même logique que StatusDone — les fichiers skipped appartiennent à la playlist)
-		if job.WatchlistID != "" && jm.eventHandler != nil && job.SpotifyID != "" && existingPath != "" {
-			jm.eventHandler.OnTrackDownloaded(job.WatchlistID, job.SpotifyID, existingPath)
-		}
 		if job.WatchlistID != "" {
 			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		}
@@ -472,9 +481,6 @@ func (jm *JobManager) processJob(jobID string) {
 	fmt.Printf("[Jobs] Done: %s\n", job.TrackName)
 
 	if job.WatchlistID != "" {
-		if jm.eventHandler != nil && job.SpotifyID != "" && resp.File != "" {
-			jm.eventHandler.OnTrackDownloaded(job.WatchlistID, job.SpotifyID, resp.File)
-		}
 		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 	}
 }
@@ -1189,25 +1195,50 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
 	return requeued, nil
 }
 
-// maybeGenerateM3U8 génère le M3U8 si tous les jobs de la watchlist sont terminés.
-// batchID identifie le batch courant : seuls ses jobs sont comptés pour le SyncLog.
+// maybeGenerateM3U8 vérifie si le batch est terminé et notifie Watcher via OnBatchComplete.
+// Chemin normal : compteur en mémoire O(1).
+// Chemin de recovery (après redémarrage, compteur inconnu) : fallback sur BoltDB O(n).
 func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
+	if batchID == "" || watchlistID == "" {
+		return
+	}
+
+	jm.mu.Lock()
+	total, hasCounter := jm.batchTotals[batchID]
+	if hasCounter {
+		jm.batchDone[batchID]++
+		done := jm.batchDone[batchID]
+		if done < total {
+			jm.mu.Unlock()
+			return // batch pas encore terminé
+		}
+		// Batch terminé — nettoyer les compteurs
+		delete(jm.batchTotals, batchID)
+		delete(jm.batchDone, batchID)
+		delete(jm.batchWatchID, batchID)
+		jm.mu.Unlock()
+	} else {
+		// Pas de compteur : job récupéré après redémarrage — vérifier via BoltDB
+		jm.mu.Unlock()
+		jobs, err := jm.GetAllJobs()
+		if err != nil {
+			return
+		}
+		for _, j := range jobs {
+			if j.WatchlistID != watchlistID || j.BatchID != batchID {
+				continue
+			}
+			if j.Status == StatusPending || j.Status == StatusDownloading {
+				return // encore des jobs actifs
+			}
+		}
+	}
+
+	// Tous les jobs du batch sont terminaux — compter et notifier
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return
 	}
-
-	// Ne déclencher que quand tous les jobs de la watchlist sont terminaux.
-	for _, j := range jobs {
-		if j.WatchlistID != watchlistID || j.BatchID != batchID {
-			continue
-		}
-		if j.Status == StatusPending || j.Status == StatusDownloading {
-			return
-		}
-	}
-
-	// Compter uniquement les jobs du batch courant, dédupliqués par SpotifyID.
 	latest := make(map[string]Job)
 	for _, j := range jobs {
 		if j.WatchlistID != watchlistID || j.BatchID != batchID {

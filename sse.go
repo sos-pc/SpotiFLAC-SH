@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,15 +103,28 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Accel-Buffering", "no") // désactive le buffering nginx
 
-	// Snapshot initial — envoyer tous les jobs existants
+	// Résoudre le user AVANT le snapshot pour appliquer le filtre dès la connexion
+	user := GetUserFromContext(r)
+
+	// Snapshot initial — envoyer les jobs récents (actifs + terminaux des 48h)
+	// Filtré par userID pour éviter les fuites de données entre utilisateurs
+	cutoff := time.Now().Add(-48 * time.Hour)
 	if jobs, err := s.ctr.Jobs.GetAllJobs(); err == nil {
 		for i := range jobs {
-			sendSSEEvent(w, flusher, "job_update", &jobs[i])
+			j := &jobs[i]
+			// Filtre utilisateur : non-admin ne voit que ses propres jobs
+			if user != nil && !user.IsAdmin && j.UserID != "" && j.UserID != user.UserID {
+				continue
+			}
+			// Borne temporelle : jobs actifs toujours inclus, terminaux limités à 48h
+			if j.Status != StatusPending && j.Status != StatusDownloading {
+				if j.UpdatedAt.Before(cutoff) {
+					continue
+				}
+			}
+			sendSSEEvent(w, flusher, "job_update", j)
 		}
 	}
-
-	// Filtrer les jobs selon le user courant (API key ou JWT)
-	user := GetUserFromContext(r)
 
 	// S'abonner au hub
 	ch := s.ctr.Jobs.hub.subscribe()

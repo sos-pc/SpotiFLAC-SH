@@ -31,28 +31,25 @@ type SyncLog struct {
 }
 
 type WatchedPlaylist struct {
-	ID             string            `json:"id"`
-	SpotifyURL     string            `json:"spotify_url"`
-	Name           string            `json:"name"`
-	IntervalHours  int               `json:"interval_hours"`
-	Settings       JobSettings       `json:"settings"`
-	LastSync       time.Time         `json:"last_sync"`
-	TrackIDs       []string          `json:"track_ids"`
-	TrackedFiles   map[string]string `json:"tracked_files,omitempty"` // spotifyID → filePath absolu
-	CreatedAt      time.Time         `json:"created_at"`
-	SyncDeletions  bool              `json:"sync_deletions"`
-	UpgradeQuality bool              `json:"upgrade_quality"`
-	SyncLogs       []SyncLog         `json:"sync_logs,omitempty"`
-	UserID         string            `json:"user_id,omitempty"`
+	ID            string      `json:"id"`
+	SpotifyURL    string      `json:"spotify_url"`
+	Name          string      `json:"name"`
+	IntervalHours int         `json:"interval_hours"`
+	Settings      JobSettings `json:"settings"`
+	LastSync      time.Time   `json:"last_sync"`
+	TrackIDs      []string    `json:"track_ids"`
+	CreatedAt     time.Time   `json:"created_at"`
+	SyncDeletions bool        `json:"sync_deletions"`
+	SyncLogs      []SyncLog   `json:"sync_logs,omitempty"`
+	UserID        string      `json:"user_id,omitempty"`
 }
 
 type AddWatchlistRequest struct {
-	SpotifyURL     string      `json:"spotify_url"`
-	IntervalHours  int         `json:"interval_hours"`
-	Settings       JobSettings `json:"settings"`
-	SyncDeletions  bool        `json:"sync_deletions"`
-	UpgradeQuality bool        `json:"upgrade_quality"`
-	UserID         string      `json:"user_id,omitempty"`
+	SpotifyURL    string      `json:"spotify_url"`
+	IntervalHours int         `json:"interval_hours"`
+	Settings      JobSettings `json:"settings"`
+	SyncDeletions bool        `json:"sync_deletions"`
+	UserID        string      `json:"user_id,omitempty"`
 }
 
 type AddWatchlistResponse struct {
@@ -66,22 +63,34 @@ type AddWatchlistResponse struct {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Watcher struct {
-	jm     *JobManager
-	auth   *AuthManager
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex // FIX #2 — protège les écritures concurrentes sur les watchlists
+	jm      *JobManager
+	auth    *AuthManager
+	ctx     context.Context
+	cancel  context.CancelFunc
+	mu      sync.Mutex      // protège les écritures concurrentes sur les watchlists + syncing
+	syncing map[string]bool // playlists en cours de sync (protégé par mu)
 }
 
 // NewWatcher crée et démarre le daemon de surveillance des playlists.
 func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Watcher{
-		jm:     jm,
-		auth:   auth,
-		ctx:    ctx,
-		cancel: cancel,
+		jm:      jm,
+		auth:    auth,
+		ctx:     ctx,
+		cancel:  cancel,
+		syncing: make(map[string]bool),
 	}
+	// Vérifier l'intégrité des M3U8 au démarrage (recovery après crash/redémarrage)
+	go func() {
+		playlists, err := w.GetWatchlists()
+		if err != nil {
+			return
+		}
+		for _, pl := range playlists {
+			w.checkM3U8Integrity(pl)
+		}
+	}()
 	go w.daemon()
 	fmt.Println("[Watcher] Daemon started")
 	return w
@@ -212,9 +221,11 @@ func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
 	case validCount == 0:
 		// Rien de téléchargé : pas de M3U8 à vérifier.
 	case m3u8Count == -1:
-		fmt.Printf("[Watcher] Integrity %s: M3U8 absent, %d fichiers valides → sera regénéré\n", pl.Name, validCount)
+		fmt.Printf("[Watcher] Integrity %s: M3U8 absent, %d fichiers valides → régénération\n", pl.Name, validCount)
+		w.generateM3U8ForPlaylist(pl.ID)
 	case m3u8Count != validCount:
-		fmt.Printf("[Watcher] Integrity %s: M3U8=%d entrées, fichiers valides=%d → sera regénéré\n", pl.Name, m3u8Count, validCount)
+		fmt.Printf("[Watcher] Integrity %s: M3U8=%d entrées, fichiers valides=%d → régénération\n", pl.Name, m3u8Count, validCount)
+		w.generateM3U8ForPlaylist(pl.ID)
 	default:
 		fmt.Printf("[Watcher] Integrity %s: OK (%d/%d)\n", pl.Name, m3u8Count, validCount)
 	}
@@ -224,8 +235,22 @@ func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
 // connus, et enqueue uniquement les nouveaux.
 // FIX #2 — mu.Lock() autour des écritures sur TrackIDs + saveWatchlist
 func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
+	// Empêcher les exécutions concurrentes pour la même playlist
+	w.mu.Lock()
+	if w.syncing[pl.ID] {
+		w.mu.Unlock()
+		fmt.Printf("[Watcher] Sync already in progress for %s — skipping\n", pl.Name)
+		return
+	}
+	w.syncing[pl.ID] = true
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		delete(w.syncing, pl.ID)
+		w.mu.Unlock()
+	}()
+
 	fmt.Printf("[Watcher] Syncing: %s\n", pl.SpotifyURL)
-	w.checkM3U8Integrity(pl)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -262,35 +287,13 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		knownIDs[id] = true
 	}
 
-	// Vérifier que les fichiers téléchargés par SpotiFLAC existent encore sur disque.
-	// Seuls les tracks dans TrackedFiles (téléchargés avec succès) sont vérifiés —
-	// les tracks ajoutés à la création de la watchlist n'ont pas d'entrée dans TrackedFiles.
-	if len(pl.TrackedFiles) > 0 {
-		var missingIDs []string
-		for spotifyID, filePath := range pl.TrackedFiles {
-			if !knownIDs[spotifyID] {
-				continue
-			}
-			if _, err := os.Stat(filePath); err != nil {
-				fmt.Printf("[Watcher] File missing for %s (%s) — will re-download\n", spotifyID, filePath)
-				delete(knownIDs, spotifyID)
-				missingIDs = append(missingIDs, spotifyID)
-			}
-		}
-		if len(missingIDs) > 0 {
-			missingSet := make(map[string]bool, len(missingIDs))
-			for _, id := range missingIDs {
-				missingSet[id] = true
-			}
-			filtered := make([]string, 0, len(pl.TrackIDs))
-			for _, id := range pl.TrackIDs {
-				if !missingSet[id] {
-					filtered = append(filtered, id)
-				}
-			}
-			pl.TrackIDs = filtered
-			fmt.Printf("[Watcher] %d missing file(s) will be re-queued for %s\n", len(missingIDs), pl.Name)
-		}
+	// Vérifier que les fichiers considérés comme téléchargés existent encore sur disque.
+	// Source unique : jobs BoltDB (StatusDone/StatusSkipped avec FilePath).
+	w.recoverMissingFiles(&pl)
+	// Reconstruire knownIDs après recoverMissingFiles (peut avoir modifié pl.TrackIDs)
+	knownIDs = make(map[string]bool, len(pl.TrackIDs))
+	for _, id := range pl.TrackIDs {
+		knownIDs[id] = true
 	}
 
 	var newTracks []JobTrack
@@ -323,10 +326,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			batchID = result.BatchID
 		}
 	}
-
-	// M3U8 généré après EnqueueBatch (les jobs existants sont déjà là)
-	// maybeGenerateM3U8 dans jobs.go le regénère aussi à la fin de chaque job
-	go w.generateM3U8ForPlaylist(pl)
 
 	// ── Sync deletions ──
 	deletedCount := 0
@@ -368,9 +367,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 								os.Remove(dir)
 								fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
 							}
-							// FIX 2 — retirer de TrackedFiles pour éviter un re-téléchargement
-							delete(pl.TrackedFiles, knownID)
-							deletedCount++ // FIX 1 — compter seulement les suppressions effectives
+							deletedCount++
 						}
 					}
 				}
@@ -434,17 +431,16 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 	}
 
 	pl := &WatchedPlaylist{
-		ID:             fmt.Sprintf("watch-%d", time.Now().UnixNano()),
-		SpotifyURL:     req.SpotifyURL,
-		Name:           name,
-		IntervalHours:  req.IntervalHours,
-		Settings:       req.Settings,
-		LastSync:       time.Now(),
-		TrackIDs:       trackIDs,
-		CreatedAt:      time.Now(),
-		SyncDeletions:  req.SyncDeletions,
-		UpgradeQuality: req.UpgradeQuality,
-		UserID:         req.UserID,
+		ID:            fmt.Sprintf("watch-%d", time.Now().UnixNano()),
+		SpotifyURL:    req.SpotifyURL,
+		Name:          name,
+		IntervalHours: req.IntervalHours,
+		Settings:      req.Settings,
+		LastSync:      time.Now(),
+		TrackIDs:      trackIDs,
+		CreatedAt:     time.Now(),
+		SyncDeletions: req.SyncDeletions,
+		UserID:        req.UserID,
 	}
 
 	if err := w.saveWatchlist(pl); err != nil {
@@ -466,9 +462,6 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 
 	fmt.Printf("[Watcher] Added watchlist: %s (%d tracks, every %dh)\n",
 		name, len(tracks), req.IntervalHours)
-
-	// Sync en arrière-plan pour mettre à jour le nom si extractPlaylistName a échoué
-	go w.syncPlaylist(*pl)
 
 	return AddWatchlistResponse{
 		ID:      pl.ID,
@@ -588,21 +581,6 @@ func (w *Watcher) saveWatchlist(pl *WatchedPlaylist) error {
 	})
 }
 
-// ForceSyncWatchlist force une synchronisation immédiate d'une playlist.
-func (w *Watcher) ForceSyncWatchlist(id string) error {
-	playlists, err := w.GetWatchlists()
-	if err != nil {
-		return err
-	}
-	for _, pl := range playlists {
-		if pl.ID == id {
-			go w.syncPlaylist(pl)
-			return nil
-		}
-	}
-	return fmt.Errorf("watchlist not found: %s", id)
-}
-
 // SyncWatchlist combine :
 //  1. Nouveaux tracks Spotify (pas encore dans TrackIDs) → enqueue
 //  2. Jobs StatusFailed de cette watchlist → reset + remise en queue
@@ -627,58 +605,6 @@ func (w *Watcher) SyncWatchlist(id string) error {
 	return nil
 }
 
-// FIX #3 — defer cancel() sorti de la boucle (pattern correct)
-func (w *Watcher) RedownloadWatchlist(id string) error {
-	playlists, err := w.GetWatchlists()
-	if err != nil {
-		return err
-	}
-	for _, pl := range playlists {
-		if pl.ID != id {
-			continue
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel() // un seul defer, hors boucle effective car on return juste après
-
-		data, err := spotify.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
-		if err != nil {
-			return fmt.Errorf("failed to fetch playlist: %v", err)
-		}
-		tracks := extractTracksFromMetadata(data)
-		playlistName := extractPlaylistName(data)
-		if playlistName == "" {
-			playlistName = pl.Name
-		}
-		for i := range tracks {
-			tracks[i].PlaylistName = playlistName
-			tracks[i].Position = i + 1
-		}
-		if len(tracks) > 0 {
-			go w.jm.EnqueueBatch(EnqueueBatchRequest{
-				Tracks:      tracks,
-				Settings:    pl.Settings,
-				WatchlistID: pl.ID,
-				UserID:      pl.UserID,
-			})
-		}
-		newIDs := make([]string, 0, len(tracks))
-		for _, t := range tracks {
-			if t.SpotifyID != "" {
-				newIDs = append(newIDs, t.SpotifyID)
-			}
-		}
-		pl.TrackIDs = newIDs
-		pl.Name = playlistName
-		if err := w.saveWatchlist(&pl); err != nil {
-			return err
-		}
-		fmt.Printf("[Watcher] Re-download all triggered for %s (%d tracks)\n", pl.Name, len(tracks))
-		return nil
-	}
-	return fmt.Errorf("watchlist not found: %s", id)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — parsing de la réponse GetFilteredSpotifyData
 // ─────────────────────────────────────────────────────────────────────────────
@@ -691,30 +617,6 @@ func (w *Watcher) RedownloadWatchlist(id string) error {
 // Retire le track des TrackIDs pour qu'il soit réessayé au prochain sync.
 func (w *Watcher) OnPermanentFailure(watchlistID, spotifyID string) {
 	w.RemoveTrackID(watchlistID, spotifyID)
-}
-
-// OnTrackDownloaded implémente JobEventHandler.
-// Persiste {spotifyID → filePath} dans TrackedFiles pour pouvoir vérifier
-// l'existence du fichier lors des syncs futurs, indépendamment du cycle de vie des jobs.
-func (w *Watcher) OnTrackDownloaded(watchlistID, spotifyID, filePath string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	playlists, err := w.GetWatchlists()
-	if err != nil {
-		return
-	}
-	for i, pl := range playlists {
-		if pl.ID != watchlistID {
-			continue
-		}
-		if playlists[i].TrackedFiles == nil {
-			playlists[i].TrackedFiles = make(map[string]string)
-		}
-		playlists[i].TrackedFiles[spotifyID] = filePath
-		w.saveWatchlist(&playlists[i])
-		return
-	}
 }
 
 // OnBatchComplete implémente JobEventHandler.
@@ -742,7 +644,7 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 				}
 			}
 		}
-		go w.generateM3U8ForPlaylist(pl)
+		w.generateM3U8ForPlaylist(pl.ID)
 		return
 	}
 }
@@ -1184,11 +1086,80 @@ func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryIte
 	return items, nil
 }
 
+// recoverMissingFiles vérifie que les fichiers considérés comme téléchargés existent
+// encore sur disque. Source : jobs BoltDB (StatusDone/StatusSkipped avec FilePath).
+// Les tracks dont le fichier a disparu sont retirés de pl.TrackIDs pour être
+// re-téléchargés au prochain sync.
+func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
+	if w.jm == nil {
+		return
+	}
+	jobs, err := w.jm.GetAllJobs()
+	if err != nil {
+		return
+	}
+
+	// Garder le job le plus récent par SpotifyID pour cette watchlist
+	latestJob := make(map[string]Job)
+	for _, job := range jobs {
+		if job.WatchlistID != pl.ID || job.FilePath == "" {
+			continue
+		}
+		if job.Status != StatusDone && job.Status != StatusSkipped {
+			continue
+		}
+		key := job.SpotifyID
+		if key == "" {
+			continue
+		}
+		if prev, ok := latestJob[key]; !ok || job.UpdatedAt.After(prev.UpdatedAt) {
+			latestJob[key] = job
+		}
+	}
+
+	// Set des TrackIDs pour filtrer les jobs qui appartiennent encore à cette playlist
+	trackIDSet := make(map[string]bool, len(pl.TrackIDs))
+	for _, id := range pl.TrackIDs {
+		trackIDSet[id] = true
+	}
+
+	var missingIDs []string
+	for spotifyID, job := range latestJob {
+		if !trackIDSet[spotifyID] {
+			continue
+		}
+		if _, err := os.Stat(job.FilePath); err != nil {
+			fmt.Printf("[Watcher] File missing for %s (%s) — will re-download\n", spotifyID, job.FilePath)
+			missingIDs = append(missingIDs, spotifyID)
+		}
+	}
+
+	if len(missingIDs) > 0 {
+		missingSet := make(map[string]bool, len(missingIDs))
+		for _, id := range missingIDs {
+			missingSet[id] = true
+		}
+		filtered := make([]string, 0, len(pl.TrackIDs))
+		for _, id := range pl.TrackIDs {
+			if !missingSet[id] {
+				filtered = append(filtered, id)
+			}
+		}
+		pl.TrackIDs = filtered
+		fmt.Printf("[Watcher] %d missing file(s) will be re-queued for %s\n", len(missingIDs), pl.Name)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // M3U8 generation pour Jellyfin
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
+func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
+	pl, err := w.getWatchlistByID(watchlistID)
+	if err != nil || pl == nil {
+		return
+	}
+
 	app := &App{}
 	var settings map[string]interface{}
 	if pl.UserID != "" && w.auth != nil {
@@ -1215,37 +1186,53 @@ func (w *Watcher) generateM3U8ForPlaylist(pl WatchedPlaylist) {
 		outputDir = "/home/nonroot/Music"
 	}
 
-	type entry struct {
-		pos  int
-		path string
-	}
 	// Construire la map position depuis TrackIDs (ordre de la playlist Spotify)
 	posMap := make(map[string]int, len(pl.TrackIDs))
 	for i, id := range pl.TrackIDs {
 		posMap[id] = i
 	}
 
-	// Utiliser TrackedFiles comme source de vérité pour les chemins de fichiers.
-	// TrackedFiles contient tous les tracks téléchargés (StatusDone) et
-	// les tracks déjà présents sur disque (StatusSkipped) depuis la correction B12.
-	var entries []entry
-	for spotifyID, filePath := range pl.TrackedFiles {
-		if filePath == "" {
+	// Source unique : jobs BoltDB StatusDone/StatusSkipped avec FilePath.
+	// Même source que checkM3U8Integrity — cohérence garantie.
+	jobs, err := w.jm.GetAllJobs()
+	if err != nil {
+		return
+	}
+	latestJob := make(map[string]Job)
+	for _, job := range jobs {
+		if job.WatchlistID != pl.ID || job.FilePath == "" {
 			continue
 		}
-		if _, err := os.Stat(filePath); err != nil {
+		if job.Status != StatusDone && job.Status != StatusSkipped {
+			continue
+		}
+		key := job.SpotifyID
+		if key == "" {
+			key = job.ID
+		}
+		if prev, ok := latestJob[key]; !ok || job.UpdatedAt.After(prev.UpdatedAt) {
+			latestJob[key] = job
+		}
+	}
+
+	type entry struct {
+		pos  int
+		path string
+	}
+	var entries []entry
+	for _, job := range latestJob {
+		if _, err := os.Stat(job.FilePath); err != nil {
 			continue // fichier supprimé ou déplacé
 		}
-		pos, ok := posMap[spotifyID]
+		pos, ok := posMap[job.SpotifyID]
 		if !ok {
-			pos = len(pl.TrackIDs) // tracks hors playlist → à la fin
+			pos = len(pl.TrackIDs) // track hors playlist → à la fin
 		}
-		entries = append(entries, entry{pos: pos, path: filePath})
+		entries = append(entries, entry{pos: pos, path: job.FilePath})
 	}
 	if len(entries) == 0 {
 		return
 	}
-	// FIX #6 — sort.Slice ici aussi
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].pos < entries[j].pos
 	})
