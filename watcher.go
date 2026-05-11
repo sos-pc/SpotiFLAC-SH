@@ -81,6 +81,15 @@ func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
 		cancel:  cancel,
 		syncing: make(map[string]bool),
 	}
+	// Injecter le callback de résolution des settings actuels d'une watchlist.
+	// processJob l'utilise pour ignorer les settings obsolètes figés dans le job.
+	jm.getWatchlistSettings = func(watchlistID string) (JobSettings, bool) {
+		pl, err := w.getWatchlistByID(watchlistID)
+		if err != nil || pl == nil {
+			return JobSettings{}, false
+		}
+		return pl.Settings, true
+	}
 	// Vérifier l'intégrité des M3U8 au démarrage (recovery après crash/redémarrage)
 	go func() {
 		playlists, err := w.GetWatchlists()

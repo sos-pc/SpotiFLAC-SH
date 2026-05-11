@@ -169,9 +169,15 @@ type JobManager struct {
 	closedOnce sync.Once
 	// compteurs en mémoire pour détecter la fin de batch en O(1)
 	// protégés par mu
-	batchTotals  map[string]int    // batchID → nombre de jobs enqueués
+	batchTotals  map[string]int    // batchID → nombre de jobs enquéués
 	batchDone    map[string]int    // batchID → nombre de jobs terminaux
 	batchWatchID map[string]string // batchID → watchlistID
+	// Callback injecté par NewWatcher pour obtenir les settings actuels
+	// d'une watchlist à l'exécution.
+	// Garantit que les jobs d'une watchlist utilisent toujours les settings
+	// courants (folderTemplate, downloadPath, etc.) même si le job a été
+	// créé avec d'anciens settings obsolètes.
+	getWatchlistSettings func(watchlistID string) (JobSettings, bool)
 }
 
 // SetEventHandler connecte le handler d'événements (typiquement *Watcher).
@@ -395,6 +401,16 @@ func (jm *JobManager) processJob(jobID string) {
 
 	if job.Status == StatusDone || job.Status == StatusSkipped {
 		return
+	}
+
+	// Pour les jobs d'une watchlist, toujours utiliser les settings actuels
+	// de la watchlist (pas les settings figés au moment de la création du job).
+	// Cela évite que des jobs créés avec d'anciens settings obsolètes
+	// (ex: folderTemplate vide) téléchargent au mauvais endroit.
+	if job.WatchlistID != "" && jm.getWatchlistSettings != nil {
+		if freshSettings, ok := jm.getWatchlistSettings(job.WatchlistID); ok {
+			job.Settings = freshSettings
+		}
 	}
 
 	fmt.Printf("[Jobs] Processing: %s - %s\n", job.TrackName, job.ArtistName)
