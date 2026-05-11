@@ -16,21 +16,24 @@ The original desktop application that SpotiFLAC Web is based on. The core downlo
 These community-maintained services provide the "zero-account" FLAC streaming that powers SpotiFLAC's default mode.
 
 **Tidal HiFi Proxies**
-- **triton.squid.wtf** — `https://triton.squid.wtf`
-- **api.monochrome.tf** — `https://api.monochrome.tf` (+ ohio-1, singapore-1 nodes)
-- **qqdl.site** — wolf, maus, vogel, katze, hund nodes
-- **spotisaver.net** — `https://hifi-one.spotisaver.net` / `hifi-two.spotisaver.net`
+- **eu-central.monochrome.tf** — `https://eu-central.monochrome.tf` (v2.10, ✅ May 2026)
+- **us-west.monochrome.tf** — `https://us-west.monochrome.tf` (v2.10, ✅ May 2026)
+- **hifi-api.kennyy.com.br** — `https://hifi-api.kennyy.com.br` (v2.10, ✅ May 2026)
+- **api.monochrome.tf** — `https://api.monochrome.tf` (v2.5, ✅ May 2026)
+- **monochrome-api.samidy.com** — `https://monochrome-api.samidy.com` (v2.3, ✅ May 2026)
+
+> ⚠️ All community Tidal proxies currently return preview-only content (30s). Full FLAC requires a Premium PKCE token.
 
 **Self-hostable Tidal Proxy**
 - **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — Fork of [sachinsenal0x64/hifi](https://github.com/sachinsenal0x64/hifi). A self-hostable Python proxy for Tidal supporting `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW` quality and Dolby Atmos. Compatible with SpotiFLAC's Tidal proxy slot (`Settings → APIs → Proxy Configuration`).
 
 **Qobuz Proxies**
-- **afkarxyz** — `https://qbz.afkarxyz.qzz.io`
-- **yeet.su** — `https://dab.yeet.su`
-- **dabmusic.xyz** — `https://dabmusic.xyz`
+- **musicdl.me** — `https://www.musicdl.me` (primary, POST + X-Debug-Key, ✅ May 2026)
+- **yeet.su** — `https://dab.yeet.su` (⚠️ unreachable May 2026)
+- **dabmusic.xyz** — `https://dabmusic.xyz` (⚠️ Cloudflare-protected May 2026)
 
 **Amazon Music Proxy**
-- **afkarxyz** — `https://amzn.afkarxyz.fun`
+- **spotbye** — `https://amazon.spotbye.qzz.io` (✅ May 2026, requires X-Debug-Key)
 
 **Deezer Proxy**
 - **deezmate** — `https://api.deezmate.com`

@@ -1,6 +1,9 @@
 package amazon
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,12 +14,89 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
+
+// ─── X-Debug-Key derivation (AES-256-GCM) ────────────────────────────────────
+// The key is derived from a SHA-256 hash of a seed string, then used to decrypt
+// a hardcoded ciphertext.  The result is the X-Debug-Key header value required
+// by amazon.spotbye.qzz.io.  Ported from spotbye/SpotiFLAC backend/amazon.go.
+
+var (
+	amazonDebugKeyOnce sync.Once
+	amazonDebugKey     string
+	amazonDebugKeyErr  error
+)
+
+var amazonDebugKeySeedParts = [][]byte{
+	[]byte("spotif"),
+	[]byte("lac:am"),
+	[]byte("azon:spotbye:api:v1"),
+}
+
+var amazonDebugKeyAAD = []byte{
+	0x61, 0x6d, 0x61, 0x7a, 0x6f, 0x6e, 0x7c, 0x73, 0x70, 0x6f, 0x74, 0x62,
+	0x79, 0x65, 0x7c, 0x64, 0x65, 0x62, 0x75, 0x67, 0x7c, 0x76, 0x31,
+}
+
+var amazonDebugKeyNonce = []byte{
+	0x52, 0x1f, 0xa4, 0x9c, 0x13, 0x77, 0x5b, 0xe2, 0x81, 0x44, 0x90, 0x6d,
+}
+
+var amazonDebugKeyCiphertext = []byte{
+	0x5b, 0xf9, 0xc1, 0x2e, 0x58, 0xf8, 0x5b, 0xc0, 0x04, 0x68, 0x7e, 0xff,
+	0x3d, 0xd6, 0x8b, 0xe3, 0x86, 0x49, 0x6c, 0xfd, 0xc1, 0x49, 0x0b, 0xfb,
+}
+
+var amazonDebugKeyTag = []byte{
+	0x6c, 0x21, 0x98, 0x51, 0xf2, 0x38, 0x4b, 0x4a, 0x23, 0xe1, 0xc6, 0xd7,
+	0x65, 0x7f, 0xfb, 0xa1,
+}
+
+// getAmazonDebugKey derives the X-Debug-Key for amazon.spotbye.qzz.io using
+// AES-256-GCM decryption.  The result is cached after the first call.
+func getAmazonDebugKey() (string, error) {
+	amazonDebugKeyOnce.Do(func() {
+		hasher := sha256.New()
+		for _, part := range amazonDebugKeySeedParts {
+			hasher.Write(part)
+		}
+
+		block, err := aes.NewCipher(hasher.Sum(nil))
+		if err != nil {
+			amazonDebugKeyErr = err
+			return
+		}
+
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			amazonDebugKeyErr = err
+			return
+		}
+
+		sealed := make([]byte, 0, len(amazonDebugKeyCiphertext)+len(amazonDebugKeyTag))
+		sealed = append(sealed, amazonDebugKeyCiphertext...)
+		sealed = append(sealed, amazonDebugKeyTag...)
+
+		plaintext, err := gcm.Open(nil, amazonDebugKeyNonce, sealed, amazonDebugKeyAAD)
+		if err != nil {
+			amazonDebugKeyErr = err
+			return
+		}
+
+		amazonDebugKey = string(plaintext)
+	})
+
+	if amazonDebugKeyErr != nil {
+		return "", amazonDebugKeyErr
+	}
+	return amazonDebugKey, nil
+}
 
 type AmazonDownloader struct {
 	client        *http.Client
@@ -113,6 +193,9 @@ func (a *AmazonDownloader) getStreamResponse(base, asin string) (*AmazonStreamRe
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	if debugKey, keyErr := getAmazonDebugKey(); keyErr == nil && debugKey != "" {
+		req.Header.Set("X-Debug-Key", debugKey)
+	}
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, err

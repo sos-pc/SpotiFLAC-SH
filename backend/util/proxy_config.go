@@ -12,36 +12,42 @@ var proxyMu sync.RWMutex
 
 // Tidal community proxies — all implement the Hi-Fi API interface:
 //
-//	GET {base}/track/?id={tidalID}&audioquality=LOSSLESS
+//	GET {base}/track/?id={tidalID}&quality={quality}
 //
-// Sources: https://github.com/monochrome-music/monochrome/blob/main/INSTANCES.md
+// Status checked via tidal-uptime.geeked.wtf (May 2026).
+// NOTE: as of May 2026, ALL community proxies return assetPresentation="PREVIEW"
+// (30-second segments) without a valid Tidal Premium PKCE token.
+// Full FLAC downloads require authentication via Settings → Tidal Account.
 var tidalProxies = []string{
-	// Official Monochrome instances — confirmed UP by tidal-uptime.geeked.wtf
+	// Monochrome instances — confirmed server-UP by tidal-uptime.geeked.wtf
+	"https://eu-central.monochrome.tf",
 	"https://us-west.monochrome.tf",
-	"https://monochrome-api.samidy.com",
+	"https://hifi-api.kennyy.com.br",
 	"https://api.monochrome.tf",
-	// Community — Lucida / QQDL — katze and hund confirmed UP + streaming
-	"https://katze.qqdl.site",
-	"https://hund.qqdl.site",
-	"https://wolf.qqdl.site",
-	"https://maus.qqdl.site",
-	"https://vogel.qqdl.site",
-	// Community — Limited/No-Sub accounts
-	"https://tidal.kinoplus.online",
+	"https://monochrome-api.samidy.com",
 }
 
-// Amazon Music proxies (tried in order, first success wins)
-var amazonProxies = []string{"https://amzn.afkarxyz.fun"}
+// Amazon Music proxy (requires X-Debug-Key header — handled by the downloader).
+// Updated from amzn.afkarxyz.fun → amazon.spotbye.qzz.io (domain change, May 2026).
+var amazonProxies = []string{"https://amazon.spotbye.qzz.io"}
 
 // Deezer proxies (tried in order, first success wins)
 var deezerProxies = []string{"https://api.deezmate.com"}
 
-// Qobuz community providers (base URL prefix, appended with trackID)
-var qobuzProviders = []string{
-	"https://dab.yeet.su/api/stream?trackId=",
-	"https://dabmusic.xyz/api/stream?trackId=",
-	"https://qbz.afkarxyz.qzz.io/api/track/",
-}
+// qobuzMusicDLURL is the PRIMARY Qobuz provider introduced by upstream in May 2026.
+// It uses a POST endpoint with an X-Debug-Key header (AES-GCM derived key).
+// Handled separately from the standard GET-based provider list — see qobuz/client.go.
+var qobuzMusicDLURL = "https://www.musicdl.me/api/qobuz/download"
+
+// qobuzProviders holds legacy GET-based Qobuz stream API base URLs (user-configurable).
+// The primary provider musicdl.me is accessed via GetQobuzMusicDLURL().
+// As of May 2026:
+//   - dab.yeet.su    → network unreachable (DNS down)
+//   - dabmusic.xyz   → Cloudflare bot protection (inaccessible to API clients)
+//   - qbz.afkarxyz.qzz.io → removed by upstream, presumed down
+//
+// Add working self-hosted instances via Settings → APIs → Proxy Configuration.
+var qobuzProviders = []string{}
 
 // ─── Getters (used by downloaders) ───────────────────────────────────────────
 
@@ -111,6 +117,22 @@ func SetQobuzProviders(providers []string) {
 	qobuzProviders = cp
 }
 
+// GetQobuzMusicDLURL returns the musicdl.me primary Qobuz provider URL.
+func GetQobuzMusicDLURL() string {
+	proxyMu.RLock()
+	defer proxyMu.RUnlock()
+	return qobuzMusicDLURL
+}
+
+// SetQobuzMusicDLURL updates the musicdl.me URL at runtime (applied immediately).
+func SetQobuzMusicDLURL(u string) {
+	proxyMu.Lock()
+	defer proxyMu.Unlock()
+	if u != "" {
+		qobuzMusicDLURL = u
+	}
+}
+
 // ─── Factory defaults (immutable hardcoded values) ────────────────────────────
 // Used by defaultProxyConfig() in api_proxies.go to enable true "reset to
 // defaults" behaviour — independent of the current in-memory state which may
@@ -118,28 +140,22 @@ func SetQobuzProviders(providers []string) {
 
 func GetDefaultTidalProxies() []string {
 	return []string{
+		"https://eu-central.monochrome.tf",
 		"https://us-west.monochrome.tf",
-		"https://monochrome-api.samidy.com",
+		"https://hifi-api.kennyy.com.br",
 		"https://api.monochrome.tf",
-		"https://katze.qqdl.site",
-		"https://hund.qqdl.site",
-		"https://wolf.qqdl.site",
-		"https://maus.qqdl.site",
-		"https://vogel.qqdl.site",
-		"https://tidal.kinoplus.online",
+		"https://monochrome-api.samidy.com",
 	}
 }
 
 func GetDefaultQobuzProviders() []string {
-	return []string{
-		"https://dab.yeet.su/api/stream?trackId=",
-		"https://dabmusic.xyz/api/stream?trackId=",
-		"https://qbz.afkarxyz.qzz.io/api/track/",
-	}
+	// No working GET-based providers as of May 2026.
+	// Primary provider musicdl.me is hardcoded — see GetQobuzMusicDLURL().
+	return []string{}
 }
 
 func GetDefaultAmazonProxies() []string {
-	return []string{"https://amzn.afkarxyz.fun"}
+	return []string{"https://amazon.spotbye.qzz.io"}
 }
 
 func GetDefaultDeezerProxies() []string {

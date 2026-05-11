@@ -211,21 +211,17 @@ func pingDeezerProxy(name, baseURL string) ServiceStatus {
 //
 // Format used by all community proxies:
 //
-//	{baseURL}/info?id={testID}
+//	{baseURL}/track/?id={testID}&quality={quality}
 //
-// Interpretation (strict — 4xx are NOT "ok" for API endpoints):
+// The response is parsed to check assetPresentation:
 //
-//	200               → ok   (proxy accepted the request and returned data)
-//	401 / 403         → down
-//	429               → ratelimited
-//	5xx / network err → down
+//	"FULL"    → proxy can serve complete tracks → "ok"
+//	"PREVIEW" → proxy is up but Tidal restricts to 30-second previews
+//	           (full downloads require a Tidal Premium PKCE token) → "ratelimited"
 func pingTidalProxy(name, baseURL string) ServiceStatus {
-	// /info retourne les métadonnées du track sans demander de qualité.
-	// Compatible Python hifi-api et TypeScript hifi-api-workers.
-	// Évite les faux négatifs causés par le paramètre audioquality ignoré
-	// par les proxies TypeScript (qui défaut vers HI_RES_LOSSLESS).
-	const testTrackID = "190909076"
-	testURL := strings.TrimSuffix(baseURL, "/") + "/info?id=" + testTrackID
+	// Uses the same probe track as the upstream TidalDownloader.
+	const testTrackID = "441821360"
+	testURL := strings.TrimSuffix(baseURL, "/") + "/track/?id=" + testTrackID + "&quality=HI_RES_LOSSLESS"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -252,7 +248,82 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 
-	// 200 — verify the body contains at least some JSON to rule out stub pages
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if err != nil || len(body) < 2 {
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: "empty or unreadable response", CheckedAt: time.Now().Unix()}
+	}
+
+	// Try v2 format: {"version":"2.x","data":{"assetPresentation":"FULL"|"PREVIEW",...}}
+	var v2 struct {
+		Data struct {
+			AssetPresentation string `json:"assetPresentation"`
+			Manifest          string `json:"manifest"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(body, &v2) == nil && v2.Data.AssetPresentation != "" {
+		switch v2.Data.AssetPresentation {
+		case "FULL":
+			if v2.Data.Manifest != "" {
+				return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+			}
+			return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+				Error: "FULL presentation but no manifest", CheckedAt: time.Now().Unix()}
+		case "PREVIEW":
+			return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency,
+				Error: "PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)", CheckedAt: time.Now().Unix()}
+		}
+	}
+
+	// Try legacy format: [{"OriginalTrackUrl":"..."}]
+	var legacy []struct {
+		OriginalTrackURL string `json:"OriginalTrackUrl"`
+	}
+	if json.Unmarshal(body, &legacy) == nil {
+		for _, item := range legacy {
+			if item.OriginalTrackURL != "" {
+				return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+			}
+		}
+	}
+
+	return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+		Error: "unexpected response format", CheckedAt: time.Now().Unix()}
+}
+
+// pingQobuzProxy performs a real track-endpoint request to validate a
+// community Qobuz proxy (standard GET-based providers).
+// For the musicdl.me primary provider, see pingQobuzMusicDL instead.
+func pingQobuzProxy(name, baseURL string) ServiceStatus {
+	// Qobuz track ID 20882393 — "Get Lucky" by Daft Punk.
+	const testTrackID = "20882393"
+	testURL := baseURL + testTrackID + "&quality=6"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
+	if err != nil {
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+	}
+	defer resp.Body.Close()
+
+	latency := int(elapsed.Milliseconds())
+
+	switch {
+	case resp.StatusCode == 429:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+	case resp.StatusCode >= 500:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+	case resp.StatusCode != http.StatusOK:
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
+			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+	}
+
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if err != nil || len(body) < 2 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
@@ -267,30 +338,14 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 }
 
-// pingQobuzProxy performs a real track-endpoint request to validate a
-// community Qobuz proxy.  Two URL schemes are in use:
-//
-//	https://dab.yeet.su/api/stream?trackId={id}&quality=6
-//	https://qbz.afkarxyz.qzz.io/api/track/{id}?quality=6
-//
-// The baseURL passed here is the API base (already contains the path prefix),
-// matching what proxy_config.go stores.  The function appends the track ID
-// using the same logic as qobuz.buildQobuzAPIURL.
-func pingQobuzProxy(name, baseURL string) ServiceStatus {
-	// Qobuz track ID 20882393 — "Get Lucky" by Daft Punk.
-	const testTrackID = "20882393"
-
-	var testURL string
-	if strings.Contains(baseURL, "qbz.afkarxyz") {
-		testURL = baseURL + testTrackID + "?quality=6"
-	} else {
-		testURL = baseURL + testTrackID + "&quality=6"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+// pingQobuzMusicDL checks whether the musicdl.me Qobuz API is reachable.
+// The endpoint only accepts POST requests; a GET returns 404 "Cannot GET ..."
+// from Express.js, which confirms the server IS running and the POST route exists.
+func pingQobuzMusicDL(name, baseURL string) ServiceStatus {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
-	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
+	resp, elapsed, err := doRequest(ctx, http.MethodGet, baseURL)
 	if err != nil {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
 	}
@@ -298,32 +353,24 @@ func pingQobuzProxy(name, baseURL string) ServiceStatus {
 
 	latency := int(elapsed.Milliseconds())
 
-	switch {
-	case resp.StatusCode == 429:
+	if resp.StatusCode == 429 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode >= 500:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode != http.StatusOK:
+	}
+	if resp.StatusCode >= 500 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
 			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil || len(body) < 2 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "empty or unreadable response", CheckedAt: time.Now().Unix()}
-	}
-	var result map[string]interface{}
-	if json.Unmarshal(body, &result) != nil || len(result) == 0 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "non-JSON or empty JSON response", CheckedAt: time.Now().Unix()}
-	}
-
+	// 404 "Cannot GET" from Express = server up, POST-only endpoint (expected)
+	// Any 2xx/3xx/4xx = server is alive
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+}
+
+// pingAmazonProxy checks whether the Amazon Music community proxy is reachable
+// by hitting its /status endpoint. A 401 (no X-Debug-Key header) still means
+// the server is alive and correctly rejecting unauthenticated requests.
+func pingAmazonProxy(name, baseURL string) ServiceStatus {
+	testURL := strings.TrimSuffix(baseURL, "/") + "/status"
+	return pingURL(name, testURL)
 }
 
 // pingDeezer performs a real track lookup to validate the Deezer API is
@@ -438,10 +485,10 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	}
 
 	// Amazon community proxies — read from live config.
-	// pingURL is used (no standard test ASIN available for Amazon Music).
+	// pingAmazonProxy checks /status; a 401 (no X-Debug-Key) still means server is alive.
 	for _, proxyURL := range util.GetAmazonProxies() {
 		name := "Amazon · " + proxyDisplayName(proxyURL)
-		all = append(all, serviceEntry{name, proxyURL, nil})
+		all = append(all, serviceEntry{name, proxyURL, pingAmazonProxy})
 	}
 
 	// Deezer community proxies — read from live config.
@@ -449,6 +496,11 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	for _, proxyURL := range util.GetDeezerProxies() {
 		name := "Deezer · " + proxyDisplayName(proxyURL)
 		all = append(all, serviceEntry{name, proxyURL, pingDeezerProxy})
+	}
+
+	// Qobuz musicdl.me — primary provider (POST endpoint, always shown in status).
+	if musicDLURL := util.GetQobuzMusicDLURL(); musicDLURL != "" {
+		all = append(all, serviceEntry{"Qobuz · musicdl.me", musicDLURL, pingQobuzMusicDL})
 	}
 
 	if jellyfinURL != "" {

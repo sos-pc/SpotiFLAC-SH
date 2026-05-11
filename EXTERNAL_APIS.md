@@ -46,26 +46,27 @@ SpotiFLAC tries providers in order: **Tidal → Qobuz → Amazon → Deezer**. E
 The OAuth 2.0 Device Code flow uses `client_id: 4N3n6Q1x95LL5K7p` — sourced from [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal). The previous TV client_id (`fX2JxdmntZWK0ixT`) conflicted with the Tidal desktop app. See [CREDITS.md](CREDITS.md) for details.
 
 **Community HiFi Proxies (fallback when no personal token):**
-* `https://triton.squid.wtf`
+
+> ⚠️ **Status as of May 2026:** All known community proxies are online as servers but return `assetPresentation: "PREVIEW"` (30-second segments) only — Tidal has restricted community tokens to preview access. **Full FLAC downloads require a personal Premium PKCE token** (Settings → Tidal Account). The proxies below are kept so the token flow can use them as the API layer.
+
+* `https://eu-central.monochrome.tf` — v2.10 ✅
+* `https://us-west.monochrome.tf` — v2.10 ✅
+* `https://hifi-api.kennyy.com.br` — v2.10 ✅
+* `https://api.monochrome.tf` — v2.5 ✅
+* `https://monochrome-api.samidy.com` — v2.3 ✅
 * Self-hosted option: **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — fork of sachinsenal0x64/hifi, runs on port 8000, compatible with the Tidal proxy slot.
-* `https://api.monochrome.tf`
-* `https://ohio-1.monochrome.tf` / `https://singapore-1.monochrome.tf`
-* `https://wolf.qqdl.site` (along with maus, vogel, katze, hund variants)
-* `https://hifi-one.spotisaver.net` / `https://hifi-two.spotisaver.net`
 
 ### 🟡 Qobuz (Fallback 1)
 
 * **`https://www.qobuz.com/api.json/0.2/track/search`** — Search tracks by ISRC.
-* **`https://qbz.afkarxyz.qzz.io/api/track/`** — Primary community stream proxy (afkarxyz).
-* **`https://dab.yeet.su/api/stream`** — Secondary community stream proxy.
-* **`https://dabmusic.xyz/api/stream`** — Tertiary community stream proxy.
+* **`https://www.musicdl.me/api/qobuz/download`** — Primary community stream proxy (musicdl.me). Uses POST + `X-Debug-Key` header (AES-256-GCM derived). Added upstream May 2026.
+* **`https://dab.yeet.su/api/stream`** — Secondary community stream proxy (⚠️ unreachable as of May 2026).
+* **`https://dabmusic.xyz/api/stream`** — Tertiary community stream proxy (⚠️ Cloudflare-protected, inaccessible to API clients as of May 2026).
 
 ### 🟠 Amazon Music (Fallback 2)
 
 Amazon tracks are delivered as encrypted `.m4a` files and decrypted via FFmpeg.
-* **`https://amzn.afkarxyz.fun/api/track/`** — Default community stream proxy.
-
-Multiple proxies are supported; SpotiFLAC tries each in order until one succeeds.
+* **`https://amazon.spotbye.qzz.io/api/track/`** — Community stream proxy (spotbye). Requires `X-Debug-Key` header (AES-256-GCM derived). Domain updated May 2026 from `amzn.afkarxyz.fun`.
 
 ### 🟣 Deezer (Fallback 3)
 
