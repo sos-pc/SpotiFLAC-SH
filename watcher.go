@@ -330,9 +330,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	}
 
 	// Retry des jobs failed pour cette watchlist (après fetch Spotify réussi)
-	if requeued, err := w.jm.RequeueFailedJobs(pl.ID); err == nil && requeued > 0 {
-		fmt.Printf("[Watcher] Requeued %d failed jobs for %s\n", requeued, pl.Name)
-	}
+	// NOTE : intentionnellement absent du daemon — seulement sur refresh manuel (SyncWatchlist)
 
 	// ── Sync deletions ──
 	deletedCount := 0
@@ -677,13 +675,18 @@ func (w *Watcher) saveWatchlist(pl *WatchedPlaylist) error {
 
 // SyncWatchlist déclenche une synchronisation manuelle de la watchlist :
 //  1. Nouveaux tracks Spotify → EnqueueBatch
-//  2. Retry des jobs failed (déplacé dans syncPlaylist, après fetch Spotify réussi)
+//  2. Retry des jobs failed avec les settings actuels de la watchlist
+//     (corrige les jobs créés avec d'anciens settings obsolètes)
 func (w *Watcher) SyncWatchlist(id string) error {
 	pl, err := w.getWatchlistByID(id)
 	if err != nil {
 		return err
 	}
 	go w.syncPlaylist(*pl)
+	// Retry des failed uniquement sur refresh manuel, avec les settings à jour
+	if requeued, err := w.jm.RequeueFailedJobs(id, pl.Settings); err == nil && requeued > 0 {
+		fmt.Printf("[Watcher] SyncWatchlist: %d failed jobs requeued pour %s\n", requeued, pl.Name)
+	}
 	return nil
 }
 

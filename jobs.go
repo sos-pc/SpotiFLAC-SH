@@ -1161,7 +1161,11 @@ func getFirstArtistStatic(artistString string) string {
 
 // RequeueFailedJobs remet en queue tous les jobs StatusFailed d'une watchlist.
 // Appelé par SyncWatchlist pour combiner nouveaux tracks + retry des échecs.
-func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
+// RequeueFailedJobs remet en queue les jobs échoués d'une watchlist en leur
+// appliquant les settings actuels de la watchlist (currentSettings).
+// Cela corrige le cas où un job a été créé avec d'anciens settings obsolètes
+// (ex: folderTemplate vide) alors que la watchlist a depuis été reconfigurée.
+func (jm *JobManager) RequeueFailedJobs(watchlistID string, currentSettings JobSettings) (int, error) {
 	jobs, err := jm.GetAllJobs()
 	if err != nil {
 		return 0, err
@@ -1172,6 +1176,7 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string) (int, error) {
 			continue
 		}
 		job.Status = StatusPending
+		job.Settings = currentSettings // mise à jour avec les settings actuels
 		job.Error = ""
 		job.Progress = 0
 		job.UpdatedAt = time.Now()
