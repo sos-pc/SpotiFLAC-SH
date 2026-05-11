@@ -968,6 +968,7 @@ func (s *Server) registerV1Routes() {
 			OutputDir         string   `json:"output_dir"`
 			FilePaths         []string `json:"file_paths"`
 			JellyfinMusicPath string   `json:"jellyfin_music_path"`
+			MusicRoot         string   `json:"music_root"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -983,7 +984,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := a.CreateM3U8File(params.M3U8Name, outputDir, cleanedPaths, params.JellyfinMusicPath); err != nil {
+		if err := a.CreateM3U8File(params.M3U8Name, outputDir, cleanedPaths, params.JellyfinMusicPath, params.MusicRoot); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}

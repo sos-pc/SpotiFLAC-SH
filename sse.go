@@ -23,8 +23,9 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 type JobEvent struct {
-	Type string `json:"type"`
-	Job  *Job   `json:"job"`
+	Type string      `json:"type"`
+	Job  *Job        `json:"job,omitempty"`
+	Data interface{} `json:"data,omitempty"` // payload pour les events non-job (ex: watchlist_synced)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,12 +140,19 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			// Filtrer par userID si non-admin
+			// Filtrer par userID si non-admin (uniquement pour les events job)
 			if user != nil && !user.IsAdmin && event.Job != nil &&
 				event.Job.UserID != "" && event.Job.UserID != user.UserID {
 				continue
 			}
-			sendSSEEvent(w, flusher, event.Type, event.Job)
+			// Envoyer Job ou Data selon le type d'événement
+			var payload interface{}
+			if event.Job != nil {
+				payload = event.Job
+			} else {
+				payload = event.Data
+			}
+			sendSSEEvent(w, flusher, event.Type, payload)
 		case <-r.Context().Done():
 			return
 		}

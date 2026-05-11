@@ -1050,7 +1050,10 @@ func (a *App) LoadSettings() (map[string]interface{}, error) {
 
 func (a *App) GetOSInfo() (string, error) { return util.GetOSInfo() }
 
-func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []string, jellyfinMusicPath string) error {
+// CreateM3U8File génère un fichier .m3u8 de manière atomique (write-then-rename).
+// musicRoot est le répertoire racine de la bibliothèque musicale locale
+// (ex: "/home/nonroot/Music") utilisé pour calculer le chemin Jellyfin.
+func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []string, jellyfinMusicPath string, musicRoot string) error {
 	if len(filePaths) == 0 {
 		return nil
 	}
@@ -1062,34 +1065,49 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 		safeName = "playlist"
 	}
 	m3u8Path := filepath.Join(outputDir, safeName+".m3u8")
-	f, err := os.Create(m3u8Path)
+	tmpPath := m3u8Path + ".tmp"
+
+	f, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := f.WriteString("#EXTM3U\n"); err != nil {
-		return err
+
+	// Écriture dans le fichier temporaire — closure pour gestion d'erreur propre
+	var werr error
+	write := func(s string) {
+		if werr != nil {
+			return
+		}
+		_, werr = f.WriteString(s)
 	}
+
+	write("#EXTM3U\n")
 	for _, path := range filePaths {
 		if path == "" {
 			continue
 		}
 		var entry string
 		if jellyfinMusicPath != "" {
-			entry = strings.Replace(path, "/home/nonroot/Music", strings.TrimRight(jellyfinMusicPath, "/"), 1)
-			entry = filepath.ToSlash(entry)
+			// Remplacer le préfixe local (musicRoot) par le chemin Jellyfin
+			localRoot := filepath.ToSlash(strings.TrimRight(musicRoot, "/"))
+			entry = strings.Replace(filepath.ToSlash(path), localRoot, strings.TrimRight(jellyfinMusicPath, "/"), 1)
 		} else {
-			relPath, err := filepath.Rel(outputDir, path)
-			if err != nil {
+			relPath, relErr := filepath.Rel(outputDir, path)
+			if relErr != nil {
 				relPath = path
 			}
 			entry = filepath.ToSlash(relPath)
 		}
-		if _, err := f.WriteString(entry + "\n"); err != nil {
-			return err
-		}
+		write(entry + "\n")
 	}
-	return nil
+
+	f.Close()
+	if werr != nil {
+		os.Remove(tmpPath)
+		return werr
+	}
+	// Rename atomique : jamais de fichier corrompu visible
+	return os.Rename(tmpPath, m3u8Path)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

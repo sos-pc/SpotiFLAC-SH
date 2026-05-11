@@ -142,8 +142,8 @@ func (w *Watcher) checkAll() {
 
 // checkM3U8Integrity vérifie que le M3U8 sur disque correspond aux fichiers
 // réellement présents parmi les jobs done/skipped de cette watchlist.
-// Appelée au début de syncPlaylist : si un écart est détecté, generateM3U8ForPlaylist
-// le corrigera en fin de sync.
+// Appelée uniquement au démarrage du serveur (NewWatcher) pour réparer d'éventuels
+// écarts après un crash ou redémarrage. Corrige en appelant generateM3U8ForPlaylist.
 func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
 	app := &App{}
 	var settings map[string]interface{}
@@ -271,7 +271,9 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	if playlistName == "" {
 		playlistName = pl.Name
 	}
+	oldName := ""
 	if playlistName != pl.Name {
+		oldName = pl.Name // sauvegarder l'ancien nom pour nettoyer l'ancien M3U8
 		pl.Name = playlistName
 	}
 
@@ -327,6 +329,11 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		}
 	}
 
+	// Retry des jobs failed pour cette watchlist (après fetch Spotify réussi)
+	if requeued, err := w.jm.RequeueFailedJobs(pl.ID); err == nil && requeued > 0 {
+		fmt.Printf("[Watcher] Requeued %d failed jobs for %s\n", requeued, pl.Name)
+	}
+
 	// ── Sync deletions ──
 	deletedCount := 0
 	if pl.SyncDeletions && len(currentTrackIDs) > 0 {
@@ -362,11 +369,15 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 					if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
 						if err := os.Remove(job.FilePath); err == nil {
 							fmt.Printf("[Watcher] Deleted file: %s\n", job.FilePath)
-							dir := filepath.Dir(job.FilePath)
-							if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
-								os.Remove(dir)
-								fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
+							outputRoot := pl.Settings.DownloadPath
+							if outputRoot == "" {
+								outputRoot = "/home/nonroot/Music"
 							}
+							removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
+							// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
+							job.FilePath = ""
+							job.UpdatedAt = time.Now()
+							_ = jm.saveJob(&job)
 							deletedCount++
 						}
 					}
@@ -394,6 +405,52 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	pl.LastSync = time.Now()
 	w.saveWatchlist(&pl)
 	w.mu.Unlock()
+
+	// Rename Spotify : supprimer l'ancien M3U8 (le nouveau sera créé juste après)
+	if oldName != "" {
+		appInst := &App{}
+		var renameSettings map[string]interface{}
+		if pl.UserID != "" && w.auth != nil {
+			if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
+				renameSettings = profile.Settings
+			}
+		}
+		if renameSettings == nil {
+			renameSettings, _ = appInst.LoadSettings()
+		}
+		if renameSettings != nil {
+			if createM3u8, _ := renameSettings["createM3u8File"].(bool); createM3u8 {
+				outputDir := pl.Settings.DownloadPath
+				if outputDir == "" {
+					outputDir = "/home/nonroot/Music"
+				}
+				oldSafeName := util.SanitizeFilename(oldName)
+				if oldSafeName != "" {
+					oldM3u8Path := filepath.Join(outputDir, "Playlists", oldSafeName+".m3u8")
+					if err := os.Remove(oldM3u8Path); err == nil {
+						fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : ancien M3U8 supprimé\n", oldName, pl.Name)
+					}
+				}
+			}
+		}
+	}
+
+	// Régénérer le M3U8 à chaque sync quand aucun nouveau batch n'est en cours.
+	// Si len(newTracks) > 0, OnBatchComplete s'en chargera après les téléchargements.
+	if len(newTracks) == 0 {
+		w.generateM3U8ForPlaylist(pl.ID)
+	}
+
+	// Notifier le frontend que la sync est terminée
+	w.jm.hub.publish(JobEvent{
+		Type: "watchlist_synced",
+		Data: map[string]interface{}{
+			"watchlist_id": pl.ID,
+			"new_tracks":   len(newTracks),
+			"deleted":      deletedCount,
+			"name":         pl.Name,
+		},
+	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,41 +528,78 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 }
 
 func (w *Watcher) RemoveWatchlist(id string) error {
-	// FIX 3 — si SyncDeletions est activé, supprimer les fichiers orphelins
-	// avant de retirer la watchlist, en vérifiant qu'ils n'appartiennent pas
-	// à une autre watchlist active.
 	playlists, _ := w.GetWatchlists()
 	for _, pl := range playlists {
-		if pl.ID != id || !pl.SyncDeletions {
+		if pl.ID != id {
 			continue
 		}
-		otherIDs := make(map[string]bool)
-		for _, other := range playlists {
-			if other.ID == id {
-				continue
-			}
-			for _, tid := range other.TrackIDs {
-				otherIDs[tid] = true
-			}
+
+		outputRoot := pl.Settings.DownloadPath
+		if outputRoot == "" {
+			outputRoot = "/home/nonroot/Music"
 		}
-		jobs, _ := w.jm.GetAllJobs()
-		for _, job := range jobs {
-			if job.WatchlistID != id || job.FilePath == "" {
-				continue
+
+		// ── Suppression des fichiers audio (seulement si SyncDeletions) ────────
+		if pl.SyncDeletions {
+			otherIDs := make(map[string]bool)
+			for _, other := range playlists {
+				if other.ID == id {
+					continue
+				}
+				for _, tid := range other.TrackIDs {
+					otherIDs[tid] = true
+				}
 			}
-			if otherIDs[job.SpotifyID] {
-				fmt.Printf("[Watcher] Track %s in another watchlist — skipping file deletion\n", job.SpotifyID)
-				continue
-			}
-			if err := os.Remove(job.FilePath); err == nil {
-				fmt.Printf("[Watcher] Deleted file (watchlist removed): %s\n", job.FilePath)
-				dir := filepath.Dir(job.FilePath)
-				if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
-					os.Remove(dir)
-					fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
+			jobs, _ := w.jm.GetAllJobs()
+			for _, job := range jobs {
+				if job.WatchlistID != id || job.FilePath == "" {
+					continue
+				}
+				if otherIDs[job.SpotifyID] {
+					fmt.Printf("[Watcher] Track %s in another watchlist — skipping file deletion\n", job.SpotifyID)
+					continue
+				}
+				if err := os.Remove(job.FilePath); err == nil {
+					fmt.Printf("[Watcher] Deleted file (watchlist removed): %s\n", job.FilePath)
+					removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
+					// Nettoyer le FilePath dans BoltDB
+					job.FilePath = ""
+					job.UpdatedAt = time.Now()
+					_ = w.jm.saveJob(&job)
 				}
 			}
 		}
+
+		// ── Suppression du fichier M3U8 (toujours, indépendamment de SyncDeletions) ──
+		app := &App{}
+		var settings map[string]interface{}
+		if pl.UserID != "" && w.auth != nil {
+			if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
+				settings = profile.Settings
+			}
+		}
+		if settings == nil {
+			settings, _ = app.LoadSettings()
+		}
+		if settings != nil {
+			if createM3u8, _ := settings["createM3u8File"].(bool); createM3u8 {
+				safeName := util.SanitizeFilename(pl.Name)
+				if safeName != "" {
+					m3u8Path := filepath.Join(outputRoot, "Playlists", safeName+".m3u8")
+					if err := os.Remove(m3u8Path); err == nil {
+						fmt.Printf("[Watcher] Deleted M3U8 (watchlist removed): %s\n", m3u8Path)
+					}
+					// Nettoyer le dossier Playlists/ s'il est vide
+					playlistsDir := filepath.Join(outputRoot, "Playlists")
+					if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
+						if err := os.Remove(playlistsDir); err == nil {
+							fmt.Printf("[Watcher] Deleted empty Playlists dir: %s\n", playlistsDir)
+						}
+					}
+				}
+			}
+		}
+
 		break
 	}
 
@@ -581,27 +675,15 @@ func (w *Watcher) saveWatchlist(pl *WatchedPlaylist) error {
 	})
 }
 
-// SyncWatchlist combine :
-//  1. Nouveaux tracks Spotify (pas encore dans TrackIDs) → enqueue
-//  2. Jobs StatusFailed de cette watchlist → reset + remise en queue
-//
-// C'est le seul bouton "Sync" exposé au frontend (remplace ForceSyncWatchlist + RedownloadWatchlist).
+// SyncWatchlist déclenche une synchronisation manuelle de la watchlist :
+//  1. Nouveaux tracks Spotify → EnqueueBatch
+//  2. Retry des jobs failed (déplacé dans syncPlaylist, après fetch Spotify réussi)
 func (w *Watcher) SyncWatchlist(id string) error {
 	pl, err := w.getWatchlistByID(id)
 	if err != nil {
 		return err
 	}
-
-	// ── 1. Nouveaux tracks depuis Spotify ────────────────────────────────
 	go w.syncPlaylist(*pl)
-
-	// ── 2. Retry des jobs failed ─────────────────────────────────────────
-	if requeued, err := w.jm.RequeueFailedJobs(id); err != nil {
-		fmt.Printf("[Watcher] SyncWatchlist: RequeueFailedJobs error: %v\n", err)
-	} else if requeued > 0 {
-		fmt.Printf("[Watcher] SyncWatchlist: %d failed jobs requeued for %s\n", requeued, pl.Name)
-	}
-
 	return nil
 }
 
@@ -685,6 +767,32 @@ func toRawBytes(data interface{}) []byte {
 	}
 	raw, _ := json.Marshal(data)
 	return raw
+}
+
+// removeEmptyParents remonte l'arborescence depuis dir et supprime chaque
+// répertoire vide rencontré, jusqu'à stopAt (exclus).
+// Sécurité : ne remonte jamais au-delà de stopAt ni à la racine du FS.
+func removeEmptyParents(dir, stopAt string) {
+	dir = filepath.Clean(dir)
+	stopAt = filepath.Clean(stopAt)
+	for {
+		// Ne pas remonter au-delà de stopAt ni à la racine
+		if dir == stopAt || dir == filepath.Dir(dir) {
+			break
+		}
+		if !strings.HasPrefix(dir, stopAt+string(filepath.Separator)) {
+			break
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			break
+		}
+		if err := os.Remove(dir); err != nil {
+			break
+		}
+		fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
+		dir = filepath.Dir(dir)
+	}
 }
 
 func extractTracksFromMetadata(data interface{}) []JobTrack {
@@ -1246,7 +1354,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 		fmt.Printf("[Watcher] M3U8: failed to create Playlists dir: %v\n", err)
 		return
 	}
-	if err := app.CreateM3U8File(pl.Name, playlistDir, paths, jellyfinPath); err != nil {
+	if err := app.CreateM3U8File(pl.Name, playlistDir, paths, jellyfinPath, outputDir); err != nil {
 		fmt.Printf("[Watcher] M3U8: failed to create %s: %v\n", pl.Name, err)
 	} else {
 		fmt.Printf("[Watcher] M3U8: created %s.m3u8\n", pl.Name)

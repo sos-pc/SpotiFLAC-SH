@@ -187,12 +187,14 @@ export const CreateM3U8File = (
   outputDir: string,
   filePaths: string[],
   jellyfinMusicPath: string,
+  musicRoot: string,
 ) =>
   rest<void>("POST", "/files/m3u8", {
     m3u8_name: m3u8Name,
     output_dir: outputDir,
     file_paths: filePaths,
     jellyfin_music_path: jellyfinMusicPath,
+    music_root: musicRoot,
   });
 export const CheckFilesExistence = (
   outputDir: string,

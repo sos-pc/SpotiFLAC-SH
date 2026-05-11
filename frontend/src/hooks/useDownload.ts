@@ -758,6 +758,7 @@ export function useDownload(region: string) {
             outputDir,
             paths,
             settings.jellyfinMusicPath || "",
+            settings.downloadPath || "",
           );
           toast.success("M3U8 playlist created");
         } catch (err) {
@@ -946,6 +947,7 @@ export function useDownload(region: string) {
           outputDir,
           finalFilePaths.filter((p) => p !== ""),
           settings.jellyfinMusicPath || "",
+          settings.downloadPath || "",
         );
         toast.success("M3U8 playlist created");
       } catch (err) {

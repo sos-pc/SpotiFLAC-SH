@@ -96,7 +96,7 @@ export function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<WatchedPlaylist[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<Record<string, WatchlistStats>>({});
   const [history, setHistory] = useState<Record<string, HistoryItem[]>>({});
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
@@ -134,6 +134,42 @@ export function WatchlistPage() {
     loadWatchlists();
     const interval = setInterval(loadWatchlists, 30000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Écouter les événements SSE pour les syncs de watchlist
+  useEffect(() => {
+    const token = localStorage.getItem("spotiflac_token");
+    if (!token) return;
+    const es = new EventSource(
+      `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
+    );
+    es.addEventListener("watchlist_synced", (e: MessageEvent) => {
+      const data = JSON.parse(e.data) as {
+        watchlist_id: string;
+        new_tracks: number;
+        deleted: number;
+        name: string;
+      };
+      // Retirer la playlist du set "en cours de sync"
+      setSyncing((prev) => {
+        const next = new Set(prev);
+        next.delete(data.watchlist_id);
+        return next;
+      });
+      // Recharger les stats + watchlists pour afficher le SyncLog à jour
+      reloadStats(data.watchlist_id);
+      loadWatchlists();
+      // Toast de résultat
+      if (data.new_tracks > 0 || data.deleted > 0) {
+        const parts: string[] = [];
+        if (data.new_tracks > 0) parts.push(`${data.new_tracks} new`);
+        if (data.deleted > 0) parts.push(`${data.deleted} deleted`);
+        toast.success(`${data.name}: ${parts.join(", ")}`);
+      } else {
+        toast.info(`${data.name}: up to date`);
+      }
+    });
+    return () => es.close();
   }, []);
 
   const handleAdd = async () => {
@@ -237,24 +273,36 @@ export function WatchlistPage() {
   };
 
   const handleSync = async (id: string) => {
-    setSyncing(id);
+    setSyncing((prev) => new Set(prev).add(id));
     try {
       await SyncWatchlist(id);
-      toast.success("Sync triggered — new tracks + failed tracks requeued");
-      setTimeout(() => reloadStats(id), 2000);
+      // Le spinner est retiré par l'événement SSE watchlist_synced
+      // Le toast de résultat aussi — on ne montre rien ici
     } catch (err) {
+      // En cas d'erreur HTTP, retirer du set immédiatement
+      setSyncing((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       toast.error(`Sync failed: ${err}`);
-    } finally {
-      setSyncing(null);
     }
   };
 
   const handleSyncAll = async () => {
     setLoading(true);
     try {
-      await Promise.all(watchlists.map((l) => SyncWatchlist(l.id)));
-      toast.success(`Sync triggered for ${watchlists.length} playlist(s)`);
-      setTimeout(loadWatchlists, 2000);
+      const results = await Promise.allSettled(
+        watchlists.map((l) => SyncWatchlist(l.id)),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed === 0) {
+        toast.success(`Sync triggered for ${watchlists.length} playlist(s)`);
+      } else {
+        toast.warning(
+          `${watchlists.length - failed}/${watchlists.length} syncs triggered`,
+        );
+      }
     } catch (err) {
       toast.error(`Sync failed: ${err}`);
     } finally {
@@ -353,11 +401,11 @@ export function WatchlistPage() {
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-primary"
                       onClick={() => handleSync(list.id)}
-                      disabled={syncing === list.id}
+                      disabled={syncing.has(list.id)}
                       title="Sync: fetch new tracks + retry failed"
                     >
                       <RefreshCw
-                        className={`h-4 w-4 ${syncing === list.id ? "animate-spin" : ""}`}
+                        className={`h-4 w-4 ${syncing.has(list.id) ? "animate-spin" : ""}`}
                       />
                     </Button>
                     <Button
