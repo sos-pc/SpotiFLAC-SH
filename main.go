@@ -78,6 +78,16 @@ func main() {
 	app.startup(context.Background())
 
 	LoadProxyConfig(db)
+
+	// Restore last discovery result so GetTidalProxiesEffective() is correct
+	// immediately, before the first scheduled run of the discovery goroutine.
+	loadSavedDiscovery(db)
+
+	// Start background proxy auto-discovery (tidal-uptime.geeked.wtf, every 6h).
+	discoveryCtx, cancelDiscovery := context.WithCancel(context.Background())
+	defer cancelDiscovery()
+	go startProxyDiscovery(discoveryCtx, db)
+
 	server := NewServer(app, ctr)
 
 	httpServer := &http.Server{

@@ -469,9 +469,10 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	all := make([]serviceEntry, 0, 32)
 	all = append(all, coreServices...)
 
-	// Build Tidal proxy entries from the live configuration so that any proxy
-	// the user has added or removed in Settings is reflected here.
-	for _, proxyURL := range util.GetTidalProxies() {
+	// Build Tidal proxy entries from the effective configuration — includes
+	// auto-discovered proxies from tidal-uptime.geeked.wtf in addition to
+	// the user's saved config. Falls back to user config if no discovery data.
+	for _, proxyURL := range util.GetTidalProxiesEffective() {
 		name := "Tidal · " + proxyDisplayName(proxyURL)
 		all = append(all, serviceEntry{name, proxyURL, pingTidalProxy})
 	}

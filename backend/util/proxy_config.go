@@ -1,6 +1,9 @@
 package util
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Proxy configuration — package-level vars, safe for concurrent access.
@@ -9,6 +12,12 @@ import "sync"
 // ─────────────────────────────────────────────────────────────────────────────
 
 var proxyMu sync.RWMutex
+
+// tidalDiscoveredUp/Down are populated by the discovery goroutine (proxy_discovery.go).
+// In-memory only — never written to BoltDB user config.
+// Set via SetTidalDiscovery(); read via GetTidalProxiesEffective().
+var tidalDiscoveredUp []string
+var tidalDiscoveredDown []string
 
 // Tidal community proxies — all implement the Hi-Fi API interface:
 //
@@ -57,6 +66,75 @@ func GetTidalProxies() []string {
 	cp := make([]string, len(tidalProxies))
 	copy(cp, tidalProxies)
 	return cp
+}
+
+// SetTidalDiscovery updates the in-memory discovery overlay.
+// Called exclusively by the proxy discovery goroutine.
+// Never modifies tidalProxies (the user-configured list).
+func SetTidalDiscovery(up, down []string) {
+	proxyMu.Lock()
+	defer proxyMu.Unlock()
+	tidalDiscoveredUp = append([]string(nil), up...)
+	tidalDiscoveredDown = append([]string(nil), down...)
+}
+
+// GetTidalProxiesEffective returns the prioritized proxy list used for downloads
+// and status checks. It merges the user config with the discovery overlay:
+//
+//	Tier 1 — discovered-up (freshest working proxies, discovery order)
+//	Tier 2 — user-configured proxies NOT in discovered-down (original order)
+//	Tier 3 — user-configured proxies IN discovered-down (last resort)
+//
+// Falls back to GetTidalProxies() when no discovery data is available.
+// The user-configured list (tidalProxies / BoltDB) is never modified.
+func GetTidalProxiesEffective() []string {
+	proxyMu.RLock()
+	defer proxyMu.RUnlock()
+
+	if len(tidalDiscoveredUp) == 0 && len(tidalDiscoveredDown) == 0 {
+		cp := make([]string, len(tidalProxies))
+		copy(cp, tidalProxies)
+		return cp
+	}
+
+	normalize := func(u string) string { return strings.TrimRight(strings.TrimSpace(u), "/") }
+
+	downSet := make(map[string]struct{}, len(tidalDiscoveredDown))
+	for _, u := range tidalDiscoveredDown {
+		downSet[normalize(u)] = struct{}{}
+	}
+
+	seen := make(map[string]struct{})
+	var result []string
+
+	// Tier 1: all discovered-up (includes proxies not in user config)
+	for _, u := range tidalDiscoveredUp {
+		n := normalize(u)
+		if _, ok := seen[n]; !ok {
+			seen[n] = struct{}{}
+			result = append(result, u)
+		}
+	}
+
+	// Tier 2 & 3: user-configured proxies
+	var lastResort []string
+	for _, u := range tidalProxies {
+		n := normalize(u)
+		if _, ok := seen[n]; ok {
+			continue // already in Tier 1
+		}
+		if _, isDown := downSet[n]; isDown {
+			lastResort = append(lastResort, u)
+			continue
+		}
+		seen[n] = struct{}{}
+		result = append(result, u)
+	}
+
+	// Tier 3: confirmed-down proxies from user config (absolute last resort)
+	result = append(result, lastResort...)
+
+	return result
 }
 
 func GetAmazonProxies() []string {

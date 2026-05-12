@@ -312,6 +312,12 @@ export interface ProxyConfig {
   deezer_proxies: string[];
   /** Override manuel du client_id OAuth Tidal. Vide = auto-découverte. */
   tidal_client_id: string;
+  /** Proxies found automatically by discovery — NOT in tidal_proxies (read-only). */
+  tidal_discovered?: string[];
+  /** Unix timestamp of the last discovery run (read-only). */
+  discovery_checked_at?: number;
+  /** Source used for auto-discovery, e.g. "tidal-uptime.geeked.wtf" (read-only). */
+  discovery_source?: string;
 }
 
 export const GetAPIProxies = () => rest<ProxyConfig>("GET", "/apis/proxies");

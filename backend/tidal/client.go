@@ -264,7 +264,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 
 	if !success {
 		fmt.Println("Falling back to public HiFi APIs...")
-		apis := util.GetTidalProxies()
+		apis := util.GetTidalProxiesEffective()
 		for _, apiBase := range apis {
 			fallbackURL := fmt.Sprintf("%s/track/?id=%d&audioquality=%s", apiBase, trackID, quality)
 			fmt.Printf("Trying fallback API: %s\n", fallbackURL)
