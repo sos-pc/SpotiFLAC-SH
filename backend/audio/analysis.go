@@ -161,14 +161,6 @@ func decodeFLACForMetrics(filepath string) ([]float64, error) {
 	return samples, nil
 }
 
-func GetFileSize(filepath string) (int64, error) {
-	info, err := os.Stat(filepath)
-	if err != nil {
-		return 0, err
-	}
-	return info.Size(), nil
-}
-
 func GetTrackMetadata(filepath string) (*AnalysisResult, error) {
 	if !util.FileExists(filepath) {
 		return nil, fmt.Errorf("file does not exist: %s", filepath)
