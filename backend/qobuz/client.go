@@ -57,38 +57,41 @@ var qobuzMusicDLKeyTag = []byte{
 	0x69, 0xb1, 0xfe, 0xbb,
 }
 
+// deriveAESGCMKey derives a plaintext key by hashing seedParts with SHA-256
+// and decrypting ciphertext+tag with AES-256-GCM using the given nonce and aad.
+func deriveAESGCMKey(seedParts [][]byte, nonce, ciphertext, tag, aad []byte) (string, error) {
+	hasher := sha256.New()
+	for _, part := range seedParts {
+		hasher.Write(part)
+	}
+	block, err := aes.NewCipher(hasher.Sum(nil))
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	sealed := make([]byte, 0, len(ciphertext)+len(tag))
+	sealed = append(sealed, ciphertext...)
+	sealed = append(sealed, tag...)
+	plaintext, err := gcm.Open(nil, nonce, sealed, aad)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
 func getQobuzMusicDLDebugKey() (string, error) {
 	qobuzMusicDLKeyOnce.Do(func() {
-		hasher := sha256.New()
-		for _, part := range qobuzMusicDLKeySeedParts {
-			hasher.Write(part)
-		}
-
-		block, err := aes.NewCipher(hasher.Sum(nil))
-		if err != nil {
-			qobuzMusicDLKeyErr = err
-			return
-		}
-
-		gcm, err := cipher.NewGCM(block)
-		if err != nil {
-			qobuzMusicDLKeyErr = err
-			return
-		}
-
-		sealed := make([]byte, 0, len(qobuzMusicDLKeyCiphertext)+len(qobuzMusicDLKeyTag))
-		sealed = append(sealed, qobuzMusicDLKeyCiphertext...)
-		sealed = append(sealed, qobuzMusicDLKeyTag...)
-
-		plaintext, err := gcm.Open(nil, qobuzMusicDLKeyNonce, sealed, qobuzMusicDLKeyAAD)
-		if err != nil {
-			qobuzMusicDLKeyErr = err
-			return
-		}
-
-		qobuzMusicDLKey = string(plaintext)
+		qobuzMusicDLKey, qobuzMusicDLKeyErr = deriveAESGCMKey(
+			qobuzMusicDLKeySeedParts,
+			qobuzMusicDLKeyNonce,
+			qobuzMusicDLKeyCiphertext,
+			qobuzMusicDLKeyTag,
+			qobuzMusicDLKeyAAD,
+		)
 	})
-
 	if qobuzMusicDLKeyErr != nil {
 		return "", qobuzMusicDLKeyErr
 	}

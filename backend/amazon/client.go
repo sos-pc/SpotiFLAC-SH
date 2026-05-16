@@ -58,40 +58,43 @@ var amazonDebugKeyTag = []byte{
 	0x65, 0x7f, 0xfb, 0xa1,
 }
 
+// deriveAESGCMKey derives a plaintext key by hashing seedParts with SHA-256
+// and decrypting ciphertext+tag with AES-256-GCM using the given nonce and aad.
+func deriveAESGCMKey(seedParts [][]byte, nonce, ciphertext, tag, aad []byte) (string, error) {
+	hasher := sha256.New()
+	for _, part := range seedParts {
+		hasher.Write(part)
+	}
+	block, err := aes.NewCipher(hasher.Sum(nil))
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	sealed := make([]byte, 0, len(ciphertext)+len(tag))
+	sealed = append(sealed, ciphertext...)
+	sealed = append(sealed, tag...)
+	plaintext, err := gcm.Open(nil, nonce, sealed, aad)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
 // getAmazonDebugKey derives the X-Debug-Key for amazon.spotbye.qzz.io using
 // AES-256-GCM decryption.  The result is cached after the first call.
 func getAmazonDebugKey() (string, error) {
 	amazonDebugKeyOnce.Do(func() {
-		hasher := sha256.New()
-		for _, part := range amazonDebugKeySeedParts {
-			hasher.Write(part)
-		}
-
-		block, err := aes.NewCipher(hasher.Sum(nil))
-		if err != nil {
-			amazonDebugKeyErr = err
-			return
-		}
-
-		gcm, err := cipher.NewGCM(block)
-		if err != nil {
-			amazonDebugKeyErr = err
-			return
-		}
-
-		sealed := make([]byte, 0, len(amazonDebugKeyCiphertext)+len(amazonDebugKeyTag))
-		sealed = append(sealed, amazonDebugKeyCiphertext...)
-		sealed = append(sealed, amazonDebugKeyTag...)
-
-		plaintext, err := gcm.Open(nil, amazonDebugKeyNonce, sealed, amazonDebugKeyAAD)
-		if err != nil {
-			amazonDebugKeyErr = err
-			return
-		}
-
-		amazonDebugKey = string(plaintext)
+		amazonDebugKey, amazonDebugKeyErr = deriveAESGCMKey(
+			amazonDebugKeySeedParts,
+			amazonDebugKeyNonce,
+			amazonDebugKeyCiphertext,
+			amazonDebugKeyTag,
+			amazonDebugKeyAAD,
+		)
 	})
-
 	if amazonDebugKeyErr != nil {
 		return "", amazonDebugKeyErr
 	}
