@@ -444,7 +444,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				item.Format = "FLAC"
 			}
 
-			AddHistoryItem(item, "SpotiFLAC")
+			AddHistoryItem(item)
 		}(filename, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID, req.CoverURL, req.AudioFormat, req.UserID)
 	}
 

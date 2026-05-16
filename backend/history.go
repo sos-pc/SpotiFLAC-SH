@@ -123,7 +123,7 @@ func InitHistoryDBAt(configDir string) error {
 	return fmt.Errorf("history DB unavailable: %w", lastErr)
 }
 
-func InitHistoryDB(appName string) error {
+func InitHistoryDB() error {
 	appDir, err := util.GetFFmpegDir()
 	if err != nil {
 		return err
@@ -187,7 +187,7 @@ func getHistoryDB() (*bolt.DB, error) {
 // Download History
 // ─────────────────────────────────────────────────────────────────────────────
 
-func AddHistoryItem(item HistoryItem, appName string) error {
+func AddHistoryItem(item HistoryItem) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		fmt.Printf("[History] AddHistoryItem skipped: %v\n", err)
@@ -226,7 +226,7 @@ func AddHistoryItem(item HistoryItem, appName string) error {
 
 // FIX #4 — userID filtre les items. "" = admin (voit tout).
 // Les items sans UserID (migrés) sont visibles par tous pour compatibilité.
-func GetHistoryItems(appName string, userID string) ([]HistoryItem, error) {
+func GetHistoryItems(userID string) ([]HistoryItem, error) {
 	db, err := getHistoryDB()
 	if err != nil {
 		return []HistoryItem{}, nil
@@ -257,7 +257,7 @@ func GetHistoryItems(appName string, userID string) ([]HistoryItem, error) {
 
 // FIX — supprime clé par clé au lieu de détruire le bucket
 // userID vide = suppression globale (admin)
-func ClearHistory(appName string, userID string) error {
+func ClearHistory(userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -289,7 +289,7 @@ func ClearHistory(appName string, userID string) error {
 }
 
 // FIX #4 — vérifie l'ownership avant suppression
-func DeleteHistoryItem(id string, appName string, userID string) error {
+func DeleteHistoryItem(id string, userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -319,7 +319,7 @@ func DeleteHistoryItem(id string, appName string, userID string) error {
 // Fetch History
 // ─────────────────────────────────────────────────────────────────────────────
 
-func AddFetchHistoryItem(item FetchHistoryItem, appName string) error {
+func AddFetchHistoryItem(item FetchHistoryItem) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		fmt.Printf("[History] AddFetchHistoryItem skipped: %v\n", err)
@@ -371,7 +371,7 @@ func AddFetchHistoryItem(item FetchHistoryItem, appName string) error {
 }
 
 // FIX #4 — filtrage par userID
-func GetFetchHistoryItems(appName string, userID string) ([]FetchHistoryItem, error) {
+func GetFetchHistoryItems(userID string) ([]FetchHistoryItem, error) {
 	db, err := getHistoryDB()
 	if err != nil {
 		return []FetchHistoryItem{}, nil
@@ -400,7 +400,7 @@ func GetFetchHistoryItems(appName string, userID string) ([]FetchHistoryItem, er
 }
 
 // FIX — clé par clé + filtrage par user
-func ClearFetchHistory(appName string, userID string) error {
+func ClearFetchHistory(userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -431,7 +431,7 @@ func ClearFetchHistory(appName string, userID string) error {
 	})
 }
 
-func ClearFetchHistoryByType(itemType string, appName string, userID string) error {
+func ClearFetchHistoryByType(itemType string, userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil
@@ -458,7 +458,7 @@ func ClearFetchHistoryByType(itemType string, appName string, userID string) err
 	})
 }
 
-func DeleteFetchHistoryItem(id string, appName string, userID string) error {
+func DeleteFetchHistoryItem(id string, userID string) error {
 	db, err := getHistoryDB()
 	if err != nil {
 		return nil

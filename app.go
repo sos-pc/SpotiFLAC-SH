@@ -486,35 +486,35 @@ func (a *App) ExportFailedDownloads() (string, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (a *App) GetDownloadHistory(userID string) ([]backend.HistoryItem, error) {
-	return backend.GetHistoryItems("SpotiFLAC", userID)
+	return backend.GetHistoryItems(userID)
 }
 
 func (a *App) ClearDownloadHistory(userID string) error {
-	return backend.ClearHistory("SpotiFLAC", userID)
+	return backend.ClearHistory(userID)
 }
 
 func (a *App) DeleteDownloadHistoryItem(id string, userID string) error {
-	return backend.DeleteHistoryItem(id, "SpotiFLAC", userID)
+	return backend.DeleteHistoryItem(id, userID)
 }
 
 func (a *App) GetFetchHistory(userID string) ([]backend.FetchHistoryItem, error) {
-	return backend.GetFetchHistoryItems("SpotiFLAC", userID)
+	return backend.GetFetchHistoryItems(userID)
 }
 
 func (a *App) AddFetchHistory(item backend.FetchHistoryItem) error {
-	return backend.AddFetchHistoryItem(item, "SpotiFLAC")
+	return backend.AddFetchHistoryItem(item)
 }
 
 func (a *App) ClearFetchHistory(userID string) error {
-	return backend.ClearFetchHistory("SpotiFLAC", userID)
+	return backend.ClearFetchHistory(userID)
 }
 
 func (a *App) ClearFetchHistoryByType(itemType string, userID string) error {
-	return backend.ClearFetchHistoryByType(itemType, "SpotiFLAC", userID)
+	return backend.ClearFetchHistoryByType(itemType, userID)
 }
 
 func (a *App) DeleteFetchHistoryItem(id string, userID string) error {
-	return backend.DeleteFetchHistoryItem(id, "SpotiFLAC", userID)
+	return backend.DeleteFetchHistoryItem(id, userID)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
