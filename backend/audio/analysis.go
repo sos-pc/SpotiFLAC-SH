@@ -183,26 +183,6 @@ func GetMetadataWithFFprobe(filePath string) (*AnalysisResult, error) {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	args := []string{
-		"-v", "error",
-		"-select_streams", "a:0",
-		"-show_entries", "stream=sample_rate,channels,bits_per_raw_sample,bits_per_sample,duration,bit_rate",
-		"-of", "default=noprint_wrappers=1:nokey=1",
-		filePath,
-	}
-
-	cmd := exec.Command(ffprobePath, args...)
-	setHideWindow(cmd)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("ffprobe failed: %w - %s", err, string(output))
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) < 4 {
-		return nil, fmt.Errorf("unexpected ffprobe output: %s", string(output))
-	}
-
 	res := &AnalysisResult{
 		FilePath: filePath,
 	}
@@ -211,25 +191,25 @@ func GetMetadataWithFFprobe(filePath string) (*AnalysisResult, error) {
 		res.FileSize = info.Size()
 	}
 
-	infoMap := make(map[string]string)
-
-	args = []string{
+	args := []string{
 		"-v", "error",
 		"-select_streams", "a:0",
 		"-show_entries", "stream=sample_rate,channels,bits_per_raw_sample,bits_per_sample,duration,bit_rate",
 		"-of", "default=noprint_wrappers=0",
 		filePath,
 	}
-	cmd = exec.Command(ffprobePath, args...)
+	cmd := exec.Command(ffprobePath, args...)
 	setHideWindow(cmd)
-	output, err = cmd.CombinedOutput()
-	if err == nil {
-		lines = strings.Split(string(output), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "=") {
-				parts := strings.SplitN(line, "=", 2)
-				infoMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-			}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ffprobe failed: %w - %s", err, string(output))
+	}
+
+	infoMap := make(map[string]string)
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			infoMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}
 	}
 
