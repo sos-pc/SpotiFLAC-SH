@@ -119,4 +119,4 @@ curl -m 5 -X POST http://$(curl -s ifconfig.me):6890/api/v1/auth/local
 
 ## Tidal Account (Optional)
 
-See [tidal-auth.md](tidal-auth.md) for the full PKCE flow. This is separate from SpotiFLAC authentication — it authorizes SpotiFLAC to use your personal Tidal Premium subscription for higher-reliability downloads. It is entirely optional; without it, SpotiFLAC uses community HiFi proxies.
+See [tidal-auth.md](tidal-auth.md) for the full Device Code flow. This is separate from SpotiFLAC authentication — it authorizes SpotiFLAC to use your personal Tidal Premium subscription for higher-reliability downloads. It is entirely optional; without it, SpotiFLAC uses community HiFi proxies.

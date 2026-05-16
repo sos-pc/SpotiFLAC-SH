@@ -37,17 +37,17 @@ SpotiFLAC tries providers in order: **Tidal → Qobuz → Amazon → Deezer**. E
 ### 🌊 Tidal (Primary Provider)
 
 **Official APIs:**
-* **`https://login.tidal.com/authorize`** & **`https://auth.tidal.com/v1/oauth2/token`** — PKCE Web OIDC flow (requires a Premium account).
+* **`https://auth.tidal.com/v1/oauth2/device_authorization`** & **`https://auth.tidal.com/v1/oauth2/token`** — OAuth 2.0 Device Code flow (requires a Premium account).
 * **`https://api.tidal.com/v1/search/tracks`** — Search tracks by name using a hardcoded public web token.
 * **`https://api.tidal.com/v1/tracks?isrc=...`** — Find Tidal tracks by ISRC.
-* **`https://api.tidal.com/v1/tracks/{id}/playbackinfopostpaywall`** — Returns the FLAC manifest. *Requires a valid Premium Token (PKCE).*
+* **`https://api.tidal.com/v1/tracks/{id}/playbackinfopostpaywall`** — Returns the FLAC manifest. *Requires a valid Premium token (Device Code flow).*
 
 **Tidal Device Code Credentials:**
 The OAuth 2.0 Device Code flow uses `client_id: 4N3n6Q1x95LL5K7p` — sourced from [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal). The previous TV client_id (`fX2JxdmntZWK0ixT`) conflicted with the Tidal desktop app. See [CREDITS.md](CREDITS.md) for details.
 
 **Community HiFi Proxies (fallback when no personal token):**
 
-> ⚠️ **Status as of May 2026:** All known community proxies are online as servers but return `assetPresentation: "PREVIEW"` (30-second segments) only — Tidal has restricted community tokens to preview access. **Full FLAC downloads require a personal Premium PKCE token** (Settings → Tidal Account). The proxies below are kept so the token flow can use them as the API layer.
+> ⚠️ **Status as of May 2026:** All known community proxies are online as servers but return `assetPresentation: "PREVIEW"` (30-second segments) only — Tidal has restricted community tokens to preview access. **Full FLAC downloads require a personal Premium token via the Device Code flow** (Settings → Tidal Account). The proxies below are kept so the token flow can use them as the API layer.
 
 * `https://eu-central.monochrome.tf` — v2.10 ✅
 * `https://us-west.monochrome.tf` — v2.10 ✅

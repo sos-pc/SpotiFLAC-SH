@@ -18,7 +18,7 @@ When `auto` is set, SpotiFLAC falls through each provider until one succeeds. If
 
 | Setting | Values | Description |
 |---------|--------|-------------|
-| `tidal_quality` | `LOSSLESS` `HI_RES` `HI_RES_LOSSLESS` | Tidal quality tier (requires PKCE token for HI_RES) |
+| `tidal_quality` | `LOSSLESS` `HI_RES` `HI_RES_LOSSLESS` | Tidal quality tier (HI_RES requires a personal Premium token via Settings → Tidal Account) |
 | `qobuz_quality` | `27` `6` `7` | Qobuz quality ID (6 = FLAC 16-bit, 7 = FLAC 24-bit, 27 = MP3 320) |
 
 ### Paths & filenames

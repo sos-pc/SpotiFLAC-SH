@@ -18,7 +18,7 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 - 📊 Real-time download queue with progress, speed and size
 - 🏠 **LAN bypass** — optional auto-login on local network (no password required)
 - 🗂️ File browser, audio converter, audio analysis
-- 🔑 **Optional Tidal Premium** — PKCE auth for better reliability; falls back to community HiFi APIs without any account
+- 🔑 **Optional Tidal Premium** — Device Code auth for better reliability; falls back to community HiFi APIs without any account
 - 🧹 Automatic BoltDB cleanup (deduplication every 24h)
 - 🐳 Docker-first deployment with GitHub Actions CI/CD
 
@@ -31,7 +31,7 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 | [Deployment](docs/deployment.md) | Docker, reverse proxy, env vars |
 | [Settings Reference](docs/settings-reference.md) | All configurable options |
 | [Watchlists](docs/watchlist.md) | Auto-sync playlists |
-| [Tidal Auth](docs/tidal-auth.md) | PKCE Premium account setup |
+| [Tidal Auth](docs/tidal-auth.md) | Device Code flow for Premium accounts |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 
 ## Screenshots
@@ -144,27 +144,13 @@ Watchlists track Spotify playlists and automatically sync them at a configurable
 
 By default SpotiFLAC uses **community HiFi API proxies** — no Tidal account required.
 
-Optionally, authenticate with a **Premium Tidal account** for better reliability via **PKCE Web OIDC** (same flow as the official Tidal web player).
+Optionally, authenticate with a **Premium Tidal account** for better reliability via the **OAuth 2.0 Device Code flow** (no redirect URL, no copy-paste).
 
 **Via the UI (easiest):** Settings → Tidal Account → Connect with Tidal
 
-**Manual (curl):**
-```bash
-# Step 1 — get the auth URL (requires a valid JWT)
-curl -H "Authorization: Bearer <token>" http://your-server:6890/api/v1/auth/tidal/url
-
-# Step 2 — open the URL in a browser and log in with your Tidal Premium account
-
-# Step 3 — copy the redirect URL (https://listen.tidal.com/login/auth?code=...) and exchange it
-curl -X POST http://your-server:6890/api/v1/auth/tidal/callback \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"callback_url":"https://listen.tidal.com/login/auth?code=..."}'
-```
-
 - Token cached in `tidal_token.json` and **auto-refreshed** before expiry
 - If no token is present (or it expires), the app falls back to community HiFi proxies automatically
-- See [`docs/tidal-auth.md`](docs/tidal-auth.md) for the full walkthrough
+- See [`docs/tidal-auth.md`](docs/tidal-auth.md) for the full walkthrough (UI and curl)
 
 ## Architecture
 
@@ -174,7 +160,7 @@ Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUT
 Browser → /api/v1/* + JWT     → handlers (per-user filtered)
                               → BoltDB (jobs, watchlists, history, users, settings)
                               → JobManager (unified queue: manual + watchlist downloads)
-                                → Tidal  (PKCE token → Community HiFi proxies, fallback loop)
+                                → Tidal  (Device token → Community HiFi proxies, fallback loop)
                                 → Qobuz  (community proxies, fallback loop)
                                 → Amazon (community proxies, fallback loop)
                                 → Deezer (community proxies, fallback loop)
@@ -205,7 +191,7 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 |------|-------------|
 | `jobs.db` | Download jobs, watchlists, users, history (BoltDB — single file) |
 | `jwt_secret` | Auto-generated JWT signing key (created on first run) |
-| `tidal_token.json` | Cached Tidal auth token (PKCE Web OIDC, if authenticated) |
+| `tidal_token.json` | Cached Tidal auth token (Device Code flow, if authenticated) |
 | `config.json` | Global settings fallback (legacy) |
 
 > Since v1.1.7, download history is stored in `jobs.db` (no separate `history.db`), eliminating BoltDB lock conflicts on restart.
@@ -258,7 +244,7 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 ### v3.0.6 — 2026-03-26
 - **fix(tidal):** Community HiFi proxy list refreshed with active instances
-- **feat(tidal):** PKCE Web OIDC flow — Premium accounts bypass the scope restrictions that broke the v2 Device Flow
+- **feat(tidal):** OAuth 2.0 Device Code flow — Premium account authentication via Settings → Tidal Account
 - **docs:** `docs/EXTERNAL_APIS.md` added
 
 ### v3.0.5

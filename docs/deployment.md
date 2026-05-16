@@ -69,7 +69,7 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 |------|-------------|
 | `jobs.db` | BoltDB — download jobs, watchlists, users, settings, history |
 | `jwt_secret` | Auto-generated JWT signing key (created on first run) |
-| `tidal_token.json` | Cached Tidal PKCE token, if authenticated |
+| `tidal_token.json` | Cached Tidal token (Device Code flow), if authenticated |
 
 > **Backup:** a single `cp jobs.db jobs.db.bak` is sufficient to snapshot all state.
 

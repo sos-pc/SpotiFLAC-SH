@@ -22,7 +22,7 @@ These community-maintained services provide the "zero-account" FLAC streaming th
 - **api.monochrome.tf** — `https://api.monochrome.tf` (v2.5, ✅ May 2026)
 - **monochrome-api.samidy.com** — `https://monochrome-api.samidy.com` (v2.3, ✅ May 2026)
 
-> ⚠️ All community Tidal proxies currently return preview-only content (30s). Full FLAC requires a Premium PKCE token.
+> ⚠️ All community Tidal proxies currently return preview-only content (30s). Full FLAC requires a personal Premium token (Device Code flow).
 
 **Self-hostable Tidal Proxy**
 - **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — Fork of [sachinsenal0x64/hifi](https://github.com/sachinsenal0x64/hifi). A self-hostable Python proxy for Tidal supporting `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW` quality and Dolby Atmos. Compatible with SpotiFLAC's Tidal proxy slot (`Settings → APIs → Proxy Configuration`).
