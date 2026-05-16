@@ -80,11 +80,16 @@ func NewSongLinkClient() *SongLinkClient {
 	}
 }
 
-func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region string) (*SongLinkURLs, error) {
+// acquireSlot enforces rate-limiting before an API call:
+// - Returns an error immediately if hard-rate-limited (429 cooldown).
+// - Resets the per-minute counter after each minute window.
+// - Blocks until the window resets if 9 calls have been made this minute.
+// - Enforces a minimum 7-second delay between consecutive calls.
+func (s *SongLinkClient) acquireSlot() error {
 	s.mu.Lock()
 	if s.isRateLimited() {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("songlink rate limited, skipping call")
+		return fmt.Errorf("songlink rate limited, skipping call")
 	}
 	now := time.Now()
 	if now.Sub(s.apiCallResetTime) >= time.Minute {
@@ -105,13 +110,19 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 	lastCall := s.lastAPICallTime
 	s.mu.Unlock()
 	if !lastCall.IsZero() {
-		timeSinceLastCall := time.Now().Sub(lastCall)
-		minDelay := 7 * time.Second
-		if timeSinceLastCall < minDelay {
-			waitTime := minDelay - timeSinceLastCall
-			fmt.Printf("Rate limiting: waiting %v...\n", waitTime.Round(time.Second))
-			time.Sleep(waitTime)
+		const minDelay = 7 * time.Second
+		if elapsed := time.Since(lastCall); elapsed < minDelay {
+			wait := minDelay - elapsed
+			fmt.Printf("Rate limiting: waiting %v...\n", wait.Round(time.Second))
+			time.Sleep(wait)
 		}
+	}
+	return nil
+}
+
+func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region string) (*SongLinkURLs, error) {
+	if err := s.acquireSlot(); err != nil {
+		return nil, err
 	}
 
 	spotifyURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotifyTrackID)
@@ -213,37 +224,8 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 }
 
 func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAvailability, error) {
-	s.mu.Lock()
-	if s.isRateLimited() {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("songlink rate limited, skipping call")
-	}
-	now := time.Now()
-	if now.Sub(s.apiCallResetTime) >= time.Minute {
-		s.apiCallCount = 0
-		s.apiCallResetTime = now
-	}
-	if s.apiCallCount >= 9 {
-		waitTime := time.Minute - now.Sub(s.apiCallResetTime)
-		s.mu.Unlock()
-		if waitTime > 0 {
-			fmt.Printf("Rate limit reached, waiting %v...\n", waitTime.Round(time.Second))
-			time.Sleep(waitTime)
-		}
-		s.mu.Lock()
-		s.apiCallCount = 0
-		s.apiCallResetTime = time.Now()
-	}
-	lastCall := s.lastAPICallTime
-	s.mu.Unlock()
-	if !lastCall.IsZero() {
-		timeSinceLastCall := time.Now().Sub(lastCall)
-		minDelay := 7 * time.Second
-		if timeSinceLastCall < minDelay {
-			waitTime := minDelay - timeSinceLastCall
-			fmt.Printf("Rate limiting: waiting %v...\n", waitTime.Round(time.Second))
-			time.Sleep(waitTime)
-		}
+	if err := s.acquireSlot(); err != nil {
+		return nil, err
 	}
 
 	spotifyURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotifyTrackID)
@@ -369,37 +351,8 @@ func checkQobuzAvailability(isrc string) bool {
 }
 
 func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string, error) {
-	s.mu.Lock()
-	if s.isRateLimited() {
-		s.mu.Unlock()
-		return "", fmt.Errorf("songlink rate limited, skipping call")
-	}
-	now := time.Now()
-	if now.Sub(s.apiCallResetTime) >= time.Minute {
-		s.apiCallCount = 0
-		s.apiCallResetTime = now
-	}
-	if s.apiCallCount >= 9 {
-		waitTime := time.Minute - now.Sub(s.apiCallResetTime)
-		s.mu.Unlock()
-		if waitTime > 0 {
-			fmt.Printf("Rate limit reached, waiting %v...\n", waitTime.Round(time.Second))
-			time.Sleep(waitTime)
-		}
-		s.mu.Lock()
-		s.apiCallCount = 0
-		s.apiCallResetTime = time.Now()
-	}
-	lastCall := s.lastAPICallTime
-	s.mu.Unlock()
-	if !lastCall.IsZero() {
-		timeSinceLastCall := time.Now().Sub(lastCall)
-		minDelay := 7 * time.Second
-		if timeSinceLastCall < minDelay {
-			waitTime := minDelay - timeSinceLastCall
-			fmt.Printf("Rate limiting: waiting %v...\n", waitTime.Round(time.Second))
-			time.Sleep(waitTime)
-		}
+	if err := s.acquireSlot(); err != nil {
+		return "", err
 	}
 
 	spotifyURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotifyTrackID)
