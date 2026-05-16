@@ -108,7 +108,7 @@ func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
 		f.Meta[cmtIdx] = &cmtBlock
 	}
 
-	if coverPath != "" && fileExists(coverPath) {
+	if coverPath != "" && util.FileExists(coverPath) {
 		if err := embedCoverArt(f, coverPath); err != nil {
 			fmt.Printf("Warning: Failed to embed cover art: %v\n", err)
 		}
@@ -148,22 +148,6 @@ func embedCoverArt(f *flac.File, coverPath string) error {
 	f.Meta = append(f.Meta, &pictureBlock)
 
 	return nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func extractYear(releaseDate string) string {
-	if releaseDate == "" {
-		return ""
-	}
-
-	if len(releaseDate) >= 4 {
-		return releaseDate[:4]
-	}
-	return releaseDate
 }
 
 func EmbedLyricsOnly(filepath string, lyrics string) error {
@@ -374,7 +358,7 @@ func extractLyricsFromFlac(filePath string) (string, error) {
 }
 
 func EmbedCoverArtOnly(filePath string, coverPath string) error {
-	if coverPath == "" || !fileExists(coverPath) {
+	if coverPath == "" || !util.FileExists(coverPath) {
 		return nil
 	}
 
@@ -873,7 +857,7 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 		tag.AddTextFrame("TSRC", id3v2.EncodingUTF8, metadata.ISRC)
 	}
 
-	if coverPath != "" && fileExists(coverPath) {
+	if coverPath != "" && util.FileExists(coverPath) {
 
 		tag.DeleteFrames(tag.CommonID("Attached picture"))
 
@@ -914,7 +898,7 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 		"-y",
 	}
 
-	if coverPath != "" && fileExists(coverPath) {
+	if coverPath != "" && util.FileExists(coverPath) {
 		args = append(args, "-i", coverPath)
 		args = append(args, "-map", "0:a", "-map", "1", "-c:a", "copy", "-c:v", "copy", "-disposition:v:0", "attached_pic")
 	} else {
