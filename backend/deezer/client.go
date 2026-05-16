@@ -32,12 +32,6 @@ type YoinkifyRequest struct {
 	GenreSource string `json:"genreSource"`
 }
 
-func (d *DeezerDownloader) DownloadFromYoinkify(spotifyURL, outputDir string) (string, error) {
-	// yoinkify.lol — domaine expiré/mort depuis 2025, fail fast
-	return "", fmt.Errorf("yoinkify.lol unavailable (domain expired)")
-}
-
-// getDeezerTrackID — recherche l'ID Deezer via l'API publique (pas de clé requise)
 func (d *DeezerDownloader) getDeezerTrackID(trackName, artistName string) (string, error) {
 	cleanArtist := artistName
 	for _, sep := range []string{", ", " & ", " feat.", " ft.", " featuring "} {
