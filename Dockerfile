@@ -5,7 +5,6 @@ FROM oven/bun:1 AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copier tout le frontend d'abord (le postinstall a besoin de scripts/)
 COPY frontend/ .
 RUN bun install --frozen-lockfile
 RUN bun run build
