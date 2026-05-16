@@ -25,7 +25,7 @@ var tidalDiscoveredDown []string
 //
 // Status checked via tidal-uptime.geeked.wtf (May 2026).
 // NOTE: as of May 2026, ALL community proxies return assetPresentation="PREVIEW"
-// (30-second segments) without a valid Tidal Premium PKCE token.
+// (30-second segments) without a valid personal Tidal Premium token (Device Code flow).
 // Full FLAC downloads require authentication via Settings → Tidal Account.
 var tidalProxies = []string{
 	// Monochrome instances — confirmed server-UP by tidal-uptime.geeked.wtf

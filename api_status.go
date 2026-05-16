@@ -217,7 +217,7 @@ func pingDeezerProxy(name, baseURL string) ServiceStatus {
 //
 //	"FULL"    → proxy can serve complete tracks → "ok"
 //	"PREVIEW" → proxy is up but Tidal restricts to 30-second previews
-//	           (full downloads require a Tidal Premium PKCE token) → "ratelimited"
+//	           (full downloads require a personal Tidal Premium token via the Device Code flow) → "ratelimited"
 func pingTidalProxy(name, baseURL string) ServiceStatus {
 	// Uses the same probe track as the upstream TidalDownloader.
 	const testTrackID = "441821360"
