@@ -754,7 +754,7 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/system/ffmpeg", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		installed, err := a.CheckFFmpegInstalled()
+		installed, err := a.IsFFmpegInstalled()
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return

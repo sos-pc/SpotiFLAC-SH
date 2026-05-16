@@ -750,7 +750,6 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 func (a *App) IsFFmpegInstalled() (bool, error)    { return audio.IsFFmpegInstalled() }
 func (a *App) IsFFprobeInstalled() (bool, error)   { return audio.IsFFprobeInstalled() }
 func (a *App) GetFFmpegPath() (string, error)      { return util.GetFFmpegPath() }
-func (a *App) CheckFFmpegInstalled() (bool, error) { return audio.IsFFmpegInstalled() }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio / File tools
