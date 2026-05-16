@@ -138,6 +138,31 @@ func (c *CoverClient) getMaxResolutionURL(imageURL string) string {
 	return mediumURL
 }
 
+// downloadImageFile fetches imageURL and writes it to filePath.
+// It is the single HTTP-download implementation shared by all cover/header/gallery/avatar methods.
+func (c *CoverClient) downloadImageFile(imageURL, filePath string) error {
+	resp, err := c.httpClient.Get(imageURL)
+	if err != nil {
+		return fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+	}
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	if _, err = io.Copy(file, resp.Body); err != nil {
+		return fmt.Errorf("failed to write image file: %w", err)
+	}
+	return nil
+}
+
 func (c *CoverClient) DownloadCoverToPath(coverURL, outputPath string, embedMaxQualityCover bool) error {
 	if coverURL == "" {
 		return fmt.Errorf("cover URL is required")
@@ -148,28 +173,7 @@ func (c *CoverClient) DownloadCoverToPath(coverURL, outputPath string, embedMaxQ
 		downloadURL = c.getMaxResolutionURL(downloadURL)
 	}
 
-	resp, err := c.httpClient.Get(downloadURL)
-	if err != nil {
-		return fmt.Errorf("failed to download cover: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download cover: HTTP %d", resp.StatusCode)
-	}
-
-	file, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write cover file: %v", err)
-	}
-
-	return nil
+	return c.downloadImageFile(downloadURL, outputPath)
 }
 
 func (c *CoverClient) DownloadCover(req CoverDownloadRequest) (*CoverDownloadResponse, error) {
@@ -212,36 +216,10 @@ func (c *CoverClient) DownloadCover(req CoverDownloadRequest) (*CoverDownloadRes
 
 	downloadURL := c.getMaxResolutionURL(req.CoverURL)
 
-	resp, err := c.httpClient.Get(downloadURL)
-	if err != nil {
+	if err := c.downloadImageFile(downloadURL, filePath); err != nil {
 		return &CoverDownloadResponse{
 			Success: false,
-			Error:   fmt.Sprintf("failed to download cover: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &CoverDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to download cover: HTTP %d", resp.StatusCode),
-		}, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		return &CoverDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to create file: %v", err),
-		}, err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return &CoverDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to write cover file: %v", err),
+			Error:   err.Error(),
 		}, err
 	}
 
@@ -294,36 +272,10 @@ func (c *CoverClient) DownloadHeader(req HeaderDownloadRequest) (*HeaderDownload
 		}, nil
 	}
 
-	resp, err := c.httpClient.Get(req.HeaderURL)
-	if err != nil {
+	if err := c.downloadImageFile(req.HeaderURL, filePath); err != nil {
 		return &HeaderDownloadResponse{
 			Success: false,
-			Error:   fmt.Sprintf("failed to download header: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &HeaderDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to download header: HTTP %d", resp.StatusCode),
-		}, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		return &HeaderDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to create file: %v", err),
-		}, err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return &HeaderDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to write header file: %v", err),
+			Error:   err.Error(),
 		}, err
 	}
 
@@ -391,36 +343,10 @@ func (c *CoverClient) DownloadGalleryImage(req GalleryImageDownloadRequest) (*Ga
 		}, nil
 	}
 
-	resp, err := c.httpClient.Get(req.ImageURL)
-	if err != nil {
+	if err := c.downloadImageFile(req.ImageURL, filePath); err != nil {
 		return &GalleryImageDownloadResponse{
 			Success: false,
-			Error:   fmt.Sprintf("failed to download gallery image: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &GalleryImageDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to download gallery image: HTTP %d", resp.StatusCode),
-		}, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		return &GalleryImageDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to create file: %v", err),
-		}, err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return &GalleryImageDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to write gallery image file: %v", err),
+			Error:   err.Error(),
 		}, err
 	}
 
@@ -487,36 +413,10 @@ func (c *CoverClient) DownloadAvatar(req AvatarDownloadRequest) (*AvatarDownload
 		}, nil
 	}
 
-	resp, err := c.httpClient.Get(req.AvatarURL)
-	if err != nil {
+	if err := c.downloadImageFile(req.AvatarURL, filePath); err != nil {
 		return &AvatarDownloadResponse{
 			Success: false,
-			Error:   fmt.Sprintf("failed to download avatar: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return &AvatarDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to download avatar: HTTP %d", resp.StatusCode),
-		}, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		return &AvatarDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to create file: %v", err),
-		}, err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return &AvatarDownloadResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to write avatar file: %v", err),
+			Error:   err.Error(),
 		}, err
 	}
 
