@@ -673,55 +673,12 @@ func parseLRCTimestamp(timestamp string) int64 {
 func ExtractFullMetadataFromFile(filePath string) (Metadata, error) {
 	var metadata Metadata
 
-	ffprobePath, err := util.GetFFprobePath()
+	tags, err := util.ReadFFprobeTags(filePath)
 	if err != nil {
 		return metadata, err
 	}
 
-	if err := util.ValidateExecutable(ffprobePath); err != nil {
-		return metadata, fmt.Errorf("invalid ffprobe executable: %w", err)
-	}
-
-	cmd := exec.Command(ffprobePath,
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		filePath,
-	)
-
-
-	output, err := cmd.Output()
-	if err != nil {
-		return metadata, err
-	}
-
-	var result struct {
-		Format struct {
-			Tags map[string]string `json:"tags"`
-		} `json:"format"`
-		Streams []struct {
-			Tags map[string]string `json:"tags"`
-		} `json:"streams"`
-	}
-
-	if err := json.Unmarshal(output, &result); err != nil {
-		return metadata, err
-	}
-
-	allTags := make(map[string]string)
-
-	for _, stream := range result.Streams {
-		for key, value := range stream.Tags {
-			allTags[strings.ToLower(key)] = value
-		}
-	}
-
-	for key, value := range result.Format.Tags {
-		allTags[strings.ToLower(key)] = value
-	}
-
-	for key, value := range allTags {
+	for key, value := range tags {
 		switch key {
 		case "title":
 			metadata.Title = value
@@ -736,7 +693,6 @@ func ExtractFullMetadataFromFile(filePath string) (Metadata, error) {
 				metadata.Date = value
 			}
 		case "track":
-
 			parts := strings.Split(value, "/")
 			if len(parts) > 0 {
 				if num, err := strconv.Atoi(parts[0]); err == nil {
@@ -749,7 +705,6 @@ func ExtractFullMetadataFromFile(filePath string) (Metadata, error) {
 				}
 			}
 		case "disc":
-
 			parts := strings.Split(value, "/")
 			if len(parts) > 0 {
 				if num, err := strconv.Atoi(parts[0]); err == nil {

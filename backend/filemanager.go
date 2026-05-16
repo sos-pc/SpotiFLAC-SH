@@ -1,10 +1,8 @@
 package backend
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -226,57 +224,14 @@ func readMp3Metadata(filePath string) (*AudioMetadata, error) {
 }
 
 func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
-	ffprobePath, err := util.GetFFprobePath()
+	tags, err := util.ReadFFprobeTags(filePath)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := util.ValidateExecutable(ffprobePath); err != nil {
-		return nil, fmt.Errorf("invalid ffprobe executable: %w", err)
-	}
-
-	cmd := exec.Command(ffprobePath,
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		filePath,
-	)
-
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Format struct {
-			Tags map[string]string `json:"tags"`
-		} `json:"format"`
-		Streams []struct {
-			Tags map[string]string `json:"tags"`
-		} `json:"streams"`
-	}
-
-	if err := json.Unmarshal(output, &result); err != nil {
 		return nil, err
 	}
 
 	metadata := &AudioMetadata{}
 
-	allTags := make(map[string]string)
-
-	for _, stream := range result.Streams {
-		for key, value := range stream.Tags {
-			allTags[strings.ToLower(key)] = value
-		}
-	}
-
-	for key, value := range result.Format.Tags {
-		allTags[strings.ToLower(key)] = value
-	}
-
-	for key, value := range allTags {
+	for key, value := range tags {
 		switch key {
 		case "title":
 			metadata.Title = value
@@ -287,7 +242,6 @@ func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
 		case "album_artist", "albumartist":
 			metadata.AlbumArtist = value
 		case "track":
-
 			trackStr := strings.Split(value, "/")[0]
 			if num, err := strconv.Atoi(trackStr); err == nil {
 				metadata.TrackNumber = num
