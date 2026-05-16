@@ -352,10 +352,6 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	return filePath, nil
 }
 
-func (a *AmazonDownloader) DownloadFromService(amazonURL, outputDir, quality string) (string, error) {
-	return a.DownloadFromAfkarXYZ(amazonURL, outputDir, quality)
-}
-
 func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate, spotifyCoverURL string, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, embedMaxQualityCover bool, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
 
 	if outputDir != "." {
@@ -418,7 +414,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 
 	fmt.Printf("Using Amazon URL: %s\n", amazonURL)
 
-	filePath, err := a.DownloadFromService(amazonURL, outputDir, quality)
+	filePath, err := a.DownloadFromAfkarXYZ(amazonURL, outputDir, quality)
 	if err != nil {
 		return "", err
 	}
