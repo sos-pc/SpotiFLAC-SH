@@ -79,11 +79,11 @@ jobs:
               CHANGED_FILES="${CHANGED_FILES}\n- \`${FILE}\` ⚠️ **disparu de upstream** (supprimé ou renommé ?)"
               continue
             fi
-            DIFF=$(git diff HEAD upstream/main -- "${FILE}" 2>/dev/null || true)
+            DIFF=$(git diff "${COMMON_ANCESTOR}" upstream/main -- "${FILE}" 2>/dev/null || true)
             if [[ -n "$DIFF" ]]; then
               ADDED=$(echo "$DIFF" | grep -c '^+[^+]' || true)
               REMOVED=$(echo "$DIFF" | grep -c '^-[^-]' || true)
-              CHANGED_FILES="${CHANGED_FILES}\n- \`${FILE}\` (+${ADDED} / -${REMOVED} lignes)"
+              CHANGED_FILES="${CHANGED_FILES}\n- \`${FILE}\` (+${ADDED} / -${REMOVED} lignes upstream)"
             else
               UNCHANGED_FILES="${UNCHANGED_FILES}\n- \`${FILE}\` ✓"
             fi
@@ -98,11 +98,11 @@ jobs:
 
           for FILE in "${MIXED_FILES[@]}"; do
             if git show "upstream/main:${FILE}" &>/dev/null 2>&1; then
-              DIFF=$(git diff HEAD upstream/main -- "${FILE}" 2>/dev/null || true)
+              DIFF=$(git diff "${COMMON_ANCESTOR}" upstream/main -- "${FILE}" 2>/dev/null || true)
               if [[ -n "$DIFF" ]]; then
                 ADDED=$(echo "$DIFF" | grep -c '^+[^+]' || true)
                 REMOVED=$(echo "$DIFF" | grep -c '^-[^-]' || true)
-                MIXED_CHANGED="${MIXED_CHANGED}\n- \`${FILE}\` (+${ADDED} / -${REMOVED} lignes)"
+                MIXED_CHANGED="${MIXED_CHANGED}\n- \`${FILE}\` (+${ADDED} / -${REMOVED} lignes upstream)"
               fi
             fi
           done
@@ -156,7 +156,7 @@ jobs:
           ./check-upstream.sh --verbose
 
           # 2. Voir le diff d'un fichier
-          git diff HEAD upstream/main -- backend/tidal.go | less
+          git diff $(git merge-base HEAD upstream/main) upstream/main -- backend/tidal.go | less
 
           # 3. Intégrer un fichier pure upstream
           git checkout upstream/main -- backend/FICHIER.go

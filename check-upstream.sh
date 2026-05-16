@@ -122,7 +122,7 @@ for FILE in "${TRACKED_FILES[@]}"; do
         continue
     fi
 
-    DIFF_OUTPUT=$(git diff HEAD upstream/main -- "${FILE}" 2>/dev/null || true)
+    DIFF_OUTPUT=$(git diff "${COMMON_ANCESTOR}" upstream/main -- "${FILE}" 2>/dev/null || true)
 
     if [[ -z "$DIFF_OUTPUT" ]]; then
         echo -e "  ${GREEN}✓${RESET} ${FILE}"
@@ -130,7 +130,7 @@ for FILE in "${TRACKED_FILES[@]}"; do
     else
         LINES_ADDED=$(echo "$DIFF_OUTPUT" | grep -c '^+[^+]' || true)
         LINES_REMOVED=$(echo "$DIFF_OUTPUT" | grep -c '^-[^-]' || true)
-        echo -e "  ${RED}✗${RESET} ${FILE} — ${RED}+${LINES_ADDED} / -${LINES_REMOVED} lignes${RESET}"
+        echo -e "  ${RED}✗${RESET} ${FILE} — ${RED}+${LINES_ADDED} / -${LINES_REMOVED} lignes upstream${RESET}"
         ((CHANGED_COUNT++)) || true
 
         if $VERBOSE; then
@@ -196,14 +196,14 @@ for FILE in "${MIXED_FILES[@]}"; do
         continue
     fi
 
-    DIFF_OUTPUT=$(git diff HEAD upstream/main -- "${FILE}" 2>/dev/null || true)
+    DIFF_OUTPUT=$(git diff "${COMMON_ANCESTOR}" upstream/main -- "${FILE}" 2>/dev/null || true)
 
     if [[ -z "$DIFF_OUTPUT" ]]; then
         echo -e "  ${GREEN}✓${RESET} ${FILE} — identique"
     else
         LINES_ADDED=$(echo "$DIFF_OUTPUT" | grep -c '^+[^+]' || true)
         LINES_REMOVED=$(echo "$DIFF_OUTPUT" | grep -c '^-[^-]' || true)
-        echo -e "  ${YELLOW}~${RESET} ${FILE} — ${YELLOW}+${LINES_ADDED} / -${LINES_REMOVED} lignes (merger manuellement)${RESET}"
+        echo -e "  ${YELLOW}~${RESET} ${FILE} — ${YELLOW}+${LINES_ADDED} / -${LINES_REMOVED} lignes upstream (merger manuellement)${RESET}"
 
         if $VERBOSE; then
             echo ""
@@ -220,8 +220,8 @@ echo ""
 if [[ "$CHANGED_COUNT" -gt 0 ]]; then
     echo -e "${BOLD}══ Commandes pour intégrer les changements ════════════${RESET}"
     echo ""
-    echo "  # Voir le diff détaillé d'un fichier :"
-    echo "  git diff HEAD upstream/main -- backend/tidal.go | less"
+    echo "  # Voir le diff détaillé d'un fichier (depuis le merge-base) :"
+    echo "  git diff \$(git merge-base HEAD upstream/main) upstream/main -- backend/tidal.go | less"
     echo ""
     echo "  # Copier un fichier pure upstream directement (si aucun conflit) :"
     echo "  git checkout upstream/main -- backend/tidal.go"
