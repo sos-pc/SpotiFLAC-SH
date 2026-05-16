@@ -229,8 +229,8 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		close(isrcChan)
 	}
 
-	tidalFmt := tidalQualityFor(req.AudioFormat)
-	qobuzFmt := qobuzQualityFor(req.AudioFormat)
+	tidalFmt := TidalQualityFor(req.AudioFormat)
+	qobuzFmt := QobuzQualityFor(req.AudioFormat)
 
 	switch req.Service {
 	case "amazon":
@@ -461,8 +461,8 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 // Quality mapping helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// tidalQualityFor converts any quality string to the nearest valid Tidal quality.
-func tidalQualityFor(format string) string {
+// TidalQualityFor converts any quality string to the nearest valid Tidal quality.
+func TidalQualityFor(format string) string {
 	switch format {
 	case "27", "7":
 		return "HI_RES_LOSSLESS"
@@ -475,8 +475,8 @@ func tidalQualityFor(format string) string {
 	}
 }
 
-// qobuzQualityFor converts any quality string to the nearest valid Qobuz quality.
-func qobuzQualityFor(format string) string {
+// QobuzQualityFor converts any quality string to the nearest valid Qobuz quality.
+func QobuzQualityFor(format string) string {
 	switch format {
 	case "HI_RES_LOSSLESS", "HI_RES", "27":
 		return "27"

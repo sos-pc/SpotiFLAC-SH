@@ -386,8 +386,8 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			EmbedLyrics:          req.EmbedLyrics,
 			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
 			AutoOrder:            req.AutoOrder,
-			TidalQuality:         tidalQualityFromFormat(req.AudioFormat),
-			QobuzQuality:         qobuzQualityFromFormat(req.AudioFormat),
+			TidalQuality:         backend.TidalQualityFor(req.AudioFormat),
+			QobuzQuality:         backend.QobuzQualityFor(req.AudioFormat),
 			AutoQuality: func() string {
 				if req.AudioFormat == "HI_RES_LOSSLESS" || req.AudioFormat == "HI_RES" {
 					return "24"
