@@ -148,11 +148,6 @@ Optionally, authenticate with a **Premium Tidal account** for better reliability
 
 **Via the UI (easiest):** Settings → Tidal Account → Connect with Tidal
 
-**Automated script:**
-```bash
-python3 auth_tidal.py --host http://your-server:6890
-```
-
 **Manual (curl):**
 ```bash
 # Step 1 — get the auth URL (requires a valid JWT)
@@ -263,7 +258,7 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 ### v3.0.6 — 2026-03-26
 - **fix(tidal):** Community HiFi proxy list refreshed with active instances
-- **feat(tidal):** PKCE Web OIDC flow — Premium accounts bypass the scope restrictions that broke the v2 Device Flow (`auth_tidal.py` helper script)
+- **feat(tidal):** PKCE Web OIDC flow — Premium accounts bypass the scope restrictions that broke the v2 Device Flow
 - **docs:** `TIDAL_AUTH_PKCE.md` and `EXTERNAL_APIS.md` added
 
 ### v3.0.5
