@@ -114,6 +114,14 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 	})))
 }
 
+// userIDFromContext returns the authenticated user's ID, or "" if anonymous.
+func userIDFromContext(r *http.Request) string {
+	if user := GetUserFromContext(r); user != nil {
+		return user.UserID
+	}
+	return ""
+}
+
 // v1RequireAdmin renvoie 403 si l'utilisateur n'est pas admin.
 func v1RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	user := GetUserFromContext(r)
@@ -301,9 +309,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		if user := GetUserFromContext(r); user != nil {
-			req.UserID = user.UserID
-		}
+		req.UserID = userIDFromContext(r)
 		result, err := s.ctr.Jobs.EnqueueBatch(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -371,10 +377,7 @@ func (s *Server) registerV1Routes() {
 
 	// ── Watchlists ────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/watchlists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		result, err := s.ctr.Watcher.GetWatchlistsByUser(userID)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -389,9 +392,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		if user := GetUserFromContext(r); user != nil {
-			req.UserID = user.UserID
-		}
+		req.UserID = userIDFromContext(r)
 		result, err := s.ctr.Watcher.AddWatchlist(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -480,10 +481,7 @@ func (s *Server) registerV1Routes() {
 
 	// ── History ───────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/history/downloads", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		result, err := a.GetDownloadHistory(userID)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -493,10 +491,7 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/history/downloads", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		if err := a.ClearDownloadHistory(userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -506,10 +501,7 @@ func (s *Server) registerV1Routes() {
 
 	s.mux.Handle("DELETE /api/v1/history/downloads/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		if err := a.DeleteDownloadHistoryItem(id, userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -518,10 +510,7 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		result, err := a.GetFetchHistory(userID)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -536,9 +525,7 @@ func (s *Server) registerV1Routes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		if user := GetUserFromContext(r); user != nil {
-			item.UserID = user.UserID
-		}
+		item.UserID = userIDFromContext(r)
 		if err := a.AddFetchHistory(item); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -547,10 +534,7 @@ func (s *Server) registerV1Routes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		if itemType := r.URL.Query().Get("type"); itemType != "" {
 			if err := a.ClearFetchHistoryByType(itemType, userID); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -567,10 +551,7 @@ func (s *Server) registerV1Routes() {
 
 	s.mux.Handle("DELETE /api/v1/history/fetch/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		userID := ""
-		if user := GetUserFromContext(r); user != nil {
-			userID = user.UserID
-		}
+		userID := userIDFromContext(r)
 		if err := a.DeleteFetchHistoryItem(id, userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
