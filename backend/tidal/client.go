@@ -104,7 +104,7 @@ func (t *TidalDownloader) SearchTidalByName(trackName, artistName string) (strin
 	apiURL := fmt.Sprintf("https://api.tidal.com/v1/search/tracks?query=%s&limit=1&countryCode=%s", query, GetTidalCountryCode())
 
 	req, _ := http.NewRequest("GET", apiURL, nil)
-	req.Header.Set("x-tidal-token", GetPublicTidalToken())
+	req.Header.Set("x-tidal-token", PublicTidalToken)
 
 	resp, err := t.client.Do(req)
 	if err != nil {
@@ -1133,7 +1133,7 @@ func GetTidalIDFromISRC(trackName, artistName, isrc string) (int64, string, erro
 	apiURL := fmt.Sprintf("https://api.tidal.com/v1/tracks?countryCode=%s&isrc=%s&limit=1", GetTidalCountryCode(), isrc)
 
 	req, _ := http.NewRequest("GET", apiURL, nil)
-	req.Header.Set("x-tidal-token", GetPublicTidalToken())
+	req.Header.Set("x-tidal-token", PublicTidalToken)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

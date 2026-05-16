@@ -15,6 +15,12 @@ import (
 const (
 	tidalDeviceClientID     = "4N3n6Q1x95LL5K7p"
 	tidalDeviceClientSecret = "oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik="
+
+	// PublicTidalToken est un x-tidal-token public utilisé par les clients web Tidal.
+	// Il autorise les appels de recherche et la résolution d'ISRC sans authentification
+	// de compte. Sa portée est limitée — pour récupérer un manifest playback FLAC,
+	// un token utilisateur valide est requis (Device Code Flow, voir auth.go).
+	PublicTidalToken = "CzET4vdadNUFQ5JU"
 )
 
 // DeviceAuthResponse est la réponse de l'endpoint device_authorization.
