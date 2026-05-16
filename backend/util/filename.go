@@ -9,6 +9,9 @@ import (
 	"unicode/utf8"
 )
 
+// Separator joins multi-valued fields (artists, genres, …) in filenames and tags.
+const Separator = ", "
+
 func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position, discNumber int, useAlbumTrackNumber bool) string {
 
 	safeTitle := SanitizeFilename(trackName)
