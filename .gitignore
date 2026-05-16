@@ -1,12 +1,3 @@
-# Wails Build
-build/
-*.exe
-*.dll
-*.dylib
-*.so
-
-# Wails Generated Files
-
 # Go
 *.test
 *.out
@@ -59,19 +50,7 @@ temp/
 *.bak
 *.old
 
-# Test files
-test
-
-# Build notes (optional - uncomment if you don't want to commit)
-# BUILD_NOTES.md
-push.bat
-# SpotiFLAC
+# SpotiFLAC runtime data
 config/
 *.db
 *.tar.gz
-docker-compose-spotiflac.yaml
-docker-compose-spotiflac\ dev.yaml
-patch-*.sh
-create-shims.sh
-push.bat
-config/
