@@ -247,10 +247,6 @@ func isSynced(resp *LyricsResponse) bool {
 	return resp != nil && !resp.Error && resp.SyncType == "LINE_SYNCED" && len(resp.Lines) > 0
 }
 
-func hasLyrics(resp *LyricsResponse) bool {
-	return resp != nil && !resp.Error && len(resp.Lines) > 0
-}
-
 func (c *LyricsClient) FetchLyricsAllSources(spotifyID, trackName, artistName, albumName string, duration int) (*LyricsResponse, string, error) {
 
 	var unsyncedFallback *LyricsResponse
