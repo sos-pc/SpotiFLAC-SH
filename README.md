@@ -259,7 +259,7 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 ### v3.0.6 — 2026-03-26
 - **fix(tidal):** Community HiFi proxy list refreshed with active instances
 - **feat(tidal):** PKCE Web OIDC flow — Premium accounts bypass the scope restrictions that broke the v2 Device Flow
-- **docs:** `EXTERNAL_APIS.md` added
+- **docs:** `docs/EXTERNAL_APIS.md` added
 
 ### v3.0.5
 - **feat(tidal):** PKCE Web OIDC authentication flow via `/api/auth/tidal/url` + `/api/auth/tidal/callback`
