@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -121,14 +120,6 @@ func InitHistoryDBAt(configDir string) error {
 	fmt.Printf("[History] WARNING: history DB unavailable after %d attempts: %v\n",
 		len(timeouts), lastErr)
 	return fmt.Errorf("history DB unavailable: %w", lastErr)
-}
-
-func InitHistoryDB() error {
-	appDir, err := util.GetFFmpegDir()
-	if err != nil {
-		return err
-	}
-	return InitHistoryDBAt(appDir)
 }
 
 func CloseHistoryDB() {
