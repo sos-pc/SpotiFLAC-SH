@@ -6,7 +6,7 @@
 
 A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz, Amazon Music & Deezer — no account required.
 
-> **Based on [SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC) by afkarxyz** — rewritten as a web server with multi-user support and Jellyfin integration.
+> **Based on [SpotiFLAC](https://github.com/spotbye/SpotiFLAC) by afkarxyz** — rewritten as a web server with multi-user support and Jellyfin integration.
 
 ## Features
 
@@ -339,5 +339,5 @@ This project is for **educational and private use only**.
 
 ## Credits
 
-- [afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC) — original project
+- [afkarxyz/SpotiFLAC](https://github.com/spotbye/SpotiFLAC) — original project
 - [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api)

@@ -3,7 +3,7 @@
 # Usage: ./check-upstream.sh [--verbose]
 #
 # Placer à la racine de SpotiFLAC-web/
-# Setup requis : git remote add upstream https://github.com/afkarxyz/SpotiFLAC.git
+# Setup requis : git remote add upstream https://github.com/spotbye/SpotiFLAC.git
 
 set -euo pipefail
 
@@ -74,7 +74,7 @@ if ! git remote get-url upstream &>/dev/null; then
     echo -e "${RED}✗ Remote 'upstream' non configuré.${RESET}"
     echo ""
     echo "  Exécuter :"
-    echo "  git remote add upstream https://github.com/afkarxyz/SpotiFLAC.git"
+    echo "  git remote add upstream https://github.com/spotbye/SpotiFLAC.git"
     exit 1
 fi
 

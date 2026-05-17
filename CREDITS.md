@@ -6,7 +6,7 @@ SpotiFLAC Web is built on the work of many open-source developers and community 
 
 ## Original Project
 
-**[afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC)**
+**[afkarxyz/SpotiFLAC](https://github.com/spotbye/SpotiFLAC)**
 The original desktop application that SpotiFLAC Web is based on. The core download logic (Tidal, Qobuz, Amazon, Deezer, Spotify metadata, lyrics) was originally developed by afkarxyz and is the foundation of this project.
 
 ---

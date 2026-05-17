@@ -20,7 +20,7 @@ jobs:
 
       - name: Add upstream remote
         run: |
-          git remote add upstream https://github.com/afkarxyz/SpotiFLAC.git
+          git remote add upstream https://github.com/spotbye/SpotiFLAC.git
           git fetch upstream --quiet
 
       - name: Check for changes in tracked files
@@ -110,7 +110,7 @@ jobs:
           RECENT_COMMITS=$(git log "${COMMON_ANCESTOR}..upstream/main" --oneline | head -15)
 
           cat > /tmp/issue_body.md << MDEOF
-          ## 🔄 Changements détectés dans [afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC)
+          ## 🔄 Changements détectés dans [spotbye/SpotiFLAC](https://github.com/spotbye/SpotiFLAC)
 
           **Upstream HEAD :** \`${UPSTREAM_HEAD:0:8}\` — ${UPSTREAM_DATE:0:10}
           **Dernier commit :** ${UPSTREAM_MSG}
