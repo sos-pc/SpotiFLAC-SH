@@ -299,14 +299,47 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 	}
 
+	// Amazon parameters: includes PlaylistName/PlaylistOwner (used for filename
+	// generation) but no AllowFallback (Amazon has no quality fallback yet).
+	amazonParams := func() amazon.DownloadParams {
+		return amazon.DownloadParams{
+			URL:                  req.ServiceURL,
+			SpotifyTrackID:       req.SpotifyID,
+			OutputDir:            req.OutputDir,
+			Quality:              req.AudioFormat,
+			FilenameFormat:       req.FilenameFormat,
+			Position:             req.Position,
+			IncludeTrackNumber:   req.TrackNumber,
+			UseFirstArtistOnly:   req.UseFirstArtistOnly,
+			PlaylistName:         req.PlaylistName,
+			PlaylistOwner:        req.PlaylistOwner,
+			SpotifyTrackName:     req.TrackName,
+			SpotifyArtistName:    req.ArtistName,
+			SpotifyAlbumName:     req.AlbumName,
+			SpotifyAlbumArtist:   req.AlbumArtist,
+			SpotifyReleaseDate:   req.ReleaseDate,
+			SpotifyCoverURL:      req.CoverURL,
+			SpotifyTrackNumber:   req.SpotifyTrackNumber,
+			SpotifyDiscNumber:    req.SpotifyDiscNumber,
+			SpotifyTotalTracks:   req.SpotifyTotalTracks,
+			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
+			SpotifyCopyright:     req.Copyright,
+			SpotifyPublisher:     req.Publisher,
+			SpotifyURL:           spotifyURL,
+			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
+			UseSingleGenre:       req.UseSingleGenre,
+			EmbedGenre:           req.EmbedGenre,
+		}
+	}
+
 	switch req.Service {
 	case "amazon":
 		downloader := amazon.NewAmazonDownloader()
 		downloader.SpeedCallback = req.SpeedCallback
 		if req.ServiceURL != "" {
-			filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+			filename, err = downloader.DownloadByURL(amazonParams())
 		} else {
-			filename, err = downloader.DownloadBySpotifyID(req.SpotifyID, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+			filename, err = downloader.DownloadBySpotifyID(amazonParams())
 		}
 
 	case "tidal":
@@ -382,9 +415,9 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				downloader := amazon.NewAmazonDownloader()
 				downloader.SpeedCallback = req.SpeedCallback
 				if req.ServiceURL != "" {
-					filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+					filename, err = downloader.DownloadByURL(amazonParams())
 				} else {
-					filename, err = downloader.DownloadBySpotifyID(req.SpotifyID, req.OutputDir, req.AudioFormat, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+					filename, err = downloader.DownloadBySpotifyID(amazonParams())
 				}
 			case "qobuz":
 				isrc := <-isrcChan
