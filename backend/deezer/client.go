@@ -169,23 +169,23 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 	return filePath, nil
 }
 
-func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate, spotifyCoverURL string, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, embedMaxQualityCover bool, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
+func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 
-	if outputDir != "." {
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if p.OutputDir != "." {
+		if err := os.MkdirAll(p.OutputDir, 0755); err != nil {
 			return "", fmt.Errorf("failed to create output directory: %w", err)
 		}
 	}
 
-	if spotifyTrackName != "" && spotifyArtistName != "" {
-		filenameArtist := spotifyArtistName
-		filenameAlbumArtist := spotifyAlbumArtist
-		if useFirstArtistOnly {
-			filenameArtist = util.GetFirstArtist(spotifyArtistName)
-			filenameAlbumArtist = util.GetFirstArtist(spotifyAlbumArtist)
+	if p.SpotifyTrackName != "" && p.SpotifyArtistName != "" {
+		filenameArtist := p.SpotifyArtistName
+		filenameAlbumArtist := p.SpotifyAlbumArtist
+		if p.UseFirstArtistOnly {
+			filenameArtist = util.GetFirstArtist(p.SpotifyArtistName)
+			filenameAlbumArtist = util.GetFirstArtist(p.SpotifyAlbumArtist)
 		}
-		expectedFilename := util.BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
-		expectedPath := filepath.Join(outputDir, expectedFilename)
+		expectedFilename := util.BuildExpectedFilename(p.SpotifyTrackName, filenameArtist, p.SpotifyAlbumName, filenameAlbumArtist, p.SpotifyReleaseDate, p.FilenameFormat, p.PlaylistName, p.PlaylistOwner, p.IncludeTrackNumber, p.Position, p.SpotifyDiscNumber, false)
+		expectedPath := filepath.Join(p.OutputDir, expectedFilename)
 
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
 			fmt.Printf("File already exists: %s (%.2f MB)\n", expectedPath, float64(fileInfo.Size())/(1024*1024))
@@ -193,30 +193,30 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 		}
 	}
 
-	deezerTrackID, err := d.getDeezerTrackID(spotifyTrackName, spotifyArtistName)
+	deezerTrackID, err := d.getDeezerTrackID(p.SpotifyTrackName, p.SpotifyArtistName)
 	if err != nil {
 		return "", fmt.Errorf("deezer: track lookup failed: %w", err)
 	}
 
-	filePath, err := d.DownloadFromDeezmate(deezerTrackID, outputDir)
+	filePath, err := d.DownloadFromDeezmate(deezerTrackID, p.OutputDir)
 	if err != nil {
 		return "", err
 	}
 
-	if spotifyTrackName != "" && spotifyArtistName != "" {
-		filenameArtist := spotifyArtistName
-		filenameAlbumArtist := spotifyAlbumArtist
-		if useFirstArtistOnly {
-			filenameArtist = util.GetFirstArtist(spotifyArtistName)
-			filenameAlbumArtist = util.GetFirstArtist(spotifyAlbumArtist)
+	if p.SpotifyTrackName != "" && p.SpotifyArtistName != "" {
+		filenameArtist := p.SpotifyArtistName
+		filenameAlbumArtist := p.SpotifyAlbumArtist
+		if p.UseFirstArtistOnly {
+			filenameArtist = util.GetFirstArtist(p.SpotifyArtistName)
+			filenameAlbumArtist = util.GetFirstArtist(p.SpotifyAlbumArtist)
 		}
-		newFilename := util.BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false)
+		newFilename := util.BuildExpectedFilename(p.SpotifyTrackName, filenameArtist, p.SpotifyAlbumName, filenameAlbumArtist, p.SpotifyReleaseDate, p.FilenameFormat, p.PlaylistName, p.PlaylistOwner, p.IncludeTrackNumber, p.Position, p.SpotifyDiscNumber, false)
 		ext := filepath.Ext(filePath)
 		if ext == "" {
 			ext = ".flac"
 		}
 		newFilename = newFilename + ext
-		newFilePath := filepath.Join(outputDir, newFilename)
+		newFilePath := filepath.Join(p.OutputDir, newFilename)
 		if err := os.Rename(filePath, newFilePath); err != nil {
 			fmt.Printf("Warning: Failed to rename file: %v\n", err)
 		} else {
@@ -228,10 +228,10 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 	fmt.Println("Embedding Spotify metadata...")
 
 	coverPath := ""
-	if spotifyCoverURL != "" {
+	if p.SpotifyCoverURL != "" {
 		coverPath = filePath + ".cover.jpg"
 		coverClient := meta.NewCoverClient()
-		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
+		if err := coverClient.DownloadCoverToPath(p.SpotifyCoverURL, coverPath, p.EmbedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download cover: %v\n", err)
 			coverPath = ""
 		} else {
@@ -239,24 +239,24 @@ func (d *DeezerDownloader) Download(spotifyID, outputDir, filenameFormat, playli
 		}
 	}
 
-	trackNumberToEmbed := spotifyTrackNumber
+	trackNumberToEmbed := p.SpotifyTrackNumber
 	if trackNumberToEmbed == 0 {
 		trackNumberToEmbed = 1
 	}
 
 	metadata := meta.Metadata{
-		Title:       spotifyTrackName,
-		Artist:      spotifyArtistName,
-		Album:       spotifyAlbumName,
-		AlbumArtist: spotifyAlbumArtist,
-		Date:        spotifyReleaseDate,
+		Title:       p.SpotifyTrackName,
+		Artist:      p.SpotifyArtistName,
+		Album:       p.SpotifyAlbumName,
+		AlbumArtist: p.SpotifyAlbumArtist,
+		Date:        p.SpotifyReleaseDate,
 		TrackNumber: trackNumberToEmbed,
-		TotalTracks: spotifyTotalTracks,
-		DiscNumber:  spotifyDiscNumber,
-		TotalDiscs:  spotifyTotalDiscs,
-		URL:         spotifyURL,
-		Copyright:   spotifyCopyright,
-		Publisher:   spotifyPublisher,
+		TotalTracks: p.SpotifyTotalTracks,
+		DiscNumber:  p.SpotifyDiscNumber,
+		TotalDiscs:  p.SpotifyTotalDiscs,
+		URL:         p.SpotifyURL,
+		Copyright:   p.SpotifyCopyright,
+		Publisher:   p.SpotifyPublisher,
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 	}
 	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {

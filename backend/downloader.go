@@ -332,6 +332,35 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 	}
 
+	// Deezer parameters: no Quality (Deezer always uses FLAC via Deezmate),
+	// no AllowFallback, no genre flags (not consumed by Deezer client today).
+	deezerParams := func() deezer.DownloadParams {
+		return deezer.DownloadParams{
+			SpotifyID:            req.SpotifyID,
+			OutputDir:            req.OutputDir,
+			FilenameFormat:       req.FilenameFormat,
+			Position:             req.Position,
+			IncludeTrackNumber:   req.TrackNumber,
+			UseFirstArtistOnly:   req.UseFirstArtistOnly,
+			PlaylistName:         req.PlaylistName,
+			PlaylistOwner:        req.PlaylistOwner,
+			SpotifyTrackName:     req.TrackName,
+			SpotifyArtistName:    req.ArtistName,
+			SpotifyAlbumName:     req.AlbumName,
+			SpotifyAlbumArtist:   req.AlbumArtist,
+			SpotifyReleaseDate:   req.ReleaseDate,
+			SpotifyCoverURL:      req.CoverURL,
+			SpotifyTrackNumber:   req.SpotifyTrackNumber,
+			SpotifyDiscNumber:    req.SpotifyDiscNumber,
+			SpotifyTotalTracks:   req.SpotifyTotalTracks,
+			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
+			SpotifyCopyright:     req.Copyright,
+			SpotifyPublisher:     req.Publisher,
+			SpotifyURL:           spotifyURL,
+			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
+		}
+	}
+
 	switch req.Service {
 	case "amazon":
 		downloader := amazon.NewAmazonDownloader()
@@ -381,7 +410,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	case "deezer":
 		downloader := deezer.NewDeezerDownloader()
 		downloader.SpeedCallback = req.SpeedCallback
-		filename, err = downloader.Download(req.SpotifyID, req.OutputDir, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+		filename, err = downloader.Download(deezerParams())
 
 	case "auto":
 		// Respecter l'ordre configuré par l'user (AutoOrder)
@@ -427,7 +456,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			case "deezer":
 				downloader := deezer.NewDeezerDownloader()
 				downloader.SpeedCallback = req.SpeedCallback
-				filename, err = downloader.Download(req.SpotifyID, req.OutputDir, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.CoverURL, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.EmbedMaxQualityCover, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+				filename, err = downloader.Download(deezerParams())
 			default:
 				continue
 			}
