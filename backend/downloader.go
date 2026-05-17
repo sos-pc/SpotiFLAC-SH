@@ -266,6 +266,39 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 	}
 
+	// Same idea for Qobuz. The ISRC is supplied separately, after being awaited
+	// from isrcChan (we don't always know it at this point).
+	qobuzParams := func(isrc string) qobuz.DownloadParams {
+		return qobuz.DownloadParams{
+			DeezerISRC:           isrc,
+			SpotifyID:            req.SpotifyID,
+			OutputDir:            req.OutputDir,
+			Quality:              qobuzFmt,
+			FilenameFormat:       req.FilenameFormat,
+			Position:             req.Position,
+			IncludeTrackNumber:   req.TrackNumber,
+			UseAlbumTrackNumber:  req.UseAlbumTrackNumber,
+			UseFirstArtistOnly:   req.UseFirstArtistOnly,
+			SpotifyTrackName:     req.TrackName,
+			SpotifyArtistName:    req.ArtistName,
+			SpotifyAlbumName:     req.AlbumName,
+			SpotifyAlbumArtist:   req.AlbumArtist,
+			SpotifyReleaseDate:   req.ReleaseDate,
+			SpotifyCoverURL:      req.CoverURL,
+			SpotifyTrackNumber:   req.SpotifyTrackNumber,
+			SpotifyDiscNumber:    req.SpotifyDiscNumber,
+			SpotifyTotalTracks:   req.SpotifyTotalTracks,
+			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
+			SpotifyCopyright:     req.Copyright,
+			SpotifyPublisher:     req.Publisher,
+			SpotifyURL:           spotifyURL,
+			AllowFallback:        req.AllowFallback,
+			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
+			UseSingleGenre:       req.UseSingleGenre,
+			EmbedGenre:           req.EmbedGenre,
+		}
+	}
+
 	switch req.Service {
 	case "amazon":
 		downloader := amazon.NewAmazonDownloader()
@@ -310,8 +343,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		isrc := <-isrcChan
 		downloader := qobuz.NewQobuzDownloader()
 		downloader.SpeedCallback = req.SpeedCallback
-		quality := qobuzFmt
-		filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+		filename, err = downloader.DownloadTrackWithISRC(qobuzParams(isrc))
 
 	case "deezer":
 		downloader := deezer.NewDeezerDownloader()
@@ -358,8 +390,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				isrc := <-isrcChan
 				downloader := qobuz.NewQobuzDownloader()
 				downloader.SpeedCallback = req.SpeedCallback
-				quality := qobuzFmt
-				filename, err = downloader.DownloadTrackWithISRC(isrc, req.SpotifyID, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+				filename, err = downloader.DownloadTrackWithISRC(qobuzParams(isrc))
 			case "deezer":
 				downloader := deezer.NewDeezerDownloader()
 				downloader.SpeedCallback = req.SpeedCallback
