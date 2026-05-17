@@ -1,0 +1,253 @@
+package main
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Handlers — Auth, API Keys, Tidal auth, APIs status & proxies
+// ─────────────────────────────────────────────────────────────────────────────
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Login / identity
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1Login(w http.ResponseWriter, r *http.Request) {
+	if !s.loginRL.Allow(remoteIP(r)) {
+		w.Header().Set("Retry-After", "300")
+		writeV1Error(w, http.StatusTooManyRequests, "too many login attempts, please wait 5 minutes")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if s.ctr.Auth == nil {
+		writeV1Error(w, http.StatusInternalServerError, "auth not initialized")
+		return
+	}
+	profile, err := s.ctr.Auth.AuthenticateWithJellyfin(req.Username, req.Password)
+	if err != nil {
+		writeV1Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	token, err := GenerateJWT(profile)
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	writeV1JSON(w, http.StatusOK, map[string]interface{}{
+		"token": token,
+		"user": map[string]interface{}{
+			"id":           profile.ID,
+			"display_name": profile.DisplayName,
+			"is_admin":     profile.IsAdmin,
+		},
+	})
+}
+
+func (s *Server) v1Me(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserFromContext(r)
+	if claims == nil {
+		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	writeV1JSON(w, http.StatusOK, map[string]interface{}{
+		"id":           claims.UserID,
+		"display_name": claims.DisplayName,
+		"is_admin":     claims.IsAdmin,
+	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Keys
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1ListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	user := GetUserFromContext(r)
+	if user == nil {
+		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	keys, err := s.ctr.Auth.ListAPIKeys(user.UserID)
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if keys == nil {
+		keys = []APIKey{}
+	}
+	writeV1JSON(w, http.StatusOK, keys)
+}
+
+func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	user := GetUserFromContext(r)
+	if user == nil {
+		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Name        string   `json:"name"`
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Name == "" {
+		writeV1Error(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if len(req.Permissions) == 0 {
+		req.Permissions = []string{"read", "download"}
+	}
+	rawKey, key, err := s.ctr.Auth.CreateAPIKey(user.UserID, req.Name, req.Permissions)
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create key: %v", err))
+		return
+	}
+	writeV1JSON(w, http.StatusCreated, map[string]interface{}{
+		"key":         rawKey,
+		"id":          key.ID,
+		"name":        key.Name,
+		"permissions": key.Permissions,
+		"created_at":  key.CreatedAt,
+	})
+}
+
+func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	user := GetUserFromContext(r)
+	if user == nil {
+		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	keyID := r.PathValue("id")
+	if err := s.ctr.Auth.RevokeAPIKey(keyID, user.UserID); err != nil {
+		writeV1Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tidal auth (Device Code flow)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
+	token := tidal.LoadTidalToken()
+	if token == nil {
+		writeV1JSON(w, http.StatusOK, map[string]interface{}{"connected": false})
+		return
+	}
+	writeV1JSON(w, http.StatusOK, map[string]interface{}{
+		"connected":  true,
+		"expires_at": token.ExpiresAt,
+	})
+}
+
+func (s *Server) v1TidalDisconnect(w http.ResponseWriter, r *http.Request) {
+	tidal.DeleteTidalToken()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) v1TidalDeviceStart(w http.ResponseWriter, r *http.Request) {
+	resp, err := tidal.StartTidalDeviceAuth()
+	if err != nil {
+		writeV1Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeV1JSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) v1TidalDevicePoll(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceCode == "" {
+		writeV1Error(w, http.StatusBadRequest, "device_code required")
+		return
+	}
+	result := tidal.PollTidalDeviceAuth(req.DeviceCode)
+	writeV1JSON(w, http.StatusOK, result)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// External API status & proxy config
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
+	if cached, ok := getCachedStatuses(); ok {
+		writeV1JSON(w, http.StatusOK, cached)
+		return
+	}
+	spotFetchURL := ""
+	if settings, err := s.app.LoadSettings(); err == nil && settings != nil {
+		if u, _ := settings["spotFetchAPIUrl"].(string); u != "" {
+			spotFetchURL = u
+		}
+	}
+	results := CheckAllServices(jellyfinURL, spotFetchURL)
+	setCachedStatuses(results)
+	writeV1JSON(w, http.StatusOK, results)
+}
+
+// ProxyConfigResponse extends ProxyConfig with auto-discovery metadata.
+// Returned by GET /api/v1/apis/proxies; the extra fields are read-only
+// (PUT /api/v1/apis/proxies still uses plain ProxyConfig — no discovery fields saved).
+type ProxyConfigResponse struct {
+	ProxyConfig
+	// TidalDiscovered contains proxies found by auto-discovery that are NOT
+	// in the user's configured tidal_proxies list. Read-only — managed automatically.
+	TidalDiscovered    []string `json:"tidal_discovered"`
+	DiscoveryCheckedAt int64    `json:"discovery_checked_at,omitempty"`
+	DiscoverySource    string   `json:"discovery_source,omitempty"`
+}
+
+func (s *Server) v1GetProxies(w http.ResponseWriter, r *http.Request) {
+	cfg := GetProxyConfig(s.ctr.DB)
+	resp := ProxyConfigResponse{ProxyConfig: cfg}
+
+	if result, err := LoadLastDiscoveryResult(s.ctr.DB); err == nil && result != nil {
+		normalize := func(u string) string {
+			if u == "" {
+				return ""
+			}
+			return strings.TrimRight(strings.TrimSpace(u), "/")
+		}
+		configSet := make(map[string]struct{}, len(cfg.TidalProxies))
+		for _, u := range cfg.TidalProxies {
+			configSet[normalize(u)] = struct{}{}
+		}
+		for _, u := range result.TidalUp {
+			if _, inConfig := configSet[normalize(u)]; !inConfig {
+				resp.TidalDiscovered = append(resp.TidalDiscovered, u)
+			}
+		}
+		resp.DiscoveryCheckedAt = result.CheckedAt
+		resp.DiscoverySource = result.Source
+	}
+
+	writeV1JSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {
+	var cfg ProxyConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if err := SaveProxyConfig(s.ctr.DB, cfg); err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

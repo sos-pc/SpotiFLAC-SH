@@ -1,0 +1,200 @@
+package main
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Handlers — Jobs (queue, SSE, downloads) & History
+// ─────────────────────────────────────────────────────────────────────────────
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Route registration — jobs & history
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) registerJobRoutes() {
+	a := s.app
+
+	// ── Jobs ──────────────────────────────────────────────────────────────
+	s.mux.Handle("POST /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		var req EnqueueBatchRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		req.UserID = userIDFromContext(r)
+		result, err := s.ctr.Jobs.EnqueueBatch(req)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusCreated, result)
+	}))
+
+	s.mux.Handle("GET /api/v1/jobs/stream", s.v1Auth(s.v1JobsStream))
+
+	s.mux.Handle("GET /api/v1/jobs/{id}/download", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		job, err := s.ctr.Jobs.GetJob(id)
+		if err != nil {
+			writeV1Error(w, http.StatusNotFound, "job not found")
+			return
+		}
+		if user := GetUserFromContext(r); user != nil {
+			if !user.IsAdmin && job.UserID != "" && job.UserID != user.UserID {
+				writeV1Error(w, http.StatusForbidden, "forbidden")
+				return
+			}
+		}
+		if job.Status != StatusDone || job.FilePath == "" {
+			writeV1Error(w, http.StatusBadRequest, "file not available")
+			return
+		}
+		if _, statErr := os.Stat(job.FilePath); statErr != nil {
+			writeV1Error(w, http.StatusNotFound, "file not found on server")
+			return
+		}
+		f, err := os.Open(job.FilePath)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, "failed to open file")
+			return
+		}
+		defer f.Close()
+		defer os.Remove(job.FilePath)
+
+		filename := filepath.Base(job.FilePath)
+		if info, statErr := f.Stat(); statErr == nil {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		w.Header().Set("Content-Type", "audio/flac")
+		http.ServeContent(w, r, filename, time.Time{}, f)
+
+		job.FilePath = ""
+		job.UpdatedAt = time.Now()
+		_ = s.ctr.Jobs.saveJob(&job)
+		s.ctr.Jobs.notifyJob(&job)
+	}))
+
+	s.mux.Handle("DELETE /api/v1/jobs/completed", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		a.ClearCompletedDownloads()
+		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}))
+
+	s.mux.Handle("DELETE /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		a.ClearAllDownloads()
+		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}))
+
+	// ── Direct downloads ──────────────────────────────────────────────────
+	s.mux.Handle("POST /api/v1/downloads/track", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		var req DownloadRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		a.ApplySettingsFallbacks(&req)
+		result, err := a.DownloadTrack(req)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, result)
+	}))
+
+	// ── History ───────────────────────────────────────────────────────────
+	s.mux.Handle("GET /api/v1/history/downloads", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromContext(r)
+		result, err := a.GetDownloadHistory(userID)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, result)
+	}))
+
+	s.mux.Handle("DELETE /api/v1/history/downloads", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromContext(r)
+		if err := a.ClearDownloadHistory(userID); err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}))
+
+	s.mux.Handle("DELETE /api/v1/history/downloads/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		userID := userIDFromContext(r)
+		if err := a.DeleteDownloadHistoryItem(id, userID); err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	s.mux.Handle("GET /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromContext(r)
+		result, err := a.GetFetchHistory(userID)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, result)
+	}))
+
+	s.mux.Handle("POST /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		var item backend.FetchHistoryItem
+		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		item.UserID = userIDFromContext(r)
+		if err := a.AddFetchHistory(item); err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusCreated, map[string]bool{"ok": true})
+	}))
+
+	s.mux.Handle("DELETE /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFromContext(r)
+		if itemType := r.URL.Query().Get("type"); itemType != "" {
+			if err := a.ClearFetchHistoryByType(itemType, userID); err != nil {
+				writeV1Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		} else {
+			if err := a.ClearFetchHistory(userID); err != nil {
+				writeV1Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}))
+
+	s.mux.Handle("DELETE /api/v1/history/fetch/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		userID := userIDFromContext(r)
+		if err := a.DeleteFetchHistoryItem(id, userID); err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	s.mux.Handle("GET /api/v1/history/downloads/export", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		message, err := a.ExportFailedDownloads()
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, map[string]string{"message": message})
+	}))
+}
