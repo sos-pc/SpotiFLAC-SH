@@ -232,6 +232,40 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	tidalFmt := TidalQualityFor(req.AudioFormat)
 	qobuzFmt := QobuzQualityFor(req.AudioFormat)
 
+	// Build the tidal.DownloadParams once; the same struct fits all three Tidal entry points
+	// (Download, DownloadByURL, DownloadByURLWithFallback). The call site picks one method,
+	// which then reads either p.URL or p.SpotifyTrackID.
+	tidalParams := func(quality string) tidal.DownloadParams {
+		return tidal.DownloadParams{
+			URL:                  req.ServiceURL,
+			SpotifyTrackID:       req.SpotifyID,
+			OutputDir:            req.OutputDir,
+			Quality:              quality,
+			FilenameFormat:       req.FilenameFormat,
+			Position:             req.Position,
+			IncludeTrackNumber:   req.TrackNumber,
+			UseAlbumTrackNumber:  req.UseAlbumTrackNumber,
+			UseFirstArtistOnly:   req.UseFirstArtistOnly,
+			SpotifyTrackName:     req.TrackName,
+			SpotifyArtistName:    req.ArtistName,
+			SpotifyAlbumName:     req.AlbumName,
+			SpotifyAlbumArtist:   req.AlbumArtist,
+			SpotifyReleaseDate:   req.ReleaseDate,
+			SpotifyCoverURL:      req.CoverURL,
+			SpotifyTrackNumber:   req.SpotifyTrackNumber,
+			SpotifyDiscNumber:    req.SpotifyDiscNumber,
+			SpotifyTotalTracks:   req.SpotifyTotalTracks,
+			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
+			SpotifyCopyright:     req.Copyright,
+			SpotifyPublisher:     req.Publisher,
+			SpotifyURL:           spotifyURL,
+			AllowFallback:        req.AllowFallback,
+			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
+			UseSingleGenre:       req.UseSingleGenre,
+			EmbedGenre:           req.EmbedGenre,
+		}
+	}
+
 	switch req.Service {
 	case "amazon":
 		downloader := amazon.NewAmazonDownloader()
@@ -254,18 +288,20 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		if req.ApiURL == "" || req.ApiURL == "auto" {
 			downloader := tidal.NewTidalDownloader("")
 			downloader.SpeedCallback = req.SpeedCallback
+			p := tidalParams(tidalFmt)
 			if req.ServiceURL != "" {
-				filename, err = downloader.DownloadByURLWithFallback(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+				filename, err = downloader.DownloadByURLWithFallback(p)
 			} else {
-				filename, err = downloader.Download(req.SpotifyID, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+				filename, err = downloader.Download(p)
 			}
 		} else {
 			downloader := tidal.NewTidalDownloader(req.ApiURL)
 			downloader.SpeedCallback = req.SpeedCallback
+			p := tidalParams(tidalFmt)
 			if req.ServiceURL != "" {
-				filename, err = downloader.DownloadByURL(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+				filename, err = downloader.DownloadByURL(p)
 			} else {
-				filename, err = downloader.Download(req.SpotifyID, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+				filename, err = downloader.Download(p)
 			}
 		}
 
@@ -304,10 +340,11 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			case "tidal":
 				downloader := tidal.NewTidalDownloader("")
 				downloader.SpeedCallback = req.SpeedCallback
+				p := tidalParams(tidalFmt)
 				if req.ServiceURL != "" {
-					filename, err = downloader.DownloadByURLWithFallback(req.ServiceURL, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+					filename, err = downloader.DownloadByURLWithFallback(p)
 				} else {
-					filename, err = downloader.Download(req.SpotifyID, req.OutputDir, tidalFmt, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
+					filename, err = downloader.Download(p)
 				}
 			case "amazon":
 				downloader := amazon.NewAmazonDownloader()

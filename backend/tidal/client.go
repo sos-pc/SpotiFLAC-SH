@@ -538,16 +538,16 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 	return nil
 }
 
-func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFormat string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate string, useAlbumTrackNumber bool, spotifyCoverURL string, embedMaxQualityCover bool, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, allowFallback bool, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
-	if outputDir != "." {
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
+func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
+	if p.OutputDir != "." {
+		if err := os.MkdirAll(p.OutputDir, 0755); err != nil {
 			return "", fmt.Errorf("directory error: %w", err)
 		}
 	}
 
-	fmt.Printf("Using Tidal URL: %s\n", tidalURL)
+	fmt.Printf("Using Tidal URL: %s\n", p.URL)
 
-	trackID, err := t.GetTrackIDFromURL(tidalURL)
+	trackID, err := t.GetTrackIDFromURL(p.URL)
 	if err != nil {
 		return "", err
 	}
@@ -556,36 +556,36 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 		return "", fmt.Errorf("no track ID found")
 	}
 
-	artistName := spotifyArtistName
-	trackTitle := spotifyTrackName
-	albumTitle := spotifyAlbumName
+	artistName := p.SpotifyArtistName
+	trackTitle := p.SpotifyTrackName
+	albumTitle := p.SpotifyAlbumName
 
 	artistNameForFile := util.SanitizeFilename(artistName)
-	albumArtistForFile := util.SanitizeFilename(spotifyAlbumArtist)
+	albumArtistForFile := util.SanitizeFilename(p.SpotifyAlbumArtist)
 
-	if useFirstArtistOnly {
+	if p.UseFirstArtistOnly {
 		artistNameForFile = util.SanitizeFilename(util.GetFirstArtist(artistName))
-		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(spotifyAlbumArtist))
+		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(p.SpotifyAlbumArtist))
 	}
 
 	trackTitleForFile := util.SanitizeFilename(trackTitle)
 	albumTitleForFile := util.SanitizeFilename(albumTitle)
 
-	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, spotifyReleaseDate, spotifyTrackNumber, spotifyDiscNumber, filenameFormat, includeTrackNumber, position, useAlbumTrackNumber)
-	outputFilename := filepath.Join(outputDir, filename)
+	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, p.SpotifyReleaseDate, p.SpotifyTrackNumber, p.SpotifyDiscNumber, p.FilenameFormat, p.IncludeTrackNumber, p.Position, p.UseAlbumTrackNumber)
+	outputFilename := filepath.Join(p.OutputDir, filename)
 
 	if fileInfo, err := os.Stat(outputFilename); err == nil && fileInfo.Size() > 0 {
 		fmt.Printf("File already exists: %s (%.2f MB)\n", outputFilename, float64(fileInfo.Size())/(1024*1024))
 		return "EXISTS:" + outputFilename, nil
 	}
 
-	downloadURL, err := t.GetDownloadURL(trackID, quality)
+	downloadURL, err := t.GetDownloadURL(trackID, p.Quality)
 	if err != nil {
-		if (quality == "HI_RES" || quality == "HI_RES_LOSSLESS") && allowFallback {
-			fmt.Printf("⚠ %s unavailable/failed, falling back to LOSSLESS...\n", quality)
+		if (p.Quality == "HI_RES" || p.Quality == "HI_RES_LOSSLESS") && p.AllowFallback {
+			fmt.Printf("⚠ %s unavailable/failed, falling back to LOSSLESS...\n", p.Quality)
 			downloadURL, err = t.GetDownloadURL(trackID, "LOSSLESS")
 			if err != nil {
-				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", quality, err)
+				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", p.Quality, err)
 			}
 		} else {
 			return "", err
@@ -598,11 +598,11 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 	}
 
 	metaChan := make(chan mbResult, 1)
-	if embedGenre && spotifyURL != "" {
+	if p.EmbedGenre && p.SpotifyURL != "" {
 		go func() {
 			res := mbResult{}
 			var isrc string
-			parts := strings.Split(spotifyURL, "/")
+			parts := strings.Split(p.SpotifyURL, "/")
 			if len(parts) > 0 {
 				sID := strings.Split(parts[len(parts)-1], "?")[0]
 				if sID != "" {
@@ -615,7 +615,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 			res.ISRC = isrc
 			if isrc != "" {
 				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
+				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre); err == nil {
 					res.Metadata = fetchedMeta
 					fmt.Println("✓ MusicBrainz metadata fetched")
 				} else {
@@ -635,7 +635,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 
 	var isrc string
 	var mbMeta meta.Metadata
-	if spotifyURL != "" {
+	if p.SpotifyURL != "" {
 		result := <-metaChan
 		isrc = result.ISRC
 		mbMeta = result.Metadata
@@ -645,10 +645,10 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 
 	coverPath := ""
 
-	if spotifyCoverURL != "" {
+	if p.SpotifyCoverURL != "" {
 		coverPath = outputFilename + ".cover.jpg"
 		coverClient := meta.NewCoverClient()
-		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
+		if err := coverClient.DownloadCoverToPath(p.SpotifyCoverURL, coverPath, p.EmbedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
 			coverPath = ""
 		} else {
@@ -657,7 +657,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 		}
 	}
 
-	trackNumberToEmbed := spotifyTrackNumber
+	trackNumberToEmbed := p.SpotifyTrackNumber
 	if trackNumberToEmbed == 0 {
 		trackNumberToEmbed = 1
 	}
@@ -666,15 +666,15 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 		Title:       trackTitle,
 		Artist:      artistName,
 		Album:       albumTitle,
-		AlbumArtist: spotifyAlbumArtist,
-		Date:        spotifyReleaseDate,
+		AlbumArtist: p.SpotifyAlbumArtist,
+		Date:        p.SpotifyReleaseDate,
 		TrackNumber: trackNumberToEmbed,
-		TotalTracks: spotifyTotalTracks,
-		DiscNumber:  spotifyDiscNumber,
-		TotalDiscs:  spotifyTotalDiscs,
-		URL:         spotifyURL,
-		Copyright:   spotifyCopyright,
-		Publisher:   spotifyPublisher,
+		TotalTracks: p.SpotifyTotalTracks,
+		DiscNumber:  p.SpotifyDiscNumber,
+		TotalDiscs:  p.SpotifyTotalDiscs,
+		URL:         p.SpotifyURL,
+		Copyright:   p.SpotifyCopyright,
+		Publisher:   p.SpotifyPublisher,
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        isrc,
 		Genre:       mbMeta.Genre,
@@ -691,21 +691,21 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 	return outputFilename, nil
 }
 
-func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality, filenameFormat string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate string, useAlbumTrackNumber bool, spotifyCoverURL string, embedMaxQualityCover bool, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, allowFallback bool, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
+func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, error) {
 	apis, err := t.GetAvailableAPIs()
 	if err != nil {
 		return "", fmt.Errorf("no APIs available for fallback: %w", err)
 	}
 
-	if outputDir != "." {
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if p.OutputDir != "." {
+		if err := os.MkdirAll(p.OutputDir, 0755); err != nil {
 			return "", fmt.Errorf("directory error: %w", err)
 		}
 	}
 
-	fmt.Printf("Using Tidal URL: %s\n", tidalURL)
+	fmt.Printf("Using Tidal URL: %s\n", p.URL)
 
-	trackID, err := t.GetTrackIDFromURL(tidalURL)
+	trackID, err := t.GetTrackIDFromURL(p.URL)
 	if err != nil {
 		return "", err
 	}
@@ -714,36 +714,36 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 		return "", fmt.Errorf("no track ID found")
 	}
 
-	artistName := spotifyArtistName
-	trackTitle := spotifyTrackName
-	albumTitle := spotifyAlbumName
+	artistName := p.SpotifyArtistName
+	trackTitle := p.SpotifyTrackName
+	albumTitle := p.SpotifyAlbumName
 
 	artistNameForFile := util.SanitizeFilename(artistName)
-	albumArtistForFile := util.SanitizeFilename(spotifyAlbumArtist)
+	albumArtistForFile := util.SanitizeFilename(p.SpotifyAlbumArtist)
 
-	if useFirstArtistOnly {
+	if p.UseFirstArtistOnly {
 		artistNameForFile = util.SanitizeFilename(util.GetFirstArtist(artistName))
-		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(spotifyAlbumArtist))
+		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(p.SpotifyAlbumArtist))
 	}
 
 	trackTitleForFile := util.SanitizeFilename(trackTitle)
 	albumTitleForFile := util.SanitizeFilename(albumTitle)
 
-	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, spotifyReleaseDate, spotifyTrackNumber, spotifyDiscNumber, filenameFormat, includeTrackNumber, position, useAlbumTrackNumber)
-	outputFilename := filepath.Join(outputDir, filename)
+	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, p.SpotifyReleaseDate, p.SpotifyTrackNumber, p.SpotifyDiscNumber, p.FilenameFormat, p.IncludeTrackNumber, p.Position, p.UseAlbumTrackNumber)
+	outputFilename := filepath.Join(p.OutputDir, filename)
 
 	if fileInfo, err := os.Stat(outputFilename); err == nil && fileInfo.Size() > 0 {
 		fmt.Printf("File already exists: %s (%.2f MB)\n", outputFilename, float64(fileInfo.Size())/(1024*1024))
 		return "EXISTS:" + outputFilename, nil
 	}
 
-	successAPI, downloadURL, err := getDownloadURLRotated(apis, trackID, quality)
+	successAPI, downloadURL, err := getDownloadURLRotated(apis, trackID, p.Quality)
 	if err != nil {
-		if (quality == "HI_RES" || quality == "HI_RES_LOSSLESS") && allowFallback {
-			fmt.Printf("⚠ %s unavailable/failed on all APIs, falling back to LOSSLESS...\n", quality)
+		if (p.Quality == "HI_RES" || p.Quality == "HI_RES_LOSSLESS") && p.AllowFallback {
+			fmt.Printf("⚠ %s unavailable/failed on all APIs, falling back to LOSSLESS...\n", p.Quality)
 			successAPI, downloadURL, err = getDownloadURLRotated(apis, trackID, "LOSSLESS")
 			if err != nil {
-				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", quality, err)
+				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", p.Quality, err)
 			}
 		} else {
 			return "", err
@@ -756,11 +756,11 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 	}
 
 	metaChan := make(chan mbResultFallback, 1)
-	if embedGenre && spotifyURL != "" {
+	if p.EmbedGenre && p.SpotifyURL != "" {
 		go func() {
 			res := mbResultFallback{}
 			var isrc string
-			parts := strings.Split(spotifyURL, "/")
+			parts := strings.Split(p.SpotifyURL, "/")
 			if len(parts) > 0 {
 				sID := strings.Split(parts[len(parts)-1], "?")[0]
 				if sID != "" {
@@ -773,7 +773,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 			res.ISRC = isrc
 			if isrc != "" {
 				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
+				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre); err == nil {
 					res.Metadata = fetchedMeta
 					fmt.Println("✓ MusicBrainz metadata fetched")
 				} else {
@@ -794,7 +794,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 
 	var isrc string
 	var mbMeta meta.Metadata
-	if spotifyURL != "" {
+	if p.SpotifyURL != "" {
 		result := <-metaChan
 		isrc = result.ISRC
 		mbMeta = result.Metadata
@@ -804,10 +804,10 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 
 	coverPath := ""
 
-	if spotifyCoverURL != "" {
+	if p.SpotifyCoverURL != "" {
 		coverPath = outputFilename + ".cover.jpg"
 		coverClient := meta.NewCoverClient()
-		if err := coverClient.DownloadCoverToPath(spotifyCoverURL, coverPath, embedMaxQualityCover); err != nil {
+		if err := coverClient.DownloadCoverToPath(p.SpotifyCoverURL, coverPath, p.EmbedMaxQualityCover); err != nil {
 			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
 			coverPath = ""
 		} else {
@@ -816,7 +816,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 		}
 	}
 
-	trackNumberToEmbed := spotifyTrackNumber
+	trackNumberToEmbed := p.SpotifyTrackNumber
 	if trackNumberToEmbed == 0 {
 		trackNumberToEmbed = 1
 	}
@@ -825,15 +825,15 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 		Title:       trackTitle,
 		Artist:      artistName,
 		Album:       albumTitle,
-		AlbumArtist: spotifyAlbumArtist,
-		Date:        spotifyReleaseDate,
+		AlbumArtist: p.SpotifyAlbumArtist,
+		Date:        p.SpotifyReleaseDate,
 		TrackNumber: trackNumberToEmbed,
-		TotalTracks: spotifyTotalTracks,
-		DiscNumber:  spotifyDiscNumber,
-		TotalDiscs:  spotifyTotalDiscs,
-		URL:         spotifyURL,
-		Copyright:   spotifyCopyright,
-		Publisher:   spotifyPublisher,
+		TotalTracks: p.SpotifyTotalTracks,
+		DiscNumber:  p.SpotifyDiscNumber,
+		TotalDiscs:  p.SpotifyTotalDiscs,
+		URL:         p.SpotifyURL,
+		Copyright:   p.SpotifyCopyright,
+		Publisher:   p.SpotifyPublisher,
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        isrc,
 		Genre:       mbMeta.Genre,
@@ -850,26 +850,27 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 	return outputFilename, nil
 }
 
-func (t *TidalDownloader) Download(spotifyTrackID, outputDir, quality, filenameFormat string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate string, useAlbumTrackNumber bool, spotifyCoverURL string, embedMaxQualityCover bool, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyURL string, allowFallback bool, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
+func (t *TidalDownloader) Download(p DownloadParams) (string, error) {
 
 	var tidalURL string
 	var err error
-	// Essayer la recherche directe Tidal en premier (pas de rate-limit, ~200ms)
-	if spotifyTrackName != "" && spotifyArtistName != "" {
-		tidalURL, err = t.SearchTidalByName(spotifyTrackName, spotifyArtistName)
+	// Try direct Tidal search first (no rate-limit, ~200 ms)
+	if p.SpotifyTrackName != "" && p.SpotifyArtistName != "" {
+		tidalURL, err = t.SearchTidalByName(p.SpotifyTrackName, p.SpotifyArtistName)
 		if err != nil {
 			fmt.Printf("Direct Tidal search failed, falling back to song.link: %v\n", err)
 		}
 	}
-	// Fallback sur song.link si la recherche directe échoue
+	// Fall back to song.link when direct search fails
 	if tidalURL == "" {
-		tidalURL, err = t.GetTidalURLFromSpotify(spotifyTrackID)
+		tidalURL, err = t.GetTidalURLFromSpotify(p.SpotifyTrackID)
 		if err != nil {
 			return "", fmt.Errorf("could not find track on Tidal: %w", err)
 		}
 	}
 
-	return t.DownloadByURLWithFallback(tidalURL, outputDir, quality, filenameFormat, includeTrackNumber, position, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate, useAlbumTrackNumber, spotifyCoverURL, embedMaxQualityCover, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks, spotifyTotalDiscs, spotifyCopyright, spotifyPublisher, spotifyURL, allowFallback, useFirstArtistOnly, useSingleGenre, embedGenre)
+	p.URL = tidalURL
+	return t.DownloadByURLWithFallback(p)
 }
 
 type SegmentTemplate struct {
