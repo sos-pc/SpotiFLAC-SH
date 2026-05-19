@@ -33,9 +33,9 @@ Tokens are signed with `HS256` using the secret from the `jwt_secret` file (auto
 
 | Claim | Type | Description |
 |-------|------|-------------|
-| `sub` | string | Jellyfin user ID |
+| `uid` | string | Jellyfin user ID |
 | `name` | string | Display name |
-| `is_admin` | bool | Admin flag |
+| `admin` | bool | Admin flag |
 | `exp` | int | Expiry timestamp (24h from issue) |
 
 The token is passed as:

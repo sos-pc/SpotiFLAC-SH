@@ -1,12 +1,11 @@
 # SpotiFLAC Web
 
-[![Latest Release](https://img.shields.io/github/v/release/methammer/SpotiFLAC?style=flat-square)](https://github.com/methammer/SpotiFLAC/releases/latest)
-[![Build](https://img.shields.io/github/actions/workflow/status/methammer/SpotiFLAC/docker.yml?style=flat-square)](https://github.com/methammer/SpotiFLAC/actions/workflows/docker.yml)
-[![Docker Image](https://img.shields.io/badge/ghcr.io-methammer%2Fspotiflac-blue?style=flat-square&logo=docker)](https://github.com/methammer/SpotiFLAC/pkgs/container/spotiflac)
+[![Build](https://img.shields.io/github/actions/workflow/status/sos-pc/SpotiFLAC-SH/docker.yml?style=flat-square)](https://github.com/sos-pc/SpotiFLAC-SH/actions/workflows/docker.yml)
+[![Docker Image](https://img.shields.io/badge/ghcr.io-sos--pc%2Fspotiflac--sh-blue?style=flat-square&logo=docker)](https://github.com/sos-pc/SpotiFLAC-SH/pkgs/container/spotiflac-sh)
 
 A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz, Amazon Music & Deezer — no account required.
 
-> **Based on [SpotiFLAC](https://github.com/spotbye/SpotiFLAC) by afkarxyz** — rewritten as a web server with multi-user support and Jellyfin integration.
+> **Based on [SpotiFLAC](https://github.com/spotbye/SpotiFLAC) by spotbye** — rewritten as a web server with multi-user support and Jellyfin integration.
 
 ## Features
 
@@ -49,8 +48,8 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 ### 2. Deploy
 
 ```bash
-git clone https://github.com/methammer/SpotiFLAC
-cd SpotiFLAC
+git clone https://github.com/sos-pc/SpotiFLAC-SH
+cd SpotiFLAC-SH
 cp docker-compose.example.yaml docker-compose.yaml
 # Edit docker-compose.yaml with your paths and settings
 docker compose up -d
@@ -61,7 +60,7 @@ docker compose up -d
 ```yaml
 services:
   spotiflac:
-    image: ghcr.io/methammer/spotiflac:latest
+    image: ghcr.io/sos-pc/spotiflac-sh:latest
     container_name: spotiflac
     restart: unless-stopped
     stop_grace_period: 30s
@@ -88,7 +87,7 @@ Open `http://your-server:6890` and log in with your Jellyfin credentials.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin instance |
-| `JWT_SECRET` | *(insecure default)* | Secret key for JWT signing — **change in production** |
+| `JWT_SECRET` | *(auto-generated)* | Secret key for JWT signing — **set explicitly in production** |
 | `DISABLE_AUTH_ON_LAN` | `false` | Auto-login as admin on direct LAN/localhost access (see below) |
 
 ## LAN Bypass (`DISABLE_AUTH_ON_LAN`)
@@ -109,7 +108,7 @@ When set to `true`, requests arriving **directly** on the local network (no reve
 
 ```bash
 # Verify the port is not exposed publicly before enabling
-curl -m 5 http://$(curl -s ifconfig.me):6890/auth/local -X POST
+curl -m 5 http://$(curl -s ifconfig.me):6890/api/v1/auth/local -X POST
 # Should timeout — if it responds, do NOT enable DISABLE_AUTH_ON_LAN
 ```
 
@@ -119,8 +118,12 @@ curl -m 5 http://$(curl -s ifconfig.me):6890/auth/local -X POST
 location / {
     proxy_pass http://localhost:6890;
     proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
+
+    # Required for SSE (download progress stream)
+    proxy_set_header Connection '';
+    proxy_buffering off;
+    proxy_cache off;
+
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
@@ -171,6 +174,48 @@ Browser → /api/v1/* + JWT     → handlers (per-user filtered)
 - Download queue & fetch history
 - Settings (quality, download path, filename templates)
 
+### Source layout
+
+```
+.
+├── main.go              # Entry point, graceful shutdown
+├── server.go            # HTTP server, mux, middleware
+├── container.go         # DI container (DB, Jobs, Auth, Watcher)
+├── app_core.go          # Core app logic (metadata, downloads, files, audio)
+├── auth.go              # Jellyfin auth, JWT (HMAC-SHA256), middleware
+├── api_v1.go            # REST API v1 route registration + shared helpers
+├── api_auth.go          # Auth handlers (login, local, tidal device code)
+├── api_jobs.go          # Download queue handlers
+├── api_watchlists.go    # Watchlist CRUD + sync handlers
+├── api_files.go         # File manager handlers (admin)
+├── api_keys.go          # API key CRUD
+├── api_proxies.go       # Proxy configuration endpoints
+├── api_status.go        # External service health checks
+├── jobs.go              # JobManager: types, lifecycle, EnqueueBatch
+├── jobs_worker.go       # Download worker goroutine
+├── jobs_storage.go      # BoltDB persistence for jobs
+├── jobs_helpers.go      # Job business logic helpers
+├── watcher.go           # Watchlist scheduler, sync logic, M3U8
+├── sse.go               # Server-Sent Events (real-time progress)
+├── ratelimit.go         # Login rate limiter
+├── proxy_discovery.go   # Auto-refresh Tidal proxy list from uptime tracker
+├── backend/
+│   ├── downloader.go    # Download dispatcher (Tidal→Qobuz→Amazon→Deezer)
+│   ├── filemanager.go   # File browser, rename, upload
+│   ├── history.go       # Download & fetch history
+│   ├── uploader.go      # Image upload helpers
+│   ├── tidal/           # Tidal client (auth, device code, download, params)
+│   ├── qobuz/           # Qobuz client (search, stream, params)
+│   ├── amazon/          # Amazon Music client (params)
+│   ├── deezer/          # Deezer client (params)
+│   ├── spotify/         # Spotify metadata (GraphQL, TOTP auth)
+│   ├── songlink/        # Song.link / Odesli matching
+│   ├── audio/           # FFmpeg, codec analysis, spectrum
+│   ├── meta/            # Lyrics (LRCLIB), cover art, MusicBrainz, tag embedding
+│   └── util/            # Config, filenames, HTTP client, proxy config, system
+└── frontend/            # React 19 + Vite + Tailwind 4
+```
+
 ## Building from Source
 
 ```bash
@@ -192,7 +237,6 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 | `jobs.db` | Download jobs, watchlists, users, history (BoltDB — single file) |
 | `jwt_secret` | Auto-generated JWT signing key (created on first run) |
 | `tidal_token.json` | Cached Tidal auth token (Device Code flow, if authenticated) |
-| `config.json` | Global settings fallback (legacy) |
 
 > Since v1.1.7, download history is stored in `jobs.db` (no separate `history.db`), eliminating BoltDB lock conflicts on restart.
 
@@ -339,5 +383,5 @@ This project is for **educational and private use only**.
 
 ## Credits
 
-- [afkarxyz/SpotiFLAC](https://github.com/spotbye/SpotiFLAC) — original project
+- [spotbye/SpotiFLAC](https://github.com/spotbye/SpotiFLAC) — original project
 - [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api)

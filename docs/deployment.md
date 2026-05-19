@@ -11,8 +11,8 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/methammer/SpotiFLAC
-cd SpotiFLAC
+git clone https://github.com/sos-pc/SpotiFLAC-SH
+cd SpotiFLAC-SH
 cp docker-compose.example.yaml docker-compose.yaml
 # Edit docker-compose.yaml (see below)
 docker compose up -d
@@ -27,7 +27,7 @@ Open `http://your-server:6890` and log in with your Jellyfin credentials.
 ```yaml
 services:
   spotiflac:
-    image: ghcr.io/methammer/spotiflac:latest
+    image: ghcr.io/sos-pc/spotiflac-sh:latest
     container_name: spotiflac
     restart: unless-stopped
     stop_grace_period: 30s
@@ -49,14 +49,14 @@ services:
 | `/home/nonroot/Music` | Where downloaded files are stored |
 | `/home/nonroot/.SpotiFLAC` | Config, database, token cache |
 
-> Both volumes must be writable by the container user (`uid 65532 nonroot`). On Linux: `chown -R 65532:65532 /path/to/config /path/to/music`
+> Both volumes must be writable by the container user (`uid 1000 nonroot`). On Linux: `chown -R 1000:1000 /path/to/config /path/to/music`
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, reachable from inside the container |
-| `JWT_SECRET` | *(insecure built-in)* | Secret for JWT signing — **always change in production** |
+| `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing — **set explicitly in production** |
 | `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md) |
 
 ---
@@ -125,14 +125,14 @@ docker compose pull
 docker compose up -d
 ```
 
-SpotiFLAC uses rolling Docker tags (`latest` + per-version `vX.Y.Z`). BoltDB migrations are automatic.
+SpotiFLAC uses rolling Docker tags (`latest` + per-version `vX.Y.Z`). The image is published to `ghcr.io/sos-pc/spotiflac-sh`. BoltDB migrations are automatic.
 
 ---
 
 ## Building from Source
 
 ```bash
-# Requirements: Go 1.22+, Bun
+# Requirements: Go 1.26+, Bun (or pnpm)
 
 # 1. Build the frontend
 cd frontend

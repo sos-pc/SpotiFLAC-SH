@@ -111,10 +111,10 @@ Amazon tracks are delivered as encrypted `.m4a` files. Decryption uses FFmpeg wi
 
 ```bash
 # Fix ownership on the host
-chown -R 65532:65532 /path/to/config /path/to/music
+chown -R 1000:1000 /path/to/config /path/to/music
 ```
 
-The container runs as `nonroot` (uid 65532).
+The container runs as `nonroot` (uid 1000).
 
 ### Container exits immediately on startup
 

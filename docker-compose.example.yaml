@@ -1,6 +1,6 @@
 services:
   spotiflac:
-    image: ghcr.io/YOURUSER/spotiflac:latest
+    image: ghcr.io/sos-pc/spotiflac-sh:latest
     container_name: spotiflac
     restart: unless-stopped
     ports:
