@@ -441,6 +441,33 @@ Update proxy configuration. Applies immediately without restart. Empty lists fal
 
 ---
 
+## Admin Maintenance
+
+### `POST /api/v1/admin/retag-legacy`
+
+**Admin only.** Walks every Done/Skipped job in BoltDB whose file still exists on disk, and writes its Spotify ID into the file's tags (`SPOTIFY_ID` Vorbis comment for FLAC, `TXXX:SPOTIFY_ID` for MP3, custom metadata for M4A) if missing. Idempotent: files that already carry the matching tag are skipped.
+
+Use this once after upgrading from a version that did not embed `SPOTIFY_ID` automatically — it lets the M3U8 generator resolve those legacy files via tag lookup, removing the need for the BoltDB fallback.
+
+**Response `200`**
+```json
+{
+  "scanned": 2487,
+  "tagged": 2401,
+  "skipped": 86,
+  "failed": 0
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `scanned` | Eligible jobs (Done/Skipped, file still on disk) |
+| `tagged` | Files whose tag was added or updated |
+| `skipped` | Files that already had the matching tag |
+| `failed` | Files where the write failed (see `failed_ids`) |
+
+---
+
 ## Error Format
 
 All errors follow the same shape:
