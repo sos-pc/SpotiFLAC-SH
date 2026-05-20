@@ -4,18 +4,28 @@
 
 ## Login / Auth
 
-### "Invalid credentials" on correct Jellyfin password
+### "Invalid credentials" on a correct Jellyfin password
 
-- Verify `JELLYFIN_URL` is reachable **from inside the container**: `docker exec spotiflac curl -s $JELLYFIN_URL/health`
-- Jellyfin must be running and accessible. The URL should not point to `localhost` on the host machine — use the Docker host IP or a shared Docker network.
+- Verify `JELLYFIN_URL` is reachable **from inside the container**:
+  ```bash
+  docker exec spotiflac wget -qO- $JELLYFIN_URL/health
+  # or
+  docker exec spotiflac sh -c 'wget -qS -O- $JELLYFIN_URL 2>&1 | head'
+  ```
+- Inside Docker, `localhost` points to the container itself — never to the host. Use the host's LAN IP, the Docker bridge gateway (`172.17.0.1`), `host.docker.internal` (Docker Desktop), or put both services on a shared Docker network.
+- If your Jellyfin is behind a reverse proxy too, make sure the URL you set is the **internal** one (no auth headers, no SSO).
 
-### 429 on login
+### `429` on login
 
-SpotiFLAC rate-limits login to 5 failed attempts per 5 minutes per IP. Wait 5 minutes. If you're behind a reverse proxy, make sure it forwards `X-Forwarded-For` so the limit applies per real IP and not per proxy IP.
+The rate limiter is **10 attempts per 1-minute window per source IP**, with a **5-minute block** on overflow. Successful logins do **not** reset the counter — the only way out of a block is to wait 5 minutes (`Retry-After: 300`).
+
+- If you're behind a reverse proxy, make sure it forwards `X-Forwarded-For` (otherwise every internet user shares one bucket).
+- If you accidentally locked yourself out and need to recover, restart the container — the rate limiter is in-memory only.
 
 ### Token expired loop / constant 401
 
-- The JWT lifetime is 24 hours. If the clock on the server drifts significantly, tokens may expire early or never be accepted. Check `docker exec spotiflac date`.
+- The JWT lifetime is 24 hours. If the host clock has drifted significantly, tokens may be rejected as expired or never accepted. Check `docker exec spotiflac date`.
+- The frontend dispatches an `auth:expired` event on `401`; if you see this in a tight loop, you probably have an outdated tab still authenticated with an old `JWT_SECRET`. Clear `localStorage` and log in again.
 
 ---
 
@@ -23,32 +33,53 @@ SpotiFLAC rate-limits login to 5 failed attempts per 5 minutes per IP. Wait 5 mi
 
 ### All downloads fail immediately
 
-1. Check **Settings → APIs** status dashboard. If Tidal proxies are all red, the community pool may be temporarily down.
-2. Try manually triggering a download — the error message in the queue detail explains the exact failure.
-3. Try switching `service` to `qobuz` or `amazon` in Settings.
+1. Open **Settings → APIs**. The status dashboard shows every external service (refreshed every 30 s). Anything red is the cause.
+2. Click on a job in the queue — its `error` field has the proxy / HTTP error returned upstream.
+3. Try switching `downloader` in Settings (`auto` → `qobuz` or `tidal`) to bypass a single broken provider.
+
+### Tidal downloads start but produce a 30-second file (preview)
+
+This is the "current state" of the community Tidal proxies (May 2026). Without a personal token, Tidal returns `assetPresentation: "PREVIEW"` to every community proxy.
+
+- The status dashboard flags this as `ratelimited` with the message `PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)`.
+- To get full FLAC, authenticate with a Premium account: **Settings → Tidal Account → Connect with Tidal**. See [tidal-auth.md](tidal-auth.md).
 
 ### "Song.link rate limited" / no Tidal/Qobuz link found
 
-Song.link's free API is aggressively rate-limited. SpotiFLAC automatically falls back to scraping the Song.link HTML page, which has a much higher limit. If both fail:
-- Wait a few minutes and retry.
-- Check the APIs status dashboard (`Settings → APIs`).
+Song.link's free API is heavily rate-limited. SpotiFLAC has multiple layers of fallback (in `getStreamingURLs`):
+
+1. Deezer public search (no rate limit) — fast, gives ISRC.
+2. Apple Music scraping via iTunes Search → `song.link/i/<id>` (different quota from `/s/<spotifyID>`).
+3. HTML scraping of `song.link/s/<spotifyID>` (`__NEXT_DATA__`).
+4. Direct Tidal search by name (`tidal.NewTidalDownloader().SearchTidalByName`).
+
+If all fail, the job is marked failed. Wait a few minutes and retry — the in-memory rate-limit cache clears automatically.
 
 ### Downloaded file is 0 bytes or corrupt
 
-- Usually a CDN/proxy issue — the proxy returned an error body instead of the audio file. Retry the download.
-- Check if the proxy is still up in the APIs status dashboard.
-- If a specific proxy is always failing, remove it in **Settings → APIs → Proxy Configuration**.
+- Almost always a CDN/proxy issue: the proxy returned an HTML error page instead of audio. Retry the download.
+- Check the APIs status dashboard. If a specific proxy is consistently failing, remove it via **Settings → APIs → Proxy Configuration**.
+- Submit a working alternative through the same UI; lists are applied immediately without restart.
 
-### "all Tidal proxies failed"
+### "All Tidal proxies failed"
 
-All community HiFi proxies are down or unreachable. Options:
-1. Wait and retry — community proxies are maintained by volunteers and may have temporary downtime.
-2. Authenticate with your own Tidal Premium account (see [tidal-auth.md](tidal-auth.md)) to bypass community proxies entirely.
-3. Switch service to Qobuz or Amazon in Settings.
+Every entry in `GetTidalProxiesEffective()` (user config + auto-discovery) returned an error. Options:
+
+1. Wait — the discovery goroutine refreshes the list every 6 h from `tidal-uptime.geeked.wtf`.
+2. Force a refresh by restarting the container (`loadSavedDiscovery` runs at startup).
+3. Authenticate with your own Tidal Premium account (see [tidal-auth.md](tidal-auth.md)) — that bypasses community proxies entirely.
+4. Switch to Qobuz or Amazon (`downloader: qobuz`) in Settings.
+
+To inspect what discovery returned:
+
+```bash
+curl -s http://spotiflac.example.com/api/v1/apis/proxies \
+  -H "Authorization: Bearer <token>" | jq '{tidal_discovered, discovery_checked_at, discovery_source}'
+```
 
 ### Track not available on any platform
 
-Some tracks are not available in lossless on Tidal/Qobuz/Amazon/Deezer (exclusives, regional restrictions, etc.). SpotiFLAC can only download what the platforms have. The job will be marked as failed.
+Some tracks are not available in lossless on Tidal/Qobuz/Amazon/Deezer (regional restrictions, Spotify-exclusive content, etc.). SpotiFLAC can only download what the platforms have. The job will be marked `failed` with the most recent provider error.
 
 ---
 
@@ -56,20 +87,28 @@ Some tracks are not available in lossless on Tidal/Qobuz/Amazon/Deezer (exclusiv
 
 ### Watchlist not syncing
 
-- Check the watchlist interval — syncs run at most once per `interval_hours`.
-- Trigger a manual sync via the Sync button to test immediately.
-- Look at the sync history for error messages.
+- The daemon ticks every 5 minutes and only syncs watchlists whose `last_sync + interval_hours` is in the past. Trigger a manual sync to test immediately.
+- Look at the watchlist's `sync_logs` (returned by `GET /watchlists`) for error messages. The most recent attempt is the last entry.
 
-### Stats show incorrect numbers
+### Stats show numbers that don't add up
 
-- Stats are recalculated on each sync. Run a manual sync to refresh them.
-- "Missing" = total Spotify tracks − tracks confirmed on disk. If you moved files, SpotiFLAC won't know until it checks again.
+- `total_tracks = downloaded + skipped + failed + pending` exactly. Tracks present in `track_ids` but with no matching job (typically purged by the 24-h dedup loop) count as `skipped` so the equation always holds.
+- If you moved or deleted files manually, `recoverMissingFiles` will catch them on the next sync and re-queue them. Refresh stats after the sync completes.
+
+### M3U8 file references broken paths after I moved files
+
+The M3U8 generator reads the `SPOTIFY_ID` tag from each audio file under `downloadPath`, so a file moved within `downloadPath` should still resolve correctly on the next sync.
+
+If you see broken paths:
+
+1. Check the file actually has the tag: `ffprobe -v error -show_entries format_tags=SPOTIFY_ID -of compact <file>`.
+2. If the tag is missing (legacy file from a build before May 2026), run `POST /api/v1/admin/retag-legacy` once to back-fill it.
+3. If the file is **outside** `downloadPath`, move it back inside or update `downloadPath` in the watchlist's settings.
 
 ### `sync_deletions` deleted a file it shouldn't have
 
-- This should not happen if multi-playlist protection is working correctly.
-- If a file is referenced by multiple watchlists pointing to the same `output_dir`, it will be protected.
-- If watchlists use different `output_dir` paths pointing to the same underlying folder (e.g. via symlinks), protection won't detect the overlap — use identical path strings.
+- Multi-playlist protection only matches by `spotify_id` against **other watchlists' `track_ids`**, not the on-disk file. If two watchlists happened to write the same `spotify_id` to different paths (different folder/filename templates), the protection still works for the catalog, but the on-disk file mapping is up to you to keep coherent.
+- Make sure both watchlists actually contain the track at sync time. A track removed simultaneously from both will still be deleted.
 
 ---
 
@@ -77,31 +116,33 @@ Some tracks are not available in lossless on Tidal/Qobuz/Amazon/Deezer (exclusiv
 
 ### "ffmpeg not found" error
 
-SpotiFLAC bundles FFmpeg in the Docker image — this error should not appear in Docker deployments.
+In Docker deployments this should never happen — `apt install ffmpeg` runs in stage 3 of the Dockerfile.
 
-If running from source:
-- Install FFmpeg system-wide (`apt install ffmpeg` / `brew install ffmpeg`), or
-- Use the auto-install feature: **Settings → System → Install FFmpeg** — SpotiFLAC will download the correct binary for your OS.
+- If running from source on bare metal: install FFmpeg system-wide (`apt install ffmpeg`, `brew install ffmpeg`, etc.). The web build does not bundle a fallback installer; the Wails desktop build did, but those code paths are unused here.
+- Verify SpotiFLAC sees it: `GET /api/v1/system/ffmpeg` returns `{"installed": true, "ffprobe_installed": true, "ffmpeg_path": "/usr/bin/ffmpeg"}`.
 
 ### FFmpeg decryption fails (Amazon Music)
 
-Amazon tracks are delivered as encrypted `.m4a` files. Decryption uses FFmpeg with the `-decryption_key` flag. If it fails:
-- Ensure FFmpeg version ≥ 4.4.
-- Check the tail of the FFmpeg output in the error message for details.
+Amazon tracks are delivered as encrypted `.m4a` and decrypted via `ffmpeg -decryption_key`. If decryption fails:
+
+- Make sure FFmpeg version ≥ 4.4. The Dockerfile's `debian:bookworm-slim` base provides 5.x.
+- The job's `error` field contains the tail of the FFmpeg output — it usually pinpoints the issue (network error during fetch, missing key, malformed stream).
 
 ---
 
 ## Performance
 
-### Downloads are slow
+### Downloads are slow / sequential
 
-- SpotiFLAC processes **one download at a time** by design — this avoids hammering community proxies and getting IP-banned.
-- Large playlists (100+ tracks) will take time. Use watchlists to spread the load over multiple sync intervals.
+By design, SpotiFLAC processes **one download at a time** (`jobWorkers = 1` in `jobs_worker.go`). This avoids hammering community proxies and getting IP-banned. For large playlists (100+ tracks), expect a long initial run; the M3U8 file is updated incrementally as tracks finish.
 
 ### UI feels slow / SSE not connecting
 
-- The download queue uses Server-Sent Events (`/api/v1/jobs/stream`). Make sure your reverse proxy is not buffering the response (see [deployment.md](deployment.md)).
-- If using Nginx, verify `proxy_buffering off` is set on the location block.
+The download queue uses Server-Sent Events (`/api/v1/jobs/stream`). If your reverse proxy buffers responses, the UI sees nothing.
+
+- Nginx: `proxy_buffering off;` + `proxy_read_timeout 0;` (see [deployment.md](deployment.md))
+- Caddy: `flush_interval -1`
+- Cloudflare proxied (orange cloud): SSE works only on Pro+ plans. Use `:gray-cloud:` (DNS only) on free.
 
 ---
 
@@ -110,11 +151,11 @@ Amazon tracks are delivered as encrypted `.m4a` files. Decryption uses FFmpeg wi
 ### Permission denied on volume
 
 ```bash
-# Fix ownership on the host
+# Fix ownership on the host (uid 1000 = nonroot in the image)
 chown -R 1000:1000 /path/to/config /path/to/music
 ```
 
-The container runs as `nonroot` (uid 1000).
+The container runs as `nonroot` with **uid 1000** (defined in the Dockerfile: `useradd -u 1000 -m -s /bin/bash nonroot`).
 
 ### Container exits immediately on startup
 
@@ -123,8 +164,14 @@ docker compose logs spotiflac
 ```
 
 Common causes:
-- `jobs.db` is locked by a previous crashed instance. Remove the lock file: `rm /path/to/config/jobs.db.lock` (if it exists — BoltDB doesn't actually create one, but check for a `.lock` or stale process).
-- Bad `JELLYFIN_URL` format — must be a valid HTTP URL.
+
+- `JELLYFIN_URL` cannot be parsed (missing scheme, malformed). Must be a valid HTTP URL like `http://jellyfin:8096`.
+- Port 6890 already in use on the host. Change the port mapping in `docker-compose.yaml`.
+- BoltDB lock — only one process can open `jobs.db` at a time. Make sure no orphan container is holding the volume:
+  ```bash
+  docker ps -a | grep spotiflac
+  docker rm -f <leftover-id>
+  ```
 
 ### Old container still running after update
 
@@ -132,8 +179,55 @@ Common causes:
 docker compose down && docker compose pull && docker compose up -d
 ```
 
+`docker compose pull` does not stop running containers automatically.
+
+---
+
+## Discovery / Proxies
+
+### `tidal_discovered` is empty or stale
+
+- The goroutine fetches `https://tidal-uptime.geeked.wtf` every 6 h, plus once at startup after a 0–30 s random jitter.
+- Cached results older than 24 h are ignored on restart (`maxDiscoveryAge`). If you've been offline for days, you may briefly see no discovery data until the first run completes.
+- If the upstream feed itself is down, `discovery_source` is still `"tidal-uptime.geeked.wtf"` but `error` will be set in the BoltDB record (currently not exposed via the API).
+
+### Community proxies all show `ratelimited` with "PREVIEW only" error
+
+This is **expected** as of May 2026 — see "Tidal downloads start but produce a 30-second file" above. Authenticate with a Tidal Premium account to unlock full FLAC.
+
+---
+
+## Tags / Library
+
+### Existing files don't have a `SPOTIFY_ID` tag
+
+If you upgraded from a build that didn't embed `SPOTIFY_ID` automatically, run **once** as an admin:
+
+```bash
+curl -s -X POST http://spotiflac.example.com/api/v1/admin/retag-legacy \
+  -H "Authorization: Bearer <admin-jwt-or-api-key>" | jq
+```
+
+The handler walks every Done/Skipped job in BoltDB whose file still exists on disk and writes the `SPOTIFY_ID` tag in place. Idempotent — safe to re-run.
+
+### Files moved/renamed manually disappear from the M3U8
+
+This shouldn't happen if the file still has its `SPOTIFY_ID` tag — `meta.BuildSpotifyIDIndex` walks the entire `downloadPath` recursively. Confirm the file is still under `downloadPath` and has the tag:
+
+```bash
+ffprobe -v error -show_entries format_tags=SPOTIFY_ID -of compact <file>
+```
+
+If the tag was stripped (e.g. by re-encoding), re-download the track via a manual sync of the watchlist.
+
 ---
 
 ## Debug logs
 
-Enable verbose logging via the **Debug Logger** page in the UI (last item in the sidebar). This streams the server's stdout log in real time, useful for diagnosing download failures.
+The server logs to stdout. In Docker, follow them with:
+
+```bash
+docker compose logs -f spotiflac
+```
+
+In the UI, the **Debug Logger** tab (last sidebar entry) shows a live stream of recent log lines and is useful when you can't reach the server's stdout.
