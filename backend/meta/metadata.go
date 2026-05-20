@@ -44,7 +44,7 @@ type Metadata struct {
 }
 
 func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
-	f, err := flac.ParseFile(filepath)
+	f, err := safeParseFlac(filepath)
 	if err != nil {
 		return fmt.Errorf("failed to parse FLAC file: %w", err)
 	}
@@ -165,7 +165,7 @@ func EmbedLyricsOnly(filepath string, lyrics string) error {
 	if lyrics == "" {
 		return nil
 	}
-	f, err := flac.ParseFile(filepath)
+	f, err := safeParseFlac(filepath)
 	if err != nil {
 		return fmt.Errorf("failed to parse FLAC file: %w", err)
 	}
@@ -261,7 +261,7 @@ func extractCoverFromM4AOrFlac(filePath string) (string, error) {
 	ext := strings.ToLower(pathfilepath.Ext(filePath))
 
 	if ext == ".flac" {
-		f, err := flac.ParseFile(filePath)
+		f, err := safeParseFlac(filePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse FLAC file: %w", err)
 		}
@@ -338,7 +338,7 @@ func extractLyricsFromMp3(filePath string) (string, error) {
 }
 
 func extractLyricsFromFlac(filePath string) (string, error) {
-	f, err := flac.ParseFile(filePath)
+	f, err := safeParseFlac(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse FLAC file: %w", err)
 	}
@@ -543,7 +543,7 @@ func GetAudioDuration(filepath string) (float64, error) {
 }
 
 func getFlacDuration(filepath string) (float64, error) {
-	f, err := flac.ParseFile(filepath)
+	f, err := safeParseFlac(filepath)
 	if err != nil {
 		return 0, err
 	}
