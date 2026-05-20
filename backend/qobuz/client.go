@@ -672,6 +672,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(p DownloadParams) (string, error
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        p.DeezerISRC,
 		Genre:       mbMeta.Genre,
+		SpotifyID:   p.SpotifyID,
 	}
 
 	if err := meta.EmbedMetadata(filepath, metadata, coverPath); err != nil {

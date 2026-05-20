@@ -678,6 +678,7 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        isrc,
 		Genre:       mbMeta.Genre,
+		SpotifyID:   p.SpotifyTrackID,
 	}
 
 	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
@@ -837,6 +838,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        isrc,
 		Genre:       mbMeta.Genre,
+		SpotifyID:   p.SpotifyTrackID,
 	}
 
 	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {

@@ -258,6 +258,7 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 		Copyright:   p.SpotifyCopyright,
 		Publisher:   p.SpotifyPublisher,
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
+		SpotifyID:   p.SpotifyID,
 	}
 	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
 		fmt.Printf("Warning: Failed to embed metadata: %v\n", err)

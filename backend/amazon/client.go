@@ -503,6 +503,7 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        isrc,
 		Genre:       mbMeta.Genre,
+		SpotifyID:   p.SpotifyTrackID,
 	}
 
 	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {

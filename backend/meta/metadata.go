@@ -16,6 +16,12 @@ import (
 	"github.com/go-flac/go-flac"
 )
 
+// SpotifyIDTagKey is the canonical tag name used to embed the Spotify track ID
+// in audio metadata. Used by FLAC (Vorbis comment), MP3 (TXXX frame description)
+// and M4A (custom metadata key) so the M3U8 generator can resolve a track on
+// disk via its tags, independently of the BoltDB job state.
+const SpotifyIDTagKey = "SPOTIFY_ID"
+
 type Metadata struct {
 	Title       string
 	Artist      string
@@ -34,6 +40,7 @@ type Metadata struct {
 	Description string
 	ISRC        string
 	Genre       string
+	SpotifyID   string
 }
 
 func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
@@ -99,6 +106,10 @@ func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
 
 	if metadata.Lyrics != "" {
 		_ = cmt.Add("LYRICS", metadata.Lyrics)
+	}
+
+	if metadata.SpotifyID != "" {
+		_ = cmt.Add(SpotifyIDTagKey, metadata.SpotifyID)
 	}
 
 	cmtBlock := cmt.Marshal()
@@ -812,6 +823,16 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 		tag.AddTextFrame("TSRC", id3v2.EncodingUTF8, metadata.ISRC)
 	}
 
+	if metadata.SpotifyID != "" {
+		// TXXX frame with description=SPOTIFY_ID stores the Spotify track ID.
+		// Pre-existing TXXX frames are removed at the top of this function.
+		tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+			Encoding:    id3v2.EncodingUTF8,
+			Description: SpotifyIDTagKey,
+			Value:       metadata.SpotifyID,
+		})
+	}
+
 	if coverPath != "" && util.FileExists(coverPath) {
 
 		tag.DeleteFrames(tag.CommonID("Attached picture"))
@@ -897,6 +918,9 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 	}
 	if metadata.ISRC != "" {
 		args = append(args, "-metadata", "isrc="+metadata.ISRC)
+	}
+	if metadata.SpotifyID != "" {
+		args = append(args, "-metadata", SpotifyIDTagKey+"="+metadata.SpotifyID)
 	}
 
 	tmpOutputFile := strings.TrimSuffix(filePath, pathfilepath.Ext(filePath)) + ".tmp" + pathfilepath.Ext(filePath)
