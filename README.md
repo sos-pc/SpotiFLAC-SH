@@ -10,17 +10,18 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 
 ## Features
 
-- 🎵 Download Spotify tracks, albums, playlists and artists as FLAC
-- 👥 **Multi-user** — authentication via your Jellyfin server
-- 📋 **Watchlists** — auto-sync Spotify playlists at configurable intervals
-- 🔁 **Smart sync** — detects new tracks, retries failed ones, optionally deletes removed tracks (with multi-playlist protection)
-- 🎬 **Jellyfin integration** — generates M3U8 playlist files automatically per user settings
-- 📊 Real-time download queue with progress, speed and size
-- 🏠 **LAN bypass** — optional auto-login on local network (no password required)
-- 🗂️ File browser, audio converter, audio analysis
-- 🔑 **Optional Tidal Premium** — PKCE auth for better reliability; falls back to community HiFi APIs without any account
-- 🧹 Automatic BoltDB cleanup (deduplication every 24h)
-- 🐳 Docker-first deployment with GitHub Actions CI/CD
+- Download Spotify tracks, albums, playlists and artists as FLAC
+- **Multi-user** — authentication via your Jellyfin server
+- **Watchlists** — auto-sync Spotify playlists at configurable intervals
+- **Smart sync** — detects new tracks, retries failed ones, optionally deletes removed tracks (with multi-playlist protection)
+- **Jellyfin integration** — generates M3U8 playlist files automatically per user settings
+- Real-time download queue (Server-Sent Events) with progress, speed and size
+- **LAN bypass** — optional auto-login on local network (no password required)
+- File browser, audio converter, audio analysis
+- **Optional Tidal Premium** — OAuth 2.0 Device Code Flow for full FLAC; falls back to community HiFi proxies (preview-only as of May 2026) without any account
+- **Auto proxy discovery** — Tidal proxy list refreshed every 6h from `tidal-uptime.geeked.wtf`
+- Automatic BoltDB cleanup (deduplication every 24h)
+- Docker-first deployment with GitHub Actions CI/CD
 
 ## Documentation
 
@@ -29,14 +30,12 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 | [API Reference](docs/api-reference.md) | All REST endpoints with examples |
 | [Authentication](docs/authentication.md) | JWT, API keys, LAN bypass |
 | [Deployment](docs/deployment.md) | Docker, reverse proxy, env vars |
-| [Settings Reference](docs/settings-reference.md) | All configurable options |
+| [Settings Reference](docs/settings-reference.md) | All configurable options (camelCase keys) |
 | [Watchlists](docs/watchlist.md) | Auto-sync playlists |
-| [Tidal Auth](docs/tidal-auth.md) | PKCE Premium account setup |
+| [Tidal Auth](docs/tidal-auth.md) | Device Code Flow setup for Premium accounts |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-
-## Screenshots
-
-> *(add your screenshots here)*
+| [External APIs](EXTERNAL_APIS.md) | Catalog of every external service used |
+| [Credits](CREDITS.md) | Attributions for community projects, libraries, and proxies |
 
 ## Quick Start
 
@@ -87,8 +86,8 @@ Open `http://your-server:6890` and log in with your Jellyfin credentials.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin instance |
-| `JWT_SECRET` | *(insecure default)* | Secret key for JWT signing — **change in production** |
+| `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin instance, reachable from inside the container |
+| `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates one and persists it in `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas. |
 | `DISABLE_AUTH_ON_LAN` | `false` | Auto-login as admin on direct LAN/localhost access (see below) |
 
 ## LAN Bypass (`DISABLE_AUTH_ON_LAN`)
@@ -96,20 +95,20 @@ Open `http://your-server:6890` and log in with your Jellyfin credentials.
 When set to `true`, requests arriving **directly** on the local network (no reverse proxy) are automatically authenticated as a local admin — no Jellyfin login required.
 
 **Security model:**
-- Only `RemoteAddr` is trusted (no `X-Forwarded-For` / `X-Real-IP`)
-- If a request comes through a reverse proxy (SWAG/Nginx), it carries `X-Forwarded-For` → normal Jellyfin login is enforced
-- Applies to: loopback (`127.x`), LAN (`192.168.x`, `10.x`), Docker bridge (`172.16/12`)
-- **Requires port 6890 to be closed on the internet** (not exposed publicly)
+- Only `RemoteAddr` is trusted. If `X-Forwarded-For` or `X-Real-IP` is present, the bypass is refused — even if `RemoteAddr` is private.
+- This means: direct LAN → bypass; via reverse proxy → normal Jellyfin login.
+- Trusted ranges: loopback (`127.0.0.0/8`, `::1`), `10.0.0.0/8`, `172.16.0.0/12` (covers Docker bridge), `192.168.0.0/16`.
+- **Requires port 6890 to be closed on the public internet.** If the port is exposed and `DISABLE_AUTH_ON_LAN=true`, anyone hitting the LAN-routed path becomes admin.
 
 | Access path | Result |
 |-------------|--------|
-| `localhost:6890` / LAN direct | Auto-login as Local Admin ✅ |
-| Via reverse proxy (internet) | Jellyfin login required ✅ |
-| Internet direct (port open) | ⚠️ Would bypass auth — keep port closed |
+| `localhost:6890` / LAN direct | Auto-login as Local Admin |
+| Via reverse proxy (internet) | Jellyfin login required |
+| Internet direct (port open) | Would bypass auth — keep port closed |
 
 ```bash
 # Verify the port is not exposed publicly before enabling
-curl -m 5 http://$(curl -s ifconfig.me):6890/auth/local -X POST
+curl -m 5 http://$(curl -s ifconfig.me):6890/api/v1/auth/local -X POST
 # Should timeout — if it responds, do NOT enable DISABLE_AUTH_ON_LAN
 ```
 
@@ -119,8 +118,12 @@ curl -m 5 http://$(curl -s ifconfig.me):6890/auth/local -X POST
 location / {
     proxy_pass http://localhost:6890;
     proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
+
+    # Required for SSE (download queue stream)
+    proxy_set_header Connection '';
+    proxy_buffering off;
+    proxy_cache off;
+
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
@@ -128,77 +131,97 @@ location / {
 }
 ```
 
-> The `X-Forwarded-For` header set by the proxy is what prevents the LAN bypass from triggering on internet requests.
+> The `X-Forwarded-For` header set by the proxy is what prevents the LAN bypass from triggering on internet requests — never strip it.
 
 ## Watchlists
 
 Watchlists track Spotify playlists and automatically sync them at a configurable interval.
 
-- New tracks added to the Spotify playlist are downloaded automatically
-- Failed tracks are retried on the next sync
-- M3U8 files are regenerated for Jellyfin after each sync
-- Stats show total / downloaded / missing per playlist
-- Playlist names are resolved from Spotify metadata on first sync
+- New tracks added to the Spotify playlist are downloaded automatically.
+- Failed tracks are retried on **manual** sync (`SyncWatchlist` button / `POST /watchlists/{id}/sync`); the scheduled daemon does not auto-retry to avoid hammering rate-limited proxies.
+- M3U8 files are regenerated for Jellyfin after each sync.
+- Stats track total / downloaded / skipped / failed / pending per playlist.
+- Playlist names are resolved from Spotify metadata on first sync and re-validated on each sync (renaming the Spotify playlist deletes the old M3U8 and creates a new one).
+
+See [docs/watchlist.md](docs/watchlist.md) for details.
 
 ## Tidal Authentication
 
-By default SpotiFLAC uses **community HiFi API proxies** — no Tidal account required.
+By default SpotiFLAC uses **community HiFi API proxies** — no Tidal account required. As of May 2026, those proxies are reachable but Tidal restricts the unauthenticated API to `assetPresentation: "PREVIEW"` (30-second segments). Full FLAC requires a personal token.
 
-Optionally, authenticate with a **Premium Tidal account** for better reliability via **PKCE Web OIDC** (same flow as the official Tidal web player).
+To get full FLAC, authenticate with a **Premium Tidal account** via the **OAuth 2.0 Device Code Flow** (same flow used by `tiddl`, `orpheusdl-tidal`, etc.).
 
-**Via the UI (easiest):** Settings → Tidal Account → Connect with Tidal
+**Via the UI (easiest):** Settings → Tidal Account → Connect with Tidal → open the displayed link → confirm in your Tidal account → SpotiFLAC detects authorization automatically (polls every 5 s).
 
 **Automated script:**
 ```bash
-python3 auth_tidal.py --host http://your-server:6890
+python3 auth_tidal.py --host http://your-server:6890 --token <your-jwt-or-api-key>
 ```
 
 **Manual (curl):**
 ```bash
-# Step 1 — get the auth URL (requires a valid JWT)
-curl -H "Authorization: Bearer <token>" http://your-server:6890/api/v1/auth/tidal/url
+# 1. Start
+curl -s -X POST http://your-server:6890/api/v1/auth/tidal/device/start \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{}'
 
-# Step 2 — open the URL in a browser and log in with your Tidal Premium account
+# Response gives device_code, user_code, verification_uri_complete, expires_in, interval
 
-# Step 3 — copy the redirect URL (https://listen.tidal.com/login/auth?code=...) and exchange it
-curl -X POST http://your-server:6890/api/v1/auth/tidal/callback \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"callback_url":"https://listen.tidal.com/login/auth?code=..."}'
+# 2. Open verification_uri_complete in a browser, log in with Tidal Premium, confirm
+
+# 3. Poll every `interval` seconds until status=authorized
+curl -s -X POST http://your-server:6890/api/v1/auth/tidal/device/poll \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"device_code":"<from step 1>"}'
 ```
 
-- Token cached in `tidal_token.json` and **auto-refreshed** before expiry
-- If no token is present (or it expires), the app falls back to community HiFi proxies automatically
-- See [`docs/tidal-auth.md`](docs/tidal-auth.md) for the full walkthrough
+- Token cached in `<config>/tidal_token.json` and **auto-refreshed** before expiry (5-minute window).
+- If the refresh fails (subscription lapsed, token revoked) the file is deleted and SpotiFLAC falls back to community proxies.
+- See [`docs/tidal-auth.md`](docs/tidal-auth.md) for the full walkthrough.
 
 ## Architecture
 
 ```
-Browser → /api/v1/auth/login  → Jellyfin auth → JWT (24h)
-Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true)
+Browser → /api/v1/auth/login  → Jellyfin auth → JWT (24h, HMAC-SHA256)
+Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true and request is LAN-direct)
 Browser → /api/v1/* + JWT     → handlers (per-user filtered)
-                              → BoltDB (jobs, watchlists, history, users, settings)
-                              → JobManager (unified queue: manual + watchlist downloads)
-                                → Tidal  (PKCE token → Community HiFi proxies, fallback loop)
-                                → Qobuz  (community proxies, fallback loop)
-                                → Amazon (community proxies, fallback loop)
-                                → Deezer (community proxies, fallback loop)
+                              → BoltDB (jobs, watchlists, history, users, settings, api_keys, api_proxies, proxy_discovery)
+                              → JobManager (1 worker, unified queue: manual + watchlist downloads)
+                                → Tidal  (Device Code token → Community HiFi proxies, fallback loop)
+                                → Qobuz  (musicdl.me primary → community proxies, fallback loop)
+                                → Amazon (community proxy with X-Debug-Key)
+                                → Deezer (community proxy /dl/ endpoint)
+
+Background goroutines (started in main.go):
+  - Watcher.daemon            — checks watchlists every 5 minutes
+  - JobManager.cleanupLoop    — dedup BoltDB every 24h (after 5 min warm-up)
+  - startProxyDiscovery       — refreshes Tidal proxy list every 6h from tidal-uptime.geeked.wtf
 ```
 
 **Data isolation per user:**
-- Watchlists & sync history
-- Download queue & fetch history
-- Settings (quality, download path, filename templates)
+- Watchlists & sync logs
+- Download queue & download/fetch history
+- Settings (quality, download path, filename templates, theme)
 
 ## Building from Source
 
 ```bash
-# Requirements: Go 1.26+, Bun
-cd frontend && bun install && bun run build
-cd ..
-go build -o spotiflac .
+# Requirements: Go 1.26+, Bun (frontend bundler)
 
-# Or with Docker
+# 1. Build the frontend (required: Go embeds frontend/dist via go:embed)
+cd frontend
+bun install --frozen-lockfile
+bun run build
+cd ..
+
+# 2. Build the Go binary
+go mod tidy
+CGO_ENABLED=0 go build -ldflags="-s -w" -o spotiflac .
+
+./spotiflac
+```
+
+```bash
+# Or with Docker (multi-stage: bun → go → debian-slim)
 docker build -t spotiflac:local .
 ```
 
@@ -208,147 +231,95 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 | File | Description |
 |------|-------------|
-| `jobs.db` | Download jobs, watchlists, users, history (BoltDB — single file) |
-| `jwt_secret` | Auto-generated JWT signing key (created on first run) |
-| `tidal_token.json` | Cached Tidal auth token (PKCE Web OIDC, if authenticated) |
-| `config.json` | Global settings fallback (legacy) |
+| `jobs.db` | BoltDB — download jobs, watchlists, users, settings, history, api keys, proxies, discovery cache |
+| `jwt_secret` | Auto-generated JWT signing key (mode 0600). Skipped when `JWT_SECRET` env var is set. |
+| `tidal_token.json` | Cached Tidal Device Code token (mode 0644). Created on successful auth, deleted on disconnect or refresh failure. |
+| `config.json` | Global settings fallback (legacy — kept so handlers can fall back to it when a user has no per-user settings yet). |
 
-> Since v1.1.7, download history is stored in `jobs.db` (no separate `history.db`), eliminating BoltDB lock conflicts on restart.
+> **Backup:** a single `cp jobs.db jobs.db.bak` snapshots the entire application state.
 
 ## Differences from original SpotiFLAC
 
 | Feature | Original | Web |
 |---------|----------|-----|
 | Interface | Desktop (Wails) | Web browser |
-| Auth | None | Jellyfin login |
-| Multi-user | ❌ | ✅ |
-| Watchlists + auto-sync | ❌ | ✅ |
-| M3U8 Jellyfin | ❌ | ✅ |
-| LAN bypass | ❌ | ✅ |
-| Docker | ❌ | ✅ |
-| Self-hosted | ❌ | ✅ |
+| Auth | None | Jellyfin login (+ API keys) |
+| Multi-user | No | Yes |
+| Watchlists + auto-sync | No | Yes |
+| M3U8 Jellyfin | No | Yes |
+| LAN bypass | No | Yes |
+| Docker | No | Yes |
+| Self-hosted | No | Yes |
+| Real-time progress | Polling | Server-Sent Events |
 
 ## Changelog
 
+### Unreleased — 2026-05
+- **feat(discovery):** Level 1 proxy auto-discovery — background goroutine fetches `tidal-uptime.geeked.wtf` every 6h, merges results with user config (`GetTidalProxiesEffective`), persists last result in BoltDB so the effective list is correct immediately after restart. New fields exposed by `GET /apis/proxies`: `tidal_discovered`, `discovery_checked_at`, `discovery_source`.
+- **chore(proxies):** Default Tidal list refreshed (May 2026): `eu-central.monochrome.tf`, `us-west.monochrome.tf`, `hifi-api.kennyy.com.br`, `api.monochrome.tf`, `monochrome-api.samidy.com`. All return `assetPresentation: "PREVIEW"` without a Premium token (full FLAC requires Tidal auth via Settings → Tidal Account).
+- **chore(proxies):** Amazon endpoint moved from `amzn.afkarxyz.fun` → `amazon.spotbye.qzz.io`.
+- **chore(proxies):** Qobuz primary moved to `musicdl.me` (POST + `X-Debug-Key`); legacy GET providers (`dab.yeet.su`, `dabmusic.xyz`, `qbz.afkarxyz.qzz.io`) all unreachable — empty default list.
+- **fix(tidal):** Device Code Flow client_id moved to `4N3n6Q1x95LL5K7p` (sourced from `orpheusdl-tidal`). The previous TV `client_id` conflicted with the Tidal desktop app and forced the desktop logout.
+
 ### v3.4.0 — 2026-04-06
-- **refactor(queue):** Unified progress tracking — removed dual queue system (`util/progress.go` global state eliminated); BoltDB + SSE is now the single source of truth for all download state
-- **feat(queue):** Live download speed now transmitted via SSE and displayed in the Download Queue UI (was always "—")
-- **fix(queue):** Clear History / Reset Queue now correctly updates the queue UI without requiring a page refresh
-- **fix(watchlist):** Pending track count now visible on watchlist cards
-- **fix(watchlist):** Sync log no longer shows "no changes" and "skipped" simultaneously
-- **fix(queue):** Session start time now calculated from active jobs instead of being hardcoded to 0
-- **refactor(backend):** `ProgressWriter` reduced to a pure io.Writer wrapper with optional `SpeedCallback`; all global queue state removed
-- **refactor(frontend):** Removed dead code — `useDownloadProgress` hook (200 ms polling) and legacy `/jobs/legacy/*` API calls deleted
+- **refactor(queue):** Unified progress tracking — removed dual queue system (`util/progress.go` global state eliminated); BoltDB + SSE is now the single source of truth for all download state.
+- **feat(queue):** Live download speed transmitted via SSE and displayed in the Download Queue UI (was always "—").
+- **fix(queue):** Clear History / Reset Queue now correctly updates the queue UI without requiring a page refresh.
+- **fix(watchlist):** Pending track count now visible on watchlist cards.
+- **fix(watchlist):** Sync log no longer shows "no changes" and "skipped" simultaneously.
+- **fix(queue):** Session start time calculated from active jobs instead of being hardcoded to 0.
+- **refactor(backend):** `ProgressWriter` reduced to a pure `io.Writer` wrapper with optional `SpeedCallback`; all global queue state removed.
+- **refactor(frontend):** Removed dead code — `useDownloadProgress` hook (200 ms polling) and legacy `/jobs/legacy/*` API calls deleted.
 
 ### v3.3.0 — 2026-03-30
-- **feat(proxies):** Amazon and Deezer now use multi-proxy lists with automatic fallback, identical to Tidal and Qobuz
-- **feat(deezer):** `DownloadFromDeezmate` restored with full fallback loop + metadata embedding
-- **feat(ui):** Proxy configuration UI shows all 4 services as editable lists
+- **feat(proxies):** Amazon and Deezer use multi-proxy lists with automatic fallback (same pattern as Tidal/Qobuz).
+- **feat(deezer):** `DownloadFromDeezmate` restored with full fallback loop and metadata embedding.
+- **feat(ui):** Proxy configuration UI shows all 4 services as editable lists.
 
 ### v3.2.0 — 2026-03-29
-- **feat(ui):** API Keys tab in Settings — create, list, revoke personal API keys
-- **feat(ui):** Tidal Account tab in Settings — PKCE connect/disconnect flow
-- **feat(ui):** APIs tab — external service health dashboard + configurable proxy lists
-- **feat(security):** Admin gating — File Manager hidden from non-admin users
-- **feat(security):** Rate limiting on `POST /api/v1/auth/login` (5 attempts / 5 min)
-- **feat(ui):** Login page shows distinct warning on 429
+- **feat(ui):** API Keys tab in Settings — create / list / revoke personal API keys (`sk_spotiflac_` prefix).
+- **feat(ui):** Tidal Account tab in Settings — Device Code connect / disconnect flow.
+- **feat(ui):** APIs tab — external service health dashboard + configurable proxy lists.
+- **feat(security):** Admin gating — File Manager hidden from non-admin users.
+- **feat(security):** Rate limiting on `POST /api/v1/auth/login` (10 attempts / 1 min window, 5-minute block on overflow).
+- **feat(ui):** Login page shows distinct warning on `429`.
 
 ### v3.1.0 — 2026-03-28
-- **feat(api):** Tidal auth routes migrated to `/api/v1/auth/tidal/*`
-- **feat(api):** New endpoints: `GET /api/v1/auth/tidal/status`, `DELETE /api/v1/auth/tidal`
-- **feat(api):** `GET/PUT /api/v1/apis/proxies` — BoltDB-backed proxy configuration, applied immediately without restart
-- **feat(api):** `GET /api/v1/apis/status` — parallel health check of all external services (30s cache)
-- **feat(api):** `GET/POST/DELETE /api/v1/auth/keys` — personal API key management (`sk_spotiflac_` prefix)
-- **feat(download):** Download queue switches to SSE (`/api/v1/jobs/stream`), replaces 500ms polling
+- **feat(api):** Tidal auth routes migrated to `/api/v1/auth/tidal/*`.
+- **feat(api):** New endpoints: `GET /api/v1/auth/tidal/status`, `DELETE /api/v1/auth/tidal`.
+- **feat(api):** `GET/PUT /api/v1/apis/proxies` — BoltDB-backed proxy configuration, applied immediately without restart.
+- **feat(api):** `GET /api/v1/apis/status` — parallel health check of all external services (30 s cache).
+- **feat(api):** `GET/POST/DELETE /api/v1/auth/keys` — personal API key management.
+- **feat(download):** Download queue switches to SSE (`/api/v1/jobs/stream`), replaces 500 ms polling.
 
-### v3.0.6 — 2026-03-26
-- **fix(tidal):** Community HiFi proxy list refreshed with active instances
-- **feat(tidal):** PKCE Web OIDC flow — Premium accounts bypass the scope restrictions that broke the v2 Device Flow (`auth_tidal.py` helper script)
-- **docs:** `TIDAL_AUTH_PKCE.md` and `EXTERNAL_APIS.md` added
+### v3.0.x — 2026-03-24 → 03-26
+- **feat(tidal):** Device Code Flow — Premium accounts authenticate via `/api/v1/auth/tidal/device/start` + `/device/poll` (replaces the older PKCE Web OIDC flow that was broken when Tidal dropped the `playback` scope from non-PKCE clients).
+- **feat(tidal):** Community HiFi public instances added as automatic fallback when no token is present.
+- **feat(tidal):** Public token used for search/ISRC resolution to avoid `403` on unauthenticated calls.
+- **feat(tidal):** Automatic token refresh before expiry.
+- **feat:** Unified download architecture — manual "Download FLAC" enqueues via JobManager (same queue, retry, progress as watchlist downloads); ~400 lines of redundant code removed.
+- **fix(jobs):** JobManager infinite loop / false instant success.
 
-### v3.0.5
-- **feat(tidal):** PKCE Web OIDC authentication flow via `/api/auth/tidal/url` + `/api/auth/tidal/callback`
+### v2.x — 2026-03-22
+- **feat:** Direct Tidal API authentication replacing proxy servers (Device Flow token).
+- **feat:** Manual downloads resilient to Song.link outages (HTML scraping fallback + direct Tidal name/ISRC search).
+- **fix:** Multiple Tidal `400`/`403` scope errors (`r_usr`, encoding); split search/download HTTP clients.
 
-### v3.0.4
-- **feat(tidal):** Community HiFi API public instances added as automatic fallback when no token is present
-
-### v3.0.3
-- **feat(tidal):** Public token used for search/ISRC resolution to avoid 403 on unauthenticated calls
-
-### v3.0.2
-- **feat(tidal):** Automatic token refresh before expiry
-
-### v3.0.1
-- **fix(jobs):** JobManager infinite loop / false instant success
-
-### v3.0.0 — 2026-03-24
-- **feat:** Unified download architecture — manual "Download FLAC" now enqueues via JobManager (same queue, retry, progress as watchlist downloads); ~400 lines of redundant code removed
-
-### v2.0.0 → v2.0.10 — 2026-03-22
-- **feat:** Direct Tidal API authentication replacing proxy servers (Device Flow token — later superseded by PKCE in v3.0.5 after Tidal dropped `playback` scope from Device Flow)
-- **feat:** Manual downloads resilient to Song.link outages (HTML scraping fallback + direct Tidal name/ISRC search)
-- **fix:** Multiple Tidal 400/403 scope errors (`r_usr`, encoding); split search/download HTTP clients
-
-### v1.3.0 → v1.3.6
-- **feat:** Deezer ISRC fallback + direct Tidal search by name when Song.link unavailable
-- **feat:** Community API pool expanded (triton.squid.wtf); Song.link NEXT_DATA HTML scraping fallback
-- **fix:** Deezer disabled (domain expiry)
-
-### v1.2.14 — 2026-03-10
-- **feat:** `DISABLE_AUTH_ON_LAN` — auto-login on direct LAN/localhost access
-- **fix:** FFmpeg install dialog no longer appears in web mode (check deferred until authenticated)
-- **fix:** Spotify URLs with `intl-fr/` prefix and `?si=` parameter now work for albums and artists
-
-### v1.2.13
-- **fix:** Playlist names now correctly resolved from Spotify metadata (`Owner.Name` field)
-
-### v1.2.12
-- **fix:** Watchlist stats — `missing = total - downloaded` (was incorrectly showing 100% failed)
-
-### v1.2.11
-- **fix:** Playlist name refresh triggered immediately after adding a watchlist
-
-### v1.2.10
-- **fix:** Build error from v1.2.9 (history handlers missing userID)
-
-### v1.2.8
-- **feat:** `SyncWatchlist` — syncs new tracks AND retries failed ones in one operation
-- **feat:** Watchlist stats redesign (total / downloaded / missing)
-- **fix:** Playlist name loading on WatchlistPage
-
-### v1.2.7
-- **fix:** `main.go` graceful shutdown — `os.Exit` replaced by `SIGTERM`, proper `app.shutdown(ctx)` with timeout
-
-### v1.2.6
-- **fix:** `CloseJobManager` idempotent (sync.Once)
-- **fix:** `songLinkSem` context-aware (no goroutine leak on shutdown)
-- **fix:** `EnqueueBatch` deduplication check
-- **fix:** `ClearAllJobs` key-by-key deletion (no bucket drop)
-- **fix:** `recoverPendingJobs` resets progress to 0
-
-### v1.2.5
-- **fix:** `watcher.go` race condition on `TrackIDs` + `saveWatchlist`
-- **fix:** `cleanupTicker` properly consumed in select loop
-- **fix:** M3U8 track ordering uses `sort.Slice`
-- **fix:** `EnqueueBatch` called before `generateM3U8`
-
-### v1.2.0 → v1.2.4
-- **fix:** CORS middleware ordering
-- **fix:** All 8 history handlers pass `userID` from JWT (not from request body)
-- **fix:** `handleMe` uses `GetUserFromContext`
-- **fix:** `CleanupOldJobs` admin-only
-- **fix:** Path traversal protection on file upload
-- **fix:** `UserID` isolation in `HistoryItem` and `FetchHistoryItem`
-
-### v1.1.7 → v1.1.9
-- **fix:** History DB merged into `jobs.db` — eliminates BoltDB lock conflicts on Docker restart
-- **fix:** `generateM3U8` reads per-user settings from BoltDB (not global `config.json`)
-
-### v1.1.2 → v1.1.6
-- **fix:** Auth guard on all RPC pollers — eliminates 401 flood on page load (fail2ban safe)
-- **fix:** `SettingsPage` syncs from backend BoltDB on mount
-- **fix:** Refresh button triggers `ForceSyncWatchlist` on all playlists
-- **fix:** `started_at` negative timestamp on old jobs (Go zero-time → 0)
+### v1.x → v1.3.x
+- **feat:** Deezer ISRC fallback + direct Tidal search by name when Song.link unavailable.
+- **feat:** Community API pool expanded; Song.link `__NEXT_DATA__` HTML scraping fallback.
+- **fix:** Deezer disabled (domain expiry) — re-enabled in v3.3.0.
+- **feat:** `DISABLE_AUTH_ON_LAN` — auto-login on direct LAN/localhost access.
+- **fix:** Spotify URLs with `intl-fr/` prefix and `?si=` parameter now work for albums and artists.
+- **fix:** Playlist names resolved from Spotify `playlist_info.owner.name` (the underlying API returns the playlist name in this field, not in `playlist_info.name`).
+- **fix:** Watchlist stats — `missing = total - downloaded` (was incorrectly showing 100 % failed).
+- **fix:** Race conditions on `TrackIDs` + `saveWatchlist`; `cleanupTicker` properly consumed; M3U8 ordering uses `sort.Slice`; `EnqueueBatch` deduplication.
+- **fix:** Idempotent `CloseJobManager` (`sync.Once`); context-aware `songLinkSem`; key-by-key `ClearAllJobs` (no bucket drop); `recoverPendingJobs` resets progress to 0.
+- **fix:** Graceful shutdown — `os.Exit` replaced by `SIGTERM`, proper `app.shutdown(ctx)` with timeout.
+- **fix:** History DB merged into `jobs.db` — eliminates BoltDB lock conflicts on Docker restart.
+- **fix:** `generateM3U8` reads per-user settings from BoltDB (not global `config.json`).
+- **fix:** Auth guard on all RPC pollers — eliminates `401` flood on page load (fail2ban safe).
+- **fix:** All history handlers pass `userID` from JWT (not from request body); admin-only `CleanupOldJobs`; path traversal protection on file upload.
 
 ## Disclaimer
 
@@ -358,5 +329,9 @@ This project is for **educational and private use only**.
 
 ## Credits
 
+See [CREDITS.md](CREDITS.md) for the full list of community projects, libraries and proxy maintainers.
+
 - [afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC) — original project
+- [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal) — Tidal Device Code credentials
+- [tidal-uptime.geeked.wtf](https://tidal-uptime.geeked.wtf) — Tidal proxy auto-discovery feed
 - [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api)
