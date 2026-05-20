@@ -2,6 +2,7 @@ package meta
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,6 +14,40 @@ import (
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
 )
+
+// flacMagic is the 4-byte signature at the start of every valid FLAC stream.
+const flacMagic = "fLaC"
+
+// hasFlacMagic returns true if the file's first 4 bytes equal "fLaC". Used to
+// short-circuit go-flac.ParseFile, which panics with index-out-of-range when
+// the buffer is shorter than 4 bytes (truncated, empty, or mis-named files).
+// See go-flac@v1.0.0 util.go:38 readFLACStream.
+func hasFlacMagic(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	var buf [4]byte
+	n, _ := io.ReadFull(f, buf[:])
+	if n < 4 {
+		return false, nil
+	}
+	return string(buf[:]) == flacMagic, nil
+}
+
+// safeParseFlac wraps go-flac.ParseFile in a panic recovery so a malformed
+// stream that survives the magic-byte check (e.g. truncated mid-header) still
+// turns into a regular error instead of crashing the goroutine.
+func safeParseFlac(path string) (file *flac.File, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			file = nil
+			err = fmt.Errorf("malformed FLAC stream (recovered panic): %v", r)
+		}
+	}()
+	return flac.ParseFile(path)
+}
 
 // supportedAudioExtensions is the set of audio file extensions scanned by
 // BuildSpotifyIDIndex.
@@ -75,7 +110,15 @@ func readSpotifyIDFromFile(path, ext string) (string, error) {
 }
 
 func readSpotifyIDFromFlac(path string) (string, error) {
-	f, err := flac.ParseFile(path)
+	ok, err := hasFlacMagic(path)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		// Mis-named or truncated file — silently skip in the index walk.
+		return "", nil
+	}
+	f, err := safeParseFlac(path)
 	if err != nil {
 		return "", err
 	}
@@ -155,7 +198,17 @@ func WriteSpotifyIDTag(path, spotifyID string) (bool, error) {
 }
 
 func writeSpotifyIDToFlac(path, spotifyID string) error {
-	f, err := flac.ParseFile(path)
+	ok, err := hasFlacMagic(path)
+	if err != nil {
+		return fmt.Errorf("read FLAC header: %w", err)
+	}
+	if !ok {
+		// Loud failure on the write path: the caller asked us to tag a file
+		// that isn't actually FLAC — surfacing this lets the retag-legacy
+		// handler record it in failed_ids instead of crashing.
+		return fmt.Errorf("not a valid FLAC file (missing %q magic): %s", flacMagic, path)
+	}
+	f, err := safeParseFlac(path)
 	if err != nil {
 		return fmt.Errorf("parse FLAC: %w", err)
 	}
