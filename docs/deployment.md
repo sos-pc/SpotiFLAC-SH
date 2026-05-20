@@ -4,7 +4,7 @@
 
 - Docker + Docker Compose
 - A running [Jellyfin](https://jellyfin.org) instance (used for authentication)
-- FFmpeg — **bundled in the Docker image**, no separate installation needed
+- FFmpeg + FFprobe — **bundled in the Docker image**, no separate installation needed
 
 ---
 
@@ -46,18 +46,18 @@ services:
 
 | Container path | Purpose |
 |----------------|---------|
-| `/home/nonroot/Music` | Where downloaded files are stored |
-| `/home/nonroot/.SpotiFLAC` | Config, database, token cache |
+| `/home/nonroot/Music` | Where downloaded files are stored (default `downloadPath`) |
+| `/home/nonroot/.SpotiFLAC` | Config, BoltDB, JWT secret, Tidal token cache |
 
-> Both volumes must be writable by the container user (`uid 65532 nonroot`). On Linux: `chown -R 65532:65532 /path/to/config /path/to/music`
+> Both volumes must be writable by the container user. The image's `nonroot` user has **uid 1000** (defined in `Dockerfile`: `useradd -u 1000 -m -s /bin/bash nonroot`). On Linux: `chown -R 1000:1000 /path/to/config /path/to/music`.
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, reachable from inside the container |
-| `JWT_SECRET` | *(insecure built-in)* | Secret for JWT signing — **always change in production** |
-| `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md) |
+| `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, **reachable from inside the container** (so not `localhost` if Jellyfin runs on the host). |
+| `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates 32 random bytes on first start and writes them to `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas, or to inject one from a secret manager. |
+| `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md). |
 
 ---
 
@@ -65,17 +65,29 @@ services:
 
 All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 
-| File | Description |
-|------|-------------|
-| `jobs.db` | BoltDB — download jobs, watchlists, users, settings, history |
-| `jwt_secret` | Auto-generated JWT signing key (created on first run) |
-| `tidal_token.json` | Cached Tidal PKCE token, if authenticated |
+| File | Purpose |
+|------|---------|
+| `jobs.db` | BoltDB single-file database. Buckets: `jobs`, `watchlist`, `users`, `apikeys`, `api_proxies`, `proxy_discovery`, `history`, `fetch_history`. |
+| `jwt_secret` | Auto-generated JWT signing key (mode `0600`). Skipped when `JWT_SECRET` env var is set. |
+| `tidal_token.json` | Cached Tidal Device Code token (mode `0644`). Created on successful auth, deleted on disconnect or refresh failure. Auto-refreshed before expiry. |
+| `config.json` | Legacy global settings (read-only fallback for users with no per-user settings yet). New deployments should not need this — settings are stored per-user inside `jobs.db`. |
 
-> **Backup:** a single `cp jobs.db jobs.db.bak` is sufficient to snapshot all state.
+> **Backup:** a single `cp jobs.db jobs.db.bak` snapshots the entire application state.
 
 ---
 
 ## Reverse Proxy
+
+The download queue uses **Server-Sent Events** (`GET /api/v1/jobs/stream`) and the artist-discography search uses another SSE endpoint (`GET /api/v1/search/stream`). Both are long-lived. Your reverse proxy must:
+
+1. Disable response buffering for these endpoints.
+2. Either disable the read timeout or set it long enough that idle keep-alives won't drop (the Go server emits an event the moment something happens — there is no heartbeat).
+
+The Go server itself is configured for indefinite long requests:
+
+- `ReadTimeout: 0` (downloads can be hours)
+- `WriteTimeout: 0`
+- `IdleTimeout: 120s`
 
 ### Nginx / SWAG
 
@@ -84,11 +96,12 @@ location / {
     proxy_pass http://localhost:6890;
     proxy_http_version 1.1;
 
-    # Required for SSE (download progress stream)
+    # Required for SSE
     proxy_set_header Connection '';
     proxy_buffering off;
     proxy_cache off;
 
+    # Standard headers
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
@@ -96,7 +109,7 @@ location / {
 }
 ```
 
-> The `X-Forwarded-For` header set by the proxy is what prevents `DISABLE_AUTH_ON_LAN` from triggering on internet requests — never remove it.
+> The `X-Forwarded-For` header set by the proxy is what prevents `DISABLE_AUTH_ON_LAN` from triggering on internet requests — never strip it.
 
 ### Caddy
 
@@ -109,12 +122,9 @@ spotiflac.example.com {
 }
 ```
 
-### Important: SSE timeouts
+### AWS ALB / CloudFront
 
-The download queue uses **Server-Sent Events** (`/api/v1/jobs/stream`). Ensure your proxy does not buffer or time out long-lived connections:
-- Nginx: `proxy_read_timeout 0;` + `proxy_buffering off;`
-- Caddy: `flush_interval -1`
-- AWS ALB / CloudFront: set idle timeout ≥ 300s
+Set the **idle timeout to at least 300 s** (CloudFront origin timeout: max 60 s without an L7 plan — consider an ALB instead). Disable response buffering / compression for the `/api/v1/*` paths.
 
 ---
 
@@ -125,30 +135,32 @@ docker compose pull
 docker compose up -d
 ```
 
-SpotiFLAC uses rolling Docker tags (`latest` + per-version `vX.Y.Z`). BoltDB migrations are automatic.
+SpotiFLAC uses the rolling `latest` Docker tag plus per-version `vX.Y.Z` tags. BoltDB schema migrations are applied automatically on first run after upgrade (`InitHistoryDBShared`, bucket creation in `NewJobManager` and `NewAuthManager`).
 
 ---
 
 ## Building from Source
 
+The Go binary embeds the built frontend via `go:embed all:frontend/dist`. The frontend **must** be built before `go build`, otherwise the embed directive will fail or embed an empty tree.
+
 ```bash
-# Requirements: Go 1.22+, Bun
+# Requirements: Go 1.26+, Bun (frontend bundler — uses Vite under the hood)
 
 # 1. Build the frontend
 cd frontend
-bun install
-bun run build
+bun install --frozen-lockfile
+bun run build      # -> writes to frontend/dist
 cd ..
 
-# 2. Build the Go binary (frontend is embedded via go:embed)
-go build -o spotiflac .
+# 2. Build the Go binary
+go mod tidy
+CGO_ENABLED=0 go build -ldflags="-s -w" -o spotiflac .
 
-# Run
 ./spotiflac
 ```
 
 ```bash
-# Or with Docker
+# Or with Docker (multi-stage build: bun → go → debian:bookworm-slim)
 docker build -t spotiflac:local .
 docker run -p 6890:6890 \
   -e JELLYFIN_URL=http://your-jellyfin:8096 \
@@ -158,20 +170,28 @@ docker run -p 6890:6890 \
   spotiflac:local
 ```
 
+The Dockerfile pipeline:
+
+1. **Stage 1 (`oven/bun:1`)** — install frontend dependencies and run `bun run build`.
+2. **Stage 2 (`golang:1.26-bookworm`)** — copy frontend `dist`, run `go mod tidy`, build a static binary with `-s -w` flags.
+3. **Stage 3 (`debian:bookworm-slim`)** — install `ffmpeg`, `ca-certificates`, `tzdata`, drop privileges to `nonroot` (uid `1000`), copy the binary to `/usr/local/bin/spotiflac`.
+
 ---
 
 ## Jellyfin co-location (same host)
 
-If Jellyfin runs on the same Docker host, use the Docker host IP or a shared network instead of `localhost`:
+If Jellyfin runs on the same Docker host, use the Docker host IP or a shared network instead of `localhost` (which inside the container points to the container itself, not the host):
 
 ```yaml
 services:
   spotiflac:
     # ...
     environment:
-      - JELLYFIN_URL=http://jellyfin:8096   # if on same Docker network
+      - JELLYFIN_URL=http://jellyfin:8096           # if on same Docker network
       # or
-      - JELLYFIN_URL=http://172.17.0.1:8096 # Docker bridge host IP
+      - JELLYFIN_URL=http://172.17.0.1:8096          # Docker bridge gateway
+      # or
+      - JELLYFIN_URL=http://host.docker.internal:8096 # Docker Desktop
     networks:
       - jellyfin_network
 
@@ -179,6 +199,15 @@ networks:
   jellyfin_network:
     external: true
 ```
+
+---
+
+## CI/CD
+
+The repository ships with two GitHub Actions workflows:
+
+- **`.github/workflows/docker.yml`** — runs on every `v*.*.*` tag. Builds the frontend, runs `go test ./... -v`, builds and pushes a multi-arch Docker image to `ghcr.io/<owner>/spotiflac` with tags `{version}`, `{major}.{minor}` and `latest`. Creates a GitHub Release with auto-generated notes.
+- **`.github/workflows/upstream-check.yml`** — periodic check against `afkarxyz/SpotiFLAC` upstream. Surfaces drift in tracked source files. See `check-upstream.sh` at the repo root for the local equivalent.
 
 ---
 
