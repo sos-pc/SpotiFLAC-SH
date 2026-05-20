@@ -162,6 +162,9 @@ func (s *Server) registerV1Routes() {
 
 	// ── Search, tracks, files, audio, media, settings, system ────────────
 	s.registerFileRoutes()
+
+	// ── Admin maintenance ─────────────────────────────────────────────────
+	s.registerAdminRoutes()
 }
 
 // v1LocalLogin handles POST /api/v1/auth/local — auto-login on direct LAN access.

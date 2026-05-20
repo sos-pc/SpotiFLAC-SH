@@ -3,6 +3,8 @@ package meta
 import (
 	"fmt"
 	"io/fs"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -122,4 +124,142 @@ func readSpotifyIDFromFFprobe(path string) (string, error) {
 		return "", err
 	}
 	return tags[strings.ToLower(SpotifyIDTagKey)], nil
+}
+
+
+
+// WriteSpotifyIDTag writes the SPOTIFY_ID tag to an existing audio file
+// without touching any other metadata. Used to retro-fit legacy files
+// downloaded before the tag was systematically embedded.
+//
+// Returns true if the tag was written, false if it was already present
+// with the same value (no-op).
+func WriteSpotifyIDTag(path, spotifyID string) (bool, error) {
+	if spotifyID == "" {
+		return false, fmt.Errorf("spotifyID is required")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	existing, _ := readSpotifyIDFromFile(path, ext)
+	if existing == spotifyID {
+		return false, nil
+	}
+	switch ext {
+	case ".flac":
+		return true, writeSpotifyIDToFlac(path, spotifyID)
+	case ".mp3":
+		return true, writeSpotifyIDToMp3(path, spotifyID)
+	case ".m4a":
+		return true, writeSpotifyIDToM4A(path, spotifyID)
+	}
+	return false, fmt.Errorf("unsupported file extension: %s", ext)
+}
+
+func writeSpotifyIDToFlac(path, spotifyID string) error {
+	f, err := flac.ParseFile(path)
+	if err != nil {
+		return fmt.Errorf("parse FLAC: %w", err)
+	}
+
+	cmtIdx := -1
+	var cmt *flacvorbis.MetaDataBlockVorbisComment
+	for idx, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cmtIdx = idx
+			cmt, _ = flacvorbis.ParseFromMetaDataBlock(*block)
+			break
+		}
+	}
+	if cmt == nil {
+		cmt = flacvorbis.New()
+	}
+
+	// Drop any existing SPOTIFY_ID entries (case-insensitive) before re-adding.
+	filtered := make([]string, 0, len(cmt.Comments))
+	for _, comment := range cmt.Comments {
+		parts := strings.SplitN(comment, "=", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], SpotifyIDTagKey) {
+			continue
+		}
+		filtered = append(filtered, comment)
+	}
+	cmt.Comments = filtered
+	if err := cmt.Add(SpotifyIDTagKey, spotifyID); err != nil {
+		return fmt.Errorf("add tag: %w", err)
+	}
+
+	block := cmt.Marshal()
+	if cmtIdx < 0 {
+		f.Meta = append(f.Meta, &block)
+	} else {
+		f.Meta[cmtIdx] = &block
+	}
+	if err := f.Save(path); err != nil {
+		return fmt.Errorf("save FLAC: %w", err)
+	}
+	return nil
+}
+
+func writeSpotifyIDToMp3(path, spotifyID string) error {
+	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+	if err != nil {
+		return fmt.Errorf("open MP3: %w", err)
+	}
+	defer tag.Close()
+
+	// Remove any pre-existing TXXX:SPOTIFY_ID frames before adding ours.
+	kept := []id3v2.Framer{}
+	for _, frame := range tag.GetFrames("TXXX") {
+		txxx, ok := frame.(id3v2.UserDefinedTextFrame)
+		if ok && strings.EqualFold(txxx.Description, SpotifyIDTagKey) {
+			continue
+		}
+		kept = append(kept, frame)
+	}
+	tag.DeleteFrames("TXXX")
+	for _, f := range kept {
+		tag.AddFrame("TXXX", f)
+	}
+	tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: SpotifyIDTagKey,
+		Value:       spotifyID,
+	})
+	if err := tag.Save(); err != nil {
+		return fmt.Errorf("save MP3: %w", err)
+	}
+	return nil
+}
+
+func writeSpotifyIDToM4A(path, spotifyID string) error {
+	ffmpegPath, err := util.GetFFmpegPath()
+	if err != nil {
+		return fmt.Errorf("ffmpeg not found: %w", err)
+	}
+	if err := util.ValidateExecutable(ffmpegPath); err != nil {
+		return fmt.Errorf("invalid ffmpeg: %w", err)
+	}
+
+	tmpOut := strings.TrimSuffix(path, filepath.Ext(path)) + ".retag" + filepath.Ext(path)
+	defer func() {
+		if _, statErr := os.Stat(tmpOut); statErr == nil {
+			_ = os.Remove(tmpOut)
+		}
+	}()
+
+	cmd := exec.Command(ffmpegPath,
+		"-i", path,
+		"-map", "0",
+		"-codec", "copy",
+		"-metadata", SpotifyIDTagKey+"="+spotifyID,
+		"-f", "ipod",
+		"-y",
+		tmpOut,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ffmpeg retag: %s - %w", string(output), err)
+	}
+	if err := os.Rename(tmpOut, path); err != nil {
+		return fmt.Errorf("rename retagged file: %w", err)
+	}
+	return nil
 }
