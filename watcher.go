@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
@@ -149,95 +150,13 @@ func (w *Watcher) checkAll() {
 	}
 }
 
-// checkM3U8Integrity vérifie que le M3U8 sur disque correspond aux fichiers
-// réellement présents parmi les jobs done/skipped de cette watchlist.
-// Appelée uniquement au démarrage du serveur (NewWatcher) pour réparer d'éventuels
-// écarts après un crash ou redémarrage. Corrige en appelant generateM3U8ForPlaylist.
+// checkM3U8Integrity is a startup-only recovery hook. The new generation
+// pipeline is filesystem-driven and idempotent (atomic write), so the only
+// thing left to do at boot is regenerate every watchlist M3U8 to absorb any
+// drift accumulated while the server was offline (manual file moves, settings
+// changes, partial crashes mid-batch).
 func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
-	app := &App{}
-	var settings map[string]interface{}
-	if pl.UserID != "" && w.auth != nil {
-		if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
-			settings = profile.Settings
-		}
-	}
-	if settings == nil {
-		var err error
-		settings, err = app.LoadSettings()
-		if err != nil || settings == nil {
-			return
-		}
-	}
-	createM3u8, _ := settings["createM3u8File"].(bool)
-	if !createM3u8 {
-		return
-	}
-
-	outputDir := pl.Settings.DownloadPath
-	if outputDir == "" {
-		outputDir = "/home/nonroot/Music"
-	}
-	safeName := util.SanitizeFilename(pl.Name)
-	if safeName == "" {
-		safeName = "playlist"
-	}
-	m3u8Path := filepath.Join(outputDir, "Playlists", safeName+".m3u8")
-
-	// Collecter les jobs done/skipped avec FilePath pour cette watchlist.
-	// Dédupliquer par SpotifyID (garder le plus récent).
-	jobs, err := w.jm.GetAllJobs()
-	if err != nil {
-		return
-	}
-	latestJob := make(map[string]Job)
-	for _, job := range jobs {
-		if job.WatchlistID != pl.ID || job.FilePath == "" {
-			continue
-		}
-		if job.Status != StatusDone && job.Status != StatusSkipped {
-			continue
-		}
-		key := job.SpotifyID
-		if key == "" {
-			key = job.ID
-		}
-		if prev, ok := latestJob[key]; !ok || job.UpdatedAt.After(prev.UpdatedAt) {
-			latestJob[key] = job
-		}
-	}
-
-	// Compter les fichiers effectivement présents sur disque.
-	validCount := 0
-	for _, job := range latestJob {
-		if _, err := os.Stat(job.FilePath); err == nil {
-			validCount++
-		}
-	}
-
-	// Lire le M3U8 existant et compter ses entrées.
-	m3u8Count := -1 // -1 = fichier absent
-	if data, err := os.ReadFile(m3u8Path); err == nil {
-		m3u8Count = 0
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				m3u8Count++
-			}
-		}
-	}
-
-	switch {
-	case validCount == 0:
-		// Rien de téléchargé : pas de M3U8 à vérifier.
-	case m3u8Count == -1:
-		fmt.Printf("[Watcher] Integrity %s: M3U8 absent, %d fichiers valides → régénération\n", pl.Name, validCount)
-		w.generateM3U8ForPlaylist(pl.ID)
-	case m3u8Count != validCount:
-		fmt.Printf("[Watcher] Integrity %s: M3U8=%d entrées, fichiers valides=%d → régénération\n", pl.Name, m3u8Count, validCount)
-		w.generateM3U8ForPlaylist(pl.ID)
-	default:
-		fmt.Printf("[Watcher] Integrity %s: OK (%d/%d)\n", pl.Name, m3u8Count, validCount)
-	}
+	w.generateM3U8ForPlaylist(pl.ID)
 }
 
 // syncPlaylist récupère les métadonnées Spotify, compare avec les tracks déjà
@@ -442,11 +361,10 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		}
 	}
 
-	// Régénérer le M3U8 à chaque sync quand aucun nouveau batch n'est en cours.
-	// Si len(newTracks) > 0, OnBatchComplete s'en chargera après les téléchargements.
-	if len(newTracks) == 0 {
-		w.generateM3U8ForPlaylist(pl.ID)
-	}
+	// Régénérer le M3U8 systématiquement à chaque sync. La fonction est
+	// idempotente (rename atomique) : si OnBatchComplete tourne ensuite à
+	// la fin du batch, le dernier write gagne et le M3U8 reste cohérent.
+	w.generateM3U8ForPlaylist(pl.ID)
 
 	// Notifier le frontend que la sync est terminée
 	w.jm.hub.publish(JobEvent{
@@ -1274,16 +1192,61 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // M3U8 generation pour Jellyfin
 // ─────────────────────────────────────────────────────────────────────────────
 
+// generateM3U8ForPlaylist writes the M3U8 file for a watchlist by resolving
+// each Spotify ID in pl.TrackIDs against the filesystem, via the SPOTIFY_ID
+// tag embedded in audio files at download time. BoltDB jobs are used only
+// as a fallback for legacy files that don't yet carry the tag.
+//
+// The filesystem is the source of truth: the M3U8 reflects what is actually
+// on disk, in the order Spotify reports the playlist. Files moved, renamed,
+// or copied keep working as long as the tag is preserved.
 func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 	pl, err := w.getWatchlistByID(watchlistID)
 	if err != nil || pl == nil {
 		return
 	}
 
+	settings := w.loadM3U8Settings(pl)
+	if settings == nil {
+		return
+	}
+
+	outputDir := pl.Settings.DownloadPath
+	if outputDir == "" {
+		outputDir = "/home/nonroot/Music"
+	}
+
+	paths := w.resolveTrackPaths(pl, outputDir)
+	if len(paths) == 0 {
+		return
+	}
+
+	playlistDir := filepath.Join(outputDir, "Playlists")
+	if err := os.MkdirAll(playlistDir, 0755); err != nil {
+		fmt.Printf("[Watcher] M3U8: failed to create Playlists dir: %v\n", err)
+		return
+	}
+
+	app := &App{}
+	if err := app.CreateM3U8File(pl.Name, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
+		fmt.Printf("[Watcher] M3U8: failed to create %s: %v\n", pl.Name, err)
+		return
+	}
+	fmt.Printf("[Watcher] M3U8: %s.m3u8 written (%d entries)\n", pl.Name, len(paths))
+}
+
+// m3u8Settings holds the user settings relevant to M3U8 generation.
+type m3u8Settings struct {
+	JellyfinPath string
+}
+
+// loadM3U8Settings returns the user (or global) settings if M3U8 generation is
+// enabled, or nil if it is disabled.
+func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
 	app := &App{}
 	var settings map[string]interface{}
 	if pl.UserID != "" && w.auth != nil {
-		if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
+		if profile, err := w.auth.GetUser(pl.UserID); err == nil && profile != nil && len(profile.Settings) > 0 {
 			settings = profile.Settings
 		}
 	}
@@ -1291,84 +1254,74 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 		var err error
 		settings, err = app.LoadSettings()
 		if err != nil || settings == nil {
-			return
+			return nil
 		}
 	}
-
-	createM3u8, _ := settings["createM3u8File"].(bool)
-	if !createM3u8 {
-		return
+	if enabled, _ := settings["createM3u8File"].(bool); !enabled {
+		return nil
 	}
 	jellyfinPath, _ := settings["jellyfinMusicPath"].(string)
+	return &m3u8Settings{JellyfinPath: jellyfinPath}
+}
 
-	outputDir := pl.Settings.DownloadPath
-	if outputDir == "" {
-		outputDir = "/home/nonroot/Music"
+// resolveTrackPaths returns the ordered list of file paths matching pl.TrackIDs.
+// Resolution order per ID:
+//  1. Filesystem index built from SPOTIFY_ID tags under outputDir.
+//  2. BoltDB job FilePath (legacy fallback for files without the tag).
+//
+// Tracks that resolve to no existing file are skipped silently.
+func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []string {
+	index, err := meta.BuildSpotifyIDIndex(outputDir)
+	if err != nil {
+		fmt.Printf("[Watcher] M3U8: index build failed for %s: %v\n", pl.Name, err)
+		index = map[string]string{}
 	}
 
-	// Construire la map position depuis TrackIDs (ordre de la playlist Spotify)
-	posMap := make(map[string]int, len(pl.TrackIDs))
-	for i, id := range pl.TrackIDs {
-		posMap[id] = i
-	}
+	legacy := w.legacyJobPaths(pl.ID)
 
-	// Source unique : jobs BoltDB StatusDone/StatusSkipped avec FilePath.
-	// Même source que checkM3U8Integrity — cohérence garantie.
+	paths := make([]string, 0, len(pl.TrackIDs))
+	for _, spotifyID := range pl.TrackIDs {
+		if path := index[spotifyID]; path != "" {
+			paths = append(paths, path)
+			continue
+		}
+		if path := legacy[spotifyID]; path != "" {
+			if _, statErr := os.Stat(path); statErr == nil {
+				paths = append(paths, path)
+			}
+		}
+	}
+	return paths
+}
+
+// legacyJobPaths returns the SpotifyID→FilePath map from BoltDB jobs for a
+// given watchlist, used as fallback for files that don't yet carry the
+// SPOTIFY_ID tag (downloaded before this change).
+func (w *Watcher) legacyJobPaths(watchlistID string) map[string]string {
 	jobs, err := w.jm.GetAllJobs()
 	if err != nil {
-		return
+		return map[string]string{}
 	}
-	latestJob := make(map[string]Job)
+	type jobRef struct {
+		path      string
+		updatedAt time.Time
+	}
+	latest := make(map[string]jobRef)
 	for _, job := range jobs {
-		if job.WatchlistID != pl.ID || job.FilePath == "" {
+		if job.WatchlistID != watchlistID || job.FilePath == "" || job.SpotifyID == "" {
 			continue
 		}
 		if job.Status != StatusDone && job.Status != StatusSkipped {
 			continue
 		}
-		key := job.SpotifyID
-		if key == "" {
-			key = job.ID
-		}
-		if prev, ok := latestJob[key]; !ok || job.UpdatedAt.After(prev.UpdatedAt) {
-			latestJob[key] = job
+		prev, ok := latest[job.SpotifyID]
+		if !ok || job.UpdatedAt.After(prev.updatedAt) {
+			latest[job.SpotifyID] = jobRef{path: job.FilePath, updatedAt: job.UpdatedAt}
 		}
 	}
-
-	type entry struct {
-		pos  int
-		path string
+	out := make(map[string]string, len(latest))
+	for id, ref := range latest {
+		out[id] = ref.path
 	}
-	var entries []entry
-	for _, job := range latestJob {
-		if _, err := os.Stat(job.FilePath); err != nil {
-			continue // fichier supprimé ou déplacé
-		}
-		pos, ok := posMap[job.SpotifyID]
-		if !ok {
-			pos = len(pl.TrackIDs) // track hors playlist → à la fin
-		}
-		entries = append(entries, entry{pos: pos, path: job.FilePath})
-	}
-	if len(entries) == 0 {
-		return
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].pos < entries[j].pos
-	})
-	paths := make([]string, len(entries))
-	for i, e := range entries {
-		paths[i] = e.path
-	}
-
-	playlistDir := outputDir + "/Playlists"
-	if err := os.MkdirAll(playlistDir, 0755); err != nil {
-		fmt.Printf("[Watcher] M3U8: failed to create Playlists dir: %v\n", err)
-		return
-	}
-	if err := app.CreateM3U8File(pl.Name, playlistDir, paths, jellyfinPath, outputDir); err != nil {
-		fmt.Printf("[Watcher] M3U8: failed to create %s: %v\n", pl.Name, err)
-	} else {
-		fmt.Printf("[Watcher] M3U8: created %s.m3u8\n", pl.Name)
-	}
+	return out
 }
