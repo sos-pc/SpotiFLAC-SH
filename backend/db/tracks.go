@@ -143,3 +143,28 @@ func GetTrackByISRC(ctx context.Context, q Querier, isrc string) (*Track, error)
 	t.Explicit = explicit != 0
 	return &t, nil
 }
+
+
+// UpsertTrackStub creates a placeholder track row with only spotify_id set
+// if no row exists yet. Used by the watcher when it receives a list of
+// track IDs from a Spotify playlist sync but has not yet fetched the full
+// metadata for each. Subsequent UpsertTrack calls fill in real data.
+//
+// No-op if the track already exists. Like UpsertAlbumStub, this keeps FK
+// invariants satisfiable across the catalog without forcing a strict
+// "fetch full metadata before any junction insert" workflow on callers.
+func UpsertTrackStub(ctx context.Context, q Querier, spotifyID string) error {
+	if spotifyID == "" {
+		return errors.New("track stub: spotify_id required")
+	}
+	now := time.Now().Unix()
+	_, err := q.ExecContext(ctx, `
+		INSERT INTO tracks (spotify_id, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT (spotify_id) DO NOTHING
+	`, spotifyID, now, now)
+	if err != nil {
+		return fmt.Errorf("upsert track stub %s: %w", spotifyID, err)
+	}
+	return nil
+}
