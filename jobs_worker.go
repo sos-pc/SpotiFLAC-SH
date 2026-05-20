@@ -74,6 +74,7 @@ func (jm *JobManager) processJob(jobID string) {
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
+		jm.recordCatalogSkipped(job)
 		if job.WatchlistID != "" {
 			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		}
@@ -104,6 +105,7 @@ func (jm *JobManager) processJob(jobID string) {
 		job.UpdatedAt = time.Now()
 		jm.saveJob(job)
 		jm.notifyJob(job)
+		jm.recordCatalogFailed(job)
 		if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil {
 			if isPermanentFailure(errMsg) {
 				jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
@@ -127,6 +129,7 @@ func (jm *JobManager) processJob(jobID string) {
 	job.UpdatedAt = time.Now()
 	jm.saveJob(job)
 	jm.notifyJob(job)
+	jm.recordCatalogDone(job)
 	fmt.Printf("[Jobs] Done: %s\n", job.TrackName)
 
 	if job.WatchlistID != "" {

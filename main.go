@@ -56,7 +56,7 @@ func main() {
 	}
 
 	// ── Job manager (workers + cleanup) ───────────────────────────────────
-	jobs, err := NewJobManager(configDir, db)
+	jobs, err := NewJobManager(configDir, db, catalog)
 	if err != nil {
 		fmt.Printf("FATAL: cannot init job manager: %v\n", err)
 		os.Exit(1)

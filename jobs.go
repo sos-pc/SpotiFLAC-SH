@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -159,6 +160,7 @@ type JobEventHandler interface {
 
 type JobManager struct {
 	db             *bolt.DB
+	catalog        *sql.DB // SQLite catalog: tracks, library_files, download_attempts
 	queue          chan string
 	songLinkSem    chan struct{}
 	songLinkClient *songlink.SongLinkClient
@@ -185,8 +187,10 @@ func (jm *JobManager) SetEventHandler(h JobEventHandler) {
 }
 
 // NewJobManager opens BoltDB, creates buckets, starts workers and the
-// periodic cleanup goroutine.
-func NewJobManager(configDir string, db *bolt.DB) (*JobManager, error) {
+// periodic cleanup goroutine. catalog is the SQLite handle returned by
+// backend/db.Open; the manager records every terminal transition there
+// (best-effort, errors logged not propagated).
+func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager, error) {
 	err := db.Update(func(tx *bolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists(bucketJobs); err != nil {
 			return err
@@ -204,6 +208,7 @@ func NewJobManager(configDir string, db *bolt.DB) (*JobManager, error) {
 
 	jm := &JobManager{
 		db:             db,
+		catalog:        catalog,
 		queue:          make(chan string, 10000),
 		songLinkSem:    make(chan struct{}, 1),
 		songLinkClient: songlink.GetSongLinkClient(),
