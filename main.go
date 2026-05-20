@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -37,6 +38,17 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+
+	// ── SQLite catalog ────────────────────────────────────────────────────
+	// Long-term store for tracks/library_files/download_attempts/snapshots.
+	// Survives BoltDB cleanup; source of truth for M3U8 generation once
+	// populated.
+	catalog, err := catalogdb.Open(configDir)
+	if err != nil {
+		fmt.Printf("FATAL: cannot open catalog database: %v\n", err)
+		os.Exit(1)
+	}
+	defer catalog.Close()
 
 	// ── History buckets (partagés dans jobs.db) ───────────────────────────
 	if err := backend.InitHistoryDBShared(db); err != nil {
@@ -68,6 +80,7 @@ func main() {
 	// ── Container (DI) ───────────────────────────────────────────────────
 	ctr := &Container{
 		DB:      db,
+		Catalog: catalog,
 		Jobs:    jobs,
 		Auth:    auth,
 		Watcher: watcher,
