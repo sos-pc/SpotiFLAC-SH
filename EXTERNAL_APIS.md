@@ -1,94 +1,176 @@
 # External APIs & Dependencies
 
-SpotiFLAC relies on a complex ecosystem of official public APIs, undocumented endpoints, and community-hosted proxies to achieve "Zero-Account" FLAC downloading.
+SpotiFLAC relies on a layered ecosystem of official public APIs, undocumented endpoints, and community-hosted proxies to achieve "zero-account" FLAC downloading.
 
 This document catalogs every external resource used by the backend.
 
-> **Proxy configuration:** All community proxy lists for Tidal, Qobuz, Amazon and Deezer are editable at runtime via **Settings → APIs → Proxy Configuration** (or `PUT /api/v1/apis/proxies`). Changes apply immediately without restart.
+> **Configurable.** All community proxy lists for Tidal, Qobuz, Amazon and Deezer are editable at runtime via **Settings → APIs → Proxy Configuration** (or `PUT /api/v1/apis/proxies`). Changes apply immediately without restart. Submitting an empty list resets to factory defaults.
 
 ---
 
-## 1. Metadata & Link Matching (The Core)
+## 1. Metadata & link matching (the core)
+
 Before downloading any audio, SpotiFLAC must fetch metadata from Spotify and find the equivalent track on a lossless platform (Tidal, Qobuz, Amazon, Deezer).
 
 ### Spotify
-Used strictly for gathering metadata (track names, artists, album art, release dates, IDs).
-* **`https://api-partner.spotify.com/pathfinder/v2/query`** — Undocumented GraphQL endpoint used by the Spotify Web Player.
-* **`https://open.spotify.com/api/token`** — Used to anonymously generate client credentials tokens.
-* **`https://i.scdn.co/image/`** — Spotify's CDN for downloading high-resolution cover art.
-* **`https://p.scdn.co/mp3-preview/`** — Used to fetch 30-second audio previews.
+Used strictly for metadata (track names, artists, album art, release dates, IDs).
+
+- **`https://api-partner.spotify.com/pathfinder/v2/query`** — Undocumented GraphQL endpoint used by the Spotify Web Player. Authenticated via a TOTP-derived bearer token generated client-side.
+- **`https://open.spotify.com/api/token`** — Used to anonymously generate client credentials tokens.
+- **`https://i.scdn.co/image/`** — Spotify's CDN for downloading high-resolution cover art.
+- **`https://p.scdn.co/mp3-preview/`** — 30-second audio previews.
+
+When the native scraper fails, SpotiFLAC can transparently fall back to a SpotFetch-compatible API if `spotFetchAPIUrl` is set in user settings (default points to `https://spotify.afkarxyz.fun/api`).
 
 ### Odesli (Song.link)
-The primary matching engine used to convert a Spotify ID into a Tidal/Qobuz/Amazon link, or extract the ISRC.
-* **`https://api.song.link/v1-alpha.1/links`** — The official JSON API. *Note: Heavily rate-limited (HTTP 429).*
-* **`https://song.link/s/{id}`** — HTML fallback. When the JSON API is rate-limited, SpotiFLAC scrapes the `__NEXT_DATA__` blob from the webpage to bypass restrictions.
+The primary matching engine used to convert a Spotify ID into a Tidal/Qobuz/Amazon link, or to extract the ISRC.
 
-### Deezer (Public API)
-Used as a fallback to resolve ISRC when Song.link fails, and as a download source (see below).
-* **`https://api.deezer.com/search`** — Public search endpoint.
-* **`https://api.deezer.com/track/`** — Track metadata endpoint.
+- **`https://api.song.link/v1-alpha.1/links`** — Official JSON API. *Heavily rate-limited (HTTP 429).*
+- **`https://song.link/s/{spotifyID}`** — HTML fallback. When the JSON API is rate-limited, SpotiFLAC scrapes the `__NEXT_DATA__` blob from the page.
+- **`https://song.link/i/{appleMusicID}`** — Apple Music quota path. SpotiFLAC reaches it via iTunes Search (`itunes.apple.com/search`) when the Spotify path is rate-limited; the two quotas are independent.
 
----
+### Deezer (public API)
+Used as ISRC fallback when Song.link is rate-limited, **and** as a download source.
 
-## 2. Audio Downloading (The Providers)
-
-SpotiFLAC tries providers in order: **Tidal → Qobuz → Amazon → Deezer**. Each provider supports a list of proxies with automatic fallback to the next proxy on failure.
-
-### 🌊 Tidal (Primary Provider)
-
-**Official APIs:**
-* **`https://login.tidal.com/authorize`** & **`https://auth.tidal.com/v1/oauth2/token`** — PKCE Web OIDC flow (requires a Premium account).
-* **`https://api.tidal.com/v1/search/tracks`** — Search tracks by name using a hardcoded public web token.
-* **`https://api.tidal.com/v1/tracks?isrc=...`** — Find Tidal tracks by ISRC.
-* **`https://api.tidal.com/v1/tracks/{id}/playbackinfopostpaywall`** — Returns the FLAC manifest. *Requires a valid Premium Token (PKCE).*
-
-**Tidal Device Code Credentials:**
-The OAuth 2.0 Device Code flow uses `client_id: 4N3n6Q1x95LL5K7p` — sourced from [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal). The previous TV client_id (`fX2JxdmntZWK0ixT`) conflicted with the Tidal desktop app. See [CREDITS.md](CREDITS.md) for details.
-
-**Community HiFi Proxies (fallback when no personal token):**
-
-> ⚠️ **Status as of May 2026:** All known community proxies are online as servers but return `assetPresentation: "PREVIEW"` (30-second segments) only — Tidal has restricted community tokens to preview access. **Full FLAC downloads require a personal Premium PKCE token** (Settings → Tidal Account). The proxies below are kept so the token flow can use them as the API layer.
-
-* `https://eu-central.monochrome.tf` — v2.10 ✅
-* `https://us-west.monochrome.tf` — v2.10 ✅
-* `https://hifi-api.kennyy.com.br` — v2.10 ✅
-* `https://api.monochrome.tf` — v2.5 ✅
-* `https://monochrome-api.samidy.com` — v2.3 ✅
-* Self-hosted option: **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — fork of sachinsenal0x64/hifi, runs on port 8000, compatible with the Tidal proxy slot.
-
-### 🟡 Qobuz (Fallback 1)
-
-* **`https://www.qobuz.com/api.json/0.2/track/search`** — Search tracks by ISRC.
-* **`https://www.musicdl.me/api/qobuz/download`** — Primary community stream proxy (musicdl.me). Uses POST + `X-Debug-Key` header (AES-256-GCM derived). Added upstream May 2026.
-* **`https://dab.yeet.su/api/stream`** — Secondary community stream proxy (⚠️ unreachable as of May 2026).
-* **`https://dabmusic.xyz/api/stream`** — Tertiary community stream proxy (⚠️ Cloudflare-protected, inaccessible to API clients as of May 2026).
-
-### 🟠 Amazon Music (Fallback 2)
-
-Amazon tracks are delivered as encrypted `.m4a` files and decrypted via FFmpeg.
-* **`https://amazon.spotbye.qzz.io/api/track/`** — Community stream proxy (spotbye). Requires `X-Debug-Key` header (AES-256-GCM derived). Domain updated May 2026 from `amzn.afkarxyz.fun`.
-
-### 🟣 Deezer (Fallback 3)
-
-Deezer downloads are resolved via ISRC lookup on the public Deezer API, then fetched through community proxies.
-* **`https://api.deezmate.com/dl/`** — Community stream proxy.
-
-Multiple proxies are supported; SpotiFLAC tries each in order until one succeeds.
-
-> **Note:** Deezer proxy availability depends on community-maintained instances. If the proxy list in the default configuration is outdated, add working instances via **Settings → APIs → Proxy Configuration**.
+- **`https://api.deezer.com/search`** — Public search endpoint.
+- **`https://api.deezer.com/track/{id}`** — Track metadata endpoint.
 
 ---
 
-## 3. Lyrics & Tags
+## 2. Audio downloading (the providers)
 
-* **LRCLIB (`https://lrclib.net/api/`)** — Synchronized (LRC) and unsynchronized lyrics. SpotiFLAC attempts an exact match (`/api/get`) based on track length, with fuzzy search (`/api/search`) as fallback.
-* **MusicBrainz (`https://musicbrainz.org/ws/2`)** — Supplementary album/artist metadata (genre, etc.) when `embed_genre` is enabled.
+When `downloader = "auto"`, providers are tried in the order configured by `autoOrder` (24 permutations of `tidal`, `qobuz`, `amazon`, `deezer`). Each provider supports a list of community proxies with automatic fallback to the next proxy on failure.
+
+### Tidal (primary provider)
+
+**Official APIs**
+
+- **`https://auth.tidal.com/v1/oauth2/device_authorization`** + **`/token`** — OAuth 2.0 Device Code Flow (RFC 8628). Used for personal Premium account authentication. See [docs/tidal-auth.md](docs/tidal-auth.md).
+- **`https://api.tidal.com/v1/search/tracks`** — Search tracks by name with a hardcoded public web token.
+- **`https://api.tidal.com/v1/tracks?isrc=…`** — Find Tidal tracks by ISRC.
+- **`https://api.tidal.com/v1/tracks/{id}/playbackinfopostpaywall`** — Returns the FLAC manifest. *Requires a valid Premium token.*
+- **`https://api.tidal.com/v1/sessions`** — Used to fetch the user's `countryCode` after auth.
+
+**Device Code credentials**
+
+The flow uses application credentials sourced from [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal):
+
+```
+client_id     = 4N3n6Q1x95LL5K7p
+client_secret = oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik=
+```
+
+These are public application credentials shared across the community. The previous TV `client_id` (`fX2JxdmntZWK0ixT`) was retired because it conflicts with the official Tidal desktop application's client ID, causing the desktop app to be forcibly disconnected. See [CREDITS.md](CREDITS.md).
+
+**Community HiFi proxies (default Tidal list, May 2026)**
+
+- `https://eu-central.monochrome.tf` — v2.10
+- `https://us-west.monochrome.tf` — v2.10
+- `https://hifi-api.kennyy.com.br` — v2.10
+- `https://api.monochrome.tf` — v2.5
+- `https://monochrome-api.samidy.com` — v2.3
+
+> **Status, May 2026.** All community proxies are reachable as servers but Tidal returns `assetPresentation: "PREVIEW"` (30-second segments) for every request without a personal Premium token. **Full FLAC downloads require authentication via Settings → Tidal Account.** The proxies remain useful as the API layer that the personal token rides on top of.
+
+**Auto-discovery — `tidal-uptime.geeked.wtf`**
+
+A goroutine runs every 6 hours (with a 0–30 s startup jitter to avoid thundering herd) and queries the upstream feed:
+
+- **`https://tidal-uptime.geeked.wtf`** — JSON-formatted live status of community Tidal HiFi proxies. Sections: `streaming` (full streaming verified), `api` (server up), `down` (confirmed unreachable).
+
+The result is merged into `GetTidalProxiesEffective()` in three tiers: discovered-up first, then user-configured proxies not in discovered-down, then user-configured proxies in discovered-down (last resort). The user's saved configuration is **never modified** by this overlay; auto-discovered proxies are exposed read-only via the `tidal_discovered` field of `GET /api/v1/apis/proxies`.
+
+The last result is persisted in BoltDB so the effective list is correct immediately after a server restart, even before the next scheduled run. Cached results older than 24 hours are ignored on startup.
+
+**Self-hosted alternative**
+
+[binimum/hifi-api](https://github.com/binimum/hifi-api) — fork of `sachinsenal0x64/hifi`, a self-hostable Python proxy compatible with the Tidal proxy slot.
+
+### Qobuz (fallback 1)
+
+- **`https://www.qobuz.com/api.json/0.2/track/search`** — Search tracks by ISRC (official, no auth).
+- **`https://www.musicdl.me/api/qobuz/download`** — Primary community stream proxy. Uses POST with an `X-Debug-Key` header (AES-256-GCM derived). Added upstream in May 2026 — see `backend/qobuz/client.go` for the request shape.
+
+**Default `qobuz_providers` list (May 2026)**
+
+Empty. The previously bundled GET-based providers are all unreachable:
+
+- `https://dab.yeet.su/api/stream` — DNS dead.
+- `https://dabmusic.xyz/api/stream` — Cloudflare bot protection blocks programmatic access.
+- `https://qbz.afkarxyz.qzz.io/api/stream` — Removed by upstream.
+
+Add working self-hosted instances via **Settings → APIs → Proxy Configuration**.
+
+### Amazon Music (fallback 2)
+
+Amazon tracks are delivered as encrypted `.m4a` files and decrypted via FFmpeg with `-decryption_key`.
+
+- **`https://amazon.spotbye.qzz.io`** — Community stream proxy (spotbye). Requires `X-Debug-Key` header (AES-256-GCM derived). The `/status` endpoint is used for health checks (a `401` response confirms the server is up and rejecting unauthenticated requests).
+
+> Domain updated May 2026 from `https://amzn.afkarxyz.fun` → `https://amazon.spotbye.qzz.io`.
+
+### Deezer (fallback 3)
+
+Resolved via ISRC lookup on the public Deezer API, then fetched through community proxies.
+
+- **`https://api.deezmate.com/dl/{trackID}`** — Community stream proxy.
+
+The proxy list supports multiple instances; SpotiFLAC tries each in order until one succeeds.
+
+> Deezer proxy availability depends on community-maintained instances. If the default list is outdated, add working instances via **Settings → APIs → Proxy Configuration**.
 
 ---
 
-## 4. Dependencies & Binaries
+## 3. Lyrics & tags
 
-* **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — Used on first launch to auto-download the correct `ffmpeg` and `ffprobe` binaries for the host OS (Windows, Linux, macOS) if not already installed. In Docker deployments, FFmpeg is pre-installed and this step is skipped.
+- **LRCLIB (`https://lrclib.net/api/`)** — Synchronized (LRC) and unsynchronized lyrics. SpotiFLAC attempts an exact match (`/api/get`) based on track length, with fuzzy search (`/api/search`) as fallback.
+- **MusicBrainz (`https://musicbrainz.org/ws/2`)** — Supplementary album/artist metadata (genre, label, etc.) when `embedGenre` is enabled (default on).
+
+---
+
+## 4. Authentication
+
+- **Jellyfin (user-configured `JELLYFIN_URL`)** — `POST /Users/AuthenticateByName`. Used for SpotiFLAC user authentication. See [docs/authentication.md](docs/authentication.md).
+- **Tidal Auth (see Tidal section above)** — Optional Device Code flow for full FLAC.
+
+No other identity providers are supported.
+
+---
+
+## 5. Health checks
+
+`GET /api/v1/apis/status` runs a parallel health check (cached for 30 s). The probes are deeper than a simple `HEAD /` for services where uptime ≠ functionality:
+
+| Service | Probe |
+|---------|-------|
+| Tidal proxies | Real `/track/?id=441821360&quality=HI_RES_LOSSLESS` request, parses `assetPresentation` to flag `PREVIEW`-only proxies as `ratelimited` |
+| Qobuz GET providers | Real `/api/stream?trackId=20882393&quality=6` request |
+| Qobuz musicdl.me | `GET /api/qobuz/download` — Express returns `Cannot GET ...` confirming server up + POST-only route |
+| Amazon proxy | `GET /status` — `401` (no `X-Debug-Key`) confirms server is alive |
+| Deezer proxies | `GET /dl/3135556` — full request to confirm the download endpoint works |
+| Deezer public API | `GET /track/3135556` — parses JSON, flags `error` payloads |
+| Spotify (SpotFetch) | `GET /track/7qiZfU4dY1lWllzX7mPBI3` — parses JSON, requires `name` field |
+| Other (Song.link, MusicBrainz, LRCLIB, Tidal API, Jellyfin) | `HEAD /` (or `GET /` fallback). 4xx counts as `ok` (server reachable, root path may not exist). 5xx → `down`. 429 → `ratelimited`. |
+
+Status values: `ok`, `down`, `ratelimited`, `unconfigured`.
+
+The Song.link probe also overrides itself with `ratelimited` if the in-memory rate-limit cache says we're banned (independent of the HTTP response).
+
+---
+
+## 6. Dependencies & binaries
+
+- **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — used by the legacy desktop build for first-launch FFmpeg auto-install. **Not used by the web build** — the Docker image installs `ffmpeg` from the Debian repos in stage 3 of the Dockerfile.
+
+---
+
+## 7. Removed / retired endpoints
+
+For historical reference:
+
+- **PKCE Web OIDC flow** (`https://login.tidal.com/authorize` callback). Removed in favour of the Device Code flow. Some leftover frontend RPC stubs (`GetTidalAuthURL`, `SubmitTidalCallback`) reference the old endpoints but are dead code.
+- **Tidal TV `client_id` `fX2JxdmntZWK0ixT`** — replaced by `4N3n6Q1x95LL5K7p` (orpheusdl-tidal credentials) because the TV ID conflicted with the official Tidal desktop app and forced a desktop logout on every authentication.
+- **`api-partner.spotify.com/pathfinder/v1/...`** — replaced by `/v2` in upstream.
 
 ---
 
