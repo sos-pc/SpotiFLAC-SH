@@ -308,6 +308,17 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 			continue
 		}
 
+		// Catalog-based dedup: if we already have this track at equal-or-
+		// better quality and the file is still on disk, skip the enqueue
+		// entirely. Records a skipped DownloadAttempt so the audit trail
+		// shows the track was considered.
+		if dedup := jm.checkCatalogDedup(track.SpotifyID, req.Settings); dedup.skip {
+			fmt.Printf("[Jobs] Catalog dedup: %s — %s\n", track.TrackName, dedup.reason)
+			jm.recordCatalogDedupSkip(track, req, dedup.libraryFileID, dedup.reason)
+			skipped++
+			continue
+		}
+
 		job := &Job{
 			ID:           fmt.Sprintf("%s-%d", track.SpotifyID, time.Now().UnixNano()),
 			SpotifyID:    track.SpotifyID,

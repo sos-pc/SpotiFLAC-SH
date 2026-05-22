@@ -223,3 +223,108 @@ func fileSizeBytes(path string, fallbackMB float64) int64 {
 	}
 	return int64(fallbackMB * 1024 * 1024)
 }
+
+
+// catalogReadTimeout caps how long the dedup lookup blocks the enqueue
+// path. Smaller than catalogWriteTimeout because we want EnqueueBatch
+// fast: callers can wait on a download but not on a 200-track batch
+// validation.
+const catalogReadTimeout = 2 * time.Second
+
+// catalogDedupResult tells EnqueueBatch how to treat a track based on
+// the catalog state. Returned by checkCatalogDedup.
+type catalogDedupResult struct {
+	skip          bool
+	libraryFileID string
+	reason        string
+}
+
+// checkCatalogDedup decides whether a track should bypass enqueue based
+// on what the catalog already knows. Best-effort: any error or missing
+// catalog returns skip=false, so the queue still picks up the work.
+//
+// Skip rules (all must hold):
+//   - jm.catalog is set.
+//   - There is an active (non-deleted) library_file for this Spotify ID.
+//   - The file actually still exists on disk (stat succeeds).
+//   - Its quality_rank is greater than or equal to the requested one.
+//
+// The third check is critical: a stale catalog row pointing at a deleted
+// file must NOT block a legitimate re-download. The fourth ensures users
+// who upgrade their `autoQuality` to 24-bit can re-download even if the
+// catalog already has a 16-bit copy.
+func (jm *JobManager) checkCatalogDedup(spotifyID string, settings JobSettings) catalogDedupResult {
+	if jm.catalog == nil || spotifyID == "" {
+		return catalogDedupResult{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), catalogReadTimeout)
+	defer cancel()
+
+	existing, err := db.GetActiveLibraryFile(ctx, jm.catalog, spotifyID)
+	if err != nil {
+		fmt.Printf("[Catalog] dedup lookup failed for %s: %v\n", spotifyID, err)
+		return catalogDedupResult{}
+	}
+	if existing == nil {
+		return catalogDedupResult{}
+	}
+	if _, err := os.Stat(existing.FilePath); err != nil {
+		// Stale row — file was removed outside SpotiFLAC. Let the worker
+		// re-download; a separate rebuild path will eventually clean up
+		// the catalog row.
+		return catalogDedupResult{}
+	}
+
+	requestedRank := db.QualityRank(deriveCatalogQuality(settings))
+	if existing.QualityRank < requestedRank {
+		return catalogDedupResult{}
+	}
+
+	return catalogDedupResult{
+		skip:          true,
+		libraryFileID: existing.ID,
+		reason: fmt.Sprintf("already in library at %s (rank %d) ≥ requested rank %d",
+			existing.Quality, existing.QualityRank, requestedRank),
+	}
+}
+
+// recordCatalogDedupSkip writes a skipped DownloadAttempt for a track
+// that was deduped at enqueue time. No Job ever reached the queue, so
+// the caller passes the JobTrack and EnqueueBatchRequest directly.
+//
+// BatchID is intentionally left empty: these skips are not part of any
+// real batch (no worker did any work for them) and counting them in the
+// batch totals would inflate sync stats.
+func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchRequest, libraryFileID, reason string) {
+	if jm.catalog == nil || track.SpotifyID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
+	defer cancel()
+
+	if err := db.UpsertTrack(ctx, jm.catalog, &db.Track{
+		SpotifyID:   track.SpotifyID,
+		Name:        track.TrackName,
+		ArtistName:  track.ArtistName,
+		TrackNumber: track.TrackNumber,
+		DiscNumber:  track.DiscNumber,
+		DurationMs:  track.DurationMs,
+	}); err != nil {
+		fmt.Printf("[Catalog] UpsertTrack failed for dedup-skip %s: %v\n", track.SpotifyID, err)
+		return
+	}
+
+	attempt := &db.DownloadAttempt{
+		SpotifyID:     track.SpotifyID,
+		LibraryFileID: libraryFileID,
+		UserID:        req.UserID,
+		WatchlistID:   req.WatchlistID,
+		Provider:      req.Settings.Service,
+		Quality:       deriveCatalogQuality(req.Settings),
+		Status:        db.AttemptStatusSkipped,
+		Error:         reason,
+	}
+	if err := db.CreateDownloadAttempt(ctx, jm.catalog, attempt); err != nil {
+		fmt.Printf("[Catalog] CreateDownloadAttempt(dedup-skip) failed for %s: %v\n", track.SpotifyID, err)
+	}
+}
