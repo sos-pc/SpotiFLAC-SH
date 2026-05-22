@@ -332,6 +332,11 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	w.saveWatchlist(&pl)
 	w.mu.Unlock()
 
+	// Mirror current state into the SQLite catalog: track stubs,
+	// watchlist_tracks junction, and a snapshot when the contents have
+	// changed (or this is the first sync). Best-effort.
+	w.mirrorWatchlistToCatalog(&pl)
+
 	// Rename Spotify : supprimer l'ancien M3U8 (le nouveau sera créé juste après)
 	if oldName != "" {
 		appInst := &App{}
@@ -1266,21 +1271,43 @@ func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
 
 // resolveTrackPaths returns the ordered list of file paths matching pl.TrackIDs.
 // Resolution order per ID:
-//  1. Filesystem index built from SPOTIFY_ID tags under outputDir.
-//  2. BoltDB job FilePath (legacy fallback for files without the tag).
+//  1. Catalog active library_file (fast SQL JOIN, source of truth once
+//     populated by recordCatalogDone or future library-rebuild). Survives
+//     BoltDB cleanup and reflects manual file moves once the rescan flow
+//     has updated the row.
+//  2. Filesystem index built from SPOTIFY_ID tags under outputDir.
+//     Covers files just downloaded but not yet mirrored to the catalog,
+//     and tagged legacy files the catalog has not learned about yet.
+//  3. BoltDB job FilePath (legacy fallback for files without the tag).
 //
-// Tracks that resolve to no existing file are skipped silently.
+// Tracks that resolve to no existing file are skipped silently. We only
+// build the filesystem index lazily — when at least one ID was missing
+// from the catalog — to avoid a recursive walk on populated libraries.
 func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []string {
-	index, err := meta.BuildSpotifyIDIndex(outputDir)
-	if err != nil {
-		fmt.Printf("[Watcher] M3U8: index build failed for %s: %v\n", pl.Name, err)
-		index = map[string]string{}
+	catalogPaths := w.catalogPathsForWatchlist(pl)
+
+	var index map[string]string
+	if len(catalogPaths) < len(pl.TrackIDs) {
+		var err error
+		index, err = meta.BuildSpotifyIDIndex(outputDir)
+		if err != nil {
+			fmt.Printf("[Watcher] M3U8: index build failed for %s: %v\n", pl.Name, err)
+			index = map[string]string{}
+		}
 	}
 
 	legacy := w.legacyJobPaths(pl.ID)
 
 	paths := make([]string, 0, len(pl.TrackIDs))
 	for _, spotifyID := range pl.TrackIDs {
+		if path := catalogPaths[spotifyID]; path != "" {
+			if _, statErr := os.Stat(path); statErr == nil {
+				paths = append(paths, path)
+				continue
+			}
+			// Stale catalog row — file no longer at recorded path. Try
+			// the next source rather than emitting a broken M3U8 entry.
+		}
 		if path := index[spotifyID]; path != "" {
 			paths = append(paths, path)
 			continue
