@@ -201,6 +201,65 @@ The handler is **idempotent**: files that already carry the matching tag are rep
 - `403 forbidden` — caller is not admin
 - `500 ...` — BoltDB read error
 
+### `POST /api/v1/admin/library-rebuild`
+
+Walks every configured download path, reads the `SPOTIFY_ID` tag from
+each audio file, and ingests the result into the SQLite catalog. The
+union of `Settings.DownloadPath` across all watchlists plus the global
+default `downloadPath` is scanned; non-existent or unreadable paths are
+silently dropped.
+
+For each tagged file:
+
+- **Imported** — no active `library_files` row existed for the Spotify ID,
+  a fresh row is created (provider `unknown`, conservative quality based
+  on extension: FLAC/M4A → `LOSSLESS`, MP3 → `HIGH`).
+- **Verified** — an existing active row already pointed at this exact
+  path; `last_verified_at` is bumped, nothing else changes.
+- **Moved** — an existing active row pointed at a different path; its
+  `file_path` is rewritten and status reset to `present`.
+
+Files **without** a `SPOTIFY_ID` tag are reported as `no_tag` with a
+sample of paths (capped at 50) so the operator can confirm the scan is
+walking the right tree. Tag-less files are the candidates for a future
+`/admin/library-match` endpoint that will fuzzy-match them against
+Spotify metadata.
+
+The handler is **idempotent** — re-running on a stable library only
+bumps `last_verified_at` on every row.
+
+**Response `200`**
+```json
+{
+  "scan_roots": ["/home/nonroot/Music"],
+  "files_scanned": 3000,
+  "imported":      459,
+  "verified":       12,
+  "moved":           0,
+  "duplicate":       0,
+  "no_tag":       2540,
+  "failed":          0,
+  "no_tag_sample": ["/home/nonroot/Music/...", "..."]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `scan_roots` | Filesystem roots actually walked (deduped, existing). |
+| `files_scanned` | Total `.flac` / `.mp3` / `.m4a` files seen. |
+| `imported` | New `library_files` rows created. |
+| `verified` | Existing rows refreshed at the same path. |
+| `moved` | Existing rows updated to a new path. |
+| `duplicate` | Same `SPOTIFY_ID` seen twice during the scan (only the first wins). |
+| `no_tag` | Files without `SPOTIFY_ID` tag — re-tag them via `/admin/retag-legacy` if their job is still in BoltDB, else use `/admin/library-match` (upcoming). |
+| `failed` | Per-file errors (catalog write, FFprobe, FS) — see server logs for details. |
+| `no_tag_sample` | First 50 orphan paths to help locate them. |
+
+**Errors**
+- `400 no scan roots: …` — neither watchlists nor settings supply a `downloadPath`.
+- `403 forbidden` — caller is not admin.
+- `503 catalog database not available` — SQLite catalog handle is nil (mis-configured deploy).
+
 ---
 
 ## Search & Metadata

@@ -57,6 +57,26 @@ var supportedAudioExtensions = map[string]bool{
 	".m4a":  true,
 }
 
+// IsSupportedAudioExt reports whether ext (with leading dot, any case) is
+// one of the audio formats this package can read SPOTIFY_ID tags from.
+// Exposed so callers walking the filesystem (e.g. library-rebuild) can
+// filter consistently with BuildSpotifyIDIndex.
+func IsSupportedAudioExt(ext string) bool {
+	return supportedAudioExtensions[strings.ToLower(ext)]
+}
+
+// ReadSpotifyID returns the SPOTIFY_ID tag value of the audio file at
+// path, or empty string if the tag is absent or the extension is not a
+// supported audio format. The format dispatch matches BuildSpotifyIDIndex
+// (native readers for FLAC/MP3, ffprobe for M4A).
+func ReadSpotifyID(path string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if !supportedAudioExtensions[ext] {
+		return "", nil
+	}
+	return readSpotifyIDFromFile(path, ext)
+}
+
 // BuildSpotifyIDIndex walks rootDir recursively, reads the SPOTIFY_ID tag from
 // every supported audio file it finds, and returns a map from Spotify track ID
 // to absolute file path. Files without the tag are silently skipped.
