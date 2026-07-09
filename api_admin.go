@@ -145,9 +145,16 @@ func (s *Server) v1LibraryRebuild(w http.ResponseWriter, r *http.Request) {
 }
 
 // collectScanRoots returns the deduplicated list of download paths to
-// walk: union of every watchlist's Settings.DownloadPath plus the
-// global default downloadPath. Non-existent or unreadable paths are
-// silently dropped.
+// walk: the global default downloadPath, plus every watchlist's
+// Settings.DownloadPath that falls under it. Non-existent or unreadable
+// paths are silently dropped.
+//
+// Watchlist DownloadPath is attacker-influenceable: creating/updating a
+// watchlist (POST/PUT /api/v1/watchlists) is not admin-gated, so any
+// authenticated non-admin user could otherwise set it to "/", "/etc", a
+// slow network mount, etc. and redirect this admin-only maintenance walk
+// anywhere on the host. Only trust a watchlist's path when it's contained
+// within the admin-configured library root.
 func (s *Server) collectScanRoots() []string {
 	seen := make(map[string]bool)
 	out := make([]string, 0)
@@ -163,16 +170,27 @@ func (s *Server) collectScanRoots() []string {
 		out = append(out, path)
 	}
 
+	var globalRoot string
+	if settings, _ := s.app.LoadSettings(); settings != nil {
+		if path, _ := settings["downloadPath"].(string); path != "" {
+			globalRoot = path
+			addIfReadable(path)
+		}
+	}
+
 	if s.ctr.Watcher != nil {
 		if pls, err := s.ctr.Watcher.GetWatchlists(); err == nil {
 			for _, pl := range pls {
-				addIfReadable(pl.Settings.DownloadPath)
+				dp := pl.Settings.DownloadPath
+				if dp == "" {
+					continue
+				}
+				if globalRoot == "" || !isSubPath(globalRoot, dp) {
+					fmt.Printf("[Admin] library-rebuild: ignoring watchlist download path outside library root: %s\n", dp)
+					continue
+				}
+				addIfReadable(dp)
 			}
-		}
-	}
-	if settings, _ := s.app.LoadSettings(); settings != nil {
-		if path, _ := settings["downloadPath"].(string); path != "" {
-			addIfReadable(path)
 		}
 	}
 	return out

@@ -111,6 +111,8 @@ location / {
 
 > The `X-Forwarded-For` header set by the proxy is what prevents `DISABLE_AUTH_ON_LAN` from triggering on internet requests — never strip it.
 
+> **Login rate limiting behind a reverse proxy:** set `TRUST_PROXY_HEADERS=true` so the login rate limiter (`POST /api/v1/auth/login`) keys off the real client IP from `X-Forwarded-For`/`X-Real-IP` instead of the proxy's own IP. This is **off by default** — trusting those headers unconditionally would let any client on the LAN (or anything sharing a Docker network with the container) forge a fresh IP on every request and bypass the lockout entirely. Only set it when every request genuinely passes through a proxy you control that overwrites these headers (as in the examples on this page); never set it if the app is reachable directly.
+
 ### Caddy
 
 ```caddyfile

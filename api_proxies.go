@@ -102,6 +102,19 @@ func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
 	cfg.AmazonProxies = cleanList(cfg.AmazonProxies, def.AmazonProxies)
 	cfg.DeezerProxies = cleanList(cfg.DeezerProxies, def.DeezerProxies)
 
+	// Ces URLs deviennent la base de requêtes sortantes faites par le
+	// serveur (téléchargements) — un schéma non-http(s) ou une cible privée/
+	// loopback ouvrirait une SSRF. Rejeter la config entière plutôt que de
+	// dropper silencieusement une entrée invalide (l'admin doit savoir
+	// laquelle poser problème).
+	for _, list := range [][]string{cfg.TidalProxies, cfg.QobuzProviders, cfg.AmazonProxies, cfg.DeezerProxies} {
+		for _, u := range list {
+			if err := ValidateExternalURL(u); err != nil {
+				return err
+			}
+		}
+	}
+
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err

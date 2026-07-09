@@ -177,27 +177,36 @@ func fetchTidalUptimeProxies(ctx context.Context) (up, down []string, err error)
 	normalize := func(u string) string { return strings.TrimRight(strings.TrimSpace(u), "/") }
 	seen := make(map[string]struct{})
 
+	// Entries come from a third-party feed (tidal-uptime.geeked.wtf) that
+	// isn't under our control. Their URLs get stored and later used
+	// unattended as the base of outbound download requests
+	// (backend/tidal/client.go), so a compromised or DNS-hijacked feed
+	// could otherwise redirect the server at internal/loopback targets
+	// (SSRF) with zero operator interaction. Drop anything that doesn't
+	// look like a safe external http(s) endpoint before it ever reaches
+	// util.SetTidalDiscovery / BoltDB.
+	addValid := func(dst *[]string, rawURL string) {
+		n := normalize(rawURL)
+		if n == "" {
+			return
+		}
+		if err := ValidateExternalURL(rawURL); err != nil {
+			fmt.Printf("[Discovery] Ignoring unsafe proxy URL from tidal-uptime: %v\n", err)
+			return
+		}
+		if _, ok := seen[n]; !ok {
+			seen[n] = struct{}{}
+			*dst = append(*dst, rawURL)
+		}
+	}
+
 	// streaming[] comes first (confirmed full streaming), then api[] (server up).
 	// In practice streaming[] is currently empty, but the ordering is future-proof.
 	for _, entry := range payload.Streaming {
-		n := normalize(entry.URL)
-		if n == "" {
-			continue
-		}
-		if _, ok := seen[n]; !ok {
-			seen[n] = struct{}{}
-			up = append(up, entry.URL)
-		}
+		addValid(&up, entry.URL)
 	}
 	for _, entry := range payload.API {
-		n := normalize(entry.URL)
-		if n == "" {
-			continue
-		}
-		if _, ok := seen[n]; !ok {
-			seen[n] = struct{}{}
-			up = append(up, entry.URL)
-		}
+		addValid(&up, entry.URL)
 	}
 	for _, entry := range payload.Down {
 		n := normalize(entry.URL)

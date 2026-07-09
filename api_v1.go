@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -61,6 +62,40 @@ func cleanAbsPaths(paths []string) ([]string, error) {
 		out[i] = c
 	}
 	return out, nil
+}
+
+// isSubPath reports whether target is root itself or a descendant of root,
+// after cleaning both. Does not resolve symlinks.
+func isSubPath(root, target string) bool {
+	rootClean := filepath.Clean(root)
+	targetClean := filepath.Clean(target)
+	if rootClean == targetClean {
+		return true
+	}
+	rel, err := filepath.Rel(rootClean, targetClean)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// isSameOriginRequest reports whether a browser-sent Origin header (when
+// present) matches the Host this request was addressed to. Requests with no
+// Origin header (same-origin navigations, curl, server-to-server calls)
+// are treated as same-origin. Used to keep token-issuing endpoints from
+// being reachable via a cross-origin fetch() from an untrusted page, since
+// the wildcard CORS policy on this API would otherwise let any website read
+// the response.
+func isSameOriginRequest(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == r.Host
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,6 +206,15 @@ func (s *Server) registerV1Routes() {
 func (s *Server) v1LocalLogin(w http.ResponseWriter, r *http.Request) {
 	if !localBypassEnabled() || !isLocalIP(r) {
 		writeV1Error(w, http.StatusForbidden, "local bypass not enabled")
+		return
+	}
+	// This endpoint mints an admin token from nothing but a "local" source
+	// IP, and the API's CORS policy is wildcarded — without this check any
+	// website open in a LAN browser could fetch() it cross-origin and read
+	// back an admin JWT (a "simple request" needs no preflight since this
+	// handler doesn't read the body). Reject anything that isn't same-origin.
+	if !isSameOriginRequest(r) {
+		writeV1Error(w, http.StatusForbidden, "cross-origin request not allowed")
 		return
 	}
 	profile := &UserProfile{ID: "local-admin", DisplayName: "Local Admin", IsAdmin: true}

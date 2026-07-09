@@ -240,13 +240,19 @@ func (s *Server) v1GetProxies(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {
+	// Proxy URLs become the base of outbound requests the server makes on
+	// every download (backend/tidal/client.go etc.), so letting any
+	// authenticated user repoint them is an SSRF primitive — admin only.
+	if !v1RequireAdmin(w, r) {
+		return
+	}
 	var cfg ProxyConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	if err := SaveProxyConfig(s.ctr.DB, cfg); err != nil {
-		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		writeV1Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

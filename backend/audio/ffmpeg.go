@@ -414,7 +414,21 @@ type ConvertAudioResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// allowedConvertOutputFormats mirrors the formats the frontend's Audio
+// Converter page can request (frontend/src/components/AudioConverterPage.tsx).
+// OutputFormat is otherwise concatenated straight into an output directory
+// and file extension below — an unvalidated value like "../../../etc/cron.d"
+// would let a caller write ffmpeg's output outside the input file's directory.
+var allowedConvertOutputFormats = map[string]bool{
+	"mp3": true,
+	"m4a": true,
+}
+
 func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
+	if !allowedConvertOutputFormats[strings.ToLower(req.OutputFormat)] {
+		return nil, fmt.Errorf("unsupported output format: %q", req.OutputFormat)
+	}
+
 	ffmpegPath, err := util.GetFFmpegPath()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ffmpeg path: %w", err)

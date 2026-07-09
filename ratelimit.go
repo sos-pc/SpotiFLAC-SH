@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -78,22 +79,44 @@ func (rl *LoginRateLimiter) cleanupLoop() {
 	}
 }
 
-// remoteIP extrait l'IP de la requête (tient compte de X-Forwarded-For
-// uniquement si la connexion directe vient d'une IP privée / loopback,
-// i.e. derrière un reverse proxy de confiance).
+// trustProxyHeaders reports whether TRUST_PROXY_HEADERS=true is set — i.e.
+// the operator confirms the server sits behind a reverse proxy that
+// overwrites X-Forwarded-For/X-Real-IP on every incoming request, so those
+// headers can't be forged by the client itself.
+func trustProxyHeaders() bool {
+	return os.Getenv("TRUST_PROXY_HEADERS") == "true"
+}
+
+// remoteIP extrait l'IP de la requête. X-Forwarded-For / X-Real-IP ne sont
+// pris en compte que si TRUST_PROXY_HEADERS=true est explicitement défini.
+//
+// Se fier au header dès que le pair TCP direct est privé/loopback (l'ancien
+// comportement) est contournable par n'importe quel client sur le LAN, ou
+// derrière un simple bridge Docker : il lui suffit d'envoyer une IP
+// aléatoire dans X-Forwarded-For à chaque requête pour rendre le rate
+// limiter de login totalement inefficace. Sans opt-in explicite, on ignore
+// donc ces headers et on retombe sur l'adresse TCP réelle.
 func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	// Derrière un reverse proxy de confiance → utiliser X-Forwarded-For
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+	if trustProxyHeaders() {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// Prendre la première IP (la plus à gauche = le vrai client)
-			for _, part := range splitComma(xff) {
-				if candidate := net.ParseIP(trimSpace(part)); candidate != nil {
+			// Le maillon le plus à droite est celui ajouté par le reverse
+			// proxy de confiance le plus proche — c'est le seul qu'un
+			// client externe ne peut pas forger (un proxy correctement
+			// configuré ajoute au header au lieu de le remplacer).
+			parts := splitComma(xff)
+			for i := len(parts) - 1; i >= 0; i-- {
+				if candidate := net.ParseIP(trimSpace(parts[i])); candidate != nil {
 					return candidate.String()
 				}
+			}
+		}
+		if xrip := trimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
+			if candidate := net.ParseIP(xrip); candidate != nil {
+				return candidate.String()
 			}
 		}
 	}
