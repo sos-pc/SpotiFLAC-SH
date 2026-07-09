@@ -218,7 +218,13 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, result)
 	}))
 
+	// Admin-only: File Manager is the only caller (hidden from non-admins in
+	// the sidebar); reading arbitrary-path tag metadata has no other
+	// legitimate non-admin use.
 	s.mux.Handle("GET /api/v1/files/metadata", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
 		path, err := cleanAbsPath(r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
@@ -232,7 +238,12 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, result)
 	}))
 
+	// Admin-only: File Manager is the only caller. Renaming an arbitrary
+	// absolute path is a data-tampering primitive, not just disclosure.
 	s.mux.Handle("POST /api/v1/files/rename", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
 		var params struct {
 			OldPath string `json:"old_path"`
 			NewName string `json:"new_name"`
@@ -311,7 +322,11 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, map[string]string{"content": content})
 	}))
 
+	// Admin-only: File Manager is the only caller.
 	s.mux.Handle("POST /api/v1/files/rename/batch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
 		var params struct {
 			Files  []string `json:"files"`
 			Format string   `json:"format"`
@@ -328,7 +343,11 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, a.RenameFilesByMetadata(cleaned, params.Format))
 	}))
 
+	// Admin-only: File Manager is the only caller.
 	s.mux.Handle("POST /api/v1/files/rename/preview", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
 		var params struct {
 			Files  []string `json:"files"`
 			Format string   `json:"format"`
