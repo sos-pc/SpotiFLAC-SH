@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { getToken } from "@/lib/auth";
+import { getStreamToken } from "@/lib/auth";
 
 interface Job {
   id: string;
@@ -41,8 +41,8 @@ export function useDownloadQueueData() {
   useEffect(() => {
     let active = true;
 
-    function connect() {
-      const token = getToken();
+    async function connect() {
+      const token = await getStreamToken();
       if (!token || !active) return;
 
       const url = `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`;

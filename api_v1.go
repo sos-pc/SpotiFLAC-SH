@@ -119,6 +119,15 @@ func v1CORSMiddleware(next http.Handler) http.Handler {
 // Auth middleware
 // ─────────────────────────────────────────────────────────────────────────────
 
+// streamScopedPaths lists the only endpoints a "stream"-scoped token (see
+// GenerateStreamToken) may be used against. Kept short and explicit rather
+// than pattern-matched — this is the enforcement boundary that makes a
+// leaked stream token harmless outside its intended SSE use.
+var streamScopedPaths = map[string]bool{
+	"/api/v1/jobs/stream":   true,
+	"/api/v1/search/stream": true,
+}
+
 // v1Auth wraps a handler with CORS + local bypass + JWT/API Key authentication.
 func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 	return v1CORSMiddleware(localBypassMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +141,24 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 		}
 		if token != "" {
 			if claims, err := ValidateJWT(token); err == nil {
+				if claims.Scope == "stream" && !streamScopedPaths[r.URL.Path] {
+					writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+					return
+				}
+				// JWTs are otherwise stateless and can't be revoked before
+				// they expire (up to 24h). Comparing against the live
+				// TokenVersion closes that gap for the one case that bumps
+				// it today (a Jellyfin admin-flag change) without a DB read
+				// on API-key auth (already checked live) or on lookup
+				// failure (e.g. the local-admin bypass profile, which is
+				// never persisted — treated as unrevocable, same as before
+				// this check existed).
+				if !claims.IsAPIKey && s.ctr.Auth != nil {
+					if profile, err := s.ctr.Auth.GetUser(claims.UserID); err == nil && profile.TokenVersion != claims.TokenVersion {
+						writeV1Error(w, http.StatusUnauthorized, "session revoked")
+						return
+					}
+				}
 				ctx := context.WithValue(r.Context(), contextKeyUser, claims)
 				next(w, r.WithContext(ctx))
 				return
@@ -169,6 +196,29 @@ func v1RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// v1RequirePermission returns 403 unless the caller may perform perm
+// ("download", "read", ...). Permission scoping only applies to API keys
+// (JWTClaims.IsAPIKey) — a full browser/local session always has full
+// access to its own account, matching what CreateAPIKey's docstring and
+// the Permissions field on APIKey already promise but weren't enforcing.
+func v1RequirePermission(w http.ResponseWriter, r *http.Request, perm string) bool {
+	user := GetUserFromContext(r)
+	if user == nil {
+		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	if user.IsAdmin || !user.IsAPIKey {
+		return true
+	}
+	for _, p := range user.Permissions {
+		if p == perm {
+			return true
+		}
+	}
+	writeV1Error(w, http.StatusForbidden, fmt.Sprintf("API key missing %q permission", perm))
+	return false
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Route registration — top-level dispatcher
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +228,7 @@ func (s *Server) registerV1Routes() {
 	s.mux.Handle("POST /api/v1/auth/login", v1CORSMiddleware(http.HandlerFunc(s.v1Login)))
 	s.mux.Handle("POST /api/v1/auth/local", v1CORSMiddleware(http.HandlerFunc(s.v1LocalLogin)))
 	s.mux.Handle("GET /api/v1/auth/me", s.v1Auth(s.v1Me))
+	s.mux.Handle("GET /api/v1/auth/stream-token", s.v1Auth(s.v1StreamToken))
 	s.mux.Handle("GET /api/v1/auth/keys", s.v1Auth(s.v1ListAPIKeys))
 	s.mux.Handle("POST /api/v1/auth/keys", s.v1Auth(s.v1CreateAPIKey))
 	s.mux.Handle("DELETE /api/v1/auth/keys/{id}", s.v1Auth(s.v1RevokeAPIKey))

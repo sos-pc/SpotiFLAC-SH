@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -101,5 +103,83 @@ func TestRemoteIPTrustsForwardedHeadersWhenConfigured(t *testing.T) {
 	r := makeRequest("192.168.1.50:1234", "203.0.113.9, 192.168.1.1", "")
 	if got := remoteIP(r); got != "192.168.1.1" {
 		t.Errorf("remoteIP with TRUST_PROXY_HEADERS=true = %q, want rightmost X-Forwarded-For entry", got)
+	}
+}
+
+// requestWithClaims builds a request carrying claims the way v1Auth would
+// after a successful JWT/API-key validation.
+func requestWithClaims(claims *JWTClaims) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", nil)
+	ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+	return r.WithContext(ctx)
+}
+
+func TestV1RequirePermission(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims *JWTClaims
+		perm   string
+		want   bool
+	}{
+		{"no claims", nil, "download", false},
+		{"full session, no IsAPIKey flag, no explicit perms", &JWTClaims{UserID: "u1"}, "download", true},
+		{"admin API key bypasses scope check", &JWTClaims{UserID: "u1", IsAPIKey: true, IsAdmin: true}, "download", true},
+		{"API key with matching permission", &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "download"}}, "download", true},
+		{"API key missing permission", &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read"}}, "download", false},
+		{"API key with empty permissions", &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: nil}, "download", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := requestWithClaims(tt.claims)
+			w := httptest.NewRecorder()
+			got := v1RequirePermission(w, r, tt.perm)
+			if got != tt.want {
+				t.Errorf("v1RequirePermission(perm=%q) = %v, want %v", tt.perm, got, tt.want)
+			}
+			if !got && w.Code != http.StatusForbidden && w.Code != http.StatusUnauthorized {
+				t.Errorf("expected 403/401 on denial, got %d", w.Code)
+			}
+		})
+	}
+}
+
+func TestGetOrCreateUserBumpsTokenVersionOnPrivilegeChange(t *testing.T) {
+	am := newTestAuthManager(t)
+
+	p1, err := am.GetOrCreateUser("jf-1", "Alice", false)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser (create): %v", err)
+	}
+	if p1.TokenVersion != 0 {
+		t.Fatalf("new user TokenVersion = %d, want 0", p1.TokenVersion)
+	}
+
+	// Re-sync with the same admin flag: no privilege change, no bump.
+	p2, err := am.GetOrCreateUser("jf-1", "Alice", false)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser (no change): %v", err)
+	}
+	if p2.TokenVersion != 0 {
+		t.Fatalf("TokenVersion after unchanged re-sync = %d, want 0", p2.TokenVersion)
+	}
+
+	// Jellyfin promotes the user to admin: privilege change, must bump so
+	// any JWT issued before this point (still carrying admin=false, or an
+	// old admin=true from a prior promotion/demotion cycle) stops matching.
+	p3, err := am.GetOrCreateUser("jf-1", "Alice", true)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser (promote): %v", err)
+	}
+	if p3.TokenVersion != 1 {
+		t.Fatalf("TokenVersion after promotion = %d, want 1", p3.TokenVersion)
+	}
+
+	// Demoted back: another privilege change, another bump.
+	p4, err := am.GetOrCreateUser("jf-1", "Alice", false)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser (demote): %v", err)
+	}
+	if p4.TokenVersion != 2 {
+		t.Fatalf("TokenVersion after demotion = %d, want 2", p4.TokenVersion)
 	}
 }

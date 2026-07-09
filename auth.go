@@ -80,6 +80,13 @@ type UserProfile struct {
 	Settings    map[string]interface{} `json:"settings,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
+	// TokenVersion is embedded in every JWT minted for this user and
+	// checked live on each request (v1Auth). Bumping it — currently done
+	// automatically when Jellyfin's admin flag for this user changes —
+	// invalidates every token issued before the bump, even ones that
+	// haven't hit their 24h expiry yet. JWTs are otherwise fully
+	// stateless and unrevocable.
+	TokenVersion int `json:"token_version,omitempty"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +180,13 @@ func (a *AuthManager) GetOrCreateUser(jellyfinID, name string, isAdmin bool) (*U
 			// Mettre à jour nom + isAdmin
 			profile.Name = jellyfinID
 			profile.DisplayName = name
+			if profile.IsAdmin != isAdmin {
+				// Privilege change: any JWT already issued for this user
+				// carries the old admin flag baked in and would otherwise
+				// stay valid (with the stale privilege level) until its
+				// 24h expiry. Bumping TokenVersion invalidates them all.
+				profile.TokenVersion++
+			}
 			profile.IsAdmin = isAdmin
 			profile.UpdatedAt = time.Now()
 		} else {
@@ -256,19 +270,29 @@ func (a *AuthManager) GetAllUsers() ([]UserProfile, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type JWTClaims struct {
-	UserID      string `json:"uid"`
-	DisplayName string `json:"name"`
-	IsAdmin     bool   `json:"admin"`
-	ExpiresAt   int64  `json:"exp"`
+	UserID       string   `json:"uid"`
+	DisplayName  string   `json:"name"`
+	IsAdmin      bool     `json:"admin"`
+	ExpiresAt    int64    `json:"exp"`
+	Permissions  []string `json:"perms,omitempty"` // set only for API-key-derived claims; empty = full session, unrestricted
+	IsAPIKey     bool     `json:"is_key,omitempty"`
+	TokenVersion int      `json:"tv,omitempty"` // must match UserProfile.TokenVersion at validation time; see UserProfile.TokenVersion
+	// Scope narrows what this token may be used for. Empty = normal
+	// session, usable on any endpoint the user/key is otherwise allowed
+	// to reach. "stream" = short-lived token minted for the SSE
+	// endpoints only (see GenerateStreamToken) — v1Auth rejects it
+	// everywhere else.
+	Scope string `json:"scope,omitempty"`
 }
 
-func GenerateJWT(profile *UserProfile) (string, error) {
-	claims := JWTClaims{
-		UserID:      profile.ID,
-		DisplayName: profile.DisplayName,
-		IsAdmin:     profile.IsAdmin,
-		ExpiresAt:   time.Now().Add(24 * time.Hour).Unix(),
-	}
+// streamTokenTTL bounds how long a token minted for an SSE connection
+// stays valid. Short on purpose: this token ends up in the request URL
+// (EventSource can't set custom headers), so it's the one credential that
+// routinely leaks into reverse-proxy access logs / browser history — unlike
+// the 24h session JWT, a leaked stream token is worthless within a minute.
+const streamTokenTTL = 60 * time.Second
+
+func signClaims(claims JWTClaims) (string, error) {
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
@@ -277,6 +301,28 @@ func GenerateJWT(profile *UserProfile) (string, error) {
 	body := base64.RawURLEncoding.EncodeToString(payload)
 	sig := hmacSign(header + "." + body)
 	return header + "." + body + "." + sig, nil
+}
+
+func GenerateJWT(profile *UserProfile) (string, error) {
+	return signClaims(JWTClaims{
+		UserID:       profile.ID,
+		DisplayName:  profile.DisplayName,
+		IsAdmin:      profile.IsAdmin,
+		ExpiresAt:    time.Now().Add(24 * time.Hour).Unix(),
+		TokenVersion: profile.TokenVersion,
+	})
+}
+
+// GenerateStreamToken mints a short-lived, SSE-only token carrying the same
+// identity as an already-validated session/API-key claims. See streamTokenTTL.
+func GenerateStreamToken(claims *JWTClaims) (string, error) {
+	return signClaims(JWTClaims{
+		UserID:      claims.UserID,
+		DisplayName: claims.DisplayName,
+		IsAdmin:     claims.IsAdmin,
+		ExpiresAt:   time.Now().Add(streamTokenTTL).Unix(),
+		Scope:       "stream",
+	})
 }
 
 func ValidateJWT(token string) (*JWTClaims, error) {

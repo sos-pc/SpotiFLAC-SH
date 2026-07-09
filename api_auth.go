@@ -55,6 +55,29 @@ func (s *Server) v1Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// v1StreamToken mints a short-lived, SSE-only token (see GenerateStreamToken)
+// for the caller's already-authenticated identity. The frontend calls this
+// right before opening an EventSource, since EventSource can't send an
+// Authorization header — without this, the long-lived session JWT would
+// have to go in the URL instead, where it can end up in reverse-proxy
+// access logs or browser history for its full 24h lifetime.
+func (s *Server) v1StreamToken(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserFromContext(r)
+	if claims == nil {
+		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	token, err := GenerateStreamToken(claims)
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	writeV1JSON(w, http.StatusOK, map[string]interface{}{
+		"token":      token,
+		"expires_in": int(streamTokenTTL.Seconds()),
+	})
+}
+
 func (s *Server) v1Me(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserFromContext(r)
 	if claims == nil {

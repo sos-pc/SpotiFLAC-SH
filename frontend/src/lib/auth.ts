@@ -44,6 +44,27 @@ export async function login(username: string, password: string): Promise<AuthUse
   return data.user;
 }
 
+// getStreamToken exchanges the session token for a short-lived (60s),
+// SSE-only token. EventSource can't set an Authorization header, so without
+// this the full session JWT would have to go in the URL — where it can end
+// up in reverse-proxy access logs or browser history for its whole 24h
+// lifetime instead of one minute. Returns null on any failure so callers can
+// fall back to not opening the stream rather than crashing.
+export async function getStreamToken(): Promise<string | null> {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const resp = await fetch("/api/v1/auth/stream-token", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchMe(): Promise<AuthUser | null> {
   const token = getToken();
   if (!token) return null;

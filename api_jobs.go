@@ -24,6 +24,9 @@ func (s *Server) registerJobRoutes() {
 
 	// ── Jobs ──────────────────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "download") {
+			return
+		}
 		var req EnqueueBatchRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -95,6 +98,9 @@ func (s *Server) registerJobRoutes() {
 
 	// ── Direct downloads ──────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/downloads/track", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "download") {
+			return
+		}
 		var req DownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())

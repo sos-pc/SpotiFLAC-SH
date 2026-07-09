@@ -9,6 +9,7 @@ import {
   GetWatchlistHistory,
 } from "@/lib/rpc";
 import { getSettings } from "@/lib/settings";
+import { getStreamToken } from "@/lib/auth";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { Button } from "@/components/ui/button";
 import {
@@ -138,38 +139,47 @@ export function WatchlistPage() {
 
   // Écouter les événements SSE pour les syncs de watchlist
   useEffect(() => {
-    const token = localStorage.getItem("spotiflac_token");
-    if (!token) return;
-    const es = new EventSource(
-      `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
-    );
-    es.addEventListener("watchlist_synced", (e: MessageEvent) => {
-      const data = JSON.parse(e.data) as {
-        watchlist_id: string;
-        new_tracks: number;
-        deleted: number;
-        name: string;
-      };
-      // Retirer la playlist du set "en cours de sync"
-      setSyncing((prev) => {
-        const next = new Set(prev);
-        next.delete(data.watchlist_id);
-        return next;
+    let cancelled = false;
+    let es: EventSource | null = null;
+
+    (async () => {
+      const token = await getStreamToken();
+      if (!token || cancelled) return;
+      es = new EventSource(
+        `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
+      );
+      es.addEventListener("watchlist_synced", (e: MessageEvent) => {
+        const data = JSON.parse(e.data) as {
+          watchlist_id: string;
+          new_tracks: number;
+          deleted: number;
+          name: string;
+        };
+        // Retirer la playlist du set "en cours de sync"
+        setSyncing((prev) => {
+          const next = new Set(prev);
+          next.delete(data.watchlist_id);
+          return next;
+        });
+        // Recharger les stats + watchlists pour afficher le SyncLog à jour
+        reloadStats(data.watchlist_id);
+        loadWatchlists();
+        // Toast de résultat
+        if (data.new_tracks > 0 || data.deleted > 0) {
+          const parts: string[] = [];
+          if (data.new_tracks > 0) parts.push(`${data.new_tracks} new`);
+          if (data.deleted > 0) parts.push(`${data.deleted} deleted`);
+          toast.success(`${data.name}: ${parts.join(", ")}`);
+        } else {
+          toast.info(`${data.name}: up to date`);
+        }
       });
-      // Recharger les stats + watchlists pour afficher le SyncLog à jour
-      reloadStats(data.watchlist_id);
-      loadWatchlists();
-      // Toast de résultat
-      if (data.new_tracks > 0 || data.deleted > 0) {
-        const parts: string[] = [];
-        if (data.new_tracks > 0) parts.push(`${data.new_tracks} new`);
-        if (data.deleted > 0) parts.push(`${data.deleted} deleted`);
-        toast.success(`${data.name}: ${parts.join(", ")}`);
-      } else {
-        toast.info(`${data.name}: up to date`);
-      }
-    });
-    return () => es.close();
+    })();
+
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
   }, []);
 
   const handleAdd = async () => {

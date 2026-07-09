@@ -170,6 +170,8 @@ func (a *AuthManager) ValidateAPIKey(rawKey string) (*JWTClaims, bool) {
 		DisplayName: "API Key: " + found.Name,
 		IsAdmin:     isAdmin,
 		ExpiresAt:   0, // les clés API n'expirent pas
+		Permissions: found.Permissions,
+		IsAPIKey:    true,
 	}, true
 }
 

@@ -3,7 +3,7 @@ import { fetchSpotifyMetadata } from "@/lib/api";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { logger } from "@/lib/logger";
 import { AddFetchHistory } from "@/lib/rpc";
-import { getToken } from "@/lib/auth";
+import { getStreamToken } from "@/lib/auth";
 import type { SpotifyMetadataResponse } from "@/types/api";
 export function useMetadata() {
     const [loading, setLoading] = useState(false);
@@ -79,18 +79,19 @@ export function useMetadata() {
             console.error("Failed to save fetch history:", err);
         }
     };
-    const fetchArtistMetadataStreaming = (url: string): Promise<void> => {
+    const fetchArtistMetadataStreaming = async (url: string): Promise<void> => {
         // Close any in-progress stream before starting a new one
         if (activeStreamRef.current) {
             activeStreamRef.current.close();
             activeStreamRef.current = null;
         }
-        return new Promise((resolve, reject) => {
-            setLoading(true);
-            setTracksLoading(false);
-            setMetadata(null);
+        setLoading(true);
+        setTracksLoading(false);
+        setMetadata(null);
 
-            const token = getToken();
+        const token = await getStreamToken();
+
+        return new Promise((resolve, reject) => {
             const streamUrl = `/api/v1/search/stream?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token ?? "")}`;
             const es = new EventSource(streamUrl);
             activeStreamRef.current = es;

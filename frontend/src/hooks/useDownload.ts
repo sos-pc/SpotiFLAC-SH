@@ -4,7 +4,7 @@ import { getSettings, parseTemplate, type TemplateData } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import { getToken } from "@/lib/auth";
+import { getToken, getStreamToken } from "@/lib/auth";
 import type { TrackMetadata } from "@/types/api";
 interface CheckFileExistenceRequest {
   spotify_id: string;
@@ -70,42 +70,50 @@ export function useDownload(region: string) {
   // SSE listener for browser-mode auto-download
   useEffect(() => {
     if (downloadMode !== "browser") return;
-    const token = getToken();
-    if (!token) return;
+    let cancelled = false;
+    let es: EventSource | null = null;
 
-    const es = new EventSource(
-      `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
-    );
+    (async () => {
+      const token = await getStreamToken();
+      if (!token || cancelled) return;
 
-    es.addEventListener("job_update", (e: MessageEvent) => {
-      const job = JSON.parse(e.data) as {
-        id: string;
-        status: string;
-        batch_id?: string;
-        file_path?: string;
-      };
-      if (
-        job.status === "done" &&
-        job.batch_id &&
-        browserBatchIdsRef.current.has(job.batch_id) &&
-        job.file_path &&
-        !triggeredJobIdsRef.current.has(job.id)
-      ) {
-        triggeredJobIdsRef.current.add(job.id);
-        const t = getToken();
-        if (!t) return;
-        const a = document.createElement("a");
-        a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
-        a.download = "";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }
-    });
+      es = new EventSource(
+        `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
+      );
 
-    es.onerror = () => es.close();
+      es.addEventListener("job_update", (e: MessageEvent) => {
+        const job = JSON.parse(e.data) as {
+          id: string;
+          status: string;
+          batch_id?: string;
+          file_path?: string;
+        };
+        if (
+          job.status === "done" &&
+          job.batch_id &&
+          browserBatchIdsRef.current.has(job.batch_id) &&
+          job.file_path &&
+          !triggeredJobIdsRef.current.has(job.id)
+        ) {
+          triggeredJobIdsRef.current.add(job.id);
+          const t = getToken();
+          if (!t) return;
+          const a = document.createElement("a");
+          a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
+          a.download = "";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      });
 
-    return () => es.close();
+      es.onerror = () => es?.close();
+    })();
+
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
   }, [downloadMode]);
   const downloadWithAutoFallback = async (
     id: string,
