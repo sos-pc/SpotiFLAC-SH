@@ -681,18 +681,40 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 			continue
 		}
 		// Trouver le SyncLog correspondant au batchID plutôt que le dernier.
+		found := false
 		if batchID != "" {
 			for i := range pl.SyncLogs {
 				if pl.SyncLogs[i].BatchID == batchID {
 					pl.SyncLogs[i].Downloaded = downloaded
 					pl.SyncLogs[i].Skipped = skipped
 					pl.SyncLogs[i].Failed = failed
-					if saveErr := w.saveWatchlist(&pl); saveErr != nil {
-						fmt.Printf("[Watcher] Failed to save sync log: %v\n", saveErr)
-					}
+					found = true
 					break
 				}
 			}
+		}
+		if !found {
+			// jobWorkers=1 serializes every download across every
+			// watchlist through one shared queue, so a large batch can
+			// take far longer to drain than 20 sync cycles' worth of
+			// time — long enough for the SyncLogs cap to have already
+			// evicted this batch's original entry by the time it
+			// finishes. Append a standalone entry instead of silently
+			// dropping these counts: a slightly duplicated-looking log
+			// line beats losing the result entirely.
+			pl.SyncLogs = append(pl.SyncLogs, SyncLog{
+				Time:       time.Now(),
+				BatchID:    batchID,
+				Downloaded: downloaded,
+				Skipped:    skipped,
+				Failed:     failed,
+			})
+			if len(pl.SyncLogs) > 20 {
+				pl.SyncLogs = pl.SyncLogs[len(pl.SyncLogs)-20:]
+			}
+		}
+		if saveErr := w.saveWatchlist(&pl); saveErr != nil {
+			fmt.Printf("[Watcher] Failed to save sync log: %v\n", saveErr)
 		}
 		_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
 		return

@@ -194,6 +194,8 @@ The aggregated **per-sync** log is embedded inside the watchlist itself (the `sy
 
 `Downloaded`, `Skipped`, `Failed` are filled when the batch completes (`OnBatchComplete`). `NewTracks` and `Deleted` are written immediately during the sync.
 
+> `jobWorkers` is `1` — every download across every watchlist is serialized through one shared queue. A large batch can take far longer to drain than 20 sync cycles, so by the time `OnBatchComplete` fires, the entry it was going to fill in may already have scrolled out of the 20-entry cap. When that happens, a standalone entry carrying just the batch's counts is appended instead of silently dropping them — you may occasionally see two log lines for what was really one sync (one with `new_tracks`, a later one with `downloaded`/`skipped`/`failed`).
+
 ---
 
 ## Manual sync

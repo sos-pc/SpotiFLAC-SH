@@ -166,3 +166,47 @@ func TestGetWatchlistStatsFallsBackToSkippedWithoutCatalog(t *testing.T) {
 		t.Errorf("Pending = %d, want 0", stats.Pending)
 	}
 }
+
+// TestOnBatchCompleteSurvivesSyncLogEviction is the regression test for a
+// silent-data-loss bug in the "Recent syncs" panel: OnBatchComplete looks
+// up the SyncLog entry matching a batch's ID to fill in its
+// downloaded/skipped/failed counts, but that entry can be evicted by the
+// 20-entry cap before the batch finishes — jobWorkers=1 serializes every
+// download across every watchlist through one shared queue, so on a busy
+// instance a large batch can easily outlive 20 of this watchlist's own
+// sync cycles. Previously, a missed match meant the counts were silently
+// dropped entirely (no save, no fallback). Now a standalone entry must be
+// appended instead.
+func TestOnBatchCompleteSurvivesSyncLogEviction(t *testing.T) {
+	jm := newTestJobManager(t, false)
+	w := &Watcher{jm: jm}
+
+	pl := &WatchedPlaylist{ID: "watch-evict", Name: "Busy Playlist"}
+	// Fill SyncLogs to the cap with entries that do NOT carry the batch ID
+	// OnBatchComplete will report — simulating 20 sync cycles that ran
+	// while the original batch was still draining through the single
+	// worker.
+	for i := 0; i < 20; i++ {
+		pl.SyncLogs = append(pl.SyncLogs, SyncLog{
+			Time:    time.Now(),
+			BatchID: "some-other-batch",
+		})
+	}
+	if err := w.saveWatchlist(pl); err != nil {
+		t.Fatalf("saveWatchlist: %v", err)
+	}
+
+	w.OnBatchComplete(pl.ID, "the-evicted-batch", 5, 2, 1)
+
+	got, err := w.getWatchlistByID(pl.ID)
+	if err != nil {
+		t.Fatalf("getWatchlistByID: %v", err)
+	}
+	if len(got.SyncLogs) != 20 {
+		t.Fatalf("SyncLogs length = %d, want 20 (cap preserved)", len(got.SyncLogs))
+	}
+	last := got.SyncLogs[len(got.SyncLogs)-1]
+	if last.BatchID != "the-evicted-batch" || last.Downloaded != 5 || last.Skipped != 2 || last.Failed != 1 {
+		t.Errorf("last SyncLog entry = %+v, want a standalone entry with the batch's counts (they must not be silently dropped)", last)
+	}
+}
