@@ -187,6 +187,32 @@ func UpdateLibraryFileStatus(ctx context.Context, q Querier, id, status string) 
 	return nil
 }
 
+// UpdateLibraryFileQuality refreshes provider/quality/quality_rank/file_size
+// and bumps downloaded_at + last_verified_at on an existing row. Used when a
+// fresh download lands at the *same* file_path as the current active row
+// (e.g. a quality-upgrade download resolves to the same templated filename,
+// since the naming template doesn't encode bitrate) — without this, the
+// catalog would keep reporting the original quality forever, and dedup
+// checks that compare against it would re-trigger the "upgrade" download on
+// every subsequent sync. Also resets status to "present" since a fresh
+// write means the file demonstrably exists now.
+func UpdateLibraryFileQuality(ctx context.Context, q Querier, id, provider, quality string, fileSize int64) error {
+	if id == "" {
+		return errors.New("library_file: id required")
+	}
+	now := time.Now().Unix()
+	_, err := q.ExecContext(ctx, `
+		UPDATE library_files
+		SET provider = ?, quality = ?, quality_rank = ?, file_size = ?,
+		    downloaded_at = ?, last_verified_at = ?, status = ?
+		WHERE id = ?
+	`, provider, quality, QualityRank(quality), fileSize, now, now, StatusPresent, id)
+	if err != nil {
+		return fmt.Errorf("update quality for %s: %w", id, err)
+	}
+	return nil
+}
+
 // UpdateLibraryFilePath rewrites the file_path of an existing row and
 // resets status to "present". Used by the rescan flow when a file was
 // moved manually and rediscovered via its SPOTIFY_ID tag.

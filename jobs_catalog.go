@@ -150,6 +150,17 @@ func upsertActiveLibraryFile(ctx context.Context, q db.Querier, j *Job) (string,
 		return "", fmt.Errorf("get active library_file: %w", err)
 	}
 	if existing != nil && existing.FilePath == j.FilePath {
+		// Same path as the current active row — most likely a quality
+		// upgrade that resolved to the same templated filename (the naming
+		// template doesn't encode bitrate). Refresh quality/provider/size
+		// instead of silently keeping the stale values from the original
+		// download, otherwise checkCatalogDedup would think the upgrade
+		// never happened and re-trigger it on every future sync.
+		newQuality := deriveCatalogQuality(j.Settings)
+		newSize := fileSizeBytes(j.FilePath, j.TotalSize)
+		if err := db.UpdateLibraryFileQuality(ctx, q, existing.ID, j.Settings.Service, newQuality, newSize); err != nil {
+			return "", fmt.Errorf("refresh existing library_file: %w", err)
+		}
 		return existing.ID, nil
 	}
 	if existing != nil {

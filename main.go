@@ -42,13 +42,18 @@ func main() {
 	// ── SQLite catalog ────────────────────────────────────────────────────
 	// Long-term store for tracks/library_files/download_attempts/snapshots.
 	// Survives BoltDB cleanup; source of truth for M3U8 generation once
-	// populated.
+	// populated. Deliberately non-fatal: the catalog is additive (BoltDB
+	// still drives the live queue and watchlists), and every call site
+	// (jobs_catalog.go, watcher_catalog.go, api_admin.go) already nil-checks
+	// it and degrades gracefully — a permission/disk/WAL-corruption issue on
+	// this one file shouldn't take down core Spotify->FLAC downloading.
 	catalog, err := catalogdb.Open(configDir)
 	if err != nil {
-		fmt.Printf("FATAL: cannot open catalog database: %v\n", err)
-		os.Exit(1)
+		fmt.Printf("[Main] WARNING: catalog database unavailable, continuing without it (M3U8 generation falls back to filesystem/BoltDB, dedup falls back to BoltDB-only): %v\n", err)
+		catalog = nil
+	} else {
+		defer catalog.Close()
 	}
-	defer catalog.Close()
 
 	// ── History buckets (partagés dans jobs.db) ───────────────────────────
 	if err := backend.InitHistoryDBShared(db); err != nil {
