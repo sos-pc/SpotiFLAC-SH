@@ -340,10 +340,18 @@ func (s *Server) collectScanRoots() []string {
 // scanRootForRebuild walks one filesystem root and ingests every audio
 // file it finds into the catalog. Best-effort: per-file errors are
 // counted in result.Failed and the walk continues.
+// scanProgressLogInterval bounds how often scanRootForRebuild prints a
+// progress line during a long walk. Without this, a multi-thousand-file
+// library scan is completely silent between the "starting" and "done"
+// log lines — indistinguishable from a hang from the operator's point of
+// view (see the "Repair looks stuck" reports on large libraries).
+const scanProgressLogInterval = 5 * time.Second
+
 func (s *Server) scanRootForRebuild(
 	ctx context.Context, root string,
 	result *libraryRebuildResult, seenIDs map[string]bool,
 ) {
+	lastLog := time.Now()
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -355,6 +363,11 @@ func (s *Server) scanRootForRebuild(
 			return nil
 		}
 		result.FilesScanned++
+		if time.Since(lastLog) >= scanProgressLogInterval {
+			fmt.Printf("[Catalog] library-rebuild: %s — %d files scanned so far (imported=%d verified=%d moved=%d duplicate=%d no_tag=%d failed=%d), still walking...\n",
+				root, result.FilesScanned, result.Imported, result.Verified, result.Moved, result.Duplicate, result.NoTag, result.Failed)
+			lastLog = time.Now()
+		}
 
 		spotifyID, err := meta.ReadSpotifyID(path)
 		if err != nil {

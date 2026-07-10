@@ -1045,6 +1045,17 @@ type WatchlistStats struct {
 	TotalSizeMB float64 `json:"total_size_mb"`
 }
 
+// GetWatchlistStats reports per-track counts and total size for a
+// watchlist. Downloaded/size is resolved primarily against the SQLite
+// catalog (library_files, status='present') rather than BoltDB jobs:
+// CleanupOldJobs prunes job rows every 24h, but the catalog row for a
+// track survives indefinitely and holds its real on-disk file_size — a
+// job's TotalSize can also go stale after a later quality-upgrade
+// re-download landed at the same path. Without the catalog fallback, a
+// playlist whose jobs had mostly aged out reported both a plausible-ish
+// downloaded count (via the jobless-track-is-skipped fallback below) and
+// a wildly understated total_size_mb, since size can only ever be summed
+// from a job that still exists.
 func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) {
 	jm := w.jm
 	stats := WatchlistStats{WatchlistID: watchlistID}
@@ -1055,7 +1066,6 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	}
 	stats.TotalTracks = len(pl.TrackIDs)
 
-	// Set des SpotifyIDs actuellement dans la watchlist
 	trackIDSet := make(map[string]bool, len(pl.TrackIDs))
 	for _, id := range pl.TrackIDs {
 		trackIDSet[id] = true
@@ -1066,31 +1076,40 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 		return stats, err
 	}
 
-	// Dédupliquer par SpotifyID : garder le job le plus récent par track.
+	// Dédupliquer par SpotifyID : garder le job le plus récent par track
+	// encore présente dans la watchlist.
 	latest := make(map[string]Job)
 	for _, j := range jobs {
-		if j.WatchlistID != watchlistID {
+		if j.WatchlistID != watchlistID || j.SpotifyID == "" || !trackIDSet[j.SpotifyID] {
 			continue
 		}
-		key := j.SpotifyID
-		if key == "" {
-			key = j.ID
-		}
-		if prev, ok := latest[key]; !ok || j.UpdatedAt.After(prev.UpdatedAt) {
-			latest[key] = j
+		if prev, ok := latest[j.SpotifyID]; !ok || j.UpdatedAt.After(prev.UpdatedAt) {
+			latest[j.SpotifyID] = j
 		}
 	}
 
-	// Compter par statut et cumuler la taille.
-	tracksWithJob := make(map[string]bool)
-	for _, j := range latest {
-		// Ne compter que les jobs dont le track est encore dans la watchlist
-		// (OnPermanentFailure peut avoir retiré des tracks de TrackIDs)
-		if j.SpotifyID != "" && !trackIDSet[j.SpotifyID] {
+	catalogSizes := w.catalogFileSizesForWatchlist(pl)
+
+	for _, id := range pl.TrackIDs {
+		if size, ok := catalogSizes[id]; ok {
+			stats.Downloaded++
+			stats.TotalSizeMB += float64(size) / (1024 * 1024)
 			continue
 		}
-		if j.SpotifyID != "" {
-			tracksWithJob[j.SpotifyID] = true
+		j, hasJob := latest[id]
+		if !hasJob {
+			if jm.catalog != nil {
+				// Le catalogue est actif et n'a rien pour cette track :
+				// elle n'a vraiment pas encore été téléchargée.
+				stats.Pending++
+			} else {
+				// Pas de catalogue pour trancher : on garde l'ancien
+				// comportement (track sans job = déjà téléchargée avant
+				// l'activation du tracking, ou job nettoyé par
+				// CleanupOldJobs).
+				stats.Skipped++
+			}
+			continue
 		}
 		switch j.Status {
 		case StatusDone:
@@ -1103,15 +1122,6 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 			stats.Failed++
 		case StatusPending, StatusDownloading:
 			stats.Pending++
-		}
-	}
-
-	// Tracks présentes dans TrackIDs mais sans job : téléchargées avant
-	// l'activation du tracking ou dont le job a été nettoyé (CleanupOldJobs).
-	// On les considère présentes et on les ajoute aux skipped.
-	for _, id := range pl.TrackIDs {
-		if !tracksWithJob[id] {
-			stats.Skipped++
 		}
 	}
 

@@ -142,3 +142,57 @@ func (w *Watcher) catalogPathsForWatchlist(pl *WatchedPlaylist) map[string]strin
 	}
 	return out
 }
+
+// catalogFileSizesForWatchlist returns spotify_id -> file_size (bytes) for
+// tracks of the watchlist that are present in the catalog with
+// status='present'. Used by GetWatchlistStats so total_size_mb reflects
+// the durable catalog instead of only the ephemeral BoltDB job history —
+// CleanupOldJobs prunes job rows every 24h, and a track downloaded before
+// job-tracking existed (or whose job was pruned) previously contributed
+// nothing to the size total even though the file is really on disk.
+//
+// Best-effort: returns an empty map if the catalog is unset, the
+// watchlist is empty, or any query/scan error occurs.
+func (w *Watcher) catalogFileSizesForWatchlist(pl *WatchedPlaylist) map[string]int64 {
+	if w.jm == nil || w.jm.catalog == nil || pl == nil {
+		return map[string]int64{}
+	}
+	if len(pl.TrackIDs) == 0 {
+		return map[string]int64{}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), catalogLookupTimeout)
+	defer cancel()
+
+	placeholders := make([]string, len(pl.TrackIDs))
+	args := make([]interface{}, len(pl.TrackIDs))
+	for i, id := range pl.TrackIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `
+		SELECT spotify_id, file_size
+		FROM library_files
+		WHERE status = '` + db.StatusPresent + `'
+		  AND spotify_id IN (` + strings.Join(placeholders, ",") + `)`
+
+	rows, err := w.jm.catalog.QueryContext(ctx, query, args...)
+	if err != nil {
+		fmt.Printf("[Catalog] GetWatchlistStats query failed for %s: %v\n", pl.Name, err)
+		return map[string]int64{}
+	}
+	defer rows.Close()
+
+	out := make(map[string]int64)
+	for rows.Next() {
+		var id string
+		var size int64
+		if err := rows.Scan(&id, &size); err != nil {
+			fmt.Printf("[Catalog] GetWatchlistStats scan failed for %s: %v\n", pl.Name, err)
+			continue
+		}
+		out[id] = size
+	}
+	return out
+}

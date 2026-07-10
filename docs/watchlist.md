@@ -137,13 +137,15 @@ After deletion:
 | Field | Meaning |
 |-------|---------|
 | `total_tracks` | `len(pl.TrackIDs)` — current Spotify tracks for this watchlist |
-| `downloaded` | Jobs in `done` state that belong to a track still in `TrackIDs` |
-| `skipped` | Jobs in `skipped` state belonging to `TrackIDs`, **plus** tracks with no job (likely cleaned up by `CleanupOldJobs`) |
-| `failed` | Jobs in `failed` state |
-| `pending` | Jobs in `pending` or `downloading` state |
-| `total_size_mb` | Sum of `total_size` across `done` and `skipped` jobs |
+| `downloaded` | Track has a `present` row in the SQLite catalog (`library_files`), **or** (catalog unavailable/no row yet) a job in `done` state |
+| `skipped` | Job in `skipped` state, **or** (catalog disabled) a track with no job at all |
+| `failed` | Job in `failed` state |
+| `pending` | Job in `pending`/`downloading` state, **or** a track with no catalog row and no job (catalog enabled — it genuinely hasn't been downloaded yet) |
+| `total_size_mb` | Catalog `file_size` for every `downloaded` track (bytes → MB), **plus** `total_size` from `done`/`skipped` jobs not yet reflected in the catalog |
 
-> A track without a job is counted as `skipped`. This is why `total_tracks` may equal `downloaded + skipped + failed + pending` exactly — orphan IDs are absorbed by `skipped`.
+> Each track in `TrackIDs` is resolved to exactly one bucket, so `total_tracks` always equals `downloaded + skipped + failed + pending`.
+>
+> **Why the catalog first:** BoltDB job rows are pruned by `CleanupOldJobs` every 24h, but the catalog's `library_files` row for a track survives indefinitely and holds its real on-disk `file_size` — a job's `total_size` can also go stale after a later quality-upgrade re-download landed at the same path. Before this, a playlist whose jobs had mostly aged out of BoltDB could report a plausible-looking `downloaded` count while `total_size_mb` was wildly understated, since size could only ever be summed from a job that still existed. If you're on a build before this fix, run `POST /api/v1/admin/library-rebuild` (or the watchlist's Repair button) once to backfill the catalog.
 
 ---
 
