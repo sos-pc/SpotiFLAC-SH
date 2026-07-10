@@ -849,6 +849,11 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 		tag.AddTextFrame("TSRC", id3v2.EncodingUTF8, metadata.ISRC)
 	}
 
+	if metadata.Genre != "" {
+		tag.DeleteFrames("TCON")
+		tag.AddTextFrame("TCON", id3v2.EncodingUTF8, metadata.Genre)
+	}
+
 	if metadata.SpotifyID != "" {
 		// TXXX frame with description=SPOTIFY_ID stores the Spotify track ID.
 		// Pre-existing TXXX frames are removed at the top of this function.
@@ -944,6 +949,9 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 	}
 	if metadata.ISRC != "" {
 		args = append(args, "-metadata", "isrc="+metadata.ISRC)
+	}
+	if metadata.Genre != "" {
+		args = append(args, "-metadata", "genre="+metadata.Genre)
 	}
 	if metadata.SpotifyID != "" {
 		args = append(args, "-metadata", SpotifyIDTagKey+"="+metadata.SpotifyID)

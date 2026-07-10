@@ -112,16 +112,40 @@ func (jm *JobManager) recordCatalogSkipped(j *Job) {
 }
 
 // jobToCatalogTrack projects the Spotify-side identity fields of a Job
-// into a catalog Track. AlbumID is left empty until the job carries the
-// Spotify album ID (separate commit).
+// into a catalog Track. AlbumID (the real Spotify album ID, for a proper
+// albums-table link) is left empty — that needs threading through five
+// different JSON payload shapes in watcher.go plus the manual single-track
+// download path, a much larger change; ReleaseDate/AlbumName/AlbumArtist/
+// CoverURL/Copyright are denormalized straight onto the track row instead
+// (see migration 0005), since they're already sitting on Job for free.
+//
+// ISRC/Genre are read back from the downloaded file's own tags rather than
+// carried on Job: both are computed transiently inside each provider
+// client during metadata embedding and never surfaced back to the caller,
+// so the file is the only place either value survives after the fact.
+// Best-effort and skipped entirely when FilePath is empty (failed jobs
+// never had a file to read) — UpsertTrack's ON CONFLICT preserves any
+// previously-known isrc/genre rather than clobbering it with this empty
+// read on a later failed retry of the same track.
 func jobToCatalogTrack(j *Job) *db.Track {
+	var isrc, genre string
+	if j.FilePath != "" {
+		isrc, genre = meta.ReadTrackTags(j.FilePath)
+	}
 	return &db.Track{
 		SpotifyID:   j.SpotifyID,
+		ISRC:        isrc,
 		Name:        j.TrackName,
 		ArtistName:  j.ArtistName,
 		TrackNumber: j.TrackNumber,
 		DiscNumber:  j.DiscNumber,
 		DurationMs:  j.DurationMs,
+		Genre:       genre,
+		ReleaseDate: j.ReleaseDate,
+		AlbumName:   j.AlbumName,
+		AlbumArtist: j.AlbumArtist,
+		CoverURL:    j.CoverURL,
+		Copyright:   j.Copyright,
 	}
 }
 

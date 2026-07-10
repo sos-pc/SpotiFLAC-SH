@@ -213,6 +213,76 @@ func readSpotifyIDFromFFprobe(path string) (string, error) {
 	return tags[strings.ToLower(SpotifyIDTagKey)], nil
 }
 
+// ReadTrackTags returns the ISRC and Genre embedded in the audio file at
+// path, best-effort — each comes back empty if absent, unreadable, or (for
+// Genre on older files) simply never written: genre embedding was FLAC-only
+// until MP3/M4A picked up TCON/`-metadata genre=` alongside this function.
+// Called once per successful download to backfill the SQLite catalog's
+// tracks.isrc/genre columns without re-deriving values already sitting in
+// the file itself, mirroring the read-what-we-actually-wrote pattern
+// ReadSpotifyID and actualCatalogQuality already use elsewhere.
+func ReadTrackTags(path string) (isrc, genre string) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".flac":
+		return readTrackTagsFromFlac(path)
+	case ".mp3":
+		return readTrackTagsFromMp3(path)
+	case ".m4a":
+		return readTrackTagsFromFFprobe(path)
+	}
+	return "", ""
+}
+
+func readTrackTagsFromFlac(path string) (isrc, genre string) {
+	ok, err := hasFlacMagic(path)
+	if err != nil || !ok {
+		return "", ""
+	}
+	f, err := safeParseFlac(path)
+	if err != nil {
+		return "", ""
+	}
+	for _, block := range f.Meta {
+		if block.Type != flac.VorbisComment {
+			continue
+		}
+		cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
+		if err != nil {
+			continue
+		}
+		for _, comment := range cmt.Comments {
+			parts := strings.SplitN(comment, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			switch {
+			case strings.EqualFold(parts[0], "ISRC"):
+				isrc = parts[1]
+			case strings.EqualFold(parts[0], "GENRE"):
+				genre = parts[1]
+			}
+		}
+	}
+	return isrc, genre
+}
+
+func readTrackTagsFromMp3(path string) (isrc, genre string) {
+	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
+	if err != nil {
+		return "", ""
+	}
+	defer tag.Close()
+	return tag.GetTextFrame("TSRC").Text, tag.GetTextFrame("TCON").Text
+}
+
+func readTrackTagsFromFFprobe(path string) (isrc, genre string) {
+	tags, err := util.ReadFFprobeTags(path)
+	if err != nil {
+		return "", ""
+	}
+	return tags["isrc"], tags["genre"]
+}
+
 
 
 // WriteSpotifyIDTag writes the SPOTIFY_ID tag to an existing audio file

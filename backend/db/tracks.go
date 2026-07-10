@@ -13,18 +13,23 @@ import (
 // providers, but it does NOT carry a file path: physical files live in the
 // LibraryFile entity (added in a later migration).
 type Track struct {
-	SpotifyID    string
-	ISRC         string
-	Name         string
-	ArtistName   string // joined display string ("A, B feat. C")
-	AlbumID      string // empty if unknown (column stored as NULL)
-	TrackNumber  int
-	DiscNumber   int
-	DurationMs   int
-	Explicit     bool
-	Genre        string // from MusicBrainz lookup; empty until fetched
-	FirstSeenAt  int64  // preserved on update
-	LastSeenAt   int64  // bumped on every upsert
+	SpotifyID   string
+	ISRC        string
+	Name        string
+	ArtistName  string // joined display string ("A, B feat. C")
+	AlbumID     string // empty if unknown (column stored as NULL)
+	TrackNumber int
+	DiscNumber  int
+	DurationMs  int
+	Explicit    bool
+	Genre       string // from MusicBrainz lookup; empty until fetched
+	ReleaseDate string // "YYYY-MM-DD" or "YYYY", from Spotify — album-level, denormalized (see migration 0005)
+	AlbumName   string // denormalized; not linked to the albums table (see migration 0005)
+	AlbumArtist string // denormalized
+	CoverURL    string // denormalized
+	Copyright   string // denormalized
+	FirstSeenAt int64  // preserved on update
+	LastSeenAt  int64  // bumped on every upsert
 }
 
 // UpsertTrack inserts or refreshes a track. If AlbumID is non-empty, an
@@ -46,10 +51,15 @@ func UpsertTrack(ctx context.Context, q Querier, t *Track) error {
 		INSERT INTO tracks (
 			spotify_id, isrc, name, artist_name, album_id,
 			track_number, disc_number, duration_ms, explicit, genre,
+			release_date, album_name, album_artist, cover_url, copyright,
 			first_seen_at, last_seen_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (spotify_id) DO UPDATE SET
-			isrc         = excluded.isrc,
+			-- isrc/genre are only ever known when the caller could read them
+			-- back from a downloaded file (see meta.ReadTrackTags); a call
+			-- from a failed job has no file to read and would otherwise
+			-- clobber a previously-good value with empty on every retry.
+			isrc         = COALESCE(NULLIF(excluded.isrc, ''), tracks.isrc),
 			name         = excluded.name,
 			artist_name  = excluded.artist_name,
 			album_id     = excluded.album_id,
@@ -57,11 +67,17 @@ func UpsertTrack(ctx context.Context, q Querier, t *Track) error {
 			disc_number  = excluded.disc_number,
 			duration_ms  = excluded.duration_ms,
 			explicit     = excluded.explicit,
-			genre        = excluded.genre,
+			genre        = COALESCE(NULLIF(excluded.genre, ''), tracks.genre),
+			release_date = excluded.release_date,
+			album_name   = excluded.album_name,
+			album_artist = excluded.album_artist,
+			cover_url    = excluded.cover_url,
+			copyright    = excluded.copyright,
 			last_seen_at = excluded.last_seen_at
 	`,
 		t.SpotifyID, t.ISRC, t.Name, t.ArtistName, nullableString(t.AlbumID),
 		t.TrackNumber, t.DiscNumber, t.DurationMs, boolToInt(t.Explicit), t.Genre,
+		t.ReleaseDate, t.AlbumName, t.AlbumArtist, t.CoverURL, t.Copyright,
 		now, now,
 	)
 	if err != nil {
@@ -80,6 +96,7 @@ func GetTrack(ctx context.Context, q Querier, spotifyID string) (*Track, error) 
 	row := q.QueryRowContext(ctx, `
 		SELECT spotify_id, isrc, name, artist_name, COALESCE(album_id, ''),
 		       track_number, disc_number, duration_ms, explicit, genre,
+		       release_date, album_name, album_artist, cover_url, copyright,
 		       first_seen_at, last_seen_at
 		FROM tracks
 		WHERE spotify_id = ?
@@ -92,6 +109,7 @@ func GetTrack(ctx context.Context, q Querier, spotifyID string) (*Track, error) 
 	err := row.Scan(
 		&t.SpotifyID, &t.ISRC, &t.Name, &t.ArtistName, &t.AlbumID,
 		&t.TrackNumber, &t.DiscNumber, &t.DurationMs, &explicit, &t.Genre,
+		&t.ReleaseDate, &t.AlbumName, &t.AlbumArtist, &t.CoverURL, &t.Copyright,
 		&t.FirstSeenAt, &t.LastSeenAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -118,6 +136,7 @@ func GetTrackByISRC(ctx context.Context, q Querier, isrc string) (*Track, error)
 	row := q.QueryRowContext(ctx, `
 		SELECT spotify_id, isrc, name, artist_name, COALESCE(album_id, ''),
 		       track_number, disc_number, duration_ms, explicit, genre,
+		       release_date, album_name, album_artist, cover_url, copyright,
 		       first_seen_at, last_seen_at
 		FROM tracks
 		WHERE isrc = ?
@@ -132,6 +151,7 @@ func GetTrackByISRC(ctx context.Context, q Querier, isrc string) (*Track, error)
 	err := row.Scan(
 		&t.SpotifyID, &t.ISRC, &t.Name, &t.ArtistName, &t.AlbumID,
 		&t.TrackNumber, &t.DiscNumber, &t.DurationMs, &explicit, &t.Genre,
+		&t.ReleaseDate, &t.AlbumName, &t.AlbumArtist, &t.CoverURL, &t.Copyright,
 		&t.FirstSeenAt, &t.LastSeenAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -143,7 +163,6 @@ func GetTrackByISRC(ctx context.Context, q Querier, isrc string) (*Track, error)
 	t.Explicit = explicit != 0
 	return &t, nil
 }
-
 
 // UpsertTrackStub creates a placeholder track row with only spotify_id set
 // if no row exists yet. Used by the watcher when it receives a list of

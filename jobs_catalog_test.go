@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/go-flac/flacvorbis"
+	flac "github.com/go-flac/go-flac"
 )
 
 // TestActualCatalogQualityFallsBackWhenUnanalyzable covers the safety-net
@@ -25,6 +27,82 @@ func TestActualCatalogQualityFallsBackWhenUnanalyzable(t *testing.T) {
 	got := actualCatalogQuality(nonexistent, db.QualityHiResLossless)
 	if got != db.QualityHiResLossless {
 		t.Errorf("actualCatalogQuality on unanalyzable file = %q, want fallback %q", got, db.QualityHiResLossless)
+	}
+}
+
+// writeTestFlacWithTags builds a minimal but real-enough FLAC file with the
+// given ISRC/GENRE vorbis comments and a fake frame-sync header, so
+// meta.ReadTrackTags can actually parse it back. See
+// backend/meta/track_tags_test.go for why the Frames bytes are needed
+// (go-flac's readFLACStream indexes unconditionally into frame data).
+func writeTestFlacWithTags(t *testing.T, path, isrc, genre string) {
+	t.Helper()
+	cmt := flacvorbis.New()
+	if isrc != "" {
+		if err := cmt.Add("ISRC", isrc); err != nil {
+			t.Fatalf("add ISRC comment: %v", err)
+		}
+	}
+	if genre != "" {
+		if err := cmt.Add("GENRE", genre); err != nil {
+			t.Fatalf("add GENRE comment: %v", err)
+		}
+	}
+	block := cmt.Marshal()
+	f := &flac.File{Meta: []*flac.MetaDataBlock{&block}, Frames: []byte{0xFF, 0xF8}}
+	if err := os.WriteFile(path, f.Marshal(), 0644); err != nil {
+		t.Fatalf("write test FLAC: %v", err)
+	}
+}
+
+// TestJobToCatalogTrackReadsTagsFromFile is the regression test for the
+// catalog previously never learning a track's ISRC/genre: both are
+// computed transiently inside each provider client during embedding and
+// never surfaced back onto Job, so jobToCatalogTrack reads them back from
+// the file the job actually produced.
+func TestJobToCatalogTrackReadsTagsFromFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "track.flac")
+	writeTestFlacWithTags(t, path, "USRC17607839", "Synthwave")
+
+	job := &Job{
+		SpotifyID:   "spotify:track:abc",
+		TrackName:   "Some Track",
+		ArtistName:  "Some Artist",
+		FilePath:    path,
+		ReleaseDate: "2024-03-15",
+		AlbumName:   "Some Album",
+		AlbumArtist: "Some Album Artist",
+		CoverURL:    "https://example.com/cover.jpg",
+		Copyright:   "2024 Some Label",
+	}
+
+	track := jobToCatalogTrack(job)
+	if track.ISRC != "USRC17607839" {
+		t.Errorf("ISRC = %q, want %q", track.ISRC, "USRC17607839")
+	}
+	if track.Genre != "Synthwave" {
+		t.Errorf("Genre = %q, want %q", track.Genre, "Synthwave")
+	}
+	if track.ReleaseDate != job.ReleaseDate || track.AlbumName != job.AlbumName ||
+		track.AlbumArtist != job.AlbumArtist || track.CoverURL != job.CoverURL || track.Copyright != job.Copyright {
+		t.Errorf("denormalized album fields did not pass through from Job: got %+v", track)
+	}
+}
+
+// TestJobToCatalogTrackSkipsFileReadWithoutFilePath covers the failed-job
+// case: no file was ever produced, so no read should be attempted (and
+// none would succeed) — isrc/genre must simply come back empty rather
+// than erroring.
+func TestJobToCatalogTrackSkipsFileReadWithoutFilePath(t *testing.T) {
+	job := &Job{
+		SpotifyID:  "spotify:track:abc",
+		TrackName:  "Some Track",
+		ArtistName: "Some Artist",
+		FilePath:   "",
+	}
+	track := jobToCatalogTrack(job)
+	if track.ISRC != "" || track.Genre != "" {
+		t.Errorf("ISRC/Genre = (%q, %q), want (\"\", \"\") for a job with no FilePath", track.ISRC, track.Genre)
 	}
 }
 
