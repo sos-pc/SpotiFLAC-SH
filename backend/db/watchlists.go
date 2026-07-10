@@ -5,8 +5,17 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// setWatchlistTracksBatchSize bounds how many rows go into a single
+// multi-row INSERT. A large aggregator watchlist (thousands of tracks) run
+// as one INSERT per row used to hold the SQLite write lock for the entire
+// transaction's wall-clock time — long enough to trip other writers'
+// busy_timeout under concurrent syncs/downloads ("database is locked").
+// Batching cuts the round-trip count from one per track to one per 500.
+const setWatchlistTracksBatchSize = 500
 
 // SetWatchlistTracks atomically replaces the track list of a watchlist
 // with the supplied ordered Spotify IDs. Returns the diff vs the previous
@@ -51,8 +60,12 @@ func SetWatchlistTracks(
 		}
 	}
 
-	// Clear-then-insert is simpler than a 3-way diff (insert/update/delete)
-	// and the volume per watchlist is small (rarely > 200 tracks).
+	// Clear-then-insert is simpler than a 3-way diff (insert/update/delete).
+	// Inserts are batched (setWatchlistTracksBatchSize) rather than one
+	// statement per track — an aggregator watchlist can easily hold
+	// thousands of tracks, and one INSERT per row held the write lock for
+	// the whole transaction's duration, long enough to starve concurrent
+	// writers past their busy_timeout.
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM watchlist_tracks WHERE watchlist_id = ?`,
 		watchlistID,
@@ -61,12 +74,26 @@ func SetWatchlistTracks(
 	}
 
 	now := time.Now().Unix()
-	for id, pos := range newSet {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO watchlist_tracks (watchlist_id, spotify_id, position, added_at)
-			VALUES (?, ?, ?, ?)
-		`, watchlistID, id, pos, now); err != nil {
-			return nil, nil, fmt.Errorf("insert watchlist_track %s/%s: %w", watchlistID, id, err)
+	ids := make([]string, 0, len(newSet))
+	for id := range newSet {
+		ids = append(ids, id)
+	}
+	for start := 0; start < len(ids); start += setWatchlistTracksBatchSize {
+		end := start + setWatchlistTracksBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]interface{}, 0, len(batch)*4)
+		for i, id := range batch {
+			placeholders[i] = "(?, ?, ?, ?)"
+			args = append(args, watchlistID, id, newSet[id], now)
+		}
+		query := `INSERT INTO watchlist_tracks (watchlist_id, spotify_id, position, added_at) VALUES ` +
+			strings.Join(placeholders, ",")
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return nil, nil, fmt.Errorf("insert watchlist_tracks batch [%d:%d]: %w", start, end, err)
 		}
 	}
 
