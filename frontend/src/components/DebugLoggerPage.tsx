@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { Trash2, Copy, Check, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logger, type LogEntry } from "@/lib/logger";
-import { ExportFailedDownloads } from "@/lib/rpc";
+import { ExportFailedDownloads, GetServerLogs } from "@/lib/rpc";
+import { getUser, getStreamToken } from "@/lib/auth";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 const levelColors: Record<string, string> = {
     info: "text-blue-500",
@@ -10,6 +11,10 @@ const levelColors: Record<string, string> = {
     warning: "text-yellow-500",
     error: "text-red-500",
     debug: "text-gray-500",
+};
+const sourceLabels: Record<string, string> = {
+    web: "web",
+    docker: "docker",
 };
 function formatTime(date: Date): string {
     return date.toLocaleTimeString("en-US", {
@@ -19,17 +24,57 @@ function formatTime(date: Date): string {
         second: "2-digit",
     });
 }
+function byTimestamp(a: LogEntry, b: LogEntry): number {
+    return a.timestamp.getTime() - b.timestamp.getTime();
+}
 export function DebugLoggerPage() {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [copied, setCopied] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         const unsubscribe = logger.subscribe(() => {
-            setLogs(logger.getLogs());
+            setLogs([...logger.getLogs()].sort(byTimestamp));
         });
-        setLogs(logger.getLogs());
+        setLogs([...logger.getLogs()].sort(byTimestamp));
         return () => {
             unsubscribe();
+        };
+    }, []);
+    // Backend logs are admin-only (they can mention other users' watchlist
+    // names, file paths, error details) — mirrors the server-side check.
+    useEffect(() => {
+        if (!getUser()?.is_admin) return;
+        let cancelled = false;
+        let es: EventSource | null = null;
+
+        GetServerLogs()
+            .then((entries) => {
+                if (cancelled) return;
+                for (const e of entries) {
+                    logger.ingestBackend(e.time, e.level, e.message);
+                }
+            })
+            .catch(() => {});
+
+        (async () => {
+            const token = await getStreamToken();
+            if (!token || cancelled) return;
+            es = new EventSource(
+                `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
+            );
+            es.addEventListener("server_log", (e: MessageEvent) => {
+                const data = JSON.parse(e.data) as {
+                    time: string;
+                    level: string;
+                    message: string;
+                };
+                logger.ingestBackend(data.time, data.level, data.message);
+            });
+        })();
+
+        return () => {
+            cancelled = true;
+            es?.close();
         };
     }, []);
     useEffect(() => {
@@ -42,7 +87,7 @@ export function DebugLoggerPage() {
     };
     const handleCopy = async () => {
         const logText = logs
-            .map((log) => `[${formatTime(log.timestamp)}] [${log.level}] ${log.message}`)
+            .map((log) => `[${formatTime(log.timestamp)}] [${log.source}] [${log.level}] ${log.message}`)
             .join("\n");
         try {
             await navigator.clipboard.writeText(logText);
@@ -91,6 +136,9 @@ export function DebugLoggerPage() {
         {logs.length === 0 ? (<p className="text-muted-foreground lowercase">no logs yet...</p>) : (logs.map((log, i) => (<div key={i} className="flex gap-2 py-0.5">
               <span className="text-muted-foreground shrink-0">
                 [{formatTime(log.timestamp)}]
+              </span>
+              <span className={`shrink-0 w-14 ${log.source === "docker" ? "text-purple-500" : "text-cyan-500"}`}>
+                [{sourceLabels[log.source]}]
               </span>
               <span className={`shrink-0 w-16 ${levelColors[log.level]}`}>
                 [{log.level}]

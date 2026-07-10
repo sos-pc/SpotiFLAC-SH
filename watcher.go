@@ -1281,6 +1281,10 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		Unresolved: len(pl.TrackIDs) - len(paths),
 	}
 	if len(paths) == 0 {
+		if result.Total > 0 {
+			fmt.Printf("[Watcher] M3U8: %s — 0/%d tracks resolved, nothing written; run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild, or use the Repair button on this watchlist\n",
+				pl.Name, result.Total)
+		}
 		return result, nil
 	}
 

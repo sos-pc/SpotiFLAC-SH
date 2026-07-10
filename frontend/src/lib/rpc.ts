@@ -258,6 +258,15 @@ export interface WatchlistRepairResult {
 export const RepairWatchlist = (id: string) =>
   rest<void>("POST", `/watchlists/${encodeURIComponent(id)}/repair`);
 
+// ─── Admin — backend log buffer (Debug Logs page) ──────────────────────────────
+
+export interface ServerLogEntry {
+  time: string;
+  level: string;
+  message: string;
+}
+export const GetServerLogs = () => rest<ServerLogEntry[]>("GET", "/admin/logs");
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export interface APIKeyMeta {

@@ -6,8 +6,11 @@ package main
 // GET /api/v1/jobs/stream → text/event-stream
 //
 // Événements :
-//   event: job_update   — état d'un job (pending/downloading/done/failed/skipped)
-//   event: connected    — snapshot initial de la queue au moment de la connexion
+//   event: job_update       — état d'un job (pending/downloading/done/failed/skipped)
+//   event: connected        — snapshot initial de la queue au moment de la connexion
+//   event: watchlist_synced — fin de synchronisation d'une watchlist
+//   event: watchlist_repaired — fin de réparation d'une watchlist (voir api_admin.go)
+//   event: server_log       — ligne de log backend (admin only, voir logbuffer.go)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
@@ -140,8 +143,14 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			// Filtrer par userID si non-admin (uniquement pour les events job)
-			if user != nil && !user.IsAdmin && event.Job != nil &&
+			// server_log expose des chemins fichiers et des détails d'erreur
+			// potentiellement liés à d'autres utilisateurs — admin only.
+			if event.Type == "server_log" {
+				if user == nil || !user.IsAdmin {
+					continue
+				}
+			} else if user != nil && !user.IsAdmin && event.Job != nil &&
+				// Filtrer par userID si non-admin (uniquement pour les events job)
 				event.Job.UserID != "" && event.Job.UserID != user.UserID {
 				continue
 			}

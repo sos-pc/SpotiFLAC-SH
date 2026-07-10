@@ -18,6 +18,10 @@ import (
 const port = "6890"
 
 func main() {
+	// Capture stdout as early as possible so startup logs land in the
+	// in-memory buffer the Debug Logs page reads from too.
+	captureStdout()
+
 	// ── Config dir ────────────────────────────────────────────────────────
 	configDir, err := getConfigDir()
 	if err != nil {
@@ -67,6 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer jobs.Close()
+	serverLogs.attachHub(jobs.hub)
 
 	// ── Auth (Jellyfin + JWT) ─────────────────────────────────────────────
 	auth, err := NewAuthManager(db)

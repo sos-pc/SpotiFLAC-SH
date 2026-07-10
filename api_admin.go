@@ -64,6 +64,19 @@ const libraryRebuildTimeout = 10 * time.Minute
 func (s *Server) registerAdminRoutes() {
 	s.mux.Handle("POST /api/v1/admin/retag-legacy", s.v1Auth(s.v1RetagLegacy))
 	s.mux.Handle("POST /api/v1/admin/library-rebuild", s.v1Auth(s.v1LibraryRebuild))
+	s.mux.Handle("GET /api/v1/admin/logs", s.v1Auth(s.v1GetServerLogs))
+}
+
+// v1GetServerLogs returns the current in-memory backend log buffer — the
+// same lines visible via `docker logs`, used by the Debug Logs page for its
+// initial snapshot (live updates then arrive over SSE as server_log events).
+// Admin-only: backend log lines can mention other users' watchlist names,
+// file paths, and error details.
+func (s *Server) v1GetServerLogs(w http.ResponseWriter, r *http.Request) {
+	if !v1RequireAdmin(w, r) {
+		return
+	}
+	writeV1JSON(w, http.StatusOK, serverLogs.snapshot())
 }
 
 // v1RetagLegacy walks every Done/Skipped job in BoltDB whose FilePath still
