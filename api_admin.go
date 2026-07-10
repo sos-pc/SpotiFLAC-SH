@@ -178,6 +178,12 @@ type watchlistRepairResult struct {
 // (or an admin) a single "fix this playlist" action reachable from the
 // watchlist card, for the exact class of "M3U8 lost most of its tracks"
 // problem those two admin endpoints were built to address.
+//
+// The rebuild step can take up to libraryRebuildTimeout (10 min) on a large
+// library, well past any reverse-proxy's read timeout, so the handler only
+// kicks off the work and returns 202 immediately; completion is announced
+// over SSE (watchlist_repaired), mirroring how syncPlaylist announces
+// watchlist_synced.
 func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	user := GetUserFromContext(r)
@@ -192,6 +198,15 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go s.runWatchlistRepair(*pl)
+
+	writeV1JSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// runWatchlistRepair performs the actual repair steps in the background —
+// see v1RepairWatchlist for why this can't run inline in the request.
+func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
+	fmt.Printf("[Repair] %s: starting\n", pl.Name)
 	result := watchlistRepairResult{}
 
 	// 1. Retag this watchlist's own legacy files (BoltDB job record still
@@ -199,11 +214,15 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 	if jobs, jobsErr := s.ctr.Jobs.GetAllJobs(); jobsErr == nil {
 		scoped := make([]Job, 0, len(jobs))
 		for _, j := range jobs {
-			if j.WatchlistID == id {
+			if j.WatchlistID == pl.ID {
 				scoped = append(scoped, j)
 			}
 		}
 		result.Retag = retagJobs(scoped)
+		fmt.Printf("[Repair] %s: retag scanned=%d tagged=%d skipped=%d failed=%d\n",
+			pl.Name, result.Retag.Scanned, result.Retag.Tagged, result.Retag.Skipped, result.Retag.Failed)
+	} else {
+		fmt.Printf("[Repair] %s: failed to list jobs for retag: %v\n", pl.Name, jobsErr)
 	}
 
 	// 2. Rebuild the catalog for this watchlist's own download path only
@@ -216,25 +235,41 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 		if _, statErr := os.Stat(root); statErr == nil {
 			rebuildResult := libraryRebuildResult{ScanRoots: []string{root}}
 			seenIDs := make(map[string]bool)
-			ctx, cancel := context.WithTimeout(r.Context(), libraryRebuildTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), libraryRebuildTimeout)
 			s.scanRootForRebuild(ctx, root, &rebuildResult, seenIDs)
 			if ctx.Err() != nil {
 				rebuildResult.TimedOut = true
 			}
 			cancel()
 			result.Rebuild = rebuildResult
+			fmt.Printf("[Repair] %s: rebuild scanned=%d imported=%d verified=%d moved=%d duplicate=%d no_tag=%d failed=%d timed_out=%v\n",
+				pl.Name, rebuildResult.FilesScanned, rebuildResult.Imported, rebuildResult.Verified,
+				rebuildResult.Moved, rebuildResult.Duplicate, rebuildResult.NoTag, rebuildResult.Failed, rebuildResult.TimedOut)
+		} else {
+			fmt.Printf("[Repair] %s: download path %q not accessible, skipping rebuild: %v\n", pl.Name, root, statErr)
 		}
 	}
 
 	// 3. Force-regenerate the M3U8 with whatever the catalog/retag work
 	// above just improved.
-	m3uResult, m3uErr := s.ctr.Watcher.generateM3U8ForPlaylist(id, true)
+	m3uResult, m3uErr := s.ctr.Watcher.generateM3U8ForPlaylist(pl.ID, true)
 	result.M3U8 = m3uResult
 	if m3uErr != nil {
 		result.M3U8Error = m3uErr.Error()
+		fmt.Printf("[Repair] %s: M3U8 regeneration failed: %v\n", pl.Name, m3uErr)
 	}
+	fmt.Printf("[Repair] %s: done — %d/%d tracks resolved in M3U8\n", pl.Name, result.M3U8.Resolved, result.M3U8.Total)
 
-	writeV1JSON(w, http.StatusOK, result)
+	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
+		s.ctr.Jobs.hub.publish(JobEvent{
+			Type: "watchlist_repaired",
+			Data: map[string]interface{}{
+				"watchlist_id": pl.ID,
+				"name":         pl.Name,
+				"result":       result,
+			},
+		})
+	}
 }
 
 // collectScanRoots returns the deduplicated list of download paths to

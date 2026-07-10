@@ -256,10 +256,7 @@ export interface WatchlistRepairResult {
   m3u8_error?: string;
 }
 export const RepairWatchlist = (id: string) =>
-  rest<WatchlistRepairResult>(
-    "POST",
-    `/watchlists/${encodeURIComponent(id)}/repair`,
-  );
+  rest<void>("POST", `/watchlists/${encodeURIComponent(id)}/repair`);
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 

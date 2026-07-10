@@ -8,6 +8,7 @@ import {
   GetWatchlistStats,
   GetWatchlistHistory,
   RepairWatchlist,
+  type WatchlistRepairResult,
 } from "@/lib/rpc";
 import { getSettings } from "@/lib/settings";
 import { getStreamToken } from "@/lib/auth";
@@ -177,6 +178,37 @@ export function WatchlistPage() {
           toast.info(`${data.name}: up to date`);
         }
       });
+      es.addEventListener("watchlist_repaired", (e: MessageEvent) => {
+        const data = JSON.parse(e.data) as {
+          watchlist_id: string;
+          name: string;
+          result: WatchlistRepairResult;
+        };
+        setRepairing((prev) => {
+          const next = new Set(prev);
+          next.delete(data.watchlist_id);
+          return next;
+        });
+        reloadStats(data.watchlist_id);
+        loadWatchlists();
+        const { retag, rebuild, m3u8, m3u8_error } = data.result;
+        if (m3u8.unresolved === 0) {
+          toast.success(
+            `${data.name}: repaired, all ${m3u8.total} tracks resolved, M3U8 up to date`,
+          );
+        } else if (m3u8.resolved > 0) {
+          toast.warning(
+            `${data.name}: repaired, ${m3u8.resolved}/${m3u8.total} tracks resolved (${m3u8.unresolved} still missing — tagged ${retag.tagged}, imported ${rebuild.imported} into the catalog)`,
+          );
+        } else {
+          toast.error(
+            `${data.name}: repair found 0/${m3u8.total} tracks on disk — check the download path in this watchlist's settings`,
+          );
+        }
+        if (m3u8_error) {
+          toast.error(`${data.name}: M3U8 write failed: ${m3u8_error}`);
+        }
+      });
     })();
 
     return () => {
@@ -305,33 +337,18 @@ export function WatchlistPage() {
   const handleRepair = async (id: string) => {
     setRepairing((prev) => new Set(prev).add(id));
     try {
-      const result = await RepairWatchlist(id);
-      reloadStats(id);
-      const { retag, rebuild, m3u8 } = result;
-      if (m3u8.unresolved === 0) {
-        toast.success(
-          `Repaired: all ${m3u8.total} tracks resolved, M3U8 up to date`,
-        );
-      } else if (m3u8.resolved > 0) {
-        toast.warning(
-          `Repaired: ${m3u8.resolved}/${m3u8.total} tracks resolved (${m3u8.unresolved} still missing — tagged ${retag.tagged}, imported ${rebuild.imported} into the catalog)`,
-        );
-      } else {
-        toast.error(
-          `Repair found 0/${m3u8.total} tracks on disk — check the download path in this watchlist's settings`,
-        );
-      }
-      if (result.m3u8_error) {
-        toast.error(`M3U8 write failed: ${result.m3u8_error}`);
-      }
+      await RepairWatchlist(id);
+      // Le spinner et le toast de résultat sont gérés par l'événement
+      // SSE watchlist_repaired — la réparation tourne en arrière-plan
+      // côté serveur et peut prendre plusieurs minutes.
     } catch (err) {
-      toast.error(`Repair failed: ${err}`);
-    } finally {
+      // En cas d'erreur HTTP (échec du kickoff), retirer du set immédiatement
       setRepairing((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
+      toast.error(`Repair failed: ${err}`);
     }
   };
 
