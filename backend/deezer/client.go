@@ -261,10 +261,9 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 		SpotifyID:   p.SpotifyID,
 	}
 	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
-		fmt.Printf("Warning: Failed to embed metadata: %v\n", err)
-	} else {
-		fmt.Println("Metadata embedded successfully")
+		return "", fmt.Errorf("failed to embed metadata: %w", err)
 	}
+	fmt.Println("Metadata embedded successfully")
 
 	fmt.Println("✓ Downloaded successfully from Deezer")
 	return filePath, nil

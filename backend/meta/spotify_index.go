@@ -49,6 +49,30 @@ func safeParseFlac(path string) (file *flac.File, err error) {
 	return flac.ParseFile(path)
 }
 
+// saveFlacAtomic writes f's marshaled bytes to a temp file next to path,
+// then renames it into place. go-flac's own File.Save does
+// os.WriteFile(path, ...) directly, which opens with O_TRUNC — it
+// truncates the existing file before writing the new bytes, so a crash,
+// OOM-kill, disk-full, or concurrent writer to the same path mid-write
+// leaves a truncated/corrupted FLAC behind, not just an untagged one. Every
+// FLAC save in this package (initial metadata embed, lyrics-only update,
+// SPOTIFY_ID retag) goes through this instead, matching the atomic
+// temp-file+rename pattern already used for MP3 (id3v2.Tag.Save) and M4A
+// (ffmpeg-based tagging writes to a temp file and renames over the
+// original).
+func saveFlacAtomic(f *flac.File, path string) error {
+	tmp := path + ".tagtmp"
+	if err := os.WriteFile(tmp, f.Marshal(), 0644); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename into place: %w", err)
+	}
+	return nil
+}
+
 // supportedAudioExtensions is the set of audio file extensions scanned by
 // BuildSpotifyIDIndex.
 var supportedAudioExtensions = map[string]bool{
@@ -197,10 +221,17 @@ func readSpotifyIDFromFFprobe(path string) (string, error) {
 //
 // Returns true if the tag was written, false if it was already present
 // with the same value (no-op).
+//
+// Locked per-path (see tagWriteLocks) so a retag-legacy run can't race
+// against a worker's concurrent metadata embed for the same file — both
+// read-modify-write the same tag block, and without this a stale read on
+// either side could silently discard the other's changes on write.
 func WriteSpotifyIDTag(path, spotifyID string) (bool, error) {
 	if spotifyID == "" {
 		return false, fmt.Errorf("spotifyID is required")
 	}
+	unlock := lockTagWrite(path)
+	defer unlock()
 	ext := strings.ToLower(filepath.Ext(path))
 	existing, _ := readSpotifyIDFromFile(path, ext)
 	if existing == spotifyID {
@@ -266,7 +297,7 @@ func writeSpotifyIDToFlac(path, spotifyID string) error {
 	} else {
 		f.Meta[cmtIdx] = &block
 	}
-	if err := f.Save(path); err != nil {
+	if err := saveFlacAtomic(f, path); err != nil {
 		return fmt.Errorf("save FLAC: %w", err)
 	}
 	return nil

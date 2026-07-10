@@ -43,7 +43,20 @@ type Metadata struct {
 	SpotifyID   string
 }
 
+// EmbedMetadata embeds full metadata into a FLAC file. Locked per-path
+// (see tagWriteLocks) so it can't race with a concurrent retag-legacy or
+// lyrics-only write to the same file.
 func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
+	unlock := lockTagWrite(filepath)
+	defer unlock()
+	return embedMetadataFlac(filepath, metadata, coverPath)
+}
+
+// embedMetadataFlac is the unlocked implementation, shared by EmbedMetadata
+// (which locks) and EmbedMetadataToConvertedFile's FLAC case (which holds
+// its own lock for the whole dispatch — calling EmbedMetadata itself from
+// there would deadlock on the non-reentrant per-path mutex).
+func embedMetadataFlac(filepath string, metadata Metadata, coverPath string) error {
 	f, err := safeParseFlac(filepath)
 	if err != nil {
 		return fmt.Errorf("failed to parse FLAC file: %w", err)
@@ -125,7 +138,7 @@ func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
 		}
 	}
 
-	if err := f.Save(filepath); err != nil {
+	if err := saveFlacAtomic(f, filepath); err != nil {
 		return fmt.Errorf("failed to save FLAC file: %w", err)
 	}
 
@@ -206,7 +219,7 @@ func EmbedLyricsOnly(filepath string, lyrics string) error {
 		f.Meta[cmtIdx] = &cmtBlock
 	}
 
-	if err := f.Save(filepath); err != nil {
+	if err := saveFlacAtomic(f, filepath); err != nil {
 		return fmt.Errorf("failed to save FLAC file: %w", err)
 	}
 
@@ -504,10 +517,16 @@ func embedLyricsToM4A(filepath string, lyrics string) error {
 	return nil
 }
 
+// EmbedLyricsOnlyUniversal re-embeds just the lyrics tag, dispatching to the
+// format-specific implementation. Locked per-path — EmbedLyricsOnly and
+// EmbedLyricsOnlyMP3 are only ever called from here, so this is the single
+// lock point for lyrics-only writes to a given file.
 func EmbedLyricsOnlyUniversal(filepath string, lyrics string) error {
 	if lyrics == "" {
 		return nil
 	}
+	unlock := lockTagWrite(filepath)
+	defer unlock()
 
 	validatedLyrics, err := validateLyricsDuration(lyrics, filepath)
 	if err != nil {
@@ -743,13 +762,20 @@ func ExtractFullMetadataFromFile(filePath string) (Metadata, error) {
 	return metadata, nil
 }
 
+// EmbedMetadataToConvertedFile dispatches to the format-specific embedder
+// by extension. Locked per-path for the whole dispatch — the FLAC case
+// calls the unlocked embedMetadataFlac directly rather than EmbedMetadata,
+// to avoid double-locking the same (non-reentrant) per-path mutex.
 func EmbedMetadataToConvertedFile(filePath string, metadata Metadata, coverPath string) error {
+	unlock := lockTagWrite(filePath)
+	defer unlock()
+
 	ext := strings.ToLower(pathfilepath.Ext(filePath))
 
 	switch ext {
 	case ".flac":
 
-		return EmbedMetadata(filePath, metadata, coverPath)
+		return embedMetadataFlac(filePath, metadata, coverPath)
 	case ".mp3":
 		return embedMetadataToMP3(filePath, metadata, coverPath)
 	case ".m4a":

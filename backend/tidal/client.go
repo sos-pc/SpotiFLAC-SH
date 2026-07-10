@@ -682,10 +682,9 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 	}
 
 	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
-		fmt.Printf("Tagging failed: %v\n", err)
-	} else {
-		fmt.Println("Metadata saved")
+		return "", fmt.Errorf("failed to embed metadata: %w", err)
 	}
+	fmt.Println("Metadata saved")
 
 	fmt.Println("Done")
 	fmt.Println("✓ Downloaded successfully from Tidal")
@@ -842,10 +841,9 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 	}
 
 	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
-		fmt.Printf("Tagging failed: %v\n", err)
-	} else {
-		fmt.Println("Metadata saved")
+		return "", fmt.Errorf("failed to embed metadata: %w", err)
 	}
+	fmt.Println("Metadata saved")
 
 	fmt.Println("Done")
 	fmt.Println("✓ Downloaded successfully from Tidal")

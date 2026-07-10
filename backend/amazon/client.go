@@ -506,8 +506,9 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		SpotifyID:   p.SpotifyTrackID,
 	}
 
-	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
-		fmt.Printf("Warning: Failed to embed metadata: %v\n", err)
+	embedErr := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath)
+	if embedErr != nil {
+		fmt.Printf("Warning: Failed to embed metadata: %v\n", embedErr)
 	} else {
 		fmt.Println("Metadata embedded successfully")
 	}
@@ -522,6 +523,14 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 				fmt.Printf("Cleaned up original M4A file: %s\n", filepath.Base(originalM4aPath))
 			}
 		}
+	}
+
+	// Checked after the M4A cleanup above (which must run regardless) so a
+	// failed embed still fails the job — matching Qobuz's existing
+	// behavior — instead of silently leaving an untagged file that
+	// ExecuteDownload's caller-side cleanup never gets a chance to catch.
+	if embedErr != nil {
+		return "", fmt.Errorf("failed to embed metadata: %w", embedErr)
 	}
 
 	fmt.Println("Done")
