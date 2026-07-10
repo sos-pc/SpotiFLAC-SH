@@ -165,6 +165,18 @@ func (a *AuthManager) ValidateAPIKey(rawKey string) (*JWTClaims, bool) {
 			break
 		}
 	}
+	// A key's stored "admin" permission reflects what its owning account
+	// could do at creation time, not now. Re-check against the account's
+	// current status so a demoted admin (or a key that predates
+	// v1CreateAPIKey's self-escalation guard) can't keep admin API access
+	// forever through a key that never expires. Only the admin claim is
+	// downgraded on a stale/missing account — the key's other permissions
+	// (read/download) still apply.
+	if isAdmin {
+		if profile, err := a.GetUser(found.UserID); err != nil || !profile.IsAdmin {
+			isAdmin = false
+		}
+	}
 	return &JWTClaims{
 		UserID:      found.UserID,
 		DisplayName: "API Key: " + found.Name,

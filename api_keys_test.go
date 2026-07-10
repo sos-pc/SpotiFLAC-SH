@@ -156,7 +156,10 @@ func TestValidateAPIKey(t *testing.T) {
 		}
 	})
 
-	t.Run("permission admin → IsAdmin=true", func(t *testing.T) {
+	t.Run("permission admin sur un compte admin → IsAdmin=true", func(t *testing.T) {
+		if _, err := am.GetOrCreateUser("admin1", "Admin One", true); err != nil {
+			t.Fatalf("GetOrCreateUser: %v", err)
+		}
 		adminKey, _, err := am.CreateAPIKey("admin1", "admin", []string{"read", "admin"})
 		if err != nil {
 			t.Fatalf("CreateAPIKey: %v", err)
@@ -166,7 +169,68 @@ func TestValidateAPIKey(t *testing.T) {
 			t.Fatal("ValidateAPIKey devrait retourner true")
 		}
 		if !claims.IsAdmin {
-			t.Error("IsAdmin devrait être true avec permission admin")
+			t.Error("IsAdmin devrait être true avec permission admin sur un compte réellement admin")
+		}
+	})
+
+	// Regression test: a key's stored "admin" permission must not be
+	// honored unless the owning account is CURRENTLY admin. Without this,
+	// a key created before v1CreateAPIKey's self-escalation guard existed
+	// (or an account later demoted from admin) would keep full admin API
+	// access forever, since API keys never expire.
+	t.Run("permission admin sur un compte non-admin → IsAdmin=false", func(t *testing.T) {
+		if _, err := am.GetOrCreateUser("notadmin1", "Not Admin", false); err != nil {
+			t.Fatalf("GetOrCreateUser: %v", err)
+		}
+		key, _, err := am.CreateAPIKey("notadmin1", "escalation attempt", []string{"read", "admin"})
+		if err != nil {
+			t.Fatalf("CreateAPIKey: %v", err)
+		}
+		claims, ok := am.ValidateAPIKey(key)
+		if !ok {
+			t.Fatal("ValidateAPIKey devrait retourner true (la clé reste valide pour read/download)")
+		}
+		if claims.IsAdmin {
+			t.Error("IsAdmin devrait être false : le compte propriétaire n'est pas admin, malgré la permission stockée")
+		}
+	})
+
+	t.Run("permission admin sur un compte inconnu (bypass local non persisté) → IsAdmin=false", func(t *testing.T) {
+		key, _, err := am.CreateAPIKey("ghost-user", "orphan", []string{"admin"})
+		if err != nil {
+			t.Fatalf("CreateAPIKey: %v", err)
+		}
+		claims, ok := am.ValidateAPIKey(key)
+		if !ok {
+			t.Fatal("ValidateAPIKey devrait retourner true")
+		}
+		if claims.IsAdmin {
+			t.Error("IsAdmin devrait être false : impossible de vérifier un compte qui n'existe pas")
+		}
+	})
+
+	t.Run("admin rétrogradé perd IsAdmin sur ses clés existantes", func(t *testing.T) {
+		if _, err := am.GetOrCreateUser("admin2", "Admin Two", true); err != nil {
+			t.Fatalf("GetOrCreateUser (create admin): %v", err)
+		}
+		key, _, err := am.CreateAPIKey("admin2", "admin key", []string{"admin"})
+		if err != nil {
+			t.Fatalf("CreateAPIKey: %v", err)
+		}
+		if claims, ok := am.ValidateAPIKey(key); !ok || !claims.IsAdmin {
+			t.Fatalf("clé devrait être admin avant rétrogradation (ok=%v)", ok)
+		}
+
+		if _, err := am.GetOrCreateUser("admin2", "Admin Two", false); err != nil {
+			t.Fatalf("GetOrCreateUser (démotion): %v", err)
+		}
+
+		claims, ok := am.ValidateAPIKey(key)
+		if !ok {
+			t.Fatal("ValidateAPIKey devrait retourner true")
+		}
+		if claims.IsAdmin {
+			t.Error("IsAdmin devrait être false après rétrogradation du compte propriétaire")
 		}
 	})
 }

@@ -133,6 +133,18 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if len(req.Permissions) == 0 {
 		req.Permissions = []string{"read", "download"}
 	}
+	// A key inherits its owner's account, not the caller's session — without
+	// this check, any authenticated non-admin user could self-issue a key
+	// with "admin" permission and use it to reach every v1RequireAdmin-gated
+	// endpoint indefinitely (API keys never expire, unlike JWTs).
+	if !user.IsAdmin {
+		for _, p := range req.Permissions {
+			if p == "admin" {
+				writeV1Error(w, http.StatusForbidden, "only an admin account can create a key with admin permission")
+				return
+			}
+		}
+	}
 	rawKey, key, err := s.ctr.Auth.CreateAPIKey(user.UserID, req.Name, req.Permissions)
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create key: %v", err))
