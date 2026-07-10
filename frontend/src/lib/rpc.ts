@@ -258,6 +258,25 @@ export interface WatchlistRepairResult {
 export const RepairWatchlist = (id: string) =>
   rest<void>("POST", `/watchlists/${encodeURIComponent(id)}/repair`);
 
+export interface WatchlistFreshnessReport {
+  up_to_date: boolean;
+  total_tracks: number;
+  new_on_spotify: number;
+  removed_from_spotify: number;
+  missing_files: number;
+  pending: number;
+  failed: number;
+  m3u8_enabled: boolean;
+  m3u8_entry_count?: number;
+  m3u8_stale?: boolean;
+  checked_at: string;
+}
+export const CheckWatchlistFreshness = (id: string) =>
+  rest<WatchlistFreshnessReport>(
+    "GET",
+    `/watchlists/${encodeURIComponent(id)}/freshness`,
+  );
+
 // ─── Admin — backend log buffer (Debug Logs page) ──────────────────────────────
 
 export interface ServerLogEntry {

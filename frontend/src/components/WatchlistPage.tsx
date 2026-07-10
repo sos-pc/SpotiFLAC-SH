@@ -9,6 +9,7 @@ import {
   GetWatchlistHistory,
   RepairWatchlist,
   type WatchlistRepairResult,
+  CheckWatchlistFreshness,
 } from "@/lib/rpc";
 import { getSettings } from "@/lib/settings";
 import { getStreamToken } from "@/lib/auth";
@@ -43,6 +44,7 @@ import {
   XCircle,
   SkipForward,
   Wrench,
+  ShieldCheck,
 } from "lucide-react";
 
 interface SyncLog {
@@ -102,6 +104,9 @@ export function WatchlistPage() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
   const [repairing, setRepairing] = useState<Set<string>>(new Set());
+  const [checkingFreshness, setCheckingFreshness] = useState<Set<string>>(
+    new Set(),
+  );
   const [stats, setStats] = useState<Record<string, WatchlistStats>>({});
   const [history, setHistory] = useState<Record<string, HistoryItem[]>>({});
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
@@ -352,6 +357,36 @@ export function WatchlistPage() {
     }
   };
 
+  const handleCheckFreshness = async (id: string, name: string) => {
+    setCheckingFreshness((prev) => new Set(prev).add(id));
+    try {
+      const r = await CheckWatchlistFreshness(id);
+      if (r.up_to_date) {
+        toast.success(`${name}: up to date (${r.total_tracks} tracks)`);
+      } else {
+        const parts: string[] = [];
+        if (r.new_on_spotify > 0)
+          parts.push(`${r.new_on_spotify} new on Spotify`);
+        if (r.removed_from_spotify > 0)
+          parts.push(`${r.removed_from_spotify} removed from Spotify`);
+        if (r.missing_files > 0)
+          parts.push(`${r.missing_files} missing files`);
+        if (r.pending > 0) parts.push(`${r.pending} pending`);
+        if (r.failed > 0) parts.push(`${r.failed} failed`);
+        if (r.m3u8_stale) parts.push("M3U8 out of date");
+        toast.warning(`${name}: not up to date — ${parts.join(", ")}`);
+      }
+    } catch (err) {
+      toast.error(`Freshness check failed: ${err}`);
+    } finally {
+      setCheckingFreshness((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   const handleSyncAll = async () => {
     setLoading(true);
     try {
@@ -481,6 +516,18 @@ export function WatchlistPage() {
                     >
                       <Wrench
                         className={`h-4 w-4 ${repairing.has(list.id) ? "animate-pulse" : ""}`}
+                      />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-emerald-500"
+                      onClick={() => handleCheckFreshness(list.id, displayName)}
+                      disabled={checkingFreshness.has(list.id)}
+                      title="Check: is this playlist up to date with Spotify, fully downloaded, and is its M3U8 current?"
+                    >
+                      <ShieldCheck
+                        className={`h-4 w-4 ${checkingFreshness.has(list.id) ? "animate-pulse" : ""}`}
                       />
                     </Button>
                     <Button

@@ -1151,6 +1151,146 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CheckWatchlistFreshness
+// ─────────────────────────────────────────────────────────────────────────────
+
+// WatchlistFreshnessReport answers "is this watchlist actually up to date?"
+// — comparing the live Spotify playlist against what's locally tracked,
+// verifying every locally-known track still has a real file backing it
+// (not just a catalog/job row that might be stale), and checking the M3U8
+// file itself isn't lagging behind what's resolvable. Read-only: unlike
+// SyncWatchlist, this never enqueues downloads, deletes files, or mutates
+// pl.TrackIDs/pl.LastSync — it only reports.
+type WatchlistFreshnessReport struct {
+	UpToDate           bool      `json:"up_to_date"`
+	TotalTracks        int       `json:"total_tracks"`
+	NewOnSpotify       int       `json:"new_on_spotify"`       // on Spotify now, not yet tracked locally
+	RemovedFromSpotify int       `json:"removed_from_spotify"` // tracked locally, no longer on Spotify
+	MissingFiles       int       `json:"missing_files"`        // tracked locally, but no verified file resolves on disk
+	Pending            int       `json:"pending"`              // currently queued/downloading (from GetWatchlistStats)
+	Failed             int       `json:"failed"`               // failed downloads (from GetWatchlistStats)
+	M3U8Enabled        bool      `json:"m3u8_enabled"`
+	M3U8EntryCount     int       `json:"m3u8_entry_count,omitempty"`
+	M3U8Stale          bool      `json:"m3u8_stale,omitempty"` // M3U8 on disk has fewer entries than are actually resolvable right now
+	CheckedAt          time.Time `json:"checked_at"`
+}
+
+// CheckWatchlistFreshness fetches the current Spotify playlist (same call
+// syncPlaylist makes) and gathers everything computeFreshnessReport needs
+// to diff it against pl.TrackIDs — including file presence verified the
+// same way M3U8 generation does (resolveTrackPaths: catalog → filesystem
+// tag scan → BoltDB, each stat-checked), so a catalog row pointing at a
+// file deleted outside SpotiFLAC is correctly reported as missing rather
+// than trusted at face value.
+func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, error) {
+	pl, err := w.getWatchlistByID(id)
+	if err != nil {
+		return WatchlistFreshnessReport{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	data, err := spotify.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
+	if err != nil {
+		return WatchlistFreshnessReport{}, fmt.Errorf("fetch spotify metadata: %w", err)
+	}
+	spotifyTracks := extractTracksFromMetadata(data)
+	spotifyTrackIDs := make([]string, 0, len(spotifyTracks))
+	for _, t := range spotifyTracks {
+		spotifyTrackIDs = append(spotifyTrackIDs, t.SpotifyID)
+	}
+
+	outputDir := pl.Settings.DownloadPath
+	if outputDir == "" {
+		outputDir = "/home/nonroot/Music"
+	}
+	resolved := w.resolveTrackPaths(pl, outputDir)
+
+	var pending, failed int
+	if stats, statsErr := w.GetWatchlistStats(id); statsErr == nil {
+		pending, failed = stats.Pending, stats.Failed
+	}
+
+	m3u8Enabled := w.loadM3U8Settings(pl) != nil
+	var m3u8Count int
+	var m3u8Exists bool
+	if m3u8Enabled {
+		playlistDir := filepath.Join(outputDir, "Playlists")
+		m3u8Path := filepath.Join(playlistDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8")
+		m3u8Count, m3u8Exists = countM3U8Entries(m3u8Path)
+	}
+
+	return computeFreshnessReport(
+		pl.TrackIDs, spotifyTrackIDs, len(resolved),
+		pending, failed, m3u8Enabled, m3u8Count, m3u8Exists,
+	), nil
+}
+
+// computeFreshnessReport is the pure comparison logic behind
+// CheckWatchlistFreshness, factored out so it's unit-testable without a
+// live Spotify fetch: given what CheckWatchlistFreshness already gathered
+// (current Spotify track IDs, how many local tracks resolved to a real
+// file, download stats, and the M3U8's on-disk entry count), it computes
+// the diff counts and the final up-to-date verdict.
+func computeFreshnessReport(
+	localTrackIDs, spotifyTrackIDs []string,
+	resolvedCount int,
+	pending, failed int,
+	m3u8Enabled bool,
+	m3u8EntryCount int,
+	m3u8Exists bool,
+) WatchlistFreshnessReport {
+	spotifyIDs := make(map[string]bool, len(spotifyTrackIDs))
+	for _, id := range spotifyTrackIDs {
+		if id != "" {
+			spotifyIDs[id] = true
+		}
+	}
+	localIDs := make(map[string]bool, len(localTrackIDs))
+	for _, id := range localTrackIDs {
+		localIDs[id] = true
+	}
+
+	report := WatchlistFreshnessReport{
+		TotalTracks: len(localTrackIDs),
+		Pending:     pending,
+		Failed:      failed,
+		M3U8Enabled: m3u8Enabled,
+		CheckedAt:   time.Now(),
+	}
+	for sid := range spotifyIDs {
+		if !localIDs[sid] {
+			report.NewOnSpotify++
+		}
+	}
+	for lid := range localIDs {
+		if !spotifyIDs[lid] {
+			report.RemovedFromSpotify++
+		}
+	}
+	// resolveTrackPaths skips (never pads) unresolved IDs, so the shortfall
+	// vs len(localTrackIDs) is exactly the count of tracks with no
+	// verified file — never negative.
+	report.MissingFiles = len(localTrackIDs) - resolvedCount
+
+	if m3u8Enabled {
+		if m3u8Exists {
+			report.M3U8EntryCount = m3u8EntryCount
+			report.M3U8Stale = m3u8EntryCount < resolvedCount
+		} else {
+			// No M3U8 on disk yet despite having resolvable tracks — also
+			// stale, just reported via M3U8Stale rather than a separate flag.
+			report.M3U8Stale = resolvedCount > 0
+		}
+	}
+
+	report.UpToDate = report.NewOnSpotify == 0 && report.RemovedFromSpotify == 0 &&
+		report.MissingFiles == 0 && report.Pending == 0 && report.Failed == 0 && !report.M3U8Stale
+
+	return report
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GetWatchlistHistory
 // ─────────────────────────────────────────────────────────────────────────────
 

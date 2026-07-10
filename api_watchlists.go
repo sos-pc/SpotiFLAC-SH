@@ -89,6 +89,24 @@ func (s *Server) registerWatchlistRoutes() {
 
 	s.mux.Handle("POST /api/v1/watchlists/{id}/repair", s.v1Auth(s.v1RepairWatchlist))
 
+	// Read-only: fetches live Spotify data (bounded 30s timeout) but never
+	// enqueues downloads, deletes files, or mutates the watchlist — safe to
+	// call synchronously, unlike sync/repair which run in the background.
+	s.mux.Handle("GET /api/v1/watchlists/{id}/freshness", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		user := GetUserFromContext(r)
+		if err := s.checkWatchlistOwnership(id, user); err != nil {
+			writeV1Error(w, http.StatusForbidden, err.Error())
+			return
+		}
+		result, err := s.ctr.Watcher.CheckWatchlistFreshness(id)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, result)
+	}))
+
 	s.mux.Handle("GET /api/v1/watchlists/{id}/stats", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
