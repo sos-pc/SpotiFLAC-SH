@@ -300,8 +300,11 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 ## Changelog
 
-### Unreleased — May 2026
+### v3.6.0 — 2026-07-10
 
+- **fix(security):** Closed the critical/high findings from a full code audit: admin-JWT theft via wildcard CORS on the LAN-bypass login route, SSRF + arbitrary-file-write via unauthenticated proxy config changes, path traversal in the audio converter's output format, a bypassable login rate limiter, unvalidated proxy URLs from the third-party Tidal discovery feed, and an admin maintenance scan whose scope could be redirected by a non-admin watchlist setting. See commit `0c2d335`.
+- **fix(security):** Admin-gated the File Manager-only file endpoints (`files/metadata`, `files/rename`, `files/rename/batch`, `files/rename/preview`) that were reachable by any authenticated user despite the UI already hiding them from non-admins. See commit `9ec2fbb`.
+- **fix(security):** API key `permissions` (read/download/admin) are now actually enforced on the two download-triggering endpoints instead of being decorative; SSE endpoints use a short-lived (60s) stream-scoped token instead of the long-lived session JWT in the URL; a user's existing JWTs are now invalidated immediately when their Jellyfin admin flag changes, instead of staying valid for up to 24h. See commit `4d7b389`.
 - **feat(meta):** Spotify ID embedded in audio tags on every download — `SPOTIFY_ID` Vorbis comment for FLAC, `TXXX:SPOTIFY_ID` for MP3, custom iTunes atom for M4A. Centralized in `meta.SpotifyIDTagKey`.
 - **refactor(watcher):** M3U8 generation now reads tags from the filesystem (`meta.BuildSpotifyIDIndex`) instead of relying solely on BoltDB job records. Files moved or restored on disk are picked up automatically; deduplication of BoltDB jobs no longer breaks playlists.
 - **feat(api):** `POST /api/v1/admin/retag-legacy` (admin only) — back-fills the `SPOTIFY_ID` tag on files that were downloaded before tag embedding was added. Idempotent.
