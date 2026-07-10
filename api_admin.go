@@ -247,6 +247,8 @@ func (s *Server) scanRootForRebuild(
 			result.Verified++
 		case ingestMoved:
 			result.Moved++
+		case ingestDuplicate:
+			result.Duplicate++
 		}
 		return nil
 	})
@@ -258,16 +260,30 @@ func (s *Server) scanRootForRebuild(
 type ingestBucket int
 
 const (
-	ingestImported ingestBucket = iota // brand new library_file row
-	ingestVerified                     // existing row at same path, last_verified_at bumped
-	ingestMoved                        // existing row updated to a new path
+	ingestImported  ingestBucket = iota // brand new library_file row
+	ingestVerified                      // existing row at same path, last_verified_at bumped
+	ingestMoved                         // existing row updated to a new path
+	ingestDuplicate                     // existing row's path is still valid; this file is a stale/duplicate copy, catalog untouched
 )
 
 // ingestLibraryFile makes the catalog reflect a tagged file at path:
 //   - Track stub upserted (FK requirement).
 //   - If no active library_file: create one (imported).
 //   - If active row at same path: bump last_verified_at (verified).
-//   - If active row at a different path: update path (moved).
+//   - If active row at a different path that no longer exists on disk:
+//     the file was genuinely moved — update the path.
+//   - If active row at a different path that STILL exists on disk: path is
+//     almost certainly a stale duplicate/orphan (e.g. left behind by a
+//     re-download to a new folder-template path) rather than the real
+//     current copy — counted as a duplicate, catalog is left untouched.
+//
+// This distinction matters because scanRootForRebuild visits files in
+// filesystem walk order (not by recency) and dedups by SPOTIFY_ID, so
+// whichever copy the walk happens to reach first would otherwise silently
+// overwrite the catalog's active row — including regressing it FROM the
+// correct current file TO a stale orphan purely because of directory
+// traversal order, breaking M3U8 resolution for a track that was actually
+// fine before the rebuild ran.
 func (s *Server) ingestLibraryFile(
 	ctx context.Context, spotifyID, path string,
 ) (ingestBucket, error) {
@@ -286,6 +302,11 @@ func (s *Server) ingestLibraryFile(
 		return ingestVerified, nil
 	}
 	if existing != nil {
+		if _, statErr := os.Stat(existing.FilePath); statErr == nil {
+			// Current catalog path is still valid — path is a duplicate,
+			// not a move. Do not touch the catalog.
+			return ingestDuplicate, nil
+		}
 		if err := db.UpdateLibraryFilePath(ctx, s.ctr.Catalog, existing.ID, path); err != nil {
 			return ingestMoved, fmt.Errorf("update path: %w", err)
 		}

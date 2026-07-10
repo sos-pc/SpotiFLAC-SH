@@ -1,0 +1,99 @@
+package main
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/db"
+)
+
+// TestIngestLibraryFileDoesNotRegressValidPath is the regression test for
+// the library-rebuild bug: a filesystem walk visiting a stale duplicate
+// copy of a track before (or instead of) the real current file must not
+// overwrite a still-valid catalog path with the stale one.
+func TestIngestLibraryFileDoesNotRegressValidPath(t *testing.T) {
+	ctx := context.Background()
+	database := openTestCatalogDB(t)
+	s := &Server{ctr: &Container{Catalog: database}}
+
+	currentPath := filepath.Join(t.TempDir(), "current.flac")
+	if err := os.WriteFile(currentPath, []byte("current"), 0644); err != nil {
+		t.Fatalf("write current file: %v", err)
+	}
+
+	if err := db.UpsertTrackStub(ctx, database, "spotify:track:1"); err != nil {
+		t.Fatalf("UpsertTrackStub: %v", err)
+	}
+	lf := &db.LibraryFile{
+		SpotifyID: "spotify:track:1",
+		Provider:  "tidal",
+		Quality:   db.QualityLossless,
+		Format:    "flac",
+		FilePath:  currentPath,
+	}
+	if err := db.CreateLibraryFile(ctx, database, lf); err != nil {
+		t.Fatalf("CreateLibraryFile: %v", err)
+	}
+
+	// Simulate the walk reaching a stale orphan copy of the SAME track at a
+	// DIFFERENT path, while the current path is still valid on disk.
+	stalePath := filepath.Join(t.TempDir(), "stale-orphan.flac")
+	bucket, err := s.ingestLibraryFile(ctx, "spotify:track:1", stalePath)
+	if err != nil {
+		t.Fatalf("ingestLibraryFile: %v", err)
+	}
+	if bucket != ingestDuplicate {
+		t.Errorf("bucket = %v, want ingestDuplicate", bucket)
+	}
+
+	got, err := db.GetActiveLibraryFile(ctx, database, "spotify:track:1")
+	if err != nil {
+		t.Fatalf("GetActiveLibraryFile: %v", err)
+	}
+	if got.FilePath != currentPath {
+		t.Errorf("catalog path regressed to %q, want it to stay at %q — library-rebuild would break M3U8 resolution for this track", got.FilePath, currentPath)
+	}
+}
+
+// TestIngestLibraryFileUpdatesPathWhenOldOneIsGone confirms the legitimate
+// "file was actually moved" case still works: if the recorded path no
+// longer exists, the new path found by the walk IS the real move target.
+func TestIngestLibraryFileUpdatesPathWhenOldOneIsGone(t *testing.T) {
+	ctx := context.Background()
+	database := openTestCatalogDB(t)
+	s := &Server{ctr: &Container{Catalog: database}}
+
+	oldPath := filepath.Join(t.TempDir(), "old.flac") // never created — simulates a genuine move
+	if err := db.UpsertTrackStub(ctx, database, "spotify:track:2"); err != nil {
+		t.Fatalf("UpsertTrackStub: %v", err)
+	}
+	lf := &db.LibraryFile{
+		SpotifyID: "spotify:track:2",
+		Provider:  "tidal",
+		Quality:   db.QualityLossless,
+		Format:    "flac",
+		FilePath:  oldPath,
+	}
+	if err := db.CreateLibraryFile(ctx, database, lf); err != nil {
+		t.Fatalf("CreateLibraryFile: %v", err)
+	}
+
+	newPath := filepath.Join(t.TempDir(), "new-location.flac")
+	bucket, err := s.ingestLibraryFile(ctx, "spotify:track:2", newPath)
+	if err != nil {
+		t.Fatalf("ingestLibraryFile: %v", err)
+	}
+	if bucket != ingestMoved {
+		t.Errorf("bucket = %v, want ingestMoved", bucket)
+	}
+
+	got, err := db.GetActiveLibraryFile(ctx, database, "spotify:track:2")
+	if err != nil {
+		t.Fatalf("GetActiveLibraryFile: %v", err)
+	}
+	if got.FilePath != newPath {
+		t.Errorf("catalog path = %q, want the genuinely-moved-to path %q", got.FilePath, newPath)
+	}
+}

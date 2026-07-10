@@ -39,6 +39,56 @@ func TestCountM3U8Entries(t *testing.T) {
 	}
 }
 
+// TestNeedsFilesystemIndexFallback is the regression test for the
+// resolveTrackPaths gating bug: a single stale catalog row (renamed/moved
+// file) must still trigger the filesystem fallback scan, even when the
+// raw catalog row count matches the playlist's track count.
+func TestNeedsFilesystemIndexFallback(t *testing.T) {
+	tests := []struct {
+		name         string
+		trackIDs     []string
+		validCatalog map[string]string
+		want         bool
+	}{
+		{
+			name:         "all tracks resolved via catalog — no fallback needed",
+			trackIDs:     []string{"a", "b", "c"},
+			validCatalog: map[string]string{"a": "/p/a.flac", "b": "/p/b.flac", "c": "/p/c.flac"},
+			want:         false,
+		},
+		{
+			name:         "one track has no catalog row at all — needs fallback",
+			trackIDs:     []string{"a", "b", "c"},
+			validCatalog: map[string]string{"a": "/p/a.flac", "b": "/p/b.flac"},
+			want:         true,
+		},
+		{
+			name:     "one track's catalog row is stale (renamed file) — needs fallback even though row COUNT would look satisfied",
+			trackIDs: []string{"a", "b", "c"},
+			// validCatalog only holds STAT-VALID entries — a stale row for
+			// "c" was already excluded by the caller before this is
+			// called, so len(validCatalog) < len(trackIDs) here even
+			// though a raw (unfiltered) catalog row existed for "c".
+			validCatalog: map[string]string{"a": "/p/a.flac", "b": "/p/b.flac"},
+			want:         true,
+		},
+		{
+			name:         "empty playlist",
+			trackIDs:     nil,
+			validCatalog: map[string]string{},
+			want:         false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := needsFilesystemIndexFallback(tt.trackIDs, tt.validCatalog)
+			if got != tt.want {
+				t.Errorf("needsFilesystemIndexFallback(%v, %v) = %v, want %v", tt.trackIDs, tt.validCatalog, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShouldSkipShrinkingWrite(t *testing.T) {
 	tests := []struct {
 		name          string

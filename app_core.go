@@ -794,7 +794,13 @@ func (a *App) PreviewRenameFiles(files []string, format string) []backend.Rename
 	return backend.PreviewRename(files, format)
 }
 func (a *App) RenameFilesByMetadata(files []string, format string) []backend.RenameResult {
-	return backend.RenameFiles(files, format)
+	results := backend.RenameFiles(files, format)
+	for _, r := range results {
+		if r.Success && r.NewPath != "" {
+			syncCatalogPathOnRename(a.ctr, r.OldPath, r.NewPath)
+		}
+	}
+	return results
 }
 func (a *App) ReadTextFile(filePath string) (string, error) {
 	content, err := os.ReadFile(filePath)
@@ -807,7 +813,11 @@ func (a *App) RenameFileTo(oldPath, newName string) error {
 	dir := filepath.Dir(oldPath)
 	ext := filepath.Ext(oldPath)
 	newPath := filepath.Join(dir, newName+ext)
-	return os.Rename(oldPath, newPath)
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return err
+	}
+	syncCatalogPathOnRename(a.ctr, oldPath, newPath)
+	return nil
 }
 func (a *App) UploadImage(filePath string) (string, error) {
 	return backend.UploadToSendNow(filePath)

@@ -289,10 +289,21 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 				remainingIDs = append(remainingIDs, knownID)
 				continue
 			}
+			// Track left THIS watchlist's Spotify playlist — it always
+			// drops out of OUR TrackIDs (note: no append to remainingIDs
+			// below, in either branch). Whether to physically delete the
+			// underlying file is a separate question, gated by whether
+			// another watchlist still wants it. The old code kept the ID
+			// in remainingIDs when another watchlist still had it — which
+			// meant it never actually left this watchlist's list, and if
+			// the other watchlist later dropped it too, THAT watchlist's
+			// own "is it in another playlist" check would see this stale
+			// retention and also keep it — a permanent mutual deadlock
+			// where a once-shared track could never be purged from either
+			// watchlist again.
 			inOtherPlaylist := otherWatchlistIDs[knownID]
 			if inOtherPlaylist {
 				fmt.Printf("[Watcher] Track %s removed from %s but present in another watchlist — skipping file deletion\n", knownID, pl.Name)
-				remainingIDs = append(remainingIDs, knownID)
 			} else if jm != nil {
 				jobs, _ := jm.GetAllJobs()
 				for _, job := range jobs {
@@ -1341,13 +1352,34 @@ func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
 //  3. BoltDB job FilePath (legacy fallback for files without the tag).
 //
 // Tracks that resolve to no existing file are skipped silently. We only
-// build the filesystem index lazily — when at least one ID was missing
-// from the catalog — to avoid a recursive walk on populated libraries.
+// build the filesystem index lazily — when at least one ID needs it,
+// because its catalog entry is either missing OR stale (fails os.Stat) — to
+// avoid a recursive walk on populated libraries. Gating this on stale-ness
+// as well as absence matters: a single renamed/moved file whose catalog row
+// still exists but points at a dead path must still trigger the fallback
+// scan, even if every OTHER track in the playlist resolves fine via the
+// catalog (a count-only check would leave exactly that one track
+// unresolved forever, since "catalog row count == TrackIDs count" looks
+// satisfied even though one of those rows is dead).
 func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []string {
 	catalogPaths := w.catalogPathsForWatchlist(pl)
 
+	validCatalog := make(map[string]string, len(catalogPaths))
+	for _, spotifyID := range pl.TrackIDs {
+		path := catalogPaths[spotifyID]
+		if path == "" {
+			continue
+		}
+		if _, statErr := os.Stat(path); statErr == nil {
+			validCatalog[spotifyID] = path
+		}
+		// Else: stale catalog row — file no longer at recorded path. Left
+		// out of validCatalog, which is what needsFilesystemIndexFallback
+		// below checks for, rather than emitting a broken M3U8 entry.
+	}
+
 	var index map[string]string
-	if len(catalogPaths) < len(pl.TrackIDs) {
+	if needsFilesystemIndexFallback(pl.TrackIDs, validCatalog) {
 		var err error
 		index, err = meta.BuildSpotifyIDIndex(outputDir)
 		if err != nil {
@@ -1360,13 +1392,9 @@ func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []str
 
 	paths := make([]string, 0, len(pl.TrackIDs))
 	for _, spotifyID := range pl.TrackIDs {
-		if path := catalogPaths[spotifyID]; path != "" {
-			if _, statErr := os.Stat(path); statErr == nil {
-				paths = append(paths, path)
-				continue
-			}
-			// Stale catalog row — file no longer at recorded path. Try
-			// the next source rather than emitting a broken M3U8 entry.
+		if path := validCatalog[spotifyID]; path != "" {
+			paths = append(paths, path)
+			continue
 		}
 		if path := index[spotifyID]; path != "" {
 			paths = append(paths, path)
@@ -1379,6 +1407,17 @@ func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []str
 		}
 	}
 	return paths
+}
+
+// needsFilesystemIndexFallback reports whether at least one ID in trackIDs
+// has no valid (already stat-checked) entry in validCatalog — meaning the
+// filesystem SPOTIFY_ID-tag index must be built as a fallback source.
+// Comparing lengths this way correctly catches BOTH a missing catalog row
+// and a stale one (absent from validCatalog either way), unlike comparing
+// raw catalog row counts against trackIDs, which stays satisfied even when
+// one of those rows points at a dead path.
+func needsFilesystemIndexFallback(trackIDs []string, validCatalog map[string]string) bool {
+	return len(validCatalog) < len(trackIDs)
 }
 
 // legacyJobPaths returns the SpotifyID→FilePath map from BoltDB jobs for a
