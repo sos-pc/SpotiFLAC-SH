@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
 // TestIngestLibraryFileDoesNotRegressValidPath is the regression test for
@@ -40,7 +41,7 @@ func TestIngestLibraryFileDoesNotRegressValidPath(t *testing.T) {
 	// Simulate the walk reaching a stale orphan copy of the SAME track at a
 	// DIFFERENT path, while the current path is still valid on disk.
 	stalePath := filepath.Join(t.TempDir(), "stale-orphan.flac")
-	bucket, err := s.ingestLibraryFile(ctx, "spotify:track:1", stalePath)
+	bucket, err := s.ingestLibraryFile(ctx, "spotify:track:1", meta.FullTrackTags{}, stalePath)
 	if err != nil {
 		t.Fatalf("ingestLibraryFile: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestIngestLibraryFileUpdatesPathWhenOldOneIsGone(t *testing.T) {
 	}
 
 	newPath := filepath.Join(t.TempDir(), "new-location.flac")
-	bucket, err := s.ingestLibraryFile(ctx, "spotify:track:2", newPath)
+	bucket, err := s.ingestLibraryFile(ctx, "spotify:track:2", meta.FullTrackTags{}, newPath)
 	if err != nil {
 		t.Fatalf("ingestLibraryFile: %v", err)
 	}
@@ -95,5 +96,50 @@ func TestIngestLibraryFileUpdatesPathWhenOldOneIsGone(t *testing.T) {
 	}
 	if got.FilePath != newPath {
 		t.Errorf("catalog path = %q, want the genuinely-moved-to path %q", got.FilePath, newPath)
+	}
+}
+
+// TestIngestLibraryFileBackfillsTrackMetadata is the regression test for
+// the "maintenance function" gap: ingestLibraryFile used to call
+// UpsertTrackStub (spotify_id only), so a file rediscovered by
+// library-rebuild/repair never got its tracks row enriched even when the
+// scan had already read title/artist/isrc/genre/etc — those tags were
+// read once (for identification) and then thrown away. It must now do a
+// full UpsertTrack with everything the caller already read.
+func TestIngestLibraryFileBackfillsTrackMetadata(t *testing.T) {
+	ctx := context.Background()
+	database := openTestCatalogDB(t)
+	s := &Server{ctr: &Container{Catalog: database}}
+
+	path := filepath.Join(t.TempDir(), "track.flac")
+	if err := os.WriteFile(path, []byte("fake flac bytes"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	tags := meta.FullTrackTags{
+		SpotifyID:   "spotify:track:3",
+		Title:       "Some Track",
+		Artist:      "Some Artist",
+		Album:       "Some Album",
+		AlbumArtist: "Some Album Artist",
+		ReleaseDate: "2024-03-15",
+		ISRC:        "USRC17607839",
+		Genre:       "Synthwave",
+		Copyright:   "2024 Some Label",
+	}
+	if _, err := s.ingestLibraryFile(ctx, tags.SpotifyID, tags, path); err != nil {
+		t.Fatalf("ingestLibraryFile: %v", err)
+	}
+
+	got, err := db.GetTrack(ctx, database, "spotify:track:3")
+	if err != nil {
+		t.Fatalf("GetTrack: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetTrack returned nil — ingestLibraryFile left the track as a bare, FK-only stub")
+	}
+	if got.Name != tags.Title || got.ArtistName != tags.Artist || got.ISRC != tags.ISRC ||
+		got.Genre != tags.Genre || got.AlbumName != tags.Album || got.Copyright != tags.Copyright {
+		t.Errorf("track metadata not backfilled: got %+v, want it to reflect %+v", got, tags)
 	}
 }

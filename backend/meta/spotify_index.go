@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -213,34 +214,55 @@ func readSpotifyIDFromFFprobe(path string) (string, error) {
 	return tags[strings.ToLower(SpotifyIDTagKey)], nil
 }
 
-// ReadTrackTags returns the ISRC and Genre embedded in the audio file at
-// path, best-effort — each comes back empty if absent, unreadable, or (for
-// Genre on older files) simply never written: genre embedding was FLAC-only
-// until MP3/M4A picked up TCON/`-metadata genre=` alongside this function.
-// Called once per successful download to backfill the SQLite catalog's
-// tracks.isrc/genre columns without re-deriving values already sitting in
-// the file itself, mirroring the read-what-we-actually-wrote pattern
-// ReadSpotifyID and actualCatalogQuality already use elsewhere.
-func ReadTrackTags(path string) (isrc, genre string) {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".flac":
-		return readTrackTagsFromFlac(path)
-	case ".mp3":
-		return readTrackTagsFromMp3(path)
-	case ".m4a":
-		return readTrackTagsFromFFprobe(path)
-	}
-	return "", ""
+// FullTrackTags is every tag SpotiFLAC embeds into a downloaded file,
+// read back in one pass. Used to backfill the SQLite catalog — both right
+// after a download (jobs_catalog.go) and when a filesystem scan discovers
+// a file with no live Job at all (library-rebuild/repair). Every field is
+// best-effort: empty/zero if absent, unreadable, or (Genre on MP3/M4A
+// files written before genre embedding covered those formats) simply
+// never written in the first place.
+type FullTrackTags struct {
+	SpotifyID   string
+	Title       string
+	Artist      string
+	Album       string
+	AlbumArtist string
+	ReleaseDate string
+	TrackNumber int
+	DiscNumber  int
+	ISRC        string
+	Genre       string
+	Copyright   string
 }
 
-func readTrackTagsFromFlac(path string) (isrc, genre string) {
+// ReadFullTrackTags reads every tag in FullTrackTags from the file at path
+// in a single parse pass. Deliberately one pass, not "call ReadSpotifyID
+// then read the rest separately": for FLAC in particular, both would
+// re-run hasFlacMagic + a full safeParseFlac, doubling the I/O/CPU cost of
+// a library-rebuild scan across every file in the library — the exact
+// scan that was already found to be too slow for a multi-thousand-track
+// collection.
+func ReadFullTrackTags(path string) FullTrackTags {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".flac":
+		return readFullTrackTagsFromFlac(path)
+	case ".mp3":
+		return readFullTrackTagsFromMp3(path)
+	case ".m4a":
+		return readFullTrackTagsFromFFprobe(path)
+	}
+	return FullTrackTags{}
+}
+
+func readFullTrackTagsFromFlac(path string) FullTrackTags {
+	var out FullTrackTags
 	ok, err := hasFlacMagic(path)
 	if err != nil || !ok {
-		return "", ""
+		return out
 	}
 	f, err := safeParseFlac(path)
 	if err != nil {
-		return "", ""
+		return out
 	}
 	for _, block := range f.Meta {
 		if block.Type != flac.VorbisComment {
@@ -255,32 +277,93 @@ func readTrackTagsFromFlac(path string) (isrc, genre string) {
 			if len(parts) != 2 {
 				continue
 			}
+			key, val := parts[0], parts[1]
 			switch {
-			case strings.EqualFold(parts[0], "ISRC"):
-				isrc = parts[1]
-			case strings.EqualFold(parts[0], "GENRE"):
-				genre = parts[1]
+			case strings.EqualFold(key, SpotifyIDTagKey):
+				out.SpotifyID = val
+			case strings.EqualFold(key, "TITLE"):
+				out.Title = val
+			case strings.EqualFold(key, "ARTIST"):
+				out.Artist = val
+			case strings.EqualFold(key, "ALBUM"):
+				out.Album = val
+			case strings.EqualFold(key, "ALBUMARTIST"):
+				out.AlbumArtist = val
+			case strings.EqualFold(key, "DATE"):
+				out.ReleaseDate = val
+			case strings.EqualFold(key, "TRACKNUMBER"):
+				out.TrackNumber = parseLeadingInt(val)
+			case strings.EqualFold(key, "DISCNUMBER"):
+				out.DiscNumber = parseLeadingInt(val)
+			case strings.EqualFold(key, "ISRC"):
+				out.ISRC = val
+			case strings.EqualFold(key, "GENRE"):
+				out.Genre = val
+			case strings.EqualFold(key, "COPYRIGHT"):
+				out.Copyright = val
 			}
 		}
 	}
-	return isrc, genre
+	return out
 }
 
-func readTrackTagsFromMp3(path string) (isrc, genre string) {
+func readFullTrackTagsFromMp3(path string) FullTrackTags {
+	var out FullTrackTags
 	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
 	if err != nil {
-		return "", ""
+		return out
 	}
 	defer tag.Close()
-	return tag.GetTextFrame("TSRC").Text, tag.GetTextFrame("TCON").Text
+	for _, frame := range tag.GetFrames("TXXX") {
+		txxx, ok := frame.(id3v2.UserDefinedTextFrame)
+		if ok && strings.EqualFold(txxx.Description, SpotifyIDTagKey) {
+			out.SpotifyID = txxx.Value
+			break
+		}
+	}
+	out.Title = tag.Title()
+	out.Artist = tag.Artist()
+	out.Album = tag.Album()
+	out.AlbumArtist = tag.GetTextFrame("TPE2").Text
+	out.ReleaseDate = tag.Year()
+	out.TrackNumber = parseLeadingInt(tag.GetTextFrame(tag.CommonID("Track number/Position in set")).Text)
+	out.DiscNumber = parseLeadingInt(tag.GetTextFrame(tag.CommonID("Part of a set")).Text)
+	out.ISRC = tag.GetTextFrame("TSRC").Text
+	out.Genre = tag.GetTextFrame("TCON").Text
+	out.Copyright = tag.GetTextFrame("TCOP").Text
+	return out
 }
 
-func readTrackTagsFromFFprobe(path string) (isrc, genre string) {
+func readFullTrackTagsFromFFprobe(path string) FullTrackTags {
 	tags, err := util.ReadFFprobeTags(path)
 	if err != nil {
-		return "", ""
+		return FullTrackTags{}
 	}
-	return tags["isrc"], tags["genre"]
+	return FullTrackTags{
+		SpotifyID:   tags[strings.ToLower(SpotifyIDTagKey)],
+		Title:       tags["title"],
+		Artist:      tags["artist"],
+		Album:       tags["album"],
+		AlbumArtist: tags["album_artist"],
+		ReleaseDate: tags["date"],
+		TrackNumber: parseLeadingInt(tags["track"]),
+		DiscNumber:  parseLeadingInt(tags["disk"]),
+		ISRC:        tags["isrc"],
+		Genre:       tags["genre"],
+		Copyright:   tags["copyright"],
+	}
+}
+
+// parseLeadingInt parses the leading integer of s, tolerating the "N/total"
+// format used for track/disc numbers on MP3/M4A (e.g. "3/12" -> 3) and
+// returning 0 for anything unparseable rather than erroring — every
+// caller here is a best-effort tag read.
+func parseLeadingInt(s string) int {
+	if idx := strings.IndexByte(s, '/'); idx >= 0 {
+		s = s[:idx]
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
 }
 
 

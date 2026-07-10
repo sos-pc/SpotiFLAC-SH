@@ -369,26 +369,26 @@ func (s *Server) scanRootForRebuild(
 			lastLog = time.Now()
 		}
 
-		spotifyID, err := meta.ReadSpotifyID(path)
-		if err != nil {
-			fmt.Printf("[Catalog] library-rebuild: read tag %s -> %v\n", path, err)
-			result.Failed++
-			return nil
-		}
-		if spotifyID == "" {
+		// One read for everything: identification (SpotifyID) plus every
+		// other tag ingestLibraryFile can backfill into the catalog.
+		// Reading SpotifyID alone here and re-parsing the file again inside
+		// ingestLibraryFile would double the FLAC-parse cost of this scan
+		// across every file in the library.
+		tags := meta.ReadFullTrackTags(path)
+		if tags.SpotifyID == "" {
 			result.NoTag++
 			if len(result.NoTagSample) < noTagSampleLimit {
 				result.NoTagSample = append(result.NoTagSample, path)
 			}
 			return nil
 		}
-		if seenIDs[spotifyID] {
+		if seenIDs[tags.SpotifyID] {
 			result.Duplicate++
 			return nil
 		}
-		seenIDs[spotifyID] = true
+		seenIDs[tags.SpotifyID] = true
 
-		bucket, err := s.ingestLibraryFile(ctx, spotifyID, path)
+		bucket, err := s.ingestLibraryFile(ctx, tags.SpotifyID, tags, path)
 		if err != nil {
 			fmt.Printf("[Catalog] library-rebuild: ingest %s -> %v\n", path, err)
 			result.Failed++
@@ -439,10 +439,15 @@ const (
 // traversal order, breaking M3U8 resolution for a track that was actually
 // fine before the rebuild ran.
 func (s *Server) ingestLibraryFile(
-	ctx context.Context, spotifyID, path string,
+	ctx context.Context, spotifyID string, tags meta.FullTrackTags, path string,
 ) (ingestBucket, error) {
-	if err := db.UpsertTrackStub(ctx, s.ctr.Catalog, spotifyID); err != nil {
-		return ingestImported, fmt.Errorf("upsert track stub: %w", err)
+	// Full UpsertTrack (not just a stub) regardless of which bucket this
+	// file lands in below — a file rediscovered at the SAME path
+	// (ingestVerified) or a stale duplicate (ingestDuplicate) still
+	// deserves its tracks row backfilled from tags on every rebuild run,
+	// not just the first time it's ever seen.
+	if err := db.UpsertTrack(ctx, s.ctr.Catalog, catalogTrackFromTags(spotifyID, tags)); err != nil {
+		return ingestImported, fmt.Errorf("upsert track: %w", err)
 	}
 
 	existing, err := db.GetActiveLibraryFile(ctx, s.ctr.Catalog, spotifyID)

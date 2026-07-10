@@ -256,3 +256,61 @@ func TestUpsertActiveLibraryFileSucceedsWithEmptyService(t *testing.T) {
 		t.Error("Provider was left empty on the written row")
 	}
 }
+
+// TestRecordCatalogDedupSkipReadsTagsFromExistingFile is the regression
+// test for the third scattered db.Track construction site found while
+// auditing this code: recordCatalogDedupSkip fires when the catalog
+// already has a confirmed-on-disk file for a track (dedup only skips
+// after checkCatalogDedup os.Stat's the existing path), yet it used to
+// build its own bare db.Track from JobTrack fields only — never reading
+// the file it already knows is there, so isrc/genre (which have no
+// JobTrack-side source at all) never made it in through this path.
+func TestRecordCatalogDedupSkipReadsTagsFromExistingFile(t *testing.T) {
+	jm := newTestJobManager(t, true)
+	ctx := context.Background()
+
+	path := filepath.Join(t.TempDir(), "existing.flac")
+	writeTestFlacWithTags(t, path, "USRC17607839", "Synthwave")
+
+	track := JobTrack{
+		SpotifyID:  "spotify:track:dedup",
+		TrackName:  "Existing Track",
+		ArtistName: "Existing Artist",
+	}
+	// Matches the real call pattern: checkCatalogDedup only skips (and
+	// recordCatalogDedupSkip only fires) once a real library_files row is
+	// confirmed on disk, so the DownloadAttempt it writes can legitimately
+	// link to it via FK.
+	if err := db.UpsertTrack(ctx, jm.catalog, &db.Track{SpotifyID: track.SpotifyID}); err != nil {
+		t.Fatalf("UpsertTrack (seed): %v", err)
+	}
+	lf := &db.LibraryFile{
+		SpotifyID: track.SpotifyID,
+		Provider:  "tidal",
+		Quality:   db.QualityLossless,
+		Format:    "flac",
+		FilePath:  path,
+	}
+	if err := db.CreateLibraryFile(ctx, jm.catalog, lf); err != nil {
+		t.Fatalf("CreateLibraryFile (seed): %v", err)
+	}
+
+	jm.recordCatalogDedupSkip(track, EnqueueBatchRequest{}, lf.ID, path, "already present")
+
+	got, err := db.GetTrack(ctx, jm.catalog, track.SpotifyID)
+	if err != nil {
+		t.Fatalf("GetTrack: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetTrack returned nil")
+	}
+	if got.Name != track.TrackName || got.ArtistName != track.ArtistName {
+		t.Errorf("JobTrack fields not applied: Name=%q ArtistName=%q, want %q/%q", got.Name, got.ArtistName, track.TrackName, track.ArtistName)
+	}
+	if got.ISRC != "USRC17607839" {
+		t.Errorf("ISRC = %q, want %q (must be read from the existing file — JobTrack has no ISRC field)", got.ISRC, "USRC17607839")
+	}
+	if got.Genre != "Synthwave" {
+		t.Errorf("Genre = %q, want %q (must be read from the existing file — JobTrack has no Genre field)", got.Genre, "Synthwave")
+	}
+}

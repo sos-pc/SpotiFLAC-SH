@@ -111,42 +111,123 @@ func (jm *JobManager) recordCatalogSkipped(j *Job) {
 	}
 }
 
-// jobToCatalogTrack projects the Spotify-side identity fields of a Job
-// into a catalog Track. AlbumID (the real Spotify album ID, for a proper
-// albums-table link) is left empty — that needs threading through five
-// different JSON payload shapes in watcher.go plus the manual single-track
-// download path, a much larger change; ReleaseDate/AlbumName/AlbumArtist/
-// CoverURL/Copyright are denormalized straight onto the track row instead
-// (see migration 0005), since they're already sitting on Job for free.
+// catalogTrackFromTags projects an already-read meta.FullTrackTags into a
+// catalog Track. Pure/no I/O — the single place that maps tag field names
+// to db.Track field names, so every caller that ends up with a
+// FullTrackTags (from a fresh read, or reused to avoid a second parse of
+// the same file) builds a Track the same way.
 //
-// ISRC/Genre are read back from the downloaded file's own tags rather than
-// carried on Job: both are computed transiently inside each provider
-// client during metadata embedding and never surfaced back to the caller,
-// so the file is the only place either value survives after the fact.
-// Best-effort and skipped entirely when FilePath is empty (failed jobs
-// never had a file to read) — UpsertTrack's ON CONFLICT preserves any
-// previously-known isrc/genre rather than clobbering it with this empty
-// read on a later failed retry of the same track.
-func jobToCatalogTrack(j *Job) *db.Track {
-	var isrc, genre string
-	if j.FilePath != "" {
-		isrc, genre = meta.ReadTrackTags(j.FilePath)
-	}
+// AlbumID (the real Spotify album ID, for a proper albums-table link) is
+// left empty — that needs threading through five different JSON payload
+// shapes in watcher.go plus the manual single-track download path, a much
+// larger change; ReleaseDate/AlbumName/AlbumArtist/Copyright are
+// denormalized straight onto the track row instead (see migration 0005).
+// CoverURL has no tag-embedded source (cover art is a binary picture
+// block, not a fetchable URL) — only ever set by callers with a Job.
+func catalogTrackFromTags(spotifyID string, tags meta.FullTrackTags) *db.Track {
 	return &db.Track{
-		SpotifyID:   j.SpotifyID,
-		ISRC:        isrc,
+		SpotifyID:   spotifyID,
+		ISRC:        tags.ISRC,
+		Name:        tags.Title,
+		ArtistName:  tags.Artist,
+		TrackNumber: tags.TrackNumber,
+		DiscNumber:  tags.DiscNumber,
+		Genre:       tags.Genre,
+		ReleaseDate: tags.ReleaseDate,
+		AlbumName:   tags.Album,
+		AlbumArtist: tags.AlbumArtist,
+		Copyright:   tags.Copyright,
+	}
+}
+
+// catalogTrackFromFile reads path's tags and builds a catalog Track from
+// them — the convenience path for callers (jobToCatalogTrack,
+// recordCatalogDedupSkip) that have a file path but not an already-read
+// FullTrackTags. Returns a bare stub (SpotifyID only) if path is empty;
+// best-effort (empty/zero fields) if the file is unreadable.
+//
+// Hot loops that read every file in a library (scanRootForRebuild) must
+// NOT use this — call meta.ReadFullTrackTags once and pass the result to
+// catalogTrackFromTags directly, or this parses the same file twice
+// (once for the SpotifyID identification, once here).
+func catalogTrackFromFile(spotifyID, path string) *db.Track {
+	if path == "" {
+		return &db.Track{SpotifyID: spotifyID}
+	}
+	return catalogTrackFromTags(spotifyID, meta.ReadFullTrackTags(path))
+}
+
+// trackOverrides carries the subset of catalog Track fields a caller's
+// own already-fetched Spotify metadata (Job or JobTrack) can supply,
+// applied on top of a file-tag-derived Track. A live download/enqueue's
+// Spotify fetch is more trustworthy than whatever ended up embedded in
+// the file (formatting/unicode differences, or a file that predates a
+// tag-embedding fix) — but only when it actually has a value: a zero
+// value here means "Job doesn't know this field," not "this field is
+// empty," so it must never blank out a tag-derived value.
+type trackOverrides struct {
+	Name, ArtistName, AlbumName, AlbumArtist, ReleaseDate, CoverURL, Copyright string
+	TrackNumber, DiscNumber, DurationMs                                        int
+}
+
+func applyTrackOverrides(t *db.Track, o trackOverrides) {
+	if o.Name != "" {
+		t.Name = o.Name
+	}
+	if o.ArtistName != "" {
+		t.ArtistName = o.ArtistName
+	}
+	if o.AlbumName != "" {
+		t.AlbumName = o.AlbumName
+	}
+	if o.AlbumArtist != "" {
+		t.AlbumArtist = o.AlbumArtist
+	}
+	if o.ReleaseDate != "" {
+		t.ReleaseDate = o.ReleaseDate
+	}
+	if o.CoverURL != "" {
+		t.CoverURL = o.CoverURL
+	}
+	if o.Copyright != "" {
+		t.Copyright = o.Copyright
+	}
+	if o.TrackNumber != 0 {
+		t.TrackNumber = o.TrackNumber
+	}
+	if o.DiscNumber != 0 {
+		t.DiscNumber = o.DiscNumber
+	}
+	if o.DurationMs != 0 {
+		t.DurationMs = o.DurationMs
+	}
+}
+
+// jobToCatalogTrack projects a Job into a catalog Track: starts from
+// whatever the downloaded file's own tags say (catalogTrackFromFile),
+// then lets Job's fresher Spotify-fetched metadata override name/artist/
+// album/etc. ISRC/Genre have no Job-side source at all — both are
+// computed transiently inside each provider client during embedding and
+// never surfaced back to the caller, so the file is the only place
+// either value survives. Best-effort and reads nothing when FilePath is
+// empty (failed jobs never had a file) — UpsertTrack's ON CONFLICT
+// preserves any previously-known isrc/genre rather than clobbering it
+// with this empty read on a later failed retry of the same track.
+func jobToCatalogTrack(j *Job) *db.Track {
+	t := catalogTrackFromFile(j.SpotifyID, j.FilePath)
+	applyTrackOverrides(t, trackOverrides{
 		Name:        j.TrackName,
 		ArtistName:  j.ArtistName,
+		AlbumName:   j.AlbumName,
+		AlbumArtist: j.AlbumArtist,
+		ReleaseDate: j.ReleaseDate,
+		CoverURL:    j.CoverURL,
+		Copyright:   j.Copyright,
 		TrackNumber: j.TrackNumber,
 		DiscNumber:  j.DiscNumber,
 		DurationMs:  j.DurationMs,
-		Genre:       genre,
-		ReleaseDate: j.ReleaseDate,
-		AlbumName:   j.AlbumName,
-		AlbumArtist: j.AlbumArtist,
-		CoverURL:    j.CoverURL,
-		Copyright:   j.Copyright,
-	}
+	})
+	return t
 }
 
 // jobToCatalogAttempt builds a DownloadAttempt skeleton with the common
@@ -310,7 +391,6 @@ func fileSizeBytes(path string, fallbackMB float64) int64 {
 	return int64(fallbackMB * 1024 * 1024)
 }
 
-
 // catalogReadTimeout caps how long the dedup lookup blocks the enqueue
 // path. Smaller than catalogWriteTimeout because we want EnqueueBatch
 // fast: callers can wait on a download but not on a 200-track batch
@@ -322,6 +402,7 @@ const catalogReadTimeout = 2 * time.Second
 type catalogDedupResult struct {
 	skip          bool
 	libraryFileID string
+	filePath      string
 	reason        string
 }
 
@@ -382,6 +463,7 @@ func (jm *JobManager) checkCatalogDedup(spotifyID string, settings JobSettings) 
 	return catalogDedupResult{
 		skip:          true,
 		libraryFileID: existing.ID,
+		filePath:      existing.FilePath,
 		reason: fmt.Sprintf("already in library at %s (rank %d) ≥ requested rank %d",
 			existing.Quality, existing.QualityRank, requestedRank),
 	}
@@ -390,25 +472,37 @@ func (jm *JobManager) checkCatalogDedup(spotifyID string, settings JobSettings) 
 // recordCatalogDedupSkip writes a skipped DownloadAttempt for a track
 // that was deduped at enqueue time. No Job ever reached the queue, so
 // the caller passes the JobTrack and EnqueueBatchRequest directly.
+// filePath is the existing library_file's path (from checkCatalogDedup) —
+// dedup only fires when a real file was confirmed on disk, so this reads
+// the SAME file's tags catalogTrackFromFile would for a fresh download,
+// keeping the two paths' tracks rows consistently enriched instead of
+// this one staying a bare stub forever.
 //
 // BatchID is intentionally left empty: these skips are not part of any
 // real batch (no worker did any work for them) and counting them in the
 // batch totals would inflate sync stats.
-func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchRequest, libraryFileID, reason string) {
+func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchRequest, libraryFileID, filePath, reason string) {
 	if jm.catalog == nil || track.SpotifyID == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
 	defer cancel()
 
-	if err := db.UpsertTrack(ctx, jm.catalog, &db.Track{
-		SpotifyID:   track.SpotifyID,
+	t := catalogTrackFromFile(track.SpotifyID, filePath)
+	applyTrackOverrides(t, trackOverrides{
 		Name:        track.TrackName,
 		ArtistName:  track.ArtistName,
+		AlbumName:   track.AlbumName,
+		AlbumArtist: track.AlbumArtist,
+		ReleaseDate: track.ReleaseDate,
+		CoverURL:    track.CoverURL,
+		Copyright:   track.Copyright,
 		TrackNumber: track.TrackNumber,
 		DiscNumber:  track.DiscNumber,
 		DurationMs:  track.DurationMs,
-	}); err != nil {
+	})
+
+	if err := db.UpsertTrack(ctx, jm.catalog, t); err != nil {
 		fmt.Printf("[Catalog] UpsertTrack failed for dedup-skip %s: %v\n", track.SpotifyID, err)
 		return
 	}

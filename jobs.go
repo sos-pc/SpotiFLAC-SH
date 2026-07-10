@@ -314,7 +314,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		// shows the track was considered.
 		if dedup := jm.checkCatalogDedup(track.SpotifyID, req.Settings); dedup.skip {
 			fmt.Printf("[Jobs] Catalog dedup: %s — %s\n", track.TrackName, dedup.reason)
-			jm.recordCatalogDedupSkip(track, req, dedup.libraryFileID, dedup.reason)
+			jm.recordCatalogDedupSkip(track, req, dedup.libraryFileID, dedup.filePath, dedup.reason)
 			skipped++
 			continue
 		}
