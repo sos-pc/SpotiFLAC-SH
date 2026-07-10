@@ -234,6 +234,33 @@ export const GetWatchlistHistory = (id: string) =>
 export const SyncWatchlist = (id: string) =>
   rest<void>("POST", `/watchlists/${encodeURIComponent(id)}/sync`);
 
+export interface WatchlistRepairResult {
+  retag: { scanned: number; tagged: number; skipped: number; failed: number };
+  rebuild: {
+    files_scanned: number;
+    imported: number;
+    verified: number;
+    moved: number;
+    duplicate: number;
+    no_tag: number;
+    failed: number;
+    timed_out?: boolean;
+  };
+  m3u8: {
+    written: boolean;
+    skipped: boolean;
+    total: number;
+    resolved: number;
+    unresolved: number;
+  };
+  m3u8_error?: string;
+}
+export const RepairWatchlist = (id: string) =>
+  rest<WatchlistRepairResult>(
+    "POST",
+    `/watchlists/${encodeURIComponent(id)}/repair`,
+  );
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export interface APIKeyMeta {

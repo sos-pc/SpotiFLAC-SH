@@ -81,6 +81,13 @@ func (s *Server) v1RetagLegacy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeV1JSON(w, http.StatusOK, retagJobs(jobs))
+}
+
+// retagJobs retags every Done/Skipped job in jobs whose FilePath still
+// exists on disk. Shared by v1RetagLegacy (all jobs) and the per-watchlist
+// repair endpoint (jobs pre-filtered to one watchlist).
+func retagJobs(jobs []Job) retagLegacyResult {
 	result := retagLegacyResult{}
 	for _, job := range jobs {
 		if job.SpotifyID == "" || job.FilePath == "" {
@@ -104,8 +111,7 @@ func (s *Server) v1RetagLegacy(w http.ResponseWriter, r *http.Request) {
 			result.Skipped++
 		}
 	}
-
-	writeV1JSON(w, http.StatusOK, result)
+	return result
 }
 
 // v1LibraryRebuild walks every configured download path, reads the
@@ -147,6 +153,85 @@ func (s *Server) v1LibraryRebuild(w http.ResponseWriter, r *http.Request) {
 	}
 	if ctx.Err() != nil {
 		result.TimedOut = true
+	}
+
+	writeV1JSON(w, http.StatusOK, result)
+}
+
+// watchlistRepairResult is the JSON payload returned by
+// POST /api/v1/watchlists/{id}/repair.
+type watchlistRepairResult struct {
+	Retag     retagLegacyResult    `json:"retag"`
+	Rebuild   libraryRebuildResult `json:"rebuild"`
+	M3U8      m3u8GenerationResult `json:"m3u8"`
+	M3U8Error string               `json:"m3u8_error,omitempty"`
+}
+
+// v1RepairWatchlist runs the same recovery steps as retag-legacy +
+// library-rebuild, scoped to a single watchlist's own download path and
+// jobs, then force-regenerates that watchlist's M3U8 (bypassing the
+// shrink-guard — an explicit repair should show the true current state,
+// even if it's smaller than what's on disk now).
+//
+// Exists because retag-legacy/library-rebuild are admin-only, global,
+// curl-only maintenance actions with no UI — this gives a watchlist owner
+// (or an admin) a single "fix this playlist" action reachable from the
+// watchlist card, for the exact class of "M3U8 lost most of its tracks"
+// problem those two admin endpoints were built to address.
+func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	user := GetUserFromContext(r)
+	if err := s.checkWatchlistOwnership(id, user); err != nil {
+		writeV1Error(w, http.StatusForbidden, err.Error())
+		return
+	}
+
+	pl, err := s.ctr.Watcher.getWatchlistByID(id)
+	if err != nil || pl == nil {
+		writeV1Error(w, http.StatusNotFound, "watchlist not found")
+		return
+	}
+
+	result := watchlistRepairResult{}
+
+	// 1. Retag this watchlist's own legacy files (BoltDB job record still
+	// present, file on disk, but no SPOTIFY_ID tag yet).
+	if jobs, jobsErr := s.ctr.Jobs.GetAllJobs(); jobsErr == nil {
+		scoped := make([]Job, 0, len(jobs))
+		for _, j := range jobs {
+			if j.WatchlistID == id {
+				scoped = append(scoped, j)
+			}
+		}
+		result.Retag = retagJobs(scoped)
+	}
+
+	// 2. Rebuild the catalog for this watchlist's own download path only
+	// (not every root — this is a scoped, per-playlist repair).
+	if s.ctr.Catalog != nil {
+		root := pl.Settings.DownloadPath
+		if root == "" {
+			root = "/home/nonroot/Music"
+		}
+		if _, statErr := os.Stat(root); statErr == nil {
+			rebuildResult := libraryRebuildResult{ScanRoots: []string{root}}
+			seenIDs := make(map[string]bool)
+			ctx, cancel := context.WithTimeout(r.Context(), libraryRebuildTimeout)
+			s.scanRootForRebuild(ctx, root, &rebuildResult, seenIDs)
+			if ctx.Err() != nil {
+				rebuildResult.TimedOut = true
+			}
+			cancel()
+			result.Rebuild = rebuildResult
+		}
+	}
+
+	// 3. Force-regenerate the M3U8 with whatever the catalog/retag work
+	// above just improved.
+	m3uResult, m3uErr := s.ctr.Watcher.generateM3U8ForPlaylist(id, true)
+	result.M3U8 = m3uResult
+	if m3uErr != nil {
+		result.M3U8Error = m3uErr.Error()
 	}
 
 	writeV1JSON(w, http.StatusOK, result)

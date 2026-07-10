@@ -87,6 +87,8 @@ func (s *Server) registerWatchlistRoutes() {
 		writeV1JSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 	}))
 
+	s.mux.Handle("POST /api/v1/watchlists/{id}/repair", s.v1Auth(s.v1RepairWatchlist))
+
 	s.mux.Handle("GET /api/v1/watchlists/{id}/stats", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)

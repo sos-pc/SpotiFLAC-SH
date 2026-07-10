@@ -7,6 +7,7 @@ import {
   UpdateWatchlist,
   GetWatchlistStats,
   GetWatchlistHistory,
+  RepairWatchlist,
 } from "@/lib/rpc";
 import { getSettings } from "@/lib/settings";
 import { getStreamToken } from "@/lib/auth";
@@ -40,6 +41,7 @@ import {
   CheckCircle2,
   XCircle,
   SkipForward,
+  Wrench,
 } from "lucide-react";
 
 interface SyncLog {
@@ -98,6 +100,7 @@ export function WatchlistPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
+  const [repairing, setRepairing] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<Record<string, WatchlistStats>>({});
   const [history, setHistory] = useState<Record<string, HistoryItem[]>>({});
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
@@ -299,6 +302,39 @@ export function WatchlistPage() {
     }
   };
 
+  const handleRepair = async (id: string) => {
+    setRepairing((prev) => new Set(prev).add(id));
+    try {
+      const result = await RepairWatchlist(id);
+      reloadStats(id);
+      const { retag, rebuild, m3u8 } = result;
+      if (m3u8.unresolved === 0) {
+        toast.success(
+          `Repaired: all ${m3u8.total} tracks resolved, M3U8 up to date`,
+        );
+      } else if (m3u8.resolved > 0) {
+        toast.warning(
+          `Repaired: ${m3u8.resolved}/${m3u8.total} tracks resolved (${m3u8.unresolved} still missing — tagged ${retag.tagged}, imported ${rebuild.imported} into the catalog)`,
+        );
+      } else {
+        toast.error(
+          `Repair found 0/${m3u8.total} tracks on disk — check the download path in this watchlist's settings`,
+        );
+      }
+      if (result.m3u8_error) {
+        toast.error(`M3U8 write failed: ${result.m3u8_error}`);
+      }
+    } catch (err) {
+      toast.error(`Repair failed: ${err}`);
+    } finally {
+      setRepairing((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   const handleSyncAll = async () => {
     setLoading(true);
     try {
@@ -416,6 +452,18 @@ export function WatchlistPage() {
                     >
                       <RefreshCw
                         className={`h-4 w-4 ${syncing.has(list.id) ? "animate-spin" : ""}`}
+                      />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-amber-500"
+                      onClick={() => handleRepair(list.id)}
+                      disabled={repairing.has(list.id)}
+                      title="Repair: retag legacy files, rebuild catalog, and force-regenerate the M3U8 for this playlist"
+                    >
+                      <Wrench
+                        className={`h-4 w-4 ${repairing.has(list.id) ? "animate-pulse" : ""}`}
                       />
                     </Button>
                     <Button

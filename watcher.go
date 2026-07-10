@@ -162,7 +162,7 @@ func (w *Watcher) checkAll() {
 // shrinking an already-good file when that happens, so running this
 // unconditionally on every boot is safe.
 func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
-	w.generateM3U8ForPlaylist(pl.ID)
+	_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
 }
 
 // syncPlaylist récupère les métadonnées Spotify, compare avec les tracks déjà
@@ -395,7 +395,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// Régénérer le M3U8 systématiquement à chaque sync. La fonction est
 	// idempotente (rename atomique) : si OnBatchComplete tourne ensuite à
 	// la fin du batch, le dernier write gagne et le M3U8 reste cohérent.
-	w.generateM3U8ForPlaylist(pl.ID)
+	_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
 
 	// Notifier le frontend que la sync est terminée
 	w.jm.hub.publish(JobEvent{
@@ -694,7 +694,7 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 				}
 			}
 		}
-		w.generateM3U8ForPlaylist(pl.ID)
+		_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
 		return
 	}
 }
@@ -1230,6 +1230,17 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // M3U8 generation pour Jellyfin
 // ─────────────────────────────────────────────────────────────────────────────
 
+// m3u8GenerationResult reports what generateM3U8ForPlaylist actually did,
+// for callers (the repair endpoint) that need to show the user something
+// more useful than fire-and-forget log lines.
+type m3u8GenerationResult struct {
+	Written    bool `json:"written"`    // a file was actually created/updated
+	Skipped    bool `json:"skipped"`    // shrink-guard refused the write (force=false only)
+	Total      int  `json:"total"`      // len(pl.TrackIDs) at generation time
+	Resolved   int  `json:"resolved"`   // tracks successfully resolved to a file on disk
+	Unresolved int  `json:"unresolved"` // Total - Resolved
+}
+
 // generateM3U8ForPlaylist writes the M3U8 file for a watchlist by resolving
 // each Spotify ID in pl.TrackIDs against the filesystem, via the SPOTIFY_ID
 // tag embedded in audio files at download time. BoltDB jobs are used only
@@ -1238,15 +1249,24 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // The filesystem is the source of truth: the M3U8 reflects what is actually
 // on disk, in the order Spotify reports the playlist. Files moved, renamed,
 // or copied keep working as long as the tag is preserved.
-func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
+//
+// force=true bypasses the shrink-guard (see shouldSkipShrinkingWrite) and
+// always writes the freshly-resolved list, even if it's smaller than what's
+// currently on disk. Used by the explicit per-watchlist repair action,
+// where the user has just asked to reconcile the M3U8 with reality — unlike
+// the automatic triggers (sync, batch-complete, startup), which must never
+// silently destroy a better existing file, an explicit repair should show
+// the true current state even if that state got worse (e.g. a file was
+// deleted outside SpotiFLAC).
+func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8GenerationResult, error) {
 	pl, err := w.getWatchlistByID(watchlistID)
 	if err != nil || pl == nil {
-		return
+		return m3u8GenerationResult{}, fmt.Errorf("watchlist not found: %s", watchlistID)
 	}
 
 	settings := w.loadM3U8Settings(pl)
 	if settings == nil {
-		return
+		return m3u8GenerationResult{}, fmt.Errorf("M3U8 generation is disabled (createM3u8File setting)")
 	}
 
 	outputDir := pl.Settings.DownloadPath
@@ -1255,14 +1275,18 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 	}
 
 	paths := w.resolveTrackPaths(pl, outputDir)
+	result := m3u8GenerationResult{
+		Total:      len(pl.TrackIDs),
+		Resolved:   len(paths),
+		Unresolved: len(pl.TrackIDs) - len(paths),
+	}
 	if len(paths) == 0 {
-		return
+		return result, nil
 	}
 
 	playlistDir := filepath.Join(outputDir, "Playlists")
 	if err := os.MkdirAll(playlistDir, 0755); err != nil {
-		fmt.Printf("[Watcher] M3U8: failed to create Playlists dir: %v\n", err)
-		return
+		return result, fmt.Errorf("failed to create Playlists dir: %w", err)
 	}
 
 	// resolveTrackPaths can legitimately fail to resolve some of pl.TrackIDs
@@ -1272,11 +1296,12 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 	// deleted track from pl.TrackIDs before this function runs, so
 	// len(paths) < len(pl.TrackIDs) here always means a resolution gap, not
 	// an intentional shrink. Refuse to overwrite a bigger existing file with
-	// a smaller one in that case — every call site (startup integrity check,
-	// post-sync, post-batch) used to regenerate unconditionally, so a single
-	// unresolved track anywhere in the fallback chain would silently
-	// clobber an otherwise-complete M3U8 on the very next event, and the
-	// startup hook meant every container restart re-triggered it.
+	// a smaller one in that case (unless force) — every automatic call site
+	// (startup integrity check, post-sync, post-batch) used to regenerate
+	// unconditionally, so a single unresolved track anywhere in the
+	// fallback chain would silently clobber an otherwise-complete M3U8 on
+	// the very next event, and the startup hook meant every container
+	// restart re-triggered it.
 	//
 	// baseName includes a watchlist-ID-derived suffix (m3u8BaseName) so two
 	// watchlists whose names collide after sanitization (e.g. "AC/DC Hits"
@@ -1284,21 +1309,24 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 	// each other every sync.
 	baseName := m3u8BaseName(pl.Name, pl.ID)
 	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
-	if unresolved := len(pl.TrackIDs) - len(paths); unresolved > 0 {
+	if result.Unresolved > 0 {
 		fmt.Printf("[Watcher] M3U8: %s — %d/%d tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them\n",
-			pl.Name, unresolved, len(pl.TrackIDs))
-		if existingCount, ok := countM3U8Entries(m3u8Path); ok && shouldSkipShrinkingWrite(len(paths), existingCount) {
-			fmt.Printf("[Watcher] M3U8: refusing to shrink %s.m3u8 from %d to %d entries — leaving the existing file untouched\n",
-				pl.Name, existingCount, len(paths))
-			return
+			pl.Name, result.Unresolved, len(pl.TrackIDs))
+		if !force {
+			if existingCount, ok := countM3U8Entries(m3u8Path); ok && shouldSkipShrinkingWrite(len(paths), existingCount) {
+				fmt.Printf("[Watcher] M3U8: refusing to shrink %s.m3u8 from %d to %d entries — leaving the existing file untouched\n",
+					pl.Name, existingCount, len(paths))
+				result.Skipped = true
+				return result, nil
+			}
 		}
 	}
 
 	app := &App{}
 	if err := app.CreateM3U8File(baseName, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
-		fmt.Printf("[Watcher] M3U8: failed to create %s: %v\n", pl.Name, err)
-		return
+		return result, fmt.Errorf("failed to create %s: %w", pl.Name, err)
 	}
+	result.Written = true
 	fmt.Printf("[Watcher] M3U8: %s.m3u8 written (%d entries)\n", baseName, len(paths))
 
 	// One-time migration cleanup: remove the pre-disambiguation file (no ID
@@ -1313,6 +1341,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 			fmt.Printf("[Watcher] M3U8: migrated legacy file for %s, old file removed\n", pl.Name)
 		}
 	}
+	return result, nil
 }
 
 // shouldSkipShrinkingWrite reports whether a new M3U8 write with newCount
