@@ -159,6 +159,21 @@ func (s *Server) registerRoutes() {
 		if _, err := fs.Stat(distFS, path); err != nil {
 			// SPA fallback → index.html
 			r.URL.Path = "/"
+			path = "index.html"
+		}
+		if strings.HasPrefix(path, "assets/") {
+			// Vite content-hashes these filenames, so any code change
+			// produces a new URL — safe to cache indefinitely.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			// index.html (and every SPA-fallback route) must always be
+			// revalidated. embed.FS files carry no Last-Modified/ETag, so
+			// without this a browser can heuristically cache index.html
+			// across a redeploy, keep referencing asset filenames that no
+			// longer exist in the new image, and silently run stale
+			// frontend code against the new backend — e.g. an old handler
+			// reading a response field the new API no longer sends.
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 		fileServer.ServeHTTP(w, r)
 	})
