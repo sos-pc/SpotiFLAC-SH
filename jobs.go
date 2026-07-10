@@ -368,6 +368,16 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		jm.batchDone[batchID] = 0
 		jm.batchWatchID[batchID] = req.WatchlistID
 		jm.mu.Unlock()
+	} else if enqueued == 0 && skipped > 0 && req.WatchlistID != "" && jm.eventHandler != nil {
+		// Every track in the batch was caught by dedup (duplicate active
+		// job or catalog dedup) — no job was ever created with this
+		// batchID, so maybeGenerateM3U8/OnBatchComplete (triggered by a
+		// job reaching a terminal state) would otherwise never fire for
+		// it. Without this, the watchlist's SyncLog permanently shows
+		// Downloaded:0, Skipped:0, Failed:0 for a sync that in fact
+		// matched N tracks via the catalog, and the M3U8 doesn't get a
+		// chance to regenerate from this trigger either.
+		jm.eventHandler.OnBatchComplete(req.WatchlistID, batchID, 0, skipped, 0)
 	}
 
 	return EnqueueBatchResponse{

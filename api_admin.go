@@ -40,6 +40,11 @@ type libraryRebuildResult struct {
 	NoTag        int      `json:"no_tag"`                  // files without SPOTIFY_ID — candidates for library-match
 	Failed       int      `json:"failed"`                  // catalog write errors (see logs)
 	NoTagSample  []string `json:"no_tag_sample,omitempty"` // first N orphan paths to help the user
+	// TimedOut is true if libraryRebuildTimeout was hit before every scan
+	// root finished walking — the counters above only reflect what was
+	// scanned before the cutoff, not the whole library. Re-run to continue
+	// (already-ingested files are skipped fast on the next pass).
+	TimedOut bool `json:"timed_out,omitempty"`
 }
 
 // noTagSampleLimit caps the number of orphan paths returned in the
@@ -139,6 +144,9 @@ func (s *Server) v1LibraryRebuild(w http.ResponseWriter, r *http.Request) {
 	seenIDs := make(map[string]bool)
 	for _, root := range roots {
 		s.scanRootForRebuild(ctx, root, &result, seenIDs)
+	}
+	if ctx.Err() != nil {
+		result.TimedOut = true
 	}
 
 	writeV1JSON(w, http.StatusOK, result)
