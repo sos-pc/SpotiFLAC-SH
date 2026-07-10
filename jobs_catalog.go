@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 )
 
@@ -156,7 +157,7 @@ func upsertActiveLibraryFile(ctx context.Context, q db.Querier, j *Job) (string,
 		// instead of silently keeping the stale values from the original
 		// download, otherwise checkCatalogDedup would think the upgrade
 		// never happened and re-trigger it on every future sync.
-		newQuality := deriveCatalogQuality(j.Settings)
+		newQuality := actualCatalogQuality(j.FilePath, deriveCatalogQuality(j.Settings))
 		newSize := fileSizeBytes(j.FilePath, j.TotalSize)
 		if err := db.UpdateLibraryFileQuality(ctx, q, existing.ID, j.Settings.Service, newQuality, newSize); err != nil {
 			return "", fmt.Errorf("refresh existing library_file: %w", err)
@@ -172,7 +173,7 @@ func upsertActiveLibraryFile(ctx context.Context, q db.Querier, j *Job) (string,
 	lf := &db.LibraryFile{
 		SpotifyID:    j.SpotifyID,
 		Provider:     j.Settings.Service,
-		Quality:      deriveCatalogQuality(j.Settings),
+		Quality:      actualCatalogQuality(j.FilePath, deriveCatalogQuality(j.Settings)),
 		Format:       fileExtension(j.FilePath),
 		FilePath:     j.FilePath,
 		FileSize:     fileSizeBytes(j.FilePath, j.TotalSize),
@@ -217,6 +218,37 @@ func deriveCatalogQuality(s JobSettings) string {
 		return db.QualityLossless
 	}
 	return db.QualityLossless
+}
+
+// actualCatalogQuality inspects the downloaded file's real bit depth and
+// sample rate via ffprobe and maps them to the catalog's quality
+// vocabulary, falling back to fallback (typically deriveCatalogQuality's
+// requested-quality result) when the file can't be analyzed.
+//
+// deriveCatalogQuality alone reflects what was REQUESTED, not what was
+// actually delivered — a provider can silently downgrade (e.g. Tidal's
+// AllowFallback quietly serving LOSSLESS when HI_RES_LOSSLESS isn't
+// available for a track). Recording the request as if it were guaranteed
+// would let checkCatalogDedup believe a track already satisfies a quality
+// bar it doesn't actually meet, permanently blocking a legitimate future
+// re-download that would have delivered the real thing.
+func actualCatalogQuality(filePath, fallback string) string {
+	result, err := audio.GetTrackMetadata(filePath)
+	if err != nil || result == nil {
+		return fallback
+	}
+	switch {
+	case result.BitsPerSample >= 24 && result.SampleRate >= 96000:
+		return db.QualityHiResLossless
+	case result.BitsPerSample >= 24:
+		return db.QualityHiRes
+	case result.BitsPerSample >= 16:
+		return db.QualityLossless
+	case result.Bitrate > 0:
+		return db.QualityHigh
+	default:
+		return fallback
+	}
 }
 
 // fileExtension returns the lowercase extension without the leading dot,

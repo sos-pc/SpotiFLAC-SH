@@ -10,6 +10,24 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 )
 
+// TestActualCatalogQualityFallsBackWhenUnanalyzable covers the safety-net
+// path: when the file can't be probed (missing, or ffprobe/ffmpeg isn't
+// available — as in this test environment), actualCatalogQuality must
+// return the caller-supplied fallback rather than erroring out or
+// defaulting to something misleading. The "prefers real delivered quality
+// over the request" behavior itself needs a real analyzable audio fixture
+// to exercise (this repo has none, and ffmpeg/ffprobe aren't available in
+// this test environment either) — verified by code review instead: the
+// bit-depth/sample-rate thresholds mirror db.QualityRank's own tier
+// boundaries exactly.
+func TestActualCatalogQualityFallsBackWhenUnanalyzable(t *testing.T) {
+	nonexistent := filepath.Join(t.TempDir(), "does-not-exist.flac")
+	got := actualCatalogQuality(nonexistent, db.QualityHiResLossless)
+	if got != db.QualityHiResLossless {
+		t.Errorf("actualCatalogQuality on unanalyzable file = %q, want fallback %q", got, db.QualityHiResLossless)
+	}
+}
+
 func openTestCatalogDB(t *testing.T) *sql.DB {
 	t.Helper()
 	database, err := db.Open(t.TempDir())
