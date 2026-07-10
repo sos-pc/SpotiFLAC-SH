@@ -150,11 +150,15 @@ func (w *Watcher) checkAll() {
 	}
 }
 
-// checkM3U8Integrity is a startup-only recovery hook. The new generation
-// pipeline is filesystem-driven and idempotent (atomic write), so the only
-// thing left to do at boot is regenerate every watchlist M3U8 to absorb any
-// drift accumulated while the server was offline (manual file moves, settings
-// changes, partial crashes mid-batch).
+// checkM3U8Integrity is a startup-only recovery hook: regenerate every
+// watchlist M3U8 to absorb any drift accumulated while the server was
+// offline (manual file moves, settings changes, partial crashes mid-batch).
+// The write itself is atomic, but resolution can legitimately fail for some
+// tracks (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record left —
+// exactly the state of a pre-existing library downloaded before tag
+// embedding existed) — generateM3U8ForPlaylist guards against silently
+// shrinking an already-good file when that happens, so running this
+// unconditionally on every boot is safe.
 func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
 	w.generateM3U8ForPlaylist(pl.ID)
 }
@@ -1232,12 +1236,68 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 		return
 	}
 
+	// resolveTrackPaths can legitimately fail to resolve some of pl.TrackIDs
+	// — no catalog entry, no SPOTIFY_ID tag, and no BoltDB job record left
+	// (exactly the state of a pre-existing library downloaded before tag
+	// embedding existed). sync_deletions already removed any genuinely
+	// deleted track from pl.TrackIDs before this function runs, so
+	// len(paths) < len(pl.TrackIDs) here always means a resolution gap, not
+	// an intentional shrink. Refuse to overwrite a bigger existing file with
+	// a smaller one in that case — every call site (startup integrity check,
+	// post-sync, post-batch) used to regenerate unconditionally, so a single
+	// unresolved track anywhere in the fallback chain would silently
+	// clobber an otherwise-complete M3U8 on the very next event, and the
+	// startup hook meant every container restart re-triggered it.
+	safeName := util.SanitizeFilename(pl.Name)
+	if safeName == "" {
+		safeName = "playlist"
+	}
+	m3u8Path := filepath.Join(playlistDir, safeName+".m3u8")
+	if unresolved := len(pl.TrackIDs) - len(paths); unresolved > 0 {
+		fmt.Printf("[Watcher] M3U8: %s — %d/%d tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them\n",
+			pl.Name, unresolved, len(pl.TrackIDs))
+		if existingCount, ok := countM3U8Entries(m3u8Path); ok && shouldSkipShrinkingWrite(len(paths), existingCount) {
+			fmt.Printf("[Watcher] M3U8: refusing to shrink %s.m3u8 from %d to %d entries — leaving the existing file untouched\n",
+				pl.Name, existingCount, len(paths))
+			return
+		}
+	}
+
 	app := &App{}
 	if err := app.CreateM3U8File(pl.Name, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
 		fmt.Printf("[Watcher] M3U8: failed to create %s: %v\n", pl.Name, err)
 		return
 	}
 	fmt.Printf("[Watcher] M3U8: %s.m3u8 written (%d entries)\n", pl.Name, len(paths))
+}
+
+// shouldSkipShrinkingWrite reports whether a new M3U8 write with newCount
+// resolved entries should be skipped to avoid overwriting an existing file
+// that already has more (existingCount). Only called once the caller has
+// already established the shortfall is a genuine resolution gap rather than
+// an intentional playlist shrink (sync_deletions removes IDs from
+// pl.TrackIDs before resolution runs, so it never shows up here).
+func shouldSkipShrinkingWrite(newCount, existingCount int) bool {
+	return newCount < existingCount
+}
+
+// countM3U8Entries returns how many track entries the M3U8 file at path
+// currently has (non-empty lines other than the #EXTM3U header), or
+// ok=false if the file doesn't exist / can't be read (e.g. first-ever
+// generation for this playlist — nothing to protect yet).
+func countM3U8Entries(path string) (count int, ok bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "#EXTM3U" {
+			continue
+		}
+		count++
+	}
+	return count, true
 }
 
 // m3u8Settings holds the user settings relevant to M3U8 generation.
