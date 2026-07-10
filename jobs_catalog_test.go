@@ -117,3 +117,64 @@ func TestUpsertActiveLibraryFileRefreshesQualityOnSamePath(t *testing.T) {
 		t.Error("checkCatalogDedup did not recognize the upgrade as satisfied — the infinite re-download loop is not fixed")
 	}
 }
+
+// TestCatalogProviderDefaultsEmptyServiceToTidal is the regression test
+// for "library_file: provider required" write failures observed in
+// production: job.Settings.Service can be "" on jobs from watchlists
+// whose settings predate a default ever being applied.
+// buildDownloadRequest/ExecuteDownload resolve that same empty value to
+// "tidal" on their own local copy when actually picking a provider, but
+// never write it back onto the Job — so a fully successful download
+// (file on disk, correctly tagged) was silently getting no library_files
+// row at all, because CreateLibraryFile rejects an empty provider
+// outright.
+func TestCatalogProviderDefaultsEmptyServiceToTidal(t *testing.T) {
+	if got := catalogProvider(JobSettings{Service: ""}); got != "tidal" {
+		t.Errorf("catalogProvider(empty Service) = %q, want %q", got, "tidal")
+	}
+	if got := catalogProvider(JobSettings{Service: "qobuz"}); got != "qobuz" {
+		t.Errorf("catalogProvider(qobuz) = %q, want %q (must not override an explicit service)", got, "qobuz")
+	}
+}
+
+// TestUpsertActiveLibraryFileSucceedsWithEmptyService is the end-to-end
+// version of the same regression: a Job with Settings.Service == "" must
+// still produce a valid library_files row instead of erroring out of
+// upsertActiveLibraryFile entirely.
+func TestUpsertActiveLibraryFileSucceedsWithEmptyService(t *testing.T) {
+	ctx := context.Background()
+	database := openTestCatalogDB(t)
+
+	filePath := filepath.Join(t.TempDir(), "Legacy Track.flac")
+	if err := os.WriteFile(filePath, []byte("fake flac bytes"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	job := &Job{
+		SpotifyID:  "spotify:track:legacy",
+		TrackName:  "Legacy Track",
+		ArtistName: "Legacy Artist",
+		FilePath:   filePath,
+		TotalSize:  10,
+		Settings:   JobSettings{}, // Service left empty, as on old watchlist settings
+	}
+	if err := db.UpsertTrack(ctx, database, jobToCatalogTrack(job)); err != nil {
+		t.Fatalf("UpsertTrack: %v", err)
+	}
+
+	id, err := upsertActiveLibraryFile(ctx, database, job)
+	if err != nil {
+		t.Fatalf("upsertActiveLibraryFile with empty Settings.Service: %v (this must not fail — the download itself succeeded)", err)
+	}
+
+	lf, err := db.GetActiveLibraryFile(ctx, database, job.SpotifyID)
+	if err != nil {
+		t.Fatalf("GetActiveLibraryFile: %v", err)
+	}
+	if lf == nil || lf.ID != id {
+		t.Fatal("expected the created row to be the active library_file")
+	}
+	if lf.Provider == "" {
+		t.Error("Provider was left empty on the written row")
+	}
+}

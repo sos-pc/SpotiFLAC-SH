@@ -134,7 +134,7 @@ func jobToCatalogAttempt(j *Job, status string) *db.DownloadAttempt {
 		UserID:      j.UserID,
 		WatchlistID: j.WatchlistID,
 		BatchID:     j.BatchID,
-		Provider:    j.Settings.Service,
+		Provider:    catalogProvider(j.Settings),
 		Quality:     deriveCatalogQuality(j.Settings),
 		Status:      status,
 	}
@@ -160,7 +160,7 @@ func upsertActiveLibraryFile(ctx context.Context, q db.Querier, j *Job) (string,
 		// never happened and re-trigger it on every future sync.
 		newQuality := actualCatalogQuality(j.FilePath, deriveCatalogQuality(j.Settings))
 		newSize := fileSizeBytes(j.FilePath, j.TotalSize)
-		if err := db.UpdateLibraryFileQuality(ctx, q, existing.ID, j.Settings.Service, newQuality, newSize); err != nil {
+		if err := db.UpdateLibraryFileQuality(ctx, q, existing.ID, catalogProvider(j.Settings), newQuality, newSize); err != nil {
 			return "", fmt.Errorf("refresh existing library_file: %w", err)
 		}
 		return existing.ID, nil
@@ -173,7 +173,7 @@ func upsertActiveLibraryFile(ctx context.Context, q db.Querier, j *Job) (string,
 
 	lf := &db.LibraryFile{
 		SpotifyID:    j.SpotifyID,
-		Provider:     j.Settings.Service,
+		Provider:     catalogProvider(j.Settings),
 		Quality:      actualCatalogQuality(j.FilePath, deriveCatalogQuality(j.Settings)),
 		Format:       fileExtension(j.FilePath),
 		FilePath:     j.FilePath,
@@ -184,6 +184,24 @@ func upsertActiveLibraryFile(ctx context.Context, q db.Querier, j *Job) (string,
 		return "", fmt.Errorf("create library_file: %w", err)
 	}
 	return lf.ID, nil
+}
+
+// catalogProvider returns the provider value to record in library_files.
+// job.Settings.Service can be "" on jobs from watchlists whose settings
+// predate a default ever being applied — buildDownloadRequest/
+// ExecuteDownload resolve that same empty value to "tidal" locally when
+// actually picking a provider, but only on their own local copy of the
+// request, never writing it back onto the Job. Without this,
+// CreateLibraryFile rejects the row outright ("provider required"),
+// silently dropping the catalog entry for an otherwise fully successful
+// download — the file exists and is tagged, but never gets a durable
+// library_files row, undermining exactly the "survives BoltDB cleanup"
+// guarantee the catalog exists for.
+func catalogProvider(s JobSettings) string {
+	if s.Service == "" {
+		return "tidal"
+	}
+	return s.Service
 }
 
 // deriveCatalogQuality maps JobSettings to a catalog quality string.
@@ -376,7 +394,7 @@ func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchReq
 		LibraryFileID: libraryFileID,
 		UserID:        req.UserID,
 		WatchlistID:   req.WatchlistID,
-		Provider:      req.Settings.Service,
+		Provider:      catalogProvider(req.Settings),
 		Quality:       deriveCatalogQuality(req.Settings),
 		Status:        db.AttemptStatusSkipped,
 		Error:         reason,
