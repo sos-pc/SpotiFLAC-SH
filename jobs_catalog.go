@@ -24,6 +24,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
 // catalogWriteTimeout caps how long any single catalog mirror operation
@@ -315,6 +316,19 @@ func (jm *JobManager) checkCatalogDedup(spotifyID string, settings JobSettings) 
 		// Stale row — file was removed outside SpotiFLAC. Let the worker
 		// re-download; a separate rebuild path will eventually clean up
 		// the catalog row.
+		return catalogDedupResult{}
+	}
+
+	// Confirm the file at the recorded path is still actually THIS track,
+	// not just that something exists there. Filename templates built purely
+	// from title+artist (the default, backend/util/filename.go) have no
+	// SpotifyID disambiguation, so two different tracks can collide on the
+	// same generated path; without this check, a later download of a
+	// DIFFERENT track to that same collided path would make checkCatalogDedup
+	// wrongly and permanently believe THIS track is already satisfied.
+	if onDiskID, err := meta.ReadSpotifyID(existing.FilePath); err == nil && onDiskID != "" && onDiskID != spotifyID {
+		fmt.Printf("[Catalog] dedup: %s at %s actually tagged for a different track (%s) — treating as stale\n",
+			spotifyID, existing.FilePath, onDiskID)
 		return catalogDedupResult{}
 	}
 

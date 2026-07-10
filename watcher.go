@@ -320,6 +320,8 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 							job.UpdatedAt = time.Now()
 							_ = jm.saveJob(&job)
 							deletedCount++
+						} else if !os.IsNotExist(err) {
+							fmt.Printf("[Watcher] Failed to delete file %s: %v\n", job.FilePath, err)
 						}
 					}
 				}
@@ -340,19 +342,15 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		pl.SyncLogs = pl.SyncLogs[len(pl.SyncLogs)-20:]
 	}
 
-	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
-	w.mu.Lock()
-	pl.TrackIDs = append(pl.TrackIDs, newIDs...)
-	pl.LastSync = time.Now()
-	w.saveWatchlist(&pl)
-	w.mu.Unlock()
-
-	// Mirror current state into the SQLite catalog: track stubs,
-	// watchlist_tracks junction, and a snapshot when the contents have
-	// changed (or this is the first sync). Best-effort.
-	w.mirrorWatchlistToCatalog(&pl)
-
-	// Rename Spotify : supprimer l'ancien M3U8 (le nouveau sera créé juste après)
+	// Rename Spotify : supprimer l'ancien M3U8 (le nouveau sera créé juste
+	// après). Doit tourner AVANT saveWatchlist ci-dessous : ce dernier
+	// persiste le nouveau pl.Name, donc si le process crash entre les deux,
+	// le prochain sync ne verra plus playlistName != pl.Name (BoltDB a déjà
+	// le nouveau nom) et oldName ne sera plus jamais recalculé — l'ancien
+	// M3U8 resterait orphelin indéfiniment. Dans cet ordre, un crash avant
+	// saveWatchlist refait détecter le rename au prochain sync (retry
+	// naturel) ; un crash après ce bloc mais avant saveWatchlist ne fait
+	// qu'un os.Remove redondant et sans danger sur un fichier déjà absent.
 	if oldName != "" {
 		appInst := &App{}
 		var renameSettings map[string]interface{}
@@ -375,11 +373,25 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 					oldM3u8Path := filepath.Join(outputDir, "Playlists", oldSafeName+".m3u8")
 					if err := os.Remove(oldM3u8Path); err == nil {
 						fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : ancien M3U8 supprimé\n", oldName, pl.Name)
+					} else if !os.IsNotExist(err) {
+						fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : échec suppression ancien M3U8: %v\n", oldName, pl.Name, err)
 					}
 				}
 			}
 		}
 	}
+
+	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
+	w.mu.Lock()
+	pl.TrackIDs = append(pl.TrackIDs, newIDs...)
+	pl.LastSync = time.Now()
+	w.saveWatchlist(&pl)
+	w.mu.Unlock()
+
+	// Mirror current state into the SQLite catalog: track stubs,
+	// watchlist_tracks junction, and a snapshot when the contents have
+	// changed (or this is the first sync). Best-effort.
+	w.mirrorWatchlistToCatalog(&pl)
 
 	// Régénérer le M3U8 systématiquement à chaque sync. La fonction est
 	// idempotente (rename atomique) : si OnBatchComplete tourne ensuite à
@@ -533,6 +545,8 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 					m3u8Path := filepath.Join(outputRoot, "Playlists", safeName+".m3u8")
 					if err := os.Remove(m3u8Path); err == nil {
 						fmt.Printf("[Watcher] Deleted M3U8 (watchlist removed): %s\n", m3u8Path)
+					} else if !os.IsNotExist(err) {
+						fmt.Printf("[Watcher] Failed to delete M3U8 (watchlist removed) %s: %v\n", m3u8Path, err)
 					}
 					// Nettoyer le dossier Playlists/ s'il est vide
 					playlistsDir := filepath.Join(outputRoot, "Playlists")
