@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -368,14 +370,11 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 				if outputDir == "" {
 					outputDir = "/home/nonroot/Music"
 				}
-				oldSafeName := util.SanitizeFilename(oldName)
-				if oldSafeName != "" {
-					oldM3u8Path := filepath.Join(outputDir, "Playlists", oldSafeName+".m3u8")
-					if err := os.Remove(oldM3u8Path); err == nil {
-						fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : ancien M3U8 supprimé\n", oldName, pl.Name)
-					} else if !os.IsNotExist(err) {
-						fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : échec suppression ancien M3U8: %v\n", oldName, pl.Name, err)
-					}
+				oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
+				if err := os.Remove(oldM3u8Path); err == nil {
+					fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : ancien M3U8 supprimé\n", oldName, pl.Name)
+				} else if !os.IsNotExist(err) {
+					fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : échec suppression ancien M3U8: %v\n", oldName, pl.Name, err)
 				}
 			}
 		}
@@ -540,20 +539,25 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		}
 		if settings != nil {
 			if createM3u8, _ := settings["createM3u8File"].(bool); createM3u8 {
-				safeName := util.SanitizeFilename(pl.Name)
-				if safeName != "" {
-					m3u8Path := filepath.Join(outputRoot, "Playlists", safeName+".m3u8")
+				playlistsDir := filepath.Join(outputRoot, "Playlists")
+				// Try both the current (ID-suffixed) and legacy (pre-migration,
+				// no suffix) filenames — a watchlist removed before ever
+				// re-syncing after the naming-collision fix could still only
+				// have the legacy file on disk.
+				for _, m3u8Path := range []string{
+					filepath.Join(playlistsDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8"),
+					filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
+				} {
 					if err := os.Remove(m3u8Path); err == nil {
 						fmt.Printf("[Watcher] Deleted M3U8 (watchlist removed): %s\n", m3u8Path)
 					} else if !os.IsNotExist(err) {
 						fmt.Printf("[Watcher] Failed to delete M3U8 (watchlist removed) %s: %v\n", m3u8Path, err)
 					}
-					// Nettoyer le dossier Playlists/ s'il est vide
-					playlistsDir := filepath.Join(outputRoot, "Playlists")
-					if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
-						if err := os.Remove(playlistsDir); err == nil {
-							fmt.Printf("[Watcher] Deleted empty Playlists dir: %s\n", playlistsDir)
-						}
+				}
+				// Nettoyer le dossier Playlists/ s'il est vide
+				if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
+					if err := os.Remove(playlistsDir); err == nil {
+						fmt.Printf("[Watcher] Deleted empty Playlists dir: %s\n", playlistsDir)
 					}
 				}
 			}
@@ -1273,11 +1277,13 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 	// unresolved track anywhere in the fallback chain would silently
 	// clobber an otherwise-complete M3U8 on the very next event, and the
 	// startup hook meant every container restart re-triggered it.
-	safeName := util.SanitizeFilename(pl.Name)
-	if safeName == "" {
-		safeName = "playlist"
-	}
-	m3u8Path := filepath.Join(playlistDir, safeName+".m3u8")
+	//
+	// baseName includes a watchlist-ID-derived suffix (m3u8BaseName) so two
+	// watchlists whose names collide after sanitization (e.g. "AC/DC Hits"
+	// and "AC:DC Hits") get distinct files instead of silently overwriting
+	// each other every sync.
+	baseName := m3u8BaseName(pl.Name, pl.ID)
+	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
 	if unresolved := len(pl.TrackIDs) - len(paths); unresolved > 0 {
 		fmt.Printf("[Watcher] M3U8: %s — %d/%d tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them\n",
 			pl.Name, unresolved, len(pl.TrackIDs))
@@ -1289,11 +1295,24 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string) {
 	}
 
 	app := &App{}
-	if err := app.CreateM3U8File(pl.Name, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
+	if err := app.CreateM3U8File(baseName, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
 		fmt.Printf("[Watcher] M3U8: failed to create %s: %v\n", pl.Name, err)
 		return
 	}
-	fmt.Printf("[Watcher] M3U8: %s.m3u8 written (%d entries)\n", pl.Name, len(paths))
+	fmt.Printf("[Watcher] M3U8: %s.m3u8 written (%d entries)\n", baseName, len(paths))
+
+	// One-time migration cleanup: remove the pre-disambiguation file (no ID
+	// suffix) now that the new-format one has been written successfully.
+	// Safe even if it was shared with another colliding watchlist — that
+	// content was unreliable anyway (whichever watchlist synced last had
+	// silently overwritten it), and every affected watchlist gets a fresh,
+	// correctly-attributed file on its own next sync.
+	legacyPath := filepath.Join(playlistDir, legacyM3U8BaseName(pl.Name)+".m3u8")
+	if legacyPath != m3u8Path {
+		if err := os.Remove(legacyPath); err == nil {
+			fmt.Printf("[Watcher] M3U8: migrated legacy file for %s, old file removed\n", pl.Name)
+		}
+	}
 }
 
 // shouldSkipShrinkingWrite reports whether a new M3U8 write with newCount
@@ -1323,6 +1342,42 @@ func countM3U8Entries(path string) (count int, ok bool) {
 		count++
 	}
 	return count, true
+}
+
+// m3u8BaseName returns the .m3u8-free base filename SpotiFLAC uses for a
+// watchlist's Jellyfin playlist file: the sanitized playlist name plus a
+// short, watchlist-ID-derived suffix. The suffix exists because two
+// watchlists can have names that collide after SanitizeFilename strips
+// forbidden characters (e.g. "AC/DC Hits" and "AC:DC Hits" both sanitize
+// to "AC DC Hits") — without it, both watchlists would write to the same
+// file, and whichever synced last would silently overwrite the other's
+// playlist on every cycle.
+func m3u8BaseName(playlistName, watchlistID string) string {
+	safeName := util.SanitizeFilename(playlistName)
+	if safeName == "" {
+		safeName = "playlist"
+	}
+	return fmt.Sprintf("%s [%s]", safeName, watchlistIDSuffix(watchlistID))
+}
+
+// watchlistIDSuffix derives a short (8 hex char), stable, filename-safe
+// suffix from a watchlist ID via SHA-256, rather than truncating the ID
+// directly (format "watch-<unix-nano>") — a hash spreads collisions evenly
+// instead of concentrating them on IDs created close together in time.
+func watchlistIDSuffix(watchlistID string) string {
+	sum := sha256.Sum256([]byte(watchlistID))
+	return hex.EncodeToString(sum[:4])
+}
+
+// legacyM3U8BaseName is the pre-disambiguation filename (sanitized playlist
+// name only, no ID suffix) SpotiFLAC used before m3u8BaseName. Used only to
+// find and clean up leftover files from before the naming-collision fix.
+func legacyM3U8BaseName(playlistName string) string {
+	safeName := util.SanitizeFilename(playlistName)
+	if safeName == "" {
+		safeName = "playlist"
+	}
+	return safeName
 }
 
 // m3u8Settings holds the user settings relevant to M3U8 generation.

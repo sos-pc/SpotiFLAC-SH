@@ -6,6 +6,47 @@ import (
 	"testing"
 )
 
+// TestM3U8BaseNameAvoidsCollisions is the regression test for two
+// watchlists whose names collide after sanitization: they must produce
+// different filenames, so neither silently overwrites the other's M3U8.
+func TestM3U8BaseNameAvoidsCollisions(t *testing.T) {
+	nameA := m3u8BaseName("AC/DC Hits", "watch-1")
+	nameB := m3u8BaseName("AC:DC Hits", "watch-2")
+
+	// Confirm the premise: these two names really do collide once
+	// sanitized without the ID suffix (otherwise this test proves nothing).
+	if legacyM3U8BaseName("AC/DC Hits") != legacyM3U8BaseName("AC:DC Hits") {
+		t.Fatal("test premise broken: these two names no longer collide after sanitization")
+	}
+
+	if nameA == nameB {
+		t.Errorf("m3u8BaseName produced the same filename for two different watchlists: %q", nameA)
+	}
+}
+
+// TestM3U8BaseNameStableForSameWatchlist confirms the name doesn't churn
+// across calls for the same watchlist (needed for the shrink-guard and the
+// rename-cleanup logic, both of which recompute the path independently and
+// must agree with what was actually written).
+func TestM3U8BaseNameStableForSameWatchlist(t *testing.T) {
+	a := m3u8BaseName("My Playlist", "watch-123")
+	b := m3u8BaseName("My Playlist", "watch-123")
+	if a != b {
+		t.Errorf("m3u8BaseName is not stable: got %q then %q for identical inputs", a, b)
+	}
+}
+
+// TestLegacyM3U8BaseNameMatchesOldScheme confirms the legacy (pre-migration)
+// name is exactly what CreateM3U8File used to produce (sanitized name only,
+// no suffix) — the migration cleanup depends on this matching precisely to
+// find and remove the old file.
+func TestLegacyM3U8BaseNameMatchesOldScheme(t *testing.T) {
+	got := legacyM3U8BaseName("My Playlist")
+	if got != "My Playlist" {
+		t.Errorf("legacyM3U8BaseName(%q) = %q, want unchanged sanitized name", "My Playlist", got)
+	}
+}
+
 func TestCountM3U8Entries(t *testing.T) {
 	tests := []struct {
 		name      string
