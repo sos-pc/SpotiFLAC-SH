@@ -102,8 +102,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Pinned to a commit SHA, not a tag: in March 2026 aquasecurity/trivy-action
+      # was compromised via a stolen credential that force-pushed 75 of its 76
+      # version tags (including floating majors like v0.28) to malicious commits
+      # that stole CI secrets. This SHA (tag v0.35.0's target before the attack,
+      # confirmed unaffected — https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0)
+      # can't be silently moved to point somewhere else the way a tag can.
       - name: Scan pushed image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: table
