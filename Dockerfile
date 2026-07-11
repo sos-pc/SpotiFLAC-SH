@@ -32,21 +32,54 @@ RUN go mod tidy && \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o spotiflac .
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 3 — Runtime
+# Stage 3 — Static ffmpeg
 #
-# trixie-slim, not bookworm-slim (Debian 12, now oldstable): a Trivy scan of
-# the bookworm-based image found 6 CRITICAL/6 HIGH CVEs, almost all in the
-# old ffmpeg 5.1.9 build and its codec libraries (libaom, libavcodec, ...) —
-# several already marked will_not_fix by Debian on bookworm specifically.
-# trixie ships a current ffmpeg build instead of relying on backports that
-# aren't coming. CGO_ENABLED=0 in the builder stage means the Go binary
-# itself is statically linked and unaffected by the base image's glibc.
+# Not `apt-get install ffmpeg`: on both bookworm and trixie that pulls ~30
+# transitive shared-library dependencies (libavcodec/libavformat's own codec
+# libs, glib, Mesa/libgbm/libglx for GPU hwaccel, mbedtls, libssh, perl for
+# packaging scripts) — a Trivy scan found 60 CRITICAL/HIGH CVEs across those
+# packages on trixie (12 on bookworm), almost none of them in code this app,
+# a headless audio-only service, ever executes (no GPU accel, no SSH, no XML).
+# A statically-linked ffmpeg build has no runtime library dependencies of its
+# own to carry those CVEs.
+#
+# Pinned to a specific dated release tag (BtbN/FFmpeg-Builds cuts one most
+# days), not a floating "latest" pointer — same reasoning as the trivy-action
+# commit-SHA pin elsewhere in this repo: an immutable reference can't be
+# silently repointed. Verified against the checksums.sha256 published
+# alongside that same tag rather than a hash transcribed into this file,
+# since the build environment fetching it has real internet access and can
+# verify tarball-against-its-own-published-checksum at build time.
+#
+# LGPL build, not GPL: this app only needs libmp3lame (LGPL-licensed LAME)
+# plus FFmpeg's own native aac/alac encoders (see backend/audio/ffmpeg.go) —
+# no GPL-only codec (x264/x265/...) is used anywhere, so the GPL variant's
+# larger footprint buys nothing here.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
+FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df AS ffmpeg-static
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ffmpeg \
+        ca-certificates \
+        curl \
+        xz-utils && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG FFMPEG_BUILD_TAG=autobuild-2026-07-11-13-13
+WORKDIR /tmp/ffmpeg
+RUN curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/ffmpeg-master-latest-linux64-lgpl.tar.xz" && \
+    curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/checksums.sha256" && \
+    grep 'linux64-lgpl\.tar\.xz$' checksums.sha256 | sha256sum -c - && \
+    tar xf ffmpeg-master-latest-linux64-lgpl.tar.xz --strip-components=1 && \
+    chmod +x bin/ffmpeg bin/ffprobe
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 4 — Runtime
+# ─────────────────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
         ca-certificates \
         tzdata && \
     rm -rf /var/lib/apt/lists/*
@@ -56,6 +89,8 @@ USER nonroot
 WORKDIR /home/nonroot
 
 COPY --from=backend-builder /app/spotiflac /usr/local/bin/spotiflac
+COPY --from=ffmpeg-static /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg-static /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 
 EXPOSE 6890
 
