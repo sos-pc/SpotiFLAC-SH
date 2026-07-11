@@ -111,7 +111,12 @@ jobs:
       - name: Scan pushed image for vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          # Not env.IMAGE_NAME (github.repository, e.g. "sos-pc/SpotiFLAC-SH") —
+          # OCI image references must be all-lowercase and that isn't, which
+          # made Trivy reject it outright ("could not parse reference").
+          # docker/metadata-action already lowercased it correctly for the tag
+          # actually pushed; reuse that instead of re-deriving it here.
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: table
           severity: CRITICAL,HIGH
           exit-code: '1'
