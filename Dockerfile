@@ -33,8 +33,16 @@ RUN go mod tidy && \
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3 — Runtime
+#
+# trixie-slim, not bookworm-slim (Debian 12, now oldstable): a Trivy scan of
+# the bookworm-based image found 6 CRITICAL/6 HIGH CVEs, almost all in the
+# old ffmpeg 5.1.9 build and its codec libraries (libaom, libavcodec, ...) —
+# several already marked will_not_fix by Debian on bookworm specifically.
+# trixie ships a current ffmpeg build instead of relying on backports that
+# aren't coming. CGO_ENABLED=0 in the builder stage means the Go binary
+# itself is statically linked and unaffected by the base image's glibc.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
