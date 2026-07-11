@@ -1,8 +1,8 @@
 import { useState, useRef } from "react";
 import { downloadCover } from "@/lib/api";
-import { getSettings, parseTemplate, type TemplateData } from "@/lib/settings";
+import { getSettings } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
+import { resolveOutputPath } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import type { TrackMetadata } from "@/types/api";
 export function useCover() {
@@ -25,37 +25,16 @@ export function useCover() {
         setDownloadingCover(true);
         setDownloadingCoverTrack(id);
         try {
-            const os = settings.operatingSystem;
-            let outputDir = settings.downloadPath;
-            const placeholder = "__SLASH_PLACEHOLDER__";
-            const yearValue = releaseDate?.substring(0, 4);
-            const displayArtist = settings.useFirstArtistOnly && artistName ? getFirstArtist(artistName) : artistName;
-            const displayAlbumArtist = settings.useFirstArtistOnly && albumArtist ? getFirstArtist(albumArtist) : albumArtist;
-            const templateData: TemplateData = {
-                artist: displayArtist?.replace(/\//g, placeholder),
-                album: albumName?.replace(/\//g, placeholder),
-                album_artist: displayAlbumArtist?.replace(/\//g, placeholder) || displayArtist?.replace(/\//g, placeholder),
-                title: trackName?.replace(/\//g, placeholder),
-                track: position,
-                year: yearValue,
-                date: releaseDate,
-                playlist: playlistName?.replace(/\//g, placeholder),
-            };
-            const folderTemplate = settings.folderTemplate || "";
-            const useAlbumSubfolder = folderTemplate.includes("{album}") || folderTemplate.includes("{album_artist}") || folderTemplate.includes("{playlist}");
-            if (playlistName && (!isAlbum || !useAlbumSubfolder)) {
-                outputDir = joinPath(os, outputDir, sanitizePath(playlistName.replace(/\//g, " "), os));
-            }
-            if (settings.folderTemplate) {
-                const folderPath = parseTemplate(settings.folderTemplate, templateData);
-                if (folderPath) {
-                    const parts = folderPath.split("/").filter((p: string) => p.trim());
-                    for (const part of parts) {
-                        const sanitizedPart = part.replace(new RegExp(placeholder, "g"), " ");
-                        outputDir = joinPath(os, outputDir, sanitizePath(sanitizedPart, os));
-                    }
-                }
-            }
+            const { outputDir, displayArtist, displayAlbumArtist } = resolveOutputPath(settings, {
+                artistName,
+                albumName,
+                albumArtist,
+                trackName,
+                playlistName,
+                trackNumber: position,
+                releaseDate,
+                isAlbum,
+            });
             const response = await downloadCover({
                 cover_url: coverUrl,
                 track_name: trackName,
@@ -125,39 +104,18 @@ export function useCover() {
             const id = track.spotify_id || `${track.name}-${track.artists}`;
             setDownloadingCoverTrack(id);
             try {
-                const os = settings.operatingSystem;
-                let outputDir = settings.downloadPath;
-                const placeholder = "__SLASH_PLACEHOLDER__";
                 const useAlbumTrackNumber = settings.folderTemplate?.includes("{album}") || false;
                 const trackPosition = useAlbumTrackNumber ? (track.track_number || i + 1) : (i + 1);
-                const yearValue = track.release_date?.substring(0, 4);
-                const displayArtist = settings.useFirstArtistOnly && track.artists ? getFirstArtist(track.artists) : track.artists;
-                const displayAlbumArtist = settings.useFirstArtistOnly && track.album_artist ? getFirstArtist(track.album_artist) : track.album_artist;
-                const templateData: TemplateData = {
-                    artist: displayArtist?.replace(/\//g, placeholder),
-                    album: track.album_name?.replace(/\//g, placeholder),
-                    album_artist: displayAlbumArtist?.replace(/\//g, placeholder) || displayArtist?.replace(/\//g, placeholder),
-                    title: track.name?.replace(/\//g, placeholder),
-                    track: trackPosition,
-                    year: yearValue,
-                    date: track.release_date,
-                    playlist: playlistName?.replace(/\//g, placeholder),
-                };
-                const folderTemplate = settings.folderTemplate || "";
-                const useAlbumSubfolder = folderTemplate.includes("{album}") || folderTemplate.includes("{album_artist}") || folderTemplate.includes("{playlist}");
-                if (playlistName && (!isAlbum || !useAlbumSubfolder)) {
-                    outputDir = joinPath(os, outputDir, sanitizePath(playlistName.replace(/\//g, " "), os));
-                }
-                if (settings.folderTemplate) {
-                    const folderPath = parseTemplate(settings.folderTemplate, templateData);
-                    if (folderPath) {
-                        const parts = folderPath.split("/").filter((p: string) => p.trim());
-                        for (const part of parts) {
-                            const sanitizedPart = part.replace(new RegExp(placeholder, "g"), " ");
-                            outputDir = joinPath(os, outputDir, sanitizePath(sanitizedPart, os));
-                        }
-                    }
-                }
+                const { outputDir, displayArtist, displayAlbumArtist } = resolveOutputPath(settings, {
+                    artistName: track.artists,
+                    albumName: track.album_name,
+                    albumArtist: track.album_artist,
+                    trackName: track.name,
+                    playlistName,
+                    trackNumber: trackPosition,
+                    releaseDate: track.release_date,
+                    isAlbum,
+                });
                 const response = await downloadCover({
                     cover_url: track.images,
                     track_name: track.name,

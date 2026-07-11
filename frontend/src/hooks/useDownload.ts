@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { downloadTrack, fetchSpotifyMetadata } from "@/lib/api";
-import { getSettings, parseTemplate, type TemplateData } from "@/lib/settings";
+import { getSettings } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
+import {
+  getFirstArtist,
+  resolveOutputPath,
+  resolvePlaylistBaseDir,
+} from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { getToken, getStreamToken } from "@/lib/auth";
 import type { TrackMetadata } from "@/types/api";
@@ -125,7 +129,6 @@ export function useDownload(region: string) {
     position?: number,
     spotifyId?: string,
     durationMs?: number,
-    releaseYear?: string,
     albumArtist?: string,
     releaseDate?: string,
     coverUrl?: string,
@@ -139,10 +142,7 @@ export function useDownload(region: string) {
     const service = settings.downloader;
     const query =
       trackName && artistName ? `${trackName} ${artistName} ` : undefined;
-    const os = settings.operatingSystem;
-    let outputDir = settings.downloadPath;
     let useAlbumTrackNumber = false;
-    const placeholder = "__SLASH_PLACEHOLDER__";
     let finalReleaseDate = releaseDate;
     let finalTrackNumber = spotifyTrackNumber || 0;
     if (spotifyId) {
@@ -164,7 +164,6 @@ export function useDownload(region: string) {
         }
       } catch (err) {}
     }
-    const yearValue = releaseYear || finalReleaseDate?.substring(0, 4);
     const hasSubfolder =
       settings.folderTemplate && settings.folderTemplate.trim() !== "";
     const trackNumberForTemplate =
@@ -172,48 +171,23 @@ export function useDownload(region: string) {
     if (hasSubfolder) {
       useAlbumTrackNumber = true;
     }
-    const displayArtist =
-      settings.useFirstArtistOnly && artistName
-        ? getFirstArtist(artistName)
-        : artistName;
-    const displayAlbumArtist =
-      settings.useFirstArtistOnly && albumArtist
-        ? getFirstArtist(albumArtist)
-        : albumArtist;
-    const templateData: TemplateData = {
-      artist: displayArtist?.replace(/\//g, placeholder),
-      album: albumName?.replace(/\//g, placeholder),
-      album_artist:
-        displayAlbumArtist?.replace(/\//g, placeholder) ||
-        displayArtist?.replace(/\//g, placeholder),
-      title: trackName?.replace(/\//g, placeholder),
-      track: trackNumberForTemplate,
-      year: yearValue,
-      date: releaseDate,
-      playlist: playlistName?.replace(/\//g, placeholder),
-    };
-    const folderTemplate = settings.folderTemplate || "";
-    const useAlbumSubfolder =
-      folderTemplate.includes("{album}") ||
-      folderTemplate.includes("{album_artist}") ||
-      folderTemplate.includes("{playlist}");
-    if (settings.createPlaylistFolder && playlistName && !useAlbumSubfolder) {
-      outputDir = joinPath(
-        os,
-        outputDir,
-        sanitizePath(playlistName.replace(/\//g, " "), os),
-      );
-    }
-    if (settings.folderTemplate) {
-      const folderPath = parseTemplate(settings.folderTemplate, templateData);
-      if (folderPath) {
-        const parts = folderPath.split("/").filter((p: string) => p.trim());
-        for (const part of parts) {
-          const sanitizedPart = part.replace(new RegExp(placeholder, "g"), " ");
-          outputDir = joinPath(os, outputDir, sanitizePath(sanitizedPart, os));
-        }
-      }
-    }
+    // isAlbum: true — a single-track download has no album/playlist page
+    // context to distinguish, so this always suppresses the playlist
+    // subfolder when the folder template already covers it, matching the
+    // pre-consolidation behavior of this call site.
+    const { outputDir, displayArtist, displayAlbumArtist } = resolveOutputPath(
+      settings,
+      {
+        artistName,
+        albumName,
+        albumArtist,
+        trackName,
+        playlistName,
+        trackNumber: trackNumberForTemplate,
+        releaseDate: finalReleaseDate || releaseDate,
+        isAlbum: true,
+      },
+    );
     const serviceForCheck =
       service === "auto"
         ? "flac"
@@ -533,7 +507,6 @@ export function useDownload(region: string) {
     logger.info(`starting download: ${trackName} - ${displayArtist}`);
     setDownloadingTrack(id);
     try {
-      const releaseYear = releaseDate?.substring(0, 4);
       const response = await downloadWithAutoFallback(
         id,
         settings,
@@ -544,7 +517,6 @@ export function useDownload(region: string) {
         position,
         spotifyId,
         durationMs,
-        releaseYear,
         albumArtist || "",
         releaseDate,
         coverUrl,
@@ -596,20 +568,7 @@ export function useDownload(region: string) {
     setIsDownloading(true);
     setBulkDownloadType("selected");
     setDownloadProgress(0);
-    let outputDir = settings.downloadPath;
-    const os = settings.operatingSystem;
-    const useAlbumTag = settings.folderTemplate?.includes("{album}");
-    if (
-      settings.createPlaylistFolder &&
-      folderName &&
-      (!isAlbum || !useAlbumTag)
-    ) {
-      outputDir = joinPath(
-        os,
-        outputDir,
-        sanitizePath(folderName.replace(/\//g, " "), os),
-      );
-    }
+    const outputDir = resolvePlaylistBaseDir(settings, folderName, isAlbum);
     const selectedTrackObjects = selectedTracks
       .map((id) => allTracks.find((t) => t.spotify_id === id))
       .filter((t): t is TrackMetadata => t !== undefined);
@@ -791,20 +750,7 @@ export function useDownload(region: string) {
     setIsDownloading(true);
     setBulkDownloadType("all");
     setDownloadProgress(0);
-    let outputDir = settings.downloadPath;
-    const os = settings.operatingSystem;
-    const useAlbumTag = settings.folderTemplate?.includes("{album}");
-    if (
-      settings.createPlaylistFolder &&
-      folderName &&
-      (!isAlbum || !useAlbumTag)
-    ) {
-      outputDir = joinPath(
-        os,
-        outputDir,
-        sanitizePath(folderName.replace(/\//g, " "), os),
-      );
-    }
+    const outputDir = resolvePlaylistBaseDir(settings, folderName, isAlbum);
     logger.info(`checking existing files in parallel...`);
     const useAlbumTrackNumber =
       settings.folderTemplate?.includes("{album}") || false;
