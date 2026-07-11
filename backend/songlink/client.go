@@ -142,9 +142,15 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 	maxRetries := 3
 	var resp *http.Response
-	for i := 0; i < maxRetries; i++ {
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err = s.client.Do(req)
 		if err != nil {
+			// Network error — worth a retry (transient DNS/connection
+			// hiccup), unlike a 429 or a non-5xx status below.
+			if attempt < maxRetries-1 {
+				time.Sleep(time.Duration(attempt+1) * time.Second)
+				continue
+			}
 			return nil, fmt.Errorf("failed to get URLs: %w", err)
 		}
 
@@ -159,6 +165,14 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 			s.markRateLimited()
 			s.mu.Unlock()
 			return nil, fmt.Errorf("API returned status 429")
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
+			// Transient server error — retry; a permanent 4xx below isn't
+			// worth retrying.
+			resp.Body.Close()
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+			continue
 		}
 
 		if resp.StatusCode != 200 {
@@ -241,9 +255,13 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 
 	maxRetries := 3
 	var resp *http.Response
-	for i := 0; i < maxRetries; i++ {
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err = s.client.Do(req)
 		if err != nil {
+			if attempt < maxRetries-1 {
+				time.Sleep(time.Duration(attempt+1) * time.Second)
+				continue
+			}
 			return nil, fmt.Errorf("failed to check availability: %w", err)
 		}
 
@@ -258,6 +276,12 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 			s.markRateLimited()
 			s.mu.Unlock()
 			return nil, fmt.Errorf("API returned status 429")
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
+			resp.Body.Close()
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+			continue
 		}
 
 		if resp.StatusCode != 200 {
@@ -368,9 +392,13 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 
 	maxRetries := 3
 	var resp *http.Response
-	for i := 0; i < maxRetries; i++ {
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err = s.client.Do(req)
 		if err != nil {
+			if attempt < maxRetries-1 {
+				time.Sleep(time.Duration(attempt+1) * time.Second)
+				continue
+			}
 			return "", fmt.Errorf("failed to get Deezer URL: %w", err)
 		}
 
@@ -385,6 +413,12 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 			s.markRateLimited()
 			s.mu.Unlock()
 			return "", fmt.Errorf("API returned status 429")
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
+			resp.Body.Close()
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+			continue
 		}
 
 		if resp.StatusCode != 200 {

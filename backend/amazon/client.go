@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -155,7 +156,7 @@ func (a *AmazonDownloader) getStreamResponse(base, asin string) (*AmazonStreamRe
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 	if debugKey, keyErr := getAmazonDebugKey(); keyErr == nil && debugKey != "" {
 		req.Header.Set("X-Debug-Key", debugKey)
 	}
@@ -209,14 +210,8 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	fileName := fmt.Sprintf("%s.m4a", asin)
 	filePath := filepath.Join(outputDir, fileName)
 
-	out, err := os.Create(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
 	dlReq, _ := http.NewRequest("GET", downloadURL, nil)
-	dlReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	dlReq.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 
 	dlResp, err := a.client.Do(dlReq)
 	if err != nil {
@@ -225,15 +220,12 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	defer dlResp.Body.Close()
 
 	fmt.Printf("Downloading track: %s\n", fileName)
-	pw := util.NewProgressWriterWithCallback(out, a.SpeedCallback)
-	_, err = io.Copy(pw, dlResp.Body)
+	written, err := providerutil.DownloadToFileAtomic(filePath, dlResp.Body, a.SpeedCallback)
 	if err != nil {
-		out.Close()
-		os.Remove(filePath)
 		return "", err
 	}
 
-	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
+	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(written)/(1024*1024))
 
 	if apiResp.DecryptionKey != "" {
 		fmt.Printf("Decrypting file...\n")
@@ -339,43 +331,7 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		}
 	}
 
-	type mbResult struct {
-		ISRC     string
-		Metadata meta.Metadata
-	}
-
-	metaChan := make(chan mbResult, 1)
-	if p.EmbedGenre && p.SpotifyURL != "" {
-		// The reader below (<-metaChan) blocks until something arrives, so
-		// a recovered panic must still send a result.
-		util.SafeGoOrElse("amazon.fetchGenreMetadata", func() {
-			res := mbResult{}
-			var isrc string
-			parts := strings.Split(p.SpotifyURL, "/")
-			if len(parts) > 0 {
-				sID := strings.Split(parts[len(parts)-1], "?")[0]
-				if sID != "" {
-					client := songlink.GetSongLinkClient()
-					if val, err := client.GetISRC(sID); err == nil {
-						isrc = val
-					}
-				}
-			}
-			res.ISRC = isrc
-			if isrc != "" {
-				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, p.SpotifyTrackName, p.SpotifyArtistName, p.SpotifyAlbumName, p.UseSingleGenre, p.EmbedGenre); err == nil {
-					res.Metadata = fetchedMeta
-					fmt.Println("✓ MusicBrainz metadata fetched")
-				} else {
-					fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
-				}
-			}
-			metaChan <- res
-		}, func() { metaChan <- mbResult{} })
-	} else {
-		close(metaChan)
-	}
+	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, p.SpotifyTrackName, p.SpotifyArtistName, p.SpotifyAlbumName, p.UseSingleGenre, p.EmbedGenre)
 
 	fmt.Printf("Using Amazon URL: %s\n", p.URL)
 

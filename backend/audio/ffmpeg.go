@@ -413,6 +413,13 @@ type ConvertAudioResult struct {
 	OutputFile string `json:"output_file"`
 	Success    bool   `json:"success"`
 	Error      string `json:"error,omitempty"`
+	// Warning is set when the audio conversion itself succeeded (the
+	// output file is valid and playable, hence Success stays true) but a
+	// secondary step — embedding metadata or lyrics into it — failed.
+	// Previously that failure was only ever printed to the server log, so
+	// Success=true with no Error told the caller everything went fine when
+	// the converted file could actually be missing its genre/cover/lyrics.
+	Warning string `json:"warning,omitempty"`
 }
 
 // allowedConvertOutputFormats mirrors the formats the frontend's Audio
@@ -580,8 +587,10 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 				return
 			}
 
+			var warnings []string
 			if err := meta.EmbedMetadataToConvertedFile(outputFile, inputMetadata, coverArtPath); err != nil {
 				fmt.Printf("[FFmpeg] Warning: Failed to embed metadata: %v\n", err)
+				warnings = append(warnings, fmt.Sprintf("failed to embed metadata: %v", err))
 			} else {
 				fmt.Printf("[FFmpeg] Metadata embedded successfully\n")
 			}
@@ -589,9 +598,13 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 			if lyrics != "" {
 				if err := meta.EmbedLyricsOnlyUniversal(outputFile, lyrics); err != nil {
 					fmt.Printf("[FFmpeg] Warning: Failed to embed lyrics: %v\n", err)
+					warnings = append(warnings, fmt.Sprintf("failed to embed lyrics: %v", err))
 				} else {
 					fmt.Printf("[FFmpeg] Lyrics embedded successfully\n")
 				}
+			}
+			if len(warnings) > 0 {
+				result.Warning = strings.Join(warnings, "; ")
 			}
 
 			if coverArtPath != "" {

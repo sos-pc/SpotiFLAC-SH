@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -193,7 +194,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 		req, err := http.NewRequest("GET", url, nil)
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+			req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 
 			resp, err := t.client.Do(req)
 			if err == nil {
@@ -214,7 +215,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 						losslessURL := fmt.Sprintf("https://api.tidal.com/v1/tracks/%d/playbackinfopostpaywall?countryCode=%s&audioquality=LOSSLESS&playbackmode=STREAM&assetpresentation=FULL", trackID, countryCode)
 						if lreq, lerr := http.NewRequest("GET", losslessURL, nil); lerr == nil {
 							lreq.Header.Set("Authorization", "Bearer "+token.AccessToken)
-							lreq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+							lreq.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 							if lresp, lerr := t.client.Do(lreq); lerr == nil {
 								if lresp.StatusCode == 200 {
 									body, _ = io.ReadAll(lresp.Body)
@@ -323,7 +324,7 @@ func (t *TidalDownloader) DownloadFile(url, filepath string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 
 	resp, err := t.client.Do(req)
 
@@ -336,19 +337,12 @@ func (t *TidalDownloader) DownloadFile(url, filepath string) error {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(filepath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer out.Close()
-
-	pw := util.NewProgressWriterWithCallback(out, t.SpeedCallback)
-	_, err = io.Copy(pw, resp.Body)
+	written, err := providerutil.DownloadToFileAtomic(filepath, resp.Body, t.SpeedCallback)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
+	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(written)/(1024*1024))
 
 	fmt.Println("Download complete")
 	return nil
@@ -367,7 +361,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+		req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 		return client.Do(req)
 	}
 
@@ -384,19 +378,12 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 			return fmt.Errorf("download failed with status %d", resp.StatusCode)
 		}
 
-		out, err := os.Create(outputPath)
-		if err != nil {
-			return fmt.Errorf("failed to create file: %w", err)
-		}
-		defer out.Close()
-
-		pw := util.NewProgressWriterWithCallback(out, t.SpeedCallback)
-		_, err = io.Copy(pw, resp.Body)
+		written, err := providerutil.DownloadToFileAtomic(outputPath, resp.Body, t.SpeedCallback)
 		if err != nil {
 			return fmt.Errorf("failed to write file: %w", err)
 		}
 
-		fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
+		fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(written)/(1024*1024))
 		fmt.Println("Download complete")
 		return nil
 	}
@@ -592,44 +579,7 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		}
 	}
 
-	type mbResult struct {
-		ISRC     string
-		Metadata meta.Metadata
-	}
-
-	metaChan := make(chan mbResult, 1)
-	if p.EmbedGenre && p.SpotifyURL != "" {
-		// The reader below (<-metaChan) blocks until something arrives, so
-		// a recovered panic must still send a result — an empty mbResult{}
-		// is the same outcome as the normal "isrc stayed empty" path.
-		util.SafeGoOrElse("tidal.fetchGenreMetadata", func() {
-			res := mbResult{}
-			var isrc string
-			parts := strings.Split(p.SpotifyURL, "/")
-			if len(parts) > 0 {
-				sID := strings.Split(parts[len(parts)-1], "?")[0]
-				if sID != "" {
-					client := songlink.GetSongLinkClient()
-					if val, err := client.GetISRC(sID); err == nil {
-						isrc = val
-					}
-				}
-			}
-			res.ISRC = isrc
-			if isrc != "" {
-				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre); err == nil {
-					res.Metadata = fetchedMeta
-					fmt.Println("✓ MusicBrainz metadata fetched")
-				} else {
-					fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
-				}
-			}
-			metaChan <- res
-		}, func() { metaChan <- mbResult{} })
-	} else {
-		close(metaChan)
-	}
+	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre)
 
 	fmt.Printf("Downloading to: %s\n", outputFilename)
 	if err := t.DownloadFile(downloadURL, outputFilename); err != nil {
@@ -753,43 +703,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 		}
 	}
 
-	type mbResultFallback struct {
-		ISRC     string
-		Metadata meta.Metadata
-	}
-
-	metaChan := make(chan mbResultFallback, 1)
-	if p.EmbedGenre && p.SpotifyURL != "" {
-		// See the equivalent goroutine earlier in this file (Download) for
-		// why a recovered panic must still send a result.
-		util.SafeGoOrElse("tidal.fetchGenreMetadata", func() {
-			res := mbResultFallback{}
-			var isrc string
-			parts := strings.Split(p.SpotifyURL, "/")
-			if len(parts) > 0 {
-				sID := strings.Split(parts[len(parts)-1], "?")[0]
-				if sID != "" {
-					client := songlink.GetSongLinkClient()
-					if val, err := client.GetISRC(sID); err == nil {
-						isrc = val
-					}
-				}
-			}
-			res.ISRC = isrc
-			if isrc != "" {
-				fmt.Println("Fetching MusicBrainz metadata...")
-				if fetchedMeta, err := meta.FetchMusicBrainzMetadata(isrc, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre); err == nil {
-					res.Metadata = fetchedMeta
-					fmt.Println("✓ MusicBrainz metadata fetched")
-				} else {
-					fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
-				}
-			}
-			metaChan <- res
-		}, func() { metaChan <- mbResultFallback{} })
-	} else {
-		close(metaChan)
-	}
+	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre)
 
 	fmt.Printf("Downloading to: %s\n", outputFilename)
 	downloader := NewTidalDownloader(successAPI)

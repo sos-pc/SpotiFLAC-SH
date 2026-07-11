@@ -3,7 +3,6 @@ package deezer
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -83,7 +83,7 @@ func (d *DeezerDownloader) getFlacURL(base, deezerTrackID string) (string, error
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 	req.Header.Set("Accept", "application/json")
 	resp, err := d.client.Do(req)
 	if err != nil {
@@ -137,7 +137,7 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 	if err != nil {
 		return "", fmt.Errorf("deezmate: failed to create download request: %w", err)
 	}
-	dlReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	dlReq.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 
 	dlResp, err := d.client.Do(dlReq)
 	if err != nil {
@@ -152,20 +152,12 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 	tempFileName := fmt.Sprintf("deezer_%d.flac", time.Now().UnixNano())
 	filePath := filepath.Join(outputDir, tempFileName)
 
-	out, err := os.Create(filePath)
+	written, err := providerutil.DownloadToFileAtomic(filePath, dlResp.Body, d.SpeedCallback)
 	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	pw := util.NewProgressWriterWithCallback(out, d.SpeedCallback)
-	if _, err = io.Copy(pw, dlResp.Body); err != nil {
-		out.Close()
-		os.Remove(filePath)
 		return "", fmt.Errorf("deezmate: download stream failed: %w", err)
 	}
 
-	fmt.Printf("\r[Deezer] deezmate downloaded: %.2f MB\n", float64(pw.GetTotal())/(1024*1024))
+	fmt.Printf("\r[Deezer] deezmate downloaded: %.2f MB\n", float64(written)/(1024*1024))
 	return filePath, nil
 }
 

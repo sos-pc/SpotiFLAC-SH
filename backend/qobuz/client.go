@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -185,7 +186,7 @@ func (q *QobuzDownloader) searchByISRC(isrc string) (*QobuzTrack, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 	resp, err := q.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search track: %w", err)
@@ -233,7 +234,7 @@ func (q *QobuzDownloader) DownloadFromStandard(apiBase string, trackID int64, qu
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 	resp, err := q.client.Do(req)
 	if err != nil {
 		return "", err
@@ -298,7 +299,7 @@ func (q *QobuzDownloader) DownloadFromMusicDL(trackID int64, quality string) (st
 		return "", fmt.Errorf("failed to create musicdl.me request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 	req.Header.Set("X-Debug-Key", debugKey)
 
 	resp, err := q.client.Do(req)
@@ -422,7 +423,7 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create download request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
 	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
@@ -434,21 +435,14 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	}
 
 	fmt.Printf("Creating file: %s\n", filepath)
-	out, err := os.Create(filepath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer out.Close()
-
 	fmt.Println("Downloading...")
 
-	pw := util.NewProgressWriterWithCallback(out, q.SpeedCallback)
-	_, err = io.Copy(pw, resp.Body)
+	written, err := providerutil.DownloadToFileAtomic(filepath, resp.Body, q.SpeedCallback)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
+	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(written)/(1024*1024))
 	return nil
 }
 
@@ -548,23 +542,7 @@ func (q *QobuzDownloader) DownloadTrack(p DownloadParams) (string, error) {
 func (q *QobuzDownloader) DownloadTrackWithISRC(p DownloadParams) (string, error) {
 	fmt.Printf("Fetching track info for ISRC: %s\n", p.DeezerISRC)
 
-	metaChan := make(chan meta.Metadata, 1)
-	if p.EmbedGenre && p.DeezerISRC != "" {
-		// The reader below (<-metaChan) blocks until something arrives, so
-		// a recovered panic must still send a result.
-		util.SafeGoOrElse("qobuz.fetchGenreMetadata", func() {
-			fmt.Println("Fetching MusicBrainz metadata...")
-			if fetchedMeta, err := meta.FetchMusicBrainzMetadata(p.DeezerISRC, p.SpotifyTrackName, p.SpotifyArtistName, p.SpotifyAlbumName, p.UseSingleGenre, p.EmbedGenre); err == nil {
-				fmt.Println("✓ MusicBrainz metadata fetched")
-				metaChan <- fetchedMeta
-			} else {
-				fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
-				metaChan <- meta.Metadata{}
-			}
-		}, func() { metaChan <- meta.Metadata{} })
-	} else {
-		close(metaChan)
-	}
+	metaChan := providerutil.FetchGenreMetadataAsync(p.DeezerISRC, "", p.SpotifyTrackName, p.SpotifyArtistName, p.SpotifyAlbumName, p.UseSingleGenre, p.EmbedGenre)
 
 	if p.OutputDir != "." {
 		if err := os.MkdirAll(p.OutputDir, 0755); err != nil {
@@ -648,7 +626,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(p DownloadParams) (string, error
 
 	var mbMeta meta.Metadata
 	if p.DeezerISRC != "" {
-		mbMeta = <-metaChan
+		mbMeta = (<-metaChan).Metadata
 	}
 
 	fmt.Println("Embedding metadata and cover art...")
