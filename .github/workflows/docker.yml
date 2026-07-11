@@ -33,6 +33,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Runs right after the frontend build with nothing in between — go
+      # test needs the go:embed'd frontend/dist directory (untracked,
+      # gitignored) to still be on disk, and at least one of the linting
+      # actions below was observed wiping it out (fine for go vet/
+      # golangci-lint/govulncheck, which don't need to actually embed file
+      # contents to type-check, but not for a real go test build).
+      - name: Run Go tests
+        run: go test ./... -v
+
       - name: go vet
         run: go vet ./...
 
@@ -45,9 +54,6 @@ jobs:
         uses: golang/govulncheck-action@v1
         with:
           go-version-file: go.mod
-
-      - name: Run Go tests
-        run: go test ./... -v
 
       - name: Frontend lint (non-blocking — pre-existing findings not yet triaged)
         working-directory: frontend

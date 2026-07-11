@@ -18,5 +18,16 @@ export default defineConfig([
             ecmaVersion: 2020,
             globals: globals.browser,
         },
+        rules: {
+            // The codebase already uses a leading underscore to mark
+            // intentionally-unused params/vars (lib/api.ts, lib/rpc.ts,
+            // vite.config.ts) — recognize that convention instead of
+            // flagging it.
+            '@typescript-eslint/no-unused-vars': ['error', {
+                argsIgnorePattern: '^_',
+                varsIgnorePattern: '^_',
+                caughtErrorsIgnorePattern: '^_',
+            }],
+        },
     },
 ]);
