@@ -20,6 +20,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,6 +79,52 @@ func isSubPath(root, target string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// libraryRoot returns the operator-configured music library root that every
+// file-management and download operation must stay within — the same
+// downloadPath setting, with the same default fallback, that buildOutputDir
+// (jobs_helpers.go) already uses to place downloaded files. Centralized here
+// so every caller that needs to confine a client-supplied path resolves the
+// root the same way, instead of each recomputing its own copy.
+func (s *Server) libraryRoot() string {
+	if settings, err := s.app.LoadSettings(); err == nil && settings != nil {
+		if root, _ := settings["downloadPath"].(string); root != "" {
+			return filepath.Clean(root)
+		}
+	}
+	return filepath.Clean(util.GetDefaultMusicPath())
+}
+
+// cleanLibraryPath validates that p is an absolute path confined to root —
+// the root itself or one of its descendants — returning the cleaned path.
+// Use this (via s.libraryRoot()) instead of cleanAbsPath for any path that
+// arrives in a request body/query and is used for file-management or
+// download I/O: cleanAbsPath alone only rejects relative paths, it does not
+// stop a client from naming any absolute path on the host filesystem.
+func cleanLibraryPath(root, p string) (string, error) {
+	clean, err := cleanAbsPath(p)
+	if err != nil {
+		return "", err
+	}
+	if !isSubPath(root, clean) {
+		return "", fmt.Errorf("path %q is outside the configured library root", p)
+	}
+	return clean, nil
+}
+
+// cleanLibraryPaths validates a slice of paths against root, returning the
+// cleaned slice or the first error encountered.
+func cleanLibraryPaths(root string, paths []string) ([]string, error) {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		c, err := cleanLibraryPath(root, p)
+		if err != nil {
+			return nil, fmt.Errorf("path[%d]: %w", i, err)
+		}
+		out[i] = c
+	}
+	return out, nil
 }
 
 // isSameOriginRequest reports whether a browser-sent Origin header (when

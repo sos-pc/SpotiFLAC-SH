@@ -33,6 +33,16 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		req.UserID = userIDFromContext(r)
+		// Same confinement as /downloads/track above — req.Settings.DownloadPath
+		// otherwise reaches disk unconfined via buildOutputDir (S2).
+		if req.Settings.DownloadPath != "" {
+			cleaned, err := cleanLibraryPath(s.libraryRoot(), req.Settings.DownloadPath)
+			if err != nil {
+				writeV1Error(w, http.StatusBadRequest, "settings.downloadPath: "+err.Error())
+				return
+			}
+			req.Settings.DownloadPath = cleaned
+		}
 		result, err := s.ctr.Jobs.EnqueueBatch(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -107,6 +117,18 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		a.ApplySettingsFallbacks(&req)
+		// output_dir otherwise reaches disk unconfined: any authenticated
+		// session user (v1RequirePermission passes every non-API-key caller
+		// through regardless of the "download" perm — see its doc comment)
+		// could point a download anywhere the server can write (S2).
+		if req.OutputDir != "" {
+			cleaned, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+			if err != nil {
+				writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+				return
+			}
+			req.OutputDir = cleaned
+		}
 		result, err := a.DownloadTrack(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())

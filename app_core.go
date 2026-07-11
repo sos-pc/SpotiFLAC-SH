@@ -809,10 +809,27 @@ func (a *App) ReadTextFile(filePath string) (string, error) {
 	}
 	return string(content), nil
 }
+
+// RenameFileTo renames a single file to newName (extension preserved),
+// keeping it in the same directory. newName is user-supplied free text (the
+// manual "rename" text field in File Manager, not a metadata-derived
+// filename like GenerateFilename produces), so — unlike RenameFiles/
+// GenerateFilename, which already sanitize every field they build a name
+// from — it must be sanitized here too: an unsanitized value like
+// "../../../etc/cron.d/x" would survive filepath.Join and escape dir
+// entirely. Also mirrors RenameFiles' collision check: os.Rename silently
+// replaces an existing destination file on POSIX, so without this check a
+// name collision would destroy another track with no warning.
 func (a *App) RenameFileTo(oldPath, newName string) error {
 	dir := filepath.Dir(oldPath)
 	ext := filepath.Ext(oldPath)
-	newPath := filepath.Join(dir, newName+ext)
+	safeName := util.SanitizeFilename(newName)
+	newPath := filepath.Join(dir, safeName+ext)
+	if newPath != oldPath {
+		if _, err := os.Stat(newPath); err == nil {
+			return fmt.Errorf("a file named %q already exists", filepath.Base(newPath))
+		}
+	}
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
 	}

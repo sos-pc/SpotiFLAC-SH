@@ -31,6 +31,21 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		req.UserID = userIDFromContext(r)
+		// AddWatchlist stores req.Settings.DownloadPath on the watchlist and
+		// feeds it straight into every future sync's EnqueueBatch call
+		// (watcher.go) — those internal calls never go through the HTTP
+		// layer, so the same confinement applied to /downloads/track and
+		// /jobs has to be enforced here too, at watchlist creation, or
+		// every downstream sync would silently inherit an unconfined
+		// download path (S2 — watchlist creation isn't admin-gated).
+		if req.Settings.DownloadPath != "" {
+			cleaned, err := cleanLibraryPath(s.libraryRoot(), req.Settings.DownloadPath)
+			if err != nil {
+				writeV1Error(w, http.StatusBadRequest, "settings.downloadPath: "+err.Error())
+				return
+			}
+			req.Settings.DownloadPath = cleaned
+		}
 		result, err := s.ctr.Watcher.AddWatchlist(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())

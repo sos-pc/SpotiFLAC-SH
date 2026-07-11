@@ -63,6 +63,68 @@ func TestIsSubPath(t *testing.T) {
 	}
 }
 
+func TestCleanLibraryPath(t *testing.T) {
+	const root = "/music"
+	tests := []struct {
+		name    string
+		p       string
+		want    string
+		wantErr bool
+	}{
+		{"root itself", "/music", "/music", false},
+		{"nested file", "/music/Artist/track.flac", "/music/Artist/track.flac", false},
+		{"nested deep", "/music/a/b/c.flac", "/music/a/b/c.flac", false},
+		{"empty", "", "", true},
+		{"relative path", "Artist/track.flac", "", true},
+		{"outside root", "/etc/passwd", "", true},
+		{"sibling directory", "/music-backup/x", "", true},
+		{"dot-dot escape", "/music/../etc/passwd", "", true},
+		{"dot-dot escape disguised as nested", "/music/Artist/../../etc/passwd", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := cleanLibraryPath(root, tt.p)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("cleanLibraryPath(%q, %q) error = %v, wantErr %v", root, tt.p, err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("cleanLibraryPath(%q, %q) = %q, want %q", root, tt.p, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCleanLibraryPaths(t *testing.T) {
+	const root = "/music"
+
+	t.Run("all valid", func(t *testing.T) {
+		got, err := cleanLibraryPaths(root, []string{"/music/a.flac", "/music/sub/b.flac"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 || got[0] != "/music/a.flac" || got[1] != "/music/sub/b.flac" {
+			t.Errorf("got %v", got)
+		}
+	})
+
+	t.Run("one outside root rejects the whole batch", func(t *testing.T) {
+		_, err := cleanLibraryPaths(root, []string{"/music/a.flac", "/etc/passwd"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		got, err := cleanLibraryPaths(root, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %v, want empty", got)
+		}
+	})
+}
+
 func TestIsSameOriginRequest(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -190,8 +190,15 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	// ── Files ─────────────────────────────────────────────────────────────
+	// Every route below that accepts a client-supplied filesystem path uses
+	// cleanLibraryPath(s.libraryRoot(), ...) instead of the bare cleanAbsPath
+	// — cleanAbsPath only rejects relative paths, it does not stop a caller
+	// from naming any absolute path on the host (S3). Confining to the
+	// configured music library root is what api_admin.go's rebuild-scan
+	// already does for watchlist paths (collectScanRoots); this makes every
+	// other file-management/download surface consistent with it.
 	s.mux.Handle("GET /api/v1/files", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -205,7 +212,7 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/files/audio", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -225,7 +232,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequireAdmin(w, r) {
 			return
 		}
-		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -252,7 +259,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		if _, err := cleanAbsPath(params.OldPath); err != nil {
+		if _, err := cleanLibraryPath(s.libraryRoot(), params.OldPath); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "old_path: "+err.Error())
 			return
 		}
@@ -271,7 +278,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		cleaned, err := cleanAbsPaths(params.FilePaths)
+		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.FilePaths)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -284,7 +291,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequireAdmin(w, r) {
 			return
 		}
-		path, err := cleanAbsPath(r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -309,7 +316,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		path, err := cleanAbsPath(params.FilePath)
+		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -335,7 +342,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		cleaned, err := cleanAbsPaths(params.Files)
+		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.Files)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -356,7 +363,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		cleaned, err := cleanAbsPaths(params.Files)
+		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.Files)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -364,6 +371,9 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, a.PreviewRenameFiles(cleaned, params.Format))
 	}))
 
+	// Uploads client-supplied bytes (not a server-side path) to the
+	// configured cover-art host — no path-confinement concern here, unlike
+	// upload/path below.
 	s.mux.Handle("POST /api/v1/files/upload/image", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		var params struct {
 			Filename   string `json:"filename"`
@@ -381,7 +391,16 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, map[string]string{"url": url})
 	}))
 
+	// Admin-only (N1): this reads an arbitrary server-side path and uploads
+	// its contents to a third-party host, returning a public URL — without
+	// the admin gate, any authenticated non-admin user could exfiltrate any
+	// file the server process can read. cleanLibraryPath additionally
+	// confines it to the music library, consistent with every other route
+	// here (defense in depth even for an admin-triggered action).
 	s.mux.Handle("POST /api/v1/files/upload/path", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
@@ -389,7 +408,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		path, err := cleanAbsPath(params.FilePath)
+		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -414,12 +433,13 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		outputDir, err := cleanAbsPath(params.OutputDir)
+		root := s.libraryRoot()
+		outputDir, err := cleanLibraryPath(root, params.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return
 		}
-		cleanedPaths, err := cleanAbsPaths(params.FilePaths)
+		cleanedPaths, err := cleanLibraryPaths(root, params.FilePaths)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -441,15 +461,24 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		outputDir, err := cleanAbsPath(params.OutputDir)
+		root := s.libraryRoot()
+		outputDir, err := cleanLibraryPath(root, params.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return
 		}
-		rootDir, err := cleanAbsPath(params.RootDir)
-		if err != nil {
-			writeV1Error(w, http.StatusBadRequest, "root_dir: "+err.Error())
-			return
+		// root_dir is optional (only used to also match against a second
+		// directory, e.g. a legacy layout) — filepath.Walk on it below makes
+		// it just as much a real I/O target as output_dir, and an unconfined
+		// value would let a caller enumerate .flac/.mp3 filenames anywhere
+		// on the host, so it's only accepted when non-empty.
+		var rootDir string
+		if params.RootDir != "" {
+			rootDir, err = cleanLibraryPath(root, params.RootDir)
+			if err != nil {
+				writeV1Error(w, http.StatusBadRequest, "root_dir: "+err.Error())
+				return
+			}
 		}
 		writeV1JSON(w, http.StatusOK, a.CheckFilesExistence(outputDir, rootDir, params.Tracks))
 	}))
@@ -463,7 +492,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		result, err := a.AnalyzeTrack(params.FilePath)
+		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		result, err := a.AnalyzeTrack(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -479,7 +513,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		result, err := a.AnalyzeMultipleTracks(params.FilePaths)
+		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.FilePaths)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		result, err := a.AnalyzeMultipleTracks(cleaned)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -493,6 +532,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		cleaned, err := cleanLibraryPaths(s.libraryRoot(), req.InputFiles)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		req.InputFiles = cleaned
 		result, err := a.ConvertAudio(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -502,12 +547,22 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	// ── Media (lyrics, cover, header, gallery, avatar) ────────────────────
+	// Each of these takes an output_dir the server writes a downloaded file
+	// into — previously accepted straight from the request body with no
+	// validation at all (not even cleanAbsPath), the same gap as the
+	// Files/Audio routes above.
 	s.mux.Handle("POST /api/v1/media/lyrics", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		var req LyricsDownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		req.OutputDir = outputDir
 		result, err := a.DownloadLyrics(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -522,6 +577,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		req.OutputDir = outputDir
 		result, err := a.DownloadCover(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -536,6 +597,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		req.OutputDir = outputDir
 		result, err := a.DownloadHeader(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -550,6 +617,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		req.OutputDir = outputDir
 		result, err := a.DownloadGalleryImage(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -564,6 +637,12 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		if err != nil {
+			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
+			return
+		}
+		req.OutputDir = outputDir
 		result, err := a.DownloadAvatar(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())

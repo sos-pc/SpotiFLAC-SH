@@ -286,7 +286,8 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 }
 
 // collectScanRoots returns the deduplicated list of download paths to
-// walk: the global default downloadPath, plus every watchlist's
+// walk: the library root (s.libraryRoot() — the configured downloadPath, or
+// util.GetDefaultMusicPath() if unset), plus every watchlist's
 // Settings.DownloadPath that falls under it. Non-existent or unreadable
 // paths are silently dropped.
 //
@@ -311,13 +312,8 @@ func (s *Server) collectScanRoots() []string {
 		out = append(out, path)
 	}
 
-	var globalRoot string
-	if settings, _ := s.app.LoadSettings(); settings != nil {
-		if path, _ := settings["downloadPath"].(string); path != "" {
-			globalRoot = path
-			addIfReadable(path)
-		}
-	}
+	globalRoot := s.libraryRoot()
+	addIfReadable(globalRoot)
 
 	if s.ctr.Watcher != nil {
 		if pls, err := s.ctr.Watcher.GetWatchlists(); err == nil {
@@ -326,7 +322,7 @@ func (s *Server) collectScanRoots() []string {
 				if dp == "" {
 					continue
 				}
-				if globalRoot == "" || !isSubPath(globalRoot, dp) {
+				if !isSubPath(globalRoot, dp) {
 					fmt.Printf("[Admin] library-rebuild: ignoring watchlist download path outside library root: %s\n", dp)
 					continue
 				}
