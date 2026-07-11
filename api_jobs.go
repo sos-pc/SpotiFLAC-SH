@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
@@ -18,6 +19,22 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 // Route registration — jobs & history
 // ─────────────────────────────────────────────────────────────────────────────
+
+// audioContentType maps a downloaded file's extension to its real MIME type.
+// Despite the app's name, downloads aren't FLAC-only — Amazon Music serves
+// m4a and some fallback paths produce mp3 (see filemanager.go's own
+// .flac/.mp3/.m4a handling) — so the browser-download response used to claim
+// audio/flac unconditionally regardless of what was actually on disk.
+func audioContentType(filename string) string {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a":
+		return "audio/mp4"
+	default:
+		return "audio/flac"
+	}
+}
 
 func (s *Server) registerJobRoutes() {
 	a := s.app
@@ -87,7 +104,7 @@ func (s *Server) registerJobRoutes() {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 		}
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-		w.Header().Set("Content-Type", "audio/flac")
+		w.Header().Set("Content-Type", audioContentType(filename))
 		http.ServeContent(w, r, filename, time.Time{}, f)
 
 		job.FilePath = ""

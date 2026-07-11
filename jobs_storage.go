@@ -217,7 +217,6 @@ func (jm *JobManager) CleanupOldJobs() (int, []string, error) {
 	})
 
 	if err == nil && deleted > 0 {
-		jm.db.Update(func(tx *bolt.Tx) error { return nil })
 		fmt.Printf("[Jobs] Cleanup: deleted %d duplicate/old jobs\n", deleted)
 	}
 	if err == nil && jm.hub != nil {
