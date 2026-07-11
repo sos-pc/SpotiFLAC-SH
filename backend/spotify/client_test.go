@@ -28,12 +28,6 @@ func makeResp(status int, body string) *http.Response {
 	}
 }
 
-func makeRespWithHeader(status int, body, headerKey, headerVal string) *http.Response {
-	resp := makeResp(status, body)
-	resp.Header.Set(headerKey, headerVal)
-	return resp
-}
-
 // fakeInitTransport répond aux sous-requêtes d'Initialize() avec des données valides.
 // Utilisé pour simuler un re-auth réussi après 401.
 func fakeInitTransport(queryResp func() *http.Response) roundTripperFunc {

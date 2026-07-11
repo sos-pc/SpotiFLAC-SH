@@ -1404,10 +1404,6 @@ func cleanPathParts(path string) []string {
 	return parts
 }
 
-func parseArtistIDsFromString(artists string) []string {
-	return []string{}
-}
-
 func (c *SpotifyMetadataClient) Search(ctx context.Context, query string, limit int) (*SearchResponse, error) {
 	if query == "" {
 		return nil, errors.New("search query cannot be empty")

@@ -584,7 +584,9 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				item.Format = "FLAC"
 			}
 
-			AddHistoryItem(item)
+			if err := AddHistoryItem(item); err != nil {
+				fmt.Printf("[History] Failed to record history for %s: %v\n", fPath, err)
+			}
 		})
 	}
 

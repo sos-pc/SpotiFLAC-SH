@@ -396,16 +396,6 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 	return 0
 }
 
-func getInt(m map[string]interface{}, key string) int {
-	if val, ok := m[key].(int); ok {
-		return val
-	}
-	if val, ok := m[key].(float64); ok {
-		return int(val)
-	}
-	return 0
-}
-
 func getBool(m map[string]interface{}, key string) bool {
 	if val, ok := m[key].(bool); ok {
 		return val
@@ -830,7 +820,7 @@ func FilterTrack(data map[string]interface{}, albumFetchData ...map[string]inter
 			if len(albumTracks) > 0 {
 				albumTrackItems := getSlice(albumTracks, "items")
 				currentTrackID := getString(trackData, "id")
-				for idx, item := range albumTrackItems {
+				for _, item := range albumTrackItems {
 					itemMap, ok := item.(map[string]interface{})
 					if !ok {
 						continue
@@ -847,11 +837,6 @@ func FilterTrack(data map[string]interface{}, albumFetchData ...map[string]inter
 							if dNum > 0 {
 								discNumber = dNum
 							}
-						}
-
-						trackNum := int(getFloat64(trackData, "trackNumber"))
-						itemTrackNum := idx + 1
-						if trackNum == itemTrackNum && dNum > 0 {
 						}
 					}
 				}

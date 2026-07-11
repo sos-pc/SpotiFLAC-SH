@@ -166,7 +166,9 @@ func RefreshTidalToken(tokenData *TidalTokenData) (*TidalTokenData, error) {
 	tokenData.ExpiresIn = respData.ExpiresIn
 	tokenData.ExpiresAt = time.Now().Unix() + int64(respData.ExpiresIn)
 
-	SaveTidalToken(tokenData)
+	if err := SaveTidalToken(tokenData); err != nil {
+		fmt.Printf("[Tidal Auth] Failed to persist refreshed token: %v\n", err)
+	}
 	fmt.Println("[Tidal Auth] Token refreshed successfully.")
 	return tokenData, nil
 }
@@ -203,7 +205,9 @@ func GetValidTidalToken() (*TidalTokenData, error) {
 	if token.CountryCode == "" {
 		if cc := FetchTidalCountryCode(token.AccessToken); cc != "" {
 			token.CountryCode = cc
-			SaveTidalToken(token)
+			if err := SaveTidalToken(token); err != nil {
+				fmt.Printf("[Tidal Auth] Failed to persist country code: %v\n", err)
+			}
 			fmt.Printf("[Tidal Auth] Country code fetched: %s\n", cc)
 		}
 	}

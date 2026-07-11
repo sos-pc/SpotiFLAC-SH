@@ -52,20 +52,6 @@ func cleanAbsPath(p string) (string, error) {
 	return clean, nil
 }
 
-// cleanAbsPaths validates a slice of paths, returning the cleaned slice or the
-// first error encountered.
-func cleanAbsPaths(paths []string) ([]string, error) {
-	out := make([]string, len(paths))
-	for i, p := range paths {
-		c, err := cleanAbsPath(p)
-		if err != nil {
-			return nil, fmt.Errorf("path[%d]: %w", i, err)
-		}
-		out[i] = c
-	}
-	return out, nil
-}
-
 // isSubPath reports whether target is root itself or a descendant of root,
 // after cleaning both. Does not resolve symlinks.
 func isSubPath(root, target string) bool {
