@@ -9,6 +9,7 @@ import {
 } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { getStreamToken } from "@/lib/auth";
+import { useJobsStreamEvent } from "./useJobsStreamEvent";
 import type { TrackMetadata } from "@/types/api";
 interface CheckFileExistenceRequest {
   spotify_id: string;
@@ -71,60 +72,43 @@ export function useDownload(region: string) {
       window.removeEventListener("spotif:downloadModeChange", handler);
   }, []);
 
-  // SSE listener for browser-mode auto-download
-  useEffect(() => {
-    if (downloadMode !== "browser") return;
-    let cancelled = false;
-    let es: EventSource | null = null;
-
-    (async () => {
-      const token = await getStreamToken();
-      if (!token || cancelled) return;
-
-      es = new EventSource(
-        `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
-      );
-
-      es.addEventListener("job_update", (e: MessageEvent) => {
-        const job = JSON.parse(e.data) as {
-          id: string;
-          status: string;
-          batch_id?: string;
-          file_path?: string;
-        };
-        if (
-          job.status === "done" &&
-          job.batch_id &&
-          browserBatchIdsRef.current.has(job.batch_id) &&
-          job.file_path &&
-          !triggeredJobIdsRef.current.has(job.id)
-        ) {
-          triggeredJobIdsRef.current.add(job.id);
-          (async () => {
-            // Short-lived stream token, not the 24h session JWT — this URL
-            // can't set an Authorization header (it's a plain <a href>
-            // download), so a full session token here would sit in browser
-            // history / reverse-proxy logs for the rest of its lifetime.
-            const t = await getStreamToken();
-            if (!t) return;
-            const a = document.createElement("a");
-            a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
-            a.download = "";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          })();
-        }
-      });
-
-      es.onerror = () => es?.close();
-    })();
-
-    return () => {
-      cancelled = true;
-      es?.close();
-    };
-  }, [downloadMode]);
+  // SSE listener for browser-mode auto-download, on the shared jobs stream
+  // connection (see lib/jobsStream.ts) — only active while browser mode is on.
+  useJobsStreamEvent(
+    "job_update",
+    (e: MessageEvent) => {
+      const job = JSON.parse(e.data) as {
+        id: string;
+        status: string;
+        batch_id?: string;
+        file_path?: string;
+      };
+      if (
+        job.status === "done" &&
+        job.batch_id &&
+        browserBatchIdsRef.current.has(job.batch_id) &&
+        job.file_path &&
+        !triggeredJobIdsRef.current.has(job.id)
+      ) {
+        triggeredJobIdsRef.current.add(job.id);
+        (async () => {
+          // Short-lived stream token, not the 24h session JWT — this URL
+          // can't set an Authorization header (it's a plain <a href>
+          // download), so a full session token here would sit in browser
+          // history / reverse-proxy logs for the rest of its lifetime.
+          const t = await getStreamToken();
+          if (!t) return;
+          const a = document.createElement("a");
+          a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
+          a.download = "";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        })();
+      }
+    },
+    downloadMode === "browser",
+  );
   const downloadWithAutoFallback = async (
     id: string,
     settings: any,

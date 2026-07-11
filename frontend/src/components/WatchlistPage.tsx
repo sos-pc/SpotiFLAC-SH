@@ -12,7 +12,7 @@ import {
   CheckWatchlistFreshness,
 } from "@/lib/rpc";
 import { getSettings } from "@/lib/settings";
-import { getStreamToken } from "@/lib/auth";
+import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { Button } from "@/components/ui/button";
 import {
@@ -146,81 +146,66 @@ export function WatchlistPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Écouter les événements SSE pour les syncs de watchlist
-  useEffect(() => {
-    let cancelled = false;
-    let es: EventSource | null = null;
-
-    (async () => {
-      const token = await getStreamToken();
-      if (!token || cancelled) return;
-      es = new EventSource(
-        `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
-      );
-      es.addEventListener("watchlist_synced", (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as {
-          watchlist_id: string;
-          new_tracks: number;
-          deleted: number;
-          name: string;
-        };
-        // Retirer la playlist du set "en cours de sync"
-        setSyncing((prev) => {
-          const next = new Set(prev);
-          next.delete(data.watchlist_id);
-          return next;
-        });
-        // Recharger les stats + watchlists pour afficher le SyncLog à jour
-        reloadStats(data.watchlist_id);
-        loadWatchlists();
-        // Toast de résultat
-        if (data.new_tracks > 0 || data.deleted > 0) {
-          const parts: string[] = [];
-          if (data.new_tracks > 0) parts.push(`${data.new_tracks} new`);
-          if (data.deleted > 0) parts.push(`${data.deleted} deleted`);
-          toast.success(`${data.name}: ${parts.join(", ")}`);
-        } else {
-          toast.info(`${data.name}: up to date`);
-        }
-      });
-      es.addEventListener("watchlist_repaired", (e: MessageEvent) => {
-        const data = JSON.parse(e.data) as {
-          watchlist_id: string;
-          name: string;
-          result: WatchlistRepairResult;
-        };
-        setRepairing((prev) => {
-          const next = new Set(prev);
-          next.delete(data.watchlist_id);
-          return next;
-        });
-        reloadStats(data.watchlist_id);
-        loadWatchlists();
-        const { retag, rebuild, m3u8, m3u8_error } = data.result;
-        if (m3u8.unresolved === 0) {
-          toast.success(
-            `${data.name}: repaired, all ${m3u8.total} tracks resolved, M3U8 up to date`,
-          );
-        } else if (m3u8.resolved > 0) {
-          toast.warning(
-            `${data.name}: repaired, ${m3u8.resolved}/${m3u8.total} tracks resolved (${m3u8.unresolved} still missing — tagged ${retag.tagged}, imported ${rebuild.imported} into the catalog)`,
-          );
-        } else {
-          toast.error(
-            `${data.name}: repair found 0/${m3u8.total} tracks on disk — check the download path in this watchlist's settings`,
-          );
-        }
-        if (m3u8_error) {
-          toast.error(`${data.name}: M3U8 write failed: ${m3u8_error}`);
-        }
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-      es?.close();
+  // Écouter les événements SSE pour les syncs de watchlist (connexion
+  // partagée — voir lib/jobsStream.ts)
+  useJobsStreamEvent("watchlist_synced", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as {
+      watchlist_id: string;
+      new_tracks: number;
+      deleted: number;
+      name: string;
     };
-  }, []);
+    // Retirer la playlist du set "en cours de sync"
+    setSyncing((prev) => {
+      const next = new Set(prev);
+      next.delete(data.watchlist_id);
+      return next;
+    });
+    // Recharger les stats + watchlists pour afficher le SyncLog à jour
+    reloadStats(data.watchlist_id);
+    loadWatchlists();
+    // Toast de résultat
+    if (data.new_tracks > 0 || data.deleted > 0) {
+      const parts: string[] = [];
+      if (data.new_tracks > 0) parts.push(`${data.new_tracks} new`);
+      if (data.deleted > 0) parts.push(`${data.deleted} deleted`);
+      toast.success(`${data.name}: ${parts.join(", ")}`);
+    } else {
+      toast.info(`${data.name}: up to date`);
+    }
+  });
+
+  useJobsStreamEvent("watchlist_repaired", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as {
+      watchlist_id: string;
+      name: string;
+      result: WatchlistRepairResult;
+    };
+    setRepairing((prev) => {
+      const next = new Set(prev);
+      next.delete(data.watchlist_id);
+      return next;
+    });
+    reloadStats(data.watchlist_id);
+    loadWatchlists();
+    const { retag, rebuild, m3u8, m3u8_error } = data.result;
+    if (m3u8.unresolved === 0) {
+      toast.success(
+        `${data.name}: repaired, all ${m3u8.total} tracks resolved, M3U8 up to date`,
+      );
+    } else if (m3u8.resolved > 0) {
+      toast.warning(
+        `${data.name}: repaired, ${m3u8.resolved}/${m3u8.total} tracks resolved (${m3u8.unresolved} still missing — tagged ${retag.tagged}, imported ${rebuild.imported} into the catalog)`,
+      );
+    } else {
+      toast.error(
+        `${data.name}: repair found 0/${m3u8.total} tracks on disk — check the download path in this watchlist's settings`,
+      );
+    }
+    if (m3u8_error) {
+      toast.error(`${data.name}: M3U8 write failed: ${m3u8_error}`);
+    }
+  });
 
   const handleAdd = async () => {
     if (!newUrl.trim()) {

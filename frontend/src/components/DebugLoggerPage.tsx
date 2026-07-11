@@ -3,7 +3,8 @@ import { Trash2, Copy, Check, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logger, type LogEntry } from "@/lib/logger";
 import { ExportFailedDownloads, GetServerLogs } from "@/lib/rpc";
-import { getUser, getStreamToken } from "@/lib/auth";
+import { getUser } from "@/lib/auth";
+import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 const levelColors: Record<string, string> = {
     info: "text-blue-500",
@@ -42,11 +43,10 @@ export function DebugLoggerPage() {
     }, []);
     // Backend logs are admin-only (they can mention other users' watchlist
     // names, file paths, error details) — mirrors the server-side check.
+    const isAdmin = getUser()?.is_admin ?? false;
     useEffect(() => {
-        if (!getUser()?.is_admin) return;
+        if (!isAdmin) return;
         let cancelled = false;
-        let es: EventSource | null = null;
-
         GetServerLogs()
             .then((entries) => {
                 if (cancelled) return;
@@ -55,28 +55,23 @@ export function DebugLoggerPage() {
                 }
             })
             .catch(() => {});
-
-        (async () => {
-            const token = await getStreamToken();
-            if (!token || cancelled) return;
-            es = new EventSource(
-                `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`,
-            );
-            es.addEventListener("server_log", (e: MessageEvent) => {
-                const data = JSON.parse(e.data) as {
-                    time: string;
-                    level: string;
-                    message: string;
-                };
-                logger.ingestBackend(data.time, data.level, data.message);
-            });
-        })();
-
         return () => {
             cancelled = true;
-            es?.close();
         };
-    }, []);
+    }, [isAdmin]);
+    // Live tail on the shared jobs SSE connection (see lib/jobsStream.ts).
+    useJobsStreamEvent(
+        "server_log",
+        (e: MessageEvent) => {
+            const data = JSON.parse(e.data) as {
+                time: string;
+                level: string;
+                message: string;
+            };
+            logger.ingestBackend(data.time, data.level, data.message);
+        },
+        isAdmin,
+    );
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;

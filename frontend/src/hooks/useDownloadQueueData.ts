@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { getStreamToken } from "@/lib/auth";
+import { useState } from "react";
+import { useJobsStreamEvent } from "./useJobsStreamEvent";
 
 interface Job {
   id: string;
@@ -31,76 +31,40 @@ function toQueueItem(job: Job) {
   };
 }
 
-const RECONNECT_DELAY_MS = 3000;
-
 export function useDownloadQueueData() {
   const [jobs, setJobs] = useState<Map<string, Job>>(new Map());
-  const esRef = useRef<EventSource | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    let active = true;
+  useJobsStreamEvent("job_update", (e: MessageEvent) => {
+    const job: Job = JSON.parse(e.data);
+    setJobs((prev) => {
+      const next = new Map(prev);
+      next.set(job.id, job);
+      return next;
+    });
+  });
 
-    async function connect() {
-      const token = await getStreamToken();
-      if (!token || !active) return;
+  useJobsStreamEvent("job_deleted", (e: MessageEvent) => {
+    const { id } = JSON.parse(e.data) as { id: string };
+    setJobs((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  });
 
-      const url = `/api/v1/jobs/stream?token=${encodeURIComponent(token)}`;
-      const es = new EventSource(url);
-      esRef.current = es;
-
-      es.addEventListener("job_update", (e: MessageEvent) => {
-        const job: Job = JSON.parse(e.data);
-        setJobs((prev) => {
-          const next = new Map(prev);
-          next.set(job.id, job);
-          return next;
-        });
-      });
-
-      es.addEventListener("job_deleted", (e: MessageEvent) => {
-        const { id } = JSON.parse(e.data) as { id: string };
-        setJobs((prev) => {
-          const next = new Map(prev);
+  useJobsStreamEvent("queue_cleared", () => {
+    setJobs((prev) => {
+      const next = new Map(prev);
+      // Supprimer tous les jobs terminaux (done/skipped/failed)
+      // Garder pending et downloading (ils sont toujours actifs)
+      for (const [id, job] of next) {
+        if (job.status !== "pending" && job.status !== "downloading") {
           next.delete(id);
-          return next;
-        });
-      });
-
-      es.addEventListener("queue_cleared", () => {
-        setJobs((prev) => {
-          const next = new Map(prev);
-          // Supprimer tous les jobs terminaux (done/skipped/failed)
-          // Garder pending et downloading (ils sont toujours actifs)
-          for (const [id, job] of next) {
-            if (job.status !== "pending" && job.status !== "downloading") {
-              next.delete(id);
-            }
-          }
-          return next;
-        });
-      });
-
-      es.onerror = () => {
-        es.close();
-        esRef.current = null;
-        if (active) {
-          timerRef.current = setTimeout(() => {
-            if (active) connect();
-          }, RECONNECT_DELAY_MS);
         }
-      };
-    }
-
-    connect();
-
-    return () => {
-      active = false;
-      esRef.current?.close();
-      esRef.current = null;
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
+      }
+      return next;
+    });
+  });
 
   const jobsArray = Array.from(jobs.values());
   const queue = jobsArray.map(toQueueItem);
