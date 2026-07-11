@@ -31,6 +31,7 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
 // loadOrGenerateJWTSecret returns the JWT secret from env, persisted file, or generates a new one.
 func loadOrGenerateJWTSecret() []byte {
 	// 1. Variable d'environnement → priorité absolue
@@ -63,7 +64,6 @@ func generateRandomSecret() []byte {
 	base64.RawURLEncoding.Encode(dst, b)
 	return dst
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UserProfile
@@ -119,8 +119,8 @@ type jellyfinAuthRequest struct {
 
 type jellyfinAuthResponse struct {
 	User struct {
-		Id   string `json:"Id"`
-		Name string `json:"Name"`
+		Id     string `json:"Id"`
+		Name   string `json:"Name"`
 		Policy struct {
 			IsAdministrator bool `json:"IsAdministrator"`
 		} `json:"Policy"`
@@ -279,17 +279,19 @@ type JWTClaims struct {
 	TokenVersion int      `json:"tv,omitempty"` // must match UserProfile.TokenVersion at validation time; see UserProfile.TokenVersion
 	// Scope narrows what this token may be used for. Empty = normal
 	// session, usable on any endpoint the user/key is otherwise allowed
-	// to reach. "stream" = short-lived token minted for the SSE
-	// endpoints only (see GenerateStreamToken) — v1Auth rejects it
-	// everywhere else.
+	// to reach. "stream" = short-lived token minted for endpoints the
+	// browser can't attach an Authorization header to — SSE connections
+	// and the job-download link (see GenerateStreamToken, streamScopedPaths,
+	// isJobDownloadPath) — v1Auth rejects it everywhere else.
 	Scope string `json:"scope,omitempty"`
 }
 
-// streamTokenTTL bounds how long a token minted for an SSE connection
-// stays valid. Short on purpose: this token ends up in the request URL
-// (EventSource can't set custom headers), so it's the one credential that
-// routinely leaks into reverse-proxy access logs / browser history — unlike
-// the 24h session JWT, a leaked stream token is worthless within a minute.
+// streamTokenTTL bounds how long a token minted for an SSE connection or a
+// browser download link stays valid. Short on purpose: this token ends up
+// in the request URL (neither EventSource nor an <a href> download can set
+// custom headers), so it's the one credential that routinely leaks into
+// reverse-proxy access logs / browser history — unlike the 24h session JWT,
+// a leaked stream token is worthless within a minute.
 const streamTokenTTL = 60 * time.Second
 
 func signClaims(claims JWTClaims) (string, error) {
@@ -313,8 +315,9 @@ func GenerateJWT(profile *UserProfile) (string, error) {
 	})
 }
 
-// GenerateStreamToken mints a short-lived, SSE-only token carrying the same
-// identity as an already-validated session/API-key claims. See streamTokenTTL.
+// GenerateStreamToken mints a short-lived token carrying the same identity
+// as an already-validated session/API-key claims, for use on the narrow set
+// of endpoints in streamScopedPaths/isJobDownloadPath. See streamTokenTTL.
 func GenerateStreamToken(claims *JWTClaims) (string, error) {
 	return signClaims(JWTClaims{
 		UserID:      claims.UserID,
@@ -359,6 +362,7 @@ func hmacSign(data string) string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type contextKey string
+
 const contextKeyUser contextKey = "user"
 
 func RequireAuth(next http.Handler) http.Handler {

@@ -8,7 +8,7 @@ import {
   resolvePlaylistBaseDir,
 } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import { getToken, getStreamToken } from "@/lib/auth";
+import { getStreamToken } from "@/lib/auth";
 import type { TrackMetadata } from "@/types/api";
 interface CheckFileExistenceRequest {
   spotify_id: string;
@@ -100,14 +100,20 @@ export function useDownload(region: string) {
           !triggeredJobIdsRef.current.has(job.id)
         ) {
           triggeredJobIdsRef.current.add(job.id);
-          const t = getToken();
-          if (!t) return;
-          const a = document.createElement("a");
-          a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
-          a.download = "";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          (async () => {
+            // Short-lived stream token, not the 24h session JWT — this URL
+            // can't set an Authorization header (it's a plain <a href>
+            // download), so a full session token here would sit in browser
+            // history / reverse-proxy logs for the rest of its lifetime.
+            const t = await getStreamToken();
+            if (!t) return;
+            const a = document.createElement("a");
+            a.href = `/api/v1/jobs/${job.id}/download?token=${encodeURIComponent(t)}`;
+            a.download = "";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          })();
         }
       });
 

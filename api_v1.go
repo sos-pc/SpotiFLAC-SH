@@ -167,13 +167,29 @@ func v1CORSMiddleware(next http.Handler) http.Handler {
 // Auth middleware
 // ─────────────────────────────────────────────────────────────────────────────
 
-// streamScopedPaths lists the only endpoints a "stream"-scoped token (see
+// streamScopedPaths lists the exact endpoints a "stream"-scoped token (see
 // GenerateStreamToken) may be used against. Kept short and explicit rather
 // than pattern-matched — this is the enforcement boundary that makes a
-// leaked stream token harmless outside its intended SSE use.
+// leaked stream token harmless outside its intended use.
 var streamScopedPaths = map[string]bool{
 	"/api/v1/jobs/stream":   true,
 	"/api/v1/search/stream": true,
+}
+
+// isJobDownloadPath reports whether path is a job-download endpoint
+// (/api/v1/jobs/{id}/download). Parameterized by job ID, so it can't be
+// listed in streamScopedPaths' exact-match map — this is the second (and
+// only other) place a stream-scoped token is accepted: like EventSource, a
+// browser-triggered <a href> download can't set an Authorization header, so
+// without this the full 24h session JWT would have to go in the URL instead.
+func isJobDownloadPath(path string) bool {
+	const prefix = "/api/v1/jobs/"
+	const suffix = "/download"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	return id != "" && !strings.Contains(id, "/")
 }
 
 // v1Auth wraps a handler with CORS + local bypass + JWT/API Key authentication.
@@ -189,7 +205,7 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 		}
 		if token != "" {
 			if claims, err := ValidateJWT(token); err == nil {
-				if claims.Scope == "stream" && !streamScopedPaths[r.URL.Path] {
+				if claims.Scope == "stream" && !streamScopedPaths[r.URL.Path] && !isJobDownloadPath(r.URL.Path) {
 					writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 					return
 				}
