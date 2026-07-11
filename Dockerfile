@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 — Build frontend
 # ─────────────────────────────────────────────────────────────────────────────
-FROM oven/bun:1 AS frontend-builder
+FROM oven/bun:1@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -12,7 +12,7 @@ RUN bun run build
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 — Build backend Go
 # ─────────────────────────────────────────────────────────────────────────────
-FROM golang:1.26-bookworm AS backend-builder
+FROM golang:1.26-bookworm@sha256:18aedc16aa19b3fd7ded7245fc14b109e054d65d22ed53c355c899582bbb2113 AS backend-builder
 
 WORKDIR /app
 
@@ -34,7 +34,7 @@ RUN go mod tidy && \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3 — Runtime
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
