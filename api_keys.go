@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -156,7 +157,7 @@ func (a *AuthManager) ValidateAPIKey(rawKey string) (*JWTClaims, bool) {
 		return nil, false
 	}
 
-	go a.touchAPIKey(found.ID)
+	util.SafeGo("apikeys.touch["+found.ID+"]", func() { a.touchAPIKey(found.ID) })
 
 	isAdmin := false
 	for _, p := range found.Permissions {

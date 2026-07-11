@@ -599,7 +599,10 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 
 	metaChan := make(chan mbResult, 1)
 	if p.EmbedGenre && p.SpotifyURL != "" {
-		go func() {
+		// The reader below (<-metaChan) blocks until something arrives, so
+		// a recovered panic must still send a result — an empty mbResult{}
+		// is the same outcome as the normal "isrc stayed empty" path.
+		util.SafeGoOrElse("tidal.fetchGenreMetadata", func() {
 			res := mbResult{}
 			var isrc string
 			parts := strings.Split(p.SpotifyURL, "/")
@@ -623,7 +626,7 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 				}
 			}
 			metaChan <- res
-		}()
+		}, func() { metaChan <- mbResult{} })
 	} else {
 		close(metaChan)
 	}
@@ -757,7 +760,9 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 
 	metaChan := make(chan mbResultFallback, 1)
 	if p.EmbedGenre && p.SpotifyURL != "" {
-		go func() {
+		// See the equivalent goroutine earlier in this file (Download) for
+		// why a recovered panic must still send a result.
+		util.SafeGoOrElse("tidal.fetchGenreMetadata", func() {
 			res := mbResultFallback{}
 			var isrc string
 			parts := strings.Split(p.SpotifyURL, "/")
@@ -781,7 +786,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 				}
 			}
 			metaChan <- res
-		}()
+		}, func() { metaChan <- mbResultFallback{} })
 	} else {
 		close(metaChan)
 	}

@@ -170,7 +170,12 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 	if req.SpotifyID != "" {
 		if req.EmbedLyrics {
-			go func() {
+			// Whoever reads lyricsChan blocks until something arrives, so
+			// a recovered panic must still send the same "not found"
+			// fallback (empty string) the normal failure path already
+			// sends — otherwise that read hangs forever instead of just
+			// missing the lyrics for this one track.
+			util.SafeGoOrElse("downloader.fetchLyrics", func() {
 				client := meta.NewLyricsClient()
 				resp, _, err := client.FetchLyricsAllSources(req.SpotifyID, req.TrackName, req.ArtistName, req.AlbumName, req.Duration)
 				if err == nil && resp != nil && len(resp.Lines) > 0 {
@@ -179,11 +184,15 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				} else {
 					lyricsChan <- ""
 				}
-			}()
+			}, func() { lyricsChan <- "" })
 		} else {
 			close(lyricsChan)
 		}
-		go func() {
+		// Same reasoning as fetchLyrics above: isrcChan's reader blocks
+		// until something arrives, so a recovered panic must still send a
+		// fallback ("" — the same value the normal all-methods-failed
+		// path already sends).
+		util.SafeGoOrElse("downloader.resolveISRC", func() {
 			if req.ISRC != "" {
 				fmt.Printf("[ISRC] Using pre-fetched ISRC: %s\n", req.ISRC)
 				isrcChan <- req.ISRC
@@ -223,7 +232,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			}
 
 			isrcChan <- finalIsrc
-		}()
+		}, func() { isrcChan <- "" })
 	} else {
 		close(lyricsChan)
 		close(isrcChan)
@@ -531,7 +540,8 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 
 		// FIX #4 — capture req.UserID pour le taguer dans l'item d'historique
-		go func(fPath, track, artist, album, sID, cover, format, userID string) {
+		fPath, track, artist, album, sID, cover, format, userID := filename, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID, req.CoverURL, req.AudioFormat, req.UserID
+		util.SafeGo("downloader.recordHistory", func() {
 			quality := "Unknown"
 			durationStr := "--:--"
 
@@ -575,7 +585,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			}
 
 			AddHistoryItem(item)
-		}(filename, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID, req.CoverURL, req.AudioFormat, req.UserID)
+		})
 	}
 
 	return DownloadResponse{

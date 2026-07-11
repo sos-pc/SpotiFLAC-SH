@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -224,10 +225,11 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 
 	for i := 0; i < jobWorkers; i++ {
 		jm.wg.Add(1)
-		go jm.worker(i)
+		workerID := i
+		util.SafeGo(fmt.Sprintf("jobs.worker[%d]", workerID), func() { jm.worker(workerID) })
 	}
 
-	go jm.cleanupLoop()
+	util.SafeGo("jobs.cleanupLoop", jm.cleanupLoop)
 
 	fmt.Printf("[Jobs] Manager started (%d workers, db: %s)\n", jobWorkers, filepath.Join(configDir, dbFile))
 	return jm, nil
@@ -240,16 +242,19 @@ func (jm *JobManager) notifyJob(job *Job) {
 	}
 }
 
-// cleanupLoop runs CleanupOldJobs after 5 minutes, then every 24 h.
+// cleanupLoop runs CleanupOldJobs after 5 minutes, then every 24 h. Each
+// run is wrapped with runCleanupSafely so a panic inside CleanupOldJobs
+// only skips that one run instead of permanently killing this goroutine —
+// without per-run recovery, an unrecovered panic anywhere in the loop body
+// would silently stop cleanup forever (nothing restarts it) rather than
+// just failing once and retrying on the next tick.
 func (jm *JobManager) cleanupLoop() {
 	select {
 	case <-time.After(5 * time.Minute):
 	case <-jm.ctx.Done():
 		return
 	}
-	if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
-		fmt.Printf("[Jobs] Cleanup: %d old jobs deleted\n", deleted)
-	}
+	jm.runCleanupSafely()
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {
@@ -257,10 +262,19 @@ func (jm *JobManager) cleanupLoop() {
 		case <-jm.ctx.Done():
 			return
 		case <-ticker.C:
-			if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
-				fmt.Printf("[Jobs] Cleanup: %d old jobs deleted\n", deleted)
-			}
+			jm.runCleanupSafely()
 		}
+	}
+}
+
+func (jm *JobManager) runCleanupSafely() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[PANIC] recovered in jobs cleanup: %v\n%s\n", r, debug.Stack())
+		}
+	}()
+	if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
+		fmt.Printf("[Jobs] Cleanup: %d old jobs deleted\n", deleted)
 	}
 }
 
@@ -284,6 +298,23 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 	if len(req.Tracks) == 0 {
 		return EnqueueBatchResponse{}, fmt.Errorf("no tracks provided")
 	}
+
+	// The dedup check below reads a snapshot of existing jobs, then loops
+	// over req.Tracks deciding what to insert against that snapshot — a
+	// classic TOCTOU race if two EnqueueBatch calls run concurrently (a
+	// watchlist's own scheduled sync firing at the same time as a manual
+	// "Sync" click, or two syncs racing on restart): both would read the
+	// same pre-insert snapshot, neither would see the other's inserts, and
+	// both would enqueue a duplicate job for the same track+watchlist. jm.mu
+	// already exists for the batch-counter bookkeeping a few lines down;
+	// holding it for this whole call serializes EnqueueBatch calls against
+	// each other so the snapshot a call reads is always up to date with
+	// every insert any prior call completed, closing that race. The extra
+	// contention this adds is only against other EnqueueBatch calls and the
+	// brief batch-counter update in maybeGenerateM3U8 — not against the
+	// worker's actual download work, which never holds this lock.
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
 
 	existingJobs, _ := jm.GetAllJobs()
 	activeJobs := make(map[string]bool)
@@ -363,11 +394,11 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 	}
 
 	if enqueued > 0 && req.WatchlistID != "" {
-		jm.mu.Lock()
+		// Already holding jm.mu for the whole call (see the top of this
+		// function) — no separate lock/unlock needed here anymore.
 		jm.batchTotals[batchID] = enqueued
 		jm.batchDone[batchID] = 0
 		jm.batchWatchID[batchID] = req.WatchlistID
-		jm.mu.Unlock()
 	} else if enqueued == 0 && skipped > 0 && req.WatchlistID != "" && jm.eventHandler != nil {
 		// Every track in the batch was caught by dedup (duplicate active
 		// job or catalog dedup) — no job was ever created with this

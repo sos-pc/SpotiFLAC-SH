@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -517,6 +518,17 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 		wg.Add(1)
 		go func(idx int, s serviceEntry) {
 			defer wg.Done()
+			// Recovered per service: a bug in one checker must not crash
+			// the whole process (an unrecovered panic in any goroutine
+			// does, regardless of how deep this fan-out is), and must not
+			// silently leave a blank entry in results either — report it
+			// the same way every other checker failure is reported.
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("[PANIC] recovered checking status for %s: %v\n%s\n", s.name, r, debug.Stack())
+					results[idx] = ServiceStatus{Name: s.name, URL: s.url, Status: "down", Error: fmt.Sprintf("internal error: %v", r), CheckedAt: time.Now().Unix()}
+				}
+			}()
 			check := s.checker
 			if check == nil {
 				check = pingURL

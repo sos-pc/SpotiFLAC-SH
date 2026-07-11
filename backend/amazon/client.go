@@ -346,7 +346,9 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 
 	metaChan := make(chan mbResult, 1)
 	if p.EmbedGenre && p.SpotifyURL != "" {
-		go func() {
+		// The reader below (<-metaChan) blocks until something arrives, so
+		// a recovered panic must still send a result.
+		util.SafeGoOrElse("amazon.fetchGenreMetadata", func() {
 			res := mbResult{}
 			var isrc string
 			parts := strings.Split(p.SpotifyURL, "/")
@@ -370,7 +372,7 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 				}
 			}
 			metaChan <- res
-		}()
+		}, func() { metaChan <- mbResult{} })
 	} else {
 		close(metaChan)
 	}

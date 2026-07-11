@@ -16,6 +16,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 // retagLegacyResult is the JSON payload returned by POST /api/v1/admin/retag-legacy.
@@ -211,7 +212,7 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go s.runWatchlistRepair(*pl)
+	util.SafeGo("watchlist.repair["+id+"]", func() { s.runWatchlistRepair(*pl) })
 
 	writeV1JSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }

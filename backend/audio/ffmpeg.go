@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -455,6 +456,21 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 			result := ConvertAudioResult{
 				InputFile: inputFile,
 			}
+			// wg.Done() above still fires on a panic (registered defers
+			// run during unwind), so this wouldn't hang the batch even
+			// unrecovered — but an unrecovered panic in any goroutine
+			// still crashes the whole process, and would leave results[idx]
+			// at its zero value for whichever caller reads it if it
+			// somehow didn't. Recover and report the same way every other
+			// per-file failure in this function already does.
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("[PANIC] recovered converting %s: %v\n%s\n", inputFile, r, debug.Stack())
+					mu.Lock()
+					results[idx] = ConvertAudioResult{InputFile: inputFile, Success: false, Error: fmt.Sprintf("internal error: %v", r)}
+					mu.Unlock()
+				}
+			}()
 
 			inputExt := strings.ToLower(filepath.Ext(inputFile))
 			baseName := strings.TrimSuffix(filepath.Base(inputFile), inputExt)

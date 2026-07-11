@@ -550,7 +550,9 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(p DownloadParams) (string, error
 
 	metaChan := make(chan meta.Metadata, 1)
 	if p.EmbedGenre && p.DeezerISRC != "" {
-		go func() {
+		// The reader below (<-metaChan) blocks until something arrives, so
+		// a recovered panic must still send a result.
+		util.SafeGoOrElse("qobuz.fetchGenreMetadata", func() {
 			fmt.Println("Fetching MusicBrainz metadata...")
 			if fetchedMeta, err := meta.FetchMusicBrainzMetadata(p.DeezerISRC, p.SpotifyTrackName, p.SpotifyArtistName, p.SpotifyAlbumName, p.UseSingleGenre, p.EmbedGenre); err == nil {
 				fmt.Println("✓ MusicBrainz metadata fetched")
@@ -559,7 +561,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(p DownloadParams) (string, error
 				fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
 				metaChan <- meta.Metadata{}
 			}
-		}()
+		}, func() { metaChan <- meta.Metadata{} })
 	} else {
 		close(metaChan)
 	}

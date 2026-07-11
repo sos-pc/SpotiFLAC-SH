@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -1076,6 +1077,20 @@ func (c *SpotifyMetadataClient) formatArtistDiscographyData(ctx context.Context,
 			time.Sleep(100 * time.Millisecond)
 			defer func() { <-sem }()
 
+			// The collection loop below reads exactly
+			// len(raw.Discography.All) results off resultsChan, so every
+			// goroutine here must send exactly one — an unrecovered panic
+			// would crash the whole process (as any unrecovered panic in
+			// any goroutine does) and, if it somehow didn't, would also
+			// leave that read permanently blocked. Recovering and still
+			// sending an empty-tracks result satisfies both.
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("[PANIC] recovered fetching album %s: %v\n%s\n", albumName, r, debug.Stack())
+					resultsChan <- fetchResult{tracks: []AlbumTrackMetadata{}}
+				}
+			}()
+
 			select {
 			case <-ctx.Done():
 				resultsChan <- fetchResult{err: ctx.Err()}
@@ -1246,6 +1261,16 @@ func StreamArtistDiscography(ctx context.Context, spotifyURL string, emit func(e
 			sem <- struct{}{}
 			time.Sleep(100 * time.Millisecond)
 			defer func() { <-sem }()
+
+			// See the equivalent goroutine in formatArtistDiscographyData
+			// above for why every path here must send to resultsChan
+			// exactly once, including on a recovered panic.
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("[PANIC] recovered fetching album %s: %v\n%s\n", albumName, r, debug.Stack())
+					resultsChan <- fetchResult{albumID: albumID, tracks: []AlbumTrackMetadata{}}
+				}
+			}()
 
 			select {
 			case <-ctx.Done():

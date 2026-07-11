@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"sort"
@@ -23,8 +24,21 @@ import (
 
 var SpotifyError = errors.New("spotify error")
 
+// SpotifyClient is shared across concurrent goroutines when callers batch
+// several requests against one initialized session (see
+// formatArtistDiscographyData/StreamArtistDiscography in metadata.go, which
+// fan out up to 5 concurrent album fetches against a single client to avoid
+// each one paying for its own session handshake). mu guards every mutable
+// field below — without it, two goroutines racing to reset/reinitialize an
+// expired token concurrently write the same cookies map at the same time,
+// which is a fatal, unrecoverable "concurrent map writes" runtime error in
+// Go (not a panic recover() can catch). Reads/writes of these fields must
+// only ever happen while holding mu; the *http.Client itself needs no
+// protection (net/http clients are already safe for concurrent use).
 type SpotifyClient struct {
-	client        *http.Client
+	client *http.Client
+
+	mu            sync.Mutex
 	accessToken   string
 	clientToken   string
 	clientID      string
@@ -58,6 +72,10 @@ func (c *SpotifyClient) generateTOTP() (string, int, error) {
 	return totpCode, version, nil
 }
 
+// getAccessToken, getSessionInfo and getClientToken all mutate the shared
+// token/cookie fields and must only be called while c.mu is held — they're
+// only ever reached via initializeLocked (directly, or transitively through
+// getClientToken's own fallback call to the first two).
 func (c *SpotifyClient) getAccessToken() error {
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -244,7 +262,21 @@ func (c *SpotifyClient) getClientToken() error {
 	return nil
 }
 
+// Initialize runs the full session/token handshake. Safe to call on a
+// client that's about to be shared across goroutines (see the doc comment
+// on SpotifyClient), as long as no concurrent Query() calls are already in
+// flight when it's called — the normal usage pattern (Initialize once,
+// then fan out concurrent Query calls) satisfies this.
 func (c *SpotifyClient) Initialize() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.initializeLocked()
+}
+
+// initializeLocked is Initialize's body, factored out so Query can reuse it
+// without deadlocking on c.mu (Go's sync.Mutex isn't reentrant). Callers
+// must hold c.mu.
+func (c *SpotifyClient) initializeLocked() error {
 	if err := c.getSessionInfo(); err != nil {
 		return err
 	}
@@ -262,20 +294,29 @@ func (c *SpotifyClient) Query(payload map[string]interface{}) (map[string]interf
 
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Token read/refresh is the only state a shared client mutates
+		// concurrently — keep that under the lock, but copy the values out
+		// and release before the network round-trip below so multiple
+		// Query calls sharing one client still run in parallel instead of
+		// serializing on every request.
+		c.mu.Lock()
 		if c.accessToken == "" || c.clientToken == "" {
-			if err := c.Initialize(); err != nil {
+			if err := c.initializeLocked(); err != nil {
+				c.mu.Unlock()
 				return nil, err
 			}
 		}
+		accessToken, clientToken, clientVersion := c.accessToken, c.clientToken, c.clientVersion
+		c.mu.Unlock()
 
 		req, err := http.NewRequest("POST", "https://api-partner.spotify.com/pathfinder/v2/query", bytes.NewBuffer(jsonData))
 		if err != nil {
 			return nil, err
 		}
 
-		req.Header.Set("Authorization", "Bearer "+c.accessToken)
-		req.Header.Set("Client-Token", c.clientToken)
-		req.Header.Set("Spotify-App-Version", c.clientVersion)
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Client-Token", clientToken)
+		req.Header.Set("Spotify-App-Version", clientVersion)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
 
@@ -298,8 +339,10 @@ func (c *SpotifyClient) Query(payload map[string]interface{}) (map[string]interf
 			return result, nil
 		case 401:
 			// Token expired — reset and retry with fresh tokens
+			c.mu.Lock()
 			c.accessToken = ""
 			c.clientToken = ""
+			c.mu.Unlock()
 			continue
 		case 429:
 			// Rate limited — honour Retry-After if present.

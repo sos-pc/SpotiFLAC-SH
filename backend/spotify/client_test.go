@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -168,6 +169,54 @@ func TestQueryExhausted401(t *testing.T) {
 	// 3 appels Query (1 initial + 2 retries après re-auth)
 	if queryCallCount != 3 {
 		t.Errorf("queryCallCount = %d, attendu 3", queryCallCount)
+	}
+}
+
+// TestQueryConcurrentAccessIsRaceFree is the regression test for the
+// SpotifyClient data race: formatArtistDiscographyData/
+// StreamArtistDiscography (metadata.go) share ONE client across up to 5
+// concurrent goroutines specifically so they don't each pay for their own
+// session handshake. Before mu was added, two goroutines hitting 401
+// around the same time would concurrently reset/reinitialize the same
+// cookies map — a fatal "concurrent map writes" runtime error, which
+// crashes the whole process and which recover() cannot catch (unlike an
+// ordinary panic). This must be run with -race: the race detector (or a
+// hard crash from the map write) is what actually proves the fix, a plain
+// `go test` run without -race would not reliably catch it.
+func TestQueryConcurrentAccessIsRaceFree(t *testing.T) {
+	var queryCallCount int32
+	successBody, _ := json.Marshal(map[string]interface{}{"data": "ok"})
+
+	// Roughly every third call returns 401, forcing concurrent goroutines
+	// to race on resetting/reinitializing the shared client's tokens.
+	queryResp := func() *http.Response {
+		n := atomic.AddInt32(&queryCallCount, 1)
+		if n%3 == 0 {
+			return makeResp(401, "Unauthorized")
+		}
+		return makeResp(200, string(successBody))
+	}
+
+	c := newPreAuthedClient(fakeInitTransport(queryResp))
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	errCh := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.Query(map[string]interface{}{"key": "val"})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("concurrent Query returned an error: %v", err)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -29,9 +30,47 @@ func (jm *JobManager) worker(id int) {
 				fmt.Printf("[Jobs] Worker %d queue closed\n", id)
 				return
 			}
-			jm.processJob(jobID)
+			jm.processJobSafely(jobID)
 		}
 	}
+}
+
+// processJobSafely runs processJob with panic protection scoped to a
+// single job, not the whole worker goroutine. jobWorkers is 1 by default
+// (see its doc comment) — recovering only at the top of worker() would
+// still keep the process alive, but the panic would permanently kill the
+// sole worker goroutine (nothing restarts it), silently stalling the
+// entire download queue forever with no crash and no obvious symptom.
+// Recovering per job instead lets the worker loop continue, and mirrors
+// processJob's own failure-path bookkeeping (status, catalog, batch
+// completion) so a panicking job behaves like any other failed job to the
+// rest of the system instead of getting stuck in Downloading forever.
+func (jm *JobManager) processJobSafely(jobID string) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		fmt.Printf("[PANIC] recovered while processing job %s: %v\n%s\n", jobID, r, debug.Stack())
+
+		job, err := jm.loadJob(jobID)
+		if err != nil {
+			return
+		}
+		job.Status = StatusFailed
+		job.Error = fmt.Sprintf("internal error: %v", r)
+		job.UpdatedAt = time.Now()
+		jm.saveJob(job)
+		jm.notifyJob(job)
+		jm.recordCatalogFailed(job)
+		if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil && isPermanentFailure(job.Error) {
+			jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
+		}
+		if job.WatchlistID != "" {
+			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
+		}
+	}()
+	jm.processJob(jobID)
 }
 
 func (jm *JobManager) processJob(jobID string) {

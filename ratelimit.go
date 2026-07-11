@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 const (
@@ -29,7 +31,7 @@ type LoginRateLimiter struct {
 
 func NewLoginRateLimiter() *LoginRateLimiter {
 	rl := &LoginRateLimiter{entries: make(map[string]*rlEntry)}
-	go rl.cleanupLoop()
+	util.SafeGo("ratelimit.cleanupLoop", rl.cleanupLoop)
 	return rl
 }
 

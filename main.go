@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"syscall"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -109,7 +111,7 @@ func main() {
 	// Start background proxy auto-discovery (tidal-uptime.geeked.wtf, every 6h).
 	discoveryCtx, cancelDiscovery := context.WithCancel(context.Background())
 	defer cancelDiscovery()
-	go startProxyDiscovery(discoveryCtx, db)
+	util.SafeGo("proxyDiscovery", func() { startProxyDiscovery(discoveryCtx, db) })
 
 	server := NewServer(app, ctr)
 
@@ -126,6 +128,18 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
+		// A panic here (as opposed to ListenAndServe's normal error
+		// return, already handled below) must still trigger the same
+		// graceful-shutdown signal — recovering and just letting this
+		// goroutine die would leave <-stop below blocked forever with the
+		// process still running but no longer serving anything, which is
+		// worse than a clean, restart-policy-visible exit.
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("[PANIC] recovered in HTTP server goroutine: %v\n%s\n", r, debug.Stack())
+				stop <- syscall.SIGTERM
+			}
+		}()
 		fmt.Printf("[Main] SpotiFLAC listening on http://0.0.0.0:%s\n", port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("FATAL: server error: %v\n", err)

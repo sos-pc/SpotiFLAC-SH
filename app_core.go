@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -952,6 +953,19 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 				ArtistName: t.ArtistName,
 				Exists:     false,
 			}
+			// The collection loop below reads exactly len(tracks) results
+			// off resultsChan, so every goroutine here must send exactly
+			// one — an unrecovered panic wouldn't just crash the process
+			// (as any unrecovered panic in any goroutine does), it would
+			// also leave that read permanently blocked if the process
+			// somehow kept running. Recovering and still sending the
+			// zero-value "not found" res satisfies both.
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("[PANIC] recovered checking file existence for %s - %s: %v\n%s\n", t.ArtistName, t.TrackName, r, debug.Stack())
+					resultsChan <- result{index: idx, result: res}
+				}
+			}()
 			if t.TrackName == "" || t.ArtistName == "" {
 				resultsChan <- result{index: idx, result: res}
 				return

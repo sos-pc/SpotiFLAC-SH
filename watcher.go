@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -94,16 +95,26 @@ func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
 		return pl.Settings, true
 	}
 	// Vérifier l'intégrité des M3U8 au démarrage (recovery après crash/redémarrage)
-	go func() {
+	util.SafeGo("watcher.startupM3U8Integrity", func() {
 		playlists, err := w.GetWatchlists()
 		if err != nil {
 			return
 		}
 		for _, pl := range playlists {
-			w.checkM3U8Integrity(pl)
+			// Recovered per playlist so one bad playlist can't abort the
+			// integrity check for every other one in this one-time
+			// startup pass.
+			func(pl WatchedPlaylist) {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Printf("[PANIC] recovered checking M3U8 integrity for %s: %v\n%s\n", pl.Name, r, debug.Stack())
+					}
+				}()
+				w.checkM3U8Integrity(pl)
+			}(pl)
 		}
-	}()
-	go w.daemon()
+	})
+	util.SafeGo("watcher.daemon", w.daemon)
 	fmt.Println("[Watcher] Daemon started")
 	return w
 }
@@ -121,7 +132,7 @@ func (w *Watcher) daemon() {
 	defer ticker.Stop()
 
 	// Vérifier immédiatement au démarrage
-	w.checkAll()
+	w.checkAllSafely()
 
 	for {
 		select {
@@ -129,9 +140,22 @@ func (w *Watcher) daemon() {
 			fmt.Println("[Watcher] Daemon stopped")
 			return
 		case <-ticker.C:
-			w.checkAll()
+			w.checkAllSafely()
 		}
 	}
+}
+
+// checkAllSafely recovers a panic from a single checkAll pass so it only
+// skips that pass instead of permanently killing this goroutine — without
+// it, an unrecovered panic here would silently stop watchlist syncing for
+// the rest of the process's lifetime (nothing restarts this loop).
+func (w *Watcher) checkAllSafely() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[PANIC] recovered in watcher.checkAll: %v\n%s\n", r, debug.Stack())
+		}
+	}()
+	w.checkAll()
 }
 
 // checkAll parcourt toutes les playlists et lance une sync si nécessaire.
@@ -147,7 +171,7 @@ func (w *Watcher) checkAll() {
 			interval = 24 * time.Hour
 		}
 		if time.Since(pl.LastSync) >= interval {
-			go w.syncPlaylist(pl)
+			util.SafeGo("watcher.syncPlaylist["+pl.ID+"]", func() { w.syncPlaylist(pl) })
 		}
 	}
 }
@@ -465,12 +489,13 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 			tracks[i].PlaylistName = name
 			tracks[i].Position = i + 1
 		}
-		go w.jm.EnqueueBatch(EnqueueBatchRequest{
+		batchReq := EnqueueBatchRequest{
 			Tracks:      tracks,
 			Settings:    req.Settings,
 			WatchlistID: pl.ID,
 			UserID:      pl.UserID,
-		})
+		}
+		util.SafeGo("watcher.enqueueBatch["+pl.ID+"]", func() { w.jm.EnqueueBatch(batchReq) })
 	}
 
 	fmt.Printf("[Watcher] Added watchlist: %s (%d tracks, every %dh)\n",
@@ -647,7 +672,7 @@ func (w *Watcher) SyncWatchlist(id string) error {
 	if err != nil {
 		return err
 	}
-	go w.syncPlaylist(*pl)
+	util.SafeGo("watcher.syncPlaylist["+pl.ID+"]", func() { w.syncPlaylist(*pl) })
 	// Retry des failed uniquement sur refresh manuel, avec les settings à jour
 	if requeued, err := w.jm.RequeueFailedJobs(id, pl.Settings); err == nil && requeued > 0 {
 		fmt.Printf("[Watcher] SyncWatchlist: %d failed jobs requeued pour %s\n", requeued, pl.Name)

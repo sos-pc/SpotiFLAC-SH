@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -81,7 +82,7 @@ func startProxyDiscovery(ctx context.Context, db *bolt.DB) {
 	}
 
 	// First run immediately after jitter.
-	runDiscoveryOnce(ctx, db)
+	runDiscoveryOnceSafely(ctx, db)
 
 	ticker := time.NewTicker(discoveryInterval)
 	defer ticker.Stop()
@@ -92,9 +93,23 @@ func startProxyDiscovery(ctx context.Context, db *bolt.DB) {
 			fmt.Println("[Discovery] Goroutine stopped.")
 			return
 		case <-ticker.C:
-			runDiscoveryOnce(ctx, db)
+			runDiscoveryOnceSafely(ctx, db)
 		}
 	}
+}
+
+// runDiscoveryOnceSafely recovers a panic from a single discovery run so it
+// only skips that run instead of permanently killing this goroutine —
+// without it, an unrecovered panic here would silently stop proxy
+// discovery for the rest of the process's lifetime (nothing restarts this
+// loop), degrading proxy freshness with no obvious symptom.
+func runDiscoveryOnceSafely(ctx context.Context, db *bolt.DB) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[PANIC] recovered in proxy discovery run: %v\n%s\n", r, debug.Stack())
+		}
+	}()
+	runDiscoveryOnce(ctx, db)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

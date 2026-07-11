@@ -15,7 +15,9 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -122,34 +124,65 @@ func captureStdout() {
 	os.Stdout = w
 
 	go func() {
+		// This loop only ever returns via readErr != nil, i.e. if w or r
+		// gets closed — which nothing in normal operation does (this is
+		// meant to run for the lifetime of the process). Panics during
+		// chunk processing are handled inside processLogChunkSafely
+		// instead of here, specifically so this loop keeps draining the
+		// pipe rather than exiting: if it ever did stop reading with
+		// os.Stdout still pointing at w, every future fmt.Print* call in
+		// the process would eventually block once the pipe's kernel
+		// buffer filled — turning "one goroutine died" into "the whole
+		// process silently deadlocks the next time anything logs."
+		// (An earlier version of this function also restored os.Stdout in
+		// a defer here for the same reason, but that write raced with
+		// concurrent fmt.Print* calls reading os.Stdout in tests that
+		// substitute their own pipe and let this goroutine leak past the
+		// test's lifetime — and the scenario it guarded against doesn't
+		// happen in production anyway, since nothing here ever closes r/w.)
 		buf := make([]byte, 32*1024)
 		var pending []byte
 		for {
 			n, readErr := r.Read(buf)
 			if n > 0 {
-				chunk := buf[:n]
-				orig.Write(chunk)
-				pending = append(pending, chunk...)
-				for {
-					idx := bytes.IndexByte(pending, '\n')
-					if idx < 0 {
-						break
-					}
-					line := strings.TrimRight(string(pending[:idx]), "\r")
-					pending = pending[idx+1:]
-					if strings.TrimSpace(line) != "" {
-						serverLogs.add(LogEntry{Time: time.Now(), Level: classifyLogLevel(line), Message: line})
-					}
-				}
-				// Safety net against a pathological unterminated stream
-				// (e.g. a stuck \r progress loop) growing pending forever.
-				if len(pending) > 1<<20 {
-					pending = pending[len(pending)-64*1024:]
-				}
+				processLogChunkSafely(orig, buf[:n], &pending)
 			}
 			if readErr != nil {
 				return
 			}
 		}
 	}()
+}
+
+// processLogChunkSafely runs the per-chunk line-parsing body with panic
+// protection scoped to just this chunk, not the whole read loop — a panic
+// here must not stop the loop from continuing to drain the pipe (see the
+// defer in captureStdout for why that matters). Reports through orig
+// (bypassing the pipe os.Stdout now points at) so the panic message can
+// never itself contribute to the very pipe-buffer-pressure scenario the
+// surrounding defer exists to avoid.
+func processLogChunkSafely(orig *os.File, chunk []byte, pending *[]byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(orig, "[PANIC] recovered in log capture: %v\n%s\n", r, debug.Stack())
+		}
+	}()
+	orig.Write(chunk)
+	*pending = append(*pending, chunk...)
+	for {
+		idx := bytes.IndexByte(*pending, '\n')
+		if idx < 0 {
+			break
+		}
+		line := strings.TrimRight(string((*pending)[:idx]), "\r")
+		*pending = (*pending)[idx+1:]
+		if strings.TrimSpace(line) != "" {
+			serverLogs.add(LogEntry{Time: time.Now(), Level: classifyLogLevel(line), Message: line})
+		}
+	}
+	// Safety net against a pathological unterminated stream (e.g. a stuck
+	// \r progress loop) growing pending forever.
+	if len(*pending) > 1<<20 {
+		*pending = (*pending)[len(*pending)-64*1024:]
+	}
 }
