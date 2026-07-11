@@ -116,11 +116,12 @@ func main() {
 	server := NewServer(app, ctr)
 
 	httpServer := &http.Server{
-		Addr:         "0.0.0.0:" + port,
-		Handler:      server,
-		ReadTimeout:  0, // pas de timeout — les downloads peuvent être longs
-		WriteTimeout: 0,
-		IdleTimeout:  120 * time.Second,
+		Addr:              "0.0.0.0:" + port,
+		Handler:           server,
+		ReadTimeout:       0, // pas de timeout — les downloads peuvent être longs
+		WriteTimeout:      0,
+		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 30 * time.Second, // borne la lecture des headers (Slowloris) sans affecter les gros transferts de body
 	}
 
 	// ── Graceful shutdown ─────────────────────────────────────────────────
