@@ -70,6 +70,55 @@ func (jm *JobManager) GetAllJobs() ([]Job, error) {
 	return jobs, err
 }
 
+// UpdateJobFilePathsForRename rewrites FilePath on every job currently
+// pointing at oldPath to newPath. Renaming a file via File Manager only
+// ever updated the SQLite catalog (syncCatalogPathOnRename) — BoltDB jobs
+// kept the stale path, which meant recoverMissingFiles (watcher.go) saw
+// the file as "missing" and redundantly re-queued it, and the
+// playlist-track-removal path's os.Remove(job.FilePath) silently failed
+// on the stale path, leaking the actual (renamed) file on disk forever.
+// Called from syncCatalogPathOnRename so every rename path stays
+// consistent without each downstream reader having to know about renames.
+func (jm *JobManager) UpdateJobFilePathsForRename(oldPath, newPath string) (int, error) {
+	var updated int
+	err := jm.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketJobs)
+		if b == nil {
+			return nil
+		}
+		var toUpdate []struct {
+			key []byte
+			job Job
+		}
+		if err := b.ForEach(func(k, v []byte) error {
+			var job Job
+			if err := json.Unmarshal(v, &job); err == nil && job.FilePath == oldPath {
+				toUpdate = append(toUpdate, struct {
+					key []byte
+					job Job
+				}{key: append([]byte(nil), k...), job: job})
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, u := range toUpdate {
+			u.job.FilePath = newPath
+			u.job.UpdatedAt = time.Now()
+			data, err := json.Marshal(u.job)
+			if err != nil {
+				return err
+			}
+			if err := b.Put(u.key, data); err != nil {
+				return err
+			}
+			updated++
+		}
+		return nil
+	})
+	return updated, err
+}
+
 // GetDoneFilesByWatchlist returns a map {spotifyID → filePath} for all done
 // jobs of a given watchlist that have a recorded FilePath.
 // Used to verify that "validated" files still exist on disk.

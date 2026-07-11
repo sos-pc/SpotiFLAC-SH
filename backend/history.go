@@ -306,6 +306,52 @@ func DeleteHistoryItem(id string, userID string) error {
 	})
 }
 
+// UpdateHistoryItemPathsForRename rewrites Path on every history entry
+// currently pointing at oldPath to newPath. Renaming a file via File
+// Manager previously left Download History's "Open File" action pointing
+// at the old, now-nonexistent path — this keeps it in sync the same way
+// syncCatalogPathOnRename keeps the SQLite catalog in sync.
+func UpdateHistoryItemPathsForRename(oldPath, newPath string) (int, error) {
+	db, err := getHistoryDB()
+	if err != nil {
+		return 0, err
+	}
+	var updated int
+	err = db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(historyBucket))
+		if b == nil {
+			return nil
+		}
+		var toUpdate []struct {
+			key  []byte
+			item HistoryItem
+		}
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var item HistoryItem
+			if err := json.Unmarshal(v, &item); err == nil && item.Path == oldPath {
+				toUpdate = append(toUpdate, struct {
+					key  []byte
+					item HistoryItem
+				}{key: append([]byte(nil), k...), item: item})
+			}
+		}
+		for _, u := range toUpdate {
+			u.item.Path = newPath
+			buf, err := json.Marshal(u.item)
+			if err != nil {
+				return err
+			}
+			if err := b.Put(u.key, buf); err != nil {
+				return err
+			}
+			updated++
+		}
+		return nil
+	})
+	return updated, err
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fetch History
 // ─────────────────────────────────────────────────────────────────────────────
