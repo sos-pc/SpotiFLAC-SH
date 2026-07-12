@@ -3,12 +3,20 @@ export function useTypingEffect(texts: string[], typingSpeed: number = 50, delet
     const [displayedText, setDisplayedText] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
     const [textIndex, setTextIndex] = useState(0);
-    useEffect(() => {
+    // Reset when the texts array itself changes (a new placeholder set),
+    // adjusted during render rather than via a dedicated effect — see
+    // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+    const [prevTexts, setPrevTexts] = useState(texts);
+    if (texts !== prevTexts) {
+        setPrevTexts(texts);
         setDisplayedText("");
         setIsDeleting(false);
         setTextIndex(0);
-    }, [texts]);
+    }
     useEffect(() => {
+        // The setTimeout-chained typing/deleting animation genuinely can't
+        // be expressed as a derived render-time value — it's a timer loop
+        // that advances its own state machine across renders.
         const currentText = texts[textIndex % texts.length];
         let timer: ReturnType<typeof setTimeout>;
         if (isDeleting) {
@@ -26,6 +34,7 @@ export function useTypingEffect(texts: string[], typingSpeed: number = 50, delet
             timer = setTimeout(() => setIsDeleting(true), pauseDuration);
         }
         else if (isDeleting && displayedText === '') {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setIsDeleting(false);
             setTextIndex((prev) => (prev + 1) % texts.length);
         }

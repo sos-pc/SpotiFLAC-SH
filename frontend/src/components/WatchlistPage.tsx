@@ -145,10 +145,22 @@ export function WatchlistPage() {
   };
 
   useEffect(() => {
+    // Polling on an interval is exactly the kind of external-system sync
+    // effects exist for.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadWatchlists();
     const interval = setInterval(loadWatchlists, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const reloadStats = async (id: string) => {
+    try {
+      const s = await GetWatchlistStats(id);
+      setStats((prev) => ({ ...prev, [id]: s }));
+    } catch (err) {
+      toast.error(`Failed to reload stats: ${err}`);
+    }
+  };
 
   // Écouter les événements SSE pour les syncs de watchlist (connexion
   // partagée — voir lib/jobsStream.ts)
@@ -302,16 +314,6 @@ export function WatchlistPage() {
       } catch (err) {
         toast.error(`Failed to load history: ${err}`);
       }
-    }
-  };
-
-  // Bouton unique Sync : nouveaux tracks Spotify + retry des failed
-  const reloadStats = async (id: string) => {
-    try {
-      const s = await GetWatchlistStats(id);
-      setStats((prev) => ({ ...prev, [id]: s }));
-    } catch (err) {
-      toast.error(`Failed to reload stats: ${err}`);
     }
   };
 

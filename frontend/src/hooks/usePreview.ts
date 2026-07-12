@@ -17,6 +17,10 @@ export function usePreview() {
         try {
             if (playingTrack === trackId && currentAudio) {
                 currentAudio.pause();
+                // currentAudio is a live HTMLAudioElement handle, not
+                // application data — pause()/currentTime are its real,
+                // imperative control surface (same exemption refs get).
+                // eslint-disable-next-line react-hooks/immutability
                 currentAudio.currentTime = 0;
                 setPlayingTrack(null);
                 setCurrentAudio(null);
@@ -69,6 +73,7 @@ export function usePreview() {
     const stopPreview = () => {
         if (currentAudio) {
             currentAudio.pause();
+            // eslint-disable-next-line react-hooks/immutability
             currentAudio.currentTime = 0;
             setCurrentAudio(null);
             setPlayingTrack(null);
