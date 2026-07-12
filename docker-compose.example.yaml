@@ -8,13 +8,22 @@ services:
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
-    # L'image tourne en non-root, uid/gid 1000. Les dossiers montés ci-dessous
-    # doivent appartenir à ce même uid AVANT le premier démarrage, sinon le
-    # conteneur crash au démarrage ("permission denied") :
-    #   sudo chown -R 1000:1000 /path/to/music /path/to/config
+    # L'image tourne en non-root, uid/gid 1000.
+    # Le dossier musique ci-dessous est un chemin choisi sur l'hôte (pour que
+    # Jellyfin puisse y accéder directement) : il doit appartenir à cet uid
+    # AVANT le premier démarrage, sinon le conteneur crash au démarrage
+    # ("permission denied") :
+    #   sudo chown -R 1000:1000 /path/to/music
+    # Le volume de config (spotiflac_config, défini plus bas) est un volume
+    # Docker géré : Docker le crée avec les bonnes permissions tout seul au
+    # premier démarrage, rien à faire.
     user: "1000:1000"
     volumes:
-      # Dossier de téléchargement musique
+      # Dossier de téléchargement musique — chemin hôte à adapter
       - /path/to/music:/home/nonroot/Music
-      # Configuration et base de données
-      - /path/to/config:/home/nonroot/.SpotiFLAC
+      # Configuration et base de données — volume Docker géré
+      - spotiflac_config:/home/nonroot/.SpotiFLAC
+
+volumes:
+  spotiflac_config:
+    name: spotiflac_config

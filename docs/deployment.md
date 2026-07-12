@@ -40,21 +40,30 @@ services:
     user: "1000:1000"
     volumes:
       - /path/to/music:/home/nonroot/Music
-      - /path/to/config:/home/nonroot/.SpotiFLAC
+      - spotiflac_config:/home/nonroot/.SpotiFLAC
+
+volumes:
+  spotiflac_config:
+    name: spotiflac_config
 ```
 
 ### Volume mapping
 
-| Container path | Purpose |
-|----------------|---------|
-| `/home/nonroot/Music` | Where downloaded files are stored (default `downloadPath`) |
-| `/home/nonroot/.SpotiFLAC` | Config, BoltDB, JWT secret, Tidal token cache |
+| Container path | Type | Purpose |
+|----------------|------|---------|
+| `/home/nonroot/Music` | Bind mount (host path you choose) | Where downloaded files are stored (default `downloadPath`) — a real host path, so Jellyfin (or anything else) can read the files directly |
+| `/home/nonroot/.SpotiFLAC` | Docker-managed named volume | Config, BoltDB, JWT secret, Tidal token cache |
 
-> **Both volumes must be writable by uid 1000** (the non-root user the image runs as — `USER 1000:1000` in `Dockerfile`). This matters most on **first run**: if the host directory doesn't exist yet, Docker creates it as `root` before starting the container, and the app then fails to start with a `permission denied` error since it has no root access to fix that itself. Before the first `docker compose up`, create the directories and set ownership yourself:
-> ```bash
-> mkdir -p /path/to/config /path/to/music
-> sudo chown -R 1000:1000 /path/to/config /path/to/music
-> ```
+Both need to be writable by **uid 1000**, the non-root user the image runs as (`USER 1000:1000` in `Dockerfile`) — but each gets there differently:
+
+- **`/path/to/music` (bind mount):** on **first run**, if this host directory doesn't exist yet, Docker creates it as `root` before starting the container — and the app, running as non-root with no shell to fix that itself, fails with `permission denied`. Before the first `docker compose up`, create it and set ownership yourself:
+  ```bash
+  mkdir -p /path/to/music
+  sudo chown -R 1000:1000 /path/to/music
+  ```
+- **`spotiflac_config` (named volume):** nothing to do. Docker only auto-populates a brand new named volume's contents (and ownership) from whatever the image already has at that path — and the image ships that directory pre-created and owned by uid 1000 — so the volume comes up with the right permissions automatically. This is exactly why the config directory uses a named volume instead of a second bind mount: it's the one persistent path with no reason to be a specific host-visible folder, so it can dodge this whole class of first-run permission errors for free.
+
+> If you're upgrading an older deployment that bind-mounts `/home/nonroot/.SpotiFLAC` to a host folder, you don't have to switch — the bind mount still works, it just needs the same manual `chown` as the music folder on a fresh setup. Migrating to the named volume is optional; if you do, copy your existing config folder's contents into the new volume first (see the backup command below, run in reverse) so you don't lose `jobs.db`.
 
 ### Environment variables
 
@@ -77,7 +86,12 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 | `tidal_token.json` | Cached Tidal Device Code token (mode `0644`). Created on successful auth, deleted on disconnect or refresh failure. Auto-refreshed before expiry. |
 | `config.json` | Legacy global settings (read-only fallback for users with no per-user settings yet). New deployments should not need this — settings are stored per-user inside `jobs.db`. |
 
-> **Backup:** a single `cp jobs.db jobs.db.bak` snapshots the entire application state.
+> **Backup:** with the example compose file's named volume (`spotiflac_config`), there's no host folder to `cp` directly — go through a throwaway container instead:
+> ```bash
+> docker run --rm -v spotiflac_config:/data -v "$(pwd)":/backup busybox \
+>   tar czf /backup/spotiflac-config-backup.tar.gz -C /data .
+> ```
+> Restore the same way, with `tar xzf` instead of `czf`. If you're still bind-mounting `/home/nonroot/.SpotiFLAC` to a host folder (see the note above), a plain `cp jobs.db jobs.db.bak` on that host folder still works.
 
 ---
 
