@@ -1066,7 +1066,15 @@ func (a *App) SaveSettings(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath, data, 0644)
+	// Atomic write (Q7): same temp-file + rename pattern as CreateM3U8File
+	// below — a crash or concurrent save mid-write can no longer leave
+	// config.json truncated/corrupted on disk.
+	tmpPath := configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, configPath)
 }
 
 func (a *App) LoadSettings() (map[string]interface{}, error) {
