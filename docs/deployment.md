@@ -37,6 +37,7 @@ services:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
       # - DISABLE_AUTH_ON_LAN=true   # see authentication.md
+    user: "1000:1000"
     volumes:
       - /path/to/music:/home/nonroot/Music
       - /path/to/config:/home/nonroot/.SpotiFLAC
@@ -49,7 +50,11 @@ services:
 | `/home/nonroot/Music` | Where downloaded files are stored (default `downloadPath`) |
 | `/home/nonroot/.SpotiFLAC` | Config, BoltDB, JWT secret, Tidal token cache |
 
-> Both volumes must be writable by the container user. The image's `nonroot` user has **uid 1000** (defined in `Dockerfile`: `useradd -u 1000 -m -s /bin/bash nonroot`). On Linux: `chown -R 1000:1000 /path/to/config /path/to/music`.
+> **Both volumes must be writable by uid 1000** (the non-root user the image runs as — `USER 1000:1000` in `Dockerfile`). This matters most on **first run**: if the host directory doesn't exist yet, Docker creates it as `root` before starting the container, and the app then fails to start with a `permission denied` error since it has no root access to fix that itself. Before the first `docker compose up`, create the directories and set ownership yourself:
+> ```bash
+> mkdir -p /path/to/config /path/to/music
+> sudo chown -R 1000:1000 /path/to/config /path/to/music
+> ```
 
 ### Environment variables
 

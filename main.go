@@ -27,11 +27,12 @@ func main() {
 	// ── Config dir ────────────────────────────────────────────────────────
 	configDir, err := getConfigDir()
 	if err != nil {
-		fmt.Printf("FATAL: cannot determine config dir: %v\n", err)
+		fprintReal("FATAL: cannot determine config dir: %v\n", err)
 		os.Exit(1)
 	}
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		fmt.Printf("FATAL: cannot create config dir: %v\n", err)
+		fprintReal("FATAL: cannot create config dir: %v\n", err)
+		printPermissionHintIfNeeded(err, configDir)
 		os.Exit(1)
 	}
 	fmt.Printf("[Main] Config dir: %s\n", configDir)
@@ -40,7 +41,8 @@ func main() {
 	dbPath := filepath.Join(configDir, dbFile)
 	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
-		fmt.Printf("FATAL: cannot open database: %v\n", err)
+		fprintReal("FATAL: cannot open database: %v\n", err)
+		printPermissionHintIfNeeded(err, configDir)
 		os.Exit(1)
 	}
 	defer db.Close()
@@ -69,7 +71,7 @@ func main() {
 	// ── Job manager (workers + cleanup) ───────────────────────────────────
 	jobs, err := NewJobManager(configDir, db, catalog)
 	if err != nil {
-		fmt.Printf("FATAL: cannot init job manager: %v\n", err)
+		fprintReal("FATAL: cannot init job manager: %v\n", err)
 		os.Exit(1)
 	}
 	defer jobs.Close()
@@ -78,7 +80,7 @@ func main() {
 	// ── Auth (Jellyfin + JWT) ─────────────────────────────────────────────
 	auth, err := NewAuthManager(db)
 	if err != nil {
-		fmt.Printf("FATAL: cannot init auth: %v\n", err)
+		fprintReal("FATAL: cannot init auth: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -169,4 +171,19 @@ func getConfigDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".SpotiFLAC"), nil
+}
+
+// printPermissionHintIfNeeded surfaces the most common cause of a
+// permission-denied FATAL under Docker: when the host directory bind-mounted
+// onto configDir didn't exist yet, Docker creates it as root before starting
+// the container, but this image runs as non-root uid 1000 (see Dockerfile)
+// and has no shell/entrypoint able to chown it. Without this hint the
+// resulting Go error ("permission denied") gives no indication of the fix.
+func printPermissionHintIfNeeded(err error, configDir string) {
+	if !os.IsPermission(err) {
+		return
+	}
+	fprintReal("HINT: this container runs as a non-root user (uid 1000, see 'user: \"1000:1000\"' in docker-compose.yaml).\n")
+	fprintReal("      The host directory mounted at %s must be owned by that same uid. On the host, run:\n", configDir)
+	fprintReal("      sudo chown -R 1000:1000 /path/to/your/host/config/directory\n")
 }

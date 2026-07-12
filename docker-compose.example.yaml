@@ -8,6 +8,11 @@ services:
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
+    # L'image tourne en non-root, uid/gid 1000. Les dossiers montés ci-dessous
+    # doivent appartenir à ce même uid AVANT le premier démarrage, sinon le
+    # conteneur crash au démarrage ("permission denied") :
+    #   sudo chown -R 1000:1000 /path/to/music /path/to/config
+    user: "1000:1000"
     volumes:
       # Dossier de téléchargement musique
       - /path/to/music:/home/nonroot/Music

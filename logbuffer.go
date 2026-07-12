@@ -47,6 +47,28 @@ type logRingBuffer struct {
 // JobManager (and its hub) is constructed.
 var serverLogs = &logRingBuffer{}
 
+// realStdout is the process's original stdout fd, saved by captureStdout
+// before os.Stdout gets swapped for the pipe write end. Set once at startup,
+// read-only afterwards — no synchronization needed.
+var realStdout *os.File
+
+// fprintReal writes directly to the real stdout, bypassing captureStdout's
+// pipe and its async tee goroutine. Use this (instead of fmt.Printf) for any
+// message that must survive an os.Exit called right after it: the tee
+// goroutine drains the pipe on its own schedule, and nothing guarantees it
+// gets to run — let alone forward the bytes to orig — before the process
+// dies out from under it, since os.Exit skips deferred calls and any
+// goroutine that hasn't finished simply vanishes. This is not theoretical:
+// reproduced locally, a FATAL line printed via plain fmt.Printf immediately
+// before os.Exit(1) was silently dropped in 5/5 runs.
+func fprintReal(format string, args ...interface{}) {
+	target := os.Stdout
+	if realStdout != nil {
+		target = realStdout
+	}
+	fmt.Fprintf(target, format, args...)
+}
+
 func (b *logRingBuffer) attachHub(hub *SSEHub) {
 	b.mu.Lock()
 	b.hub = hub
@@ -121,6 +143,7 @@ func captureStdout() {
 		return
 	}
 	orig := os.Stdout
+	realStdout = orig
 	os.Stdout = w
 
 	go func() {
