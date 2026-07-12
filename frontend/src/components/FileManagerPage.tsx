@@ -83,7 +83,9 @@ export function FileManagerPage() {
                 }
             }
         }
-        catch { }
+        catch {
+            // Corrupted or missing localStorage entry — fall through to the default below.
+        }
         return DEFAULT_PRESET;
     });
     const [customFormat, setCustomFormat] = useState(() => {
@@ -95,7 +97,9 @@ export function FileManagerPage() {
                     return parsed.customFormat;
             }
         }
-        catch { }
+        catch {
+            // Corrupted or missing localStorage entry — fall through to the default below.
+        }
         return DEFAULT_CUSTOM_FORMAT;
     });
     const renameFormat = formatPreset === "custom" ? (customFormat || FORMAT_PRESETS["custom"].template) : FORMAT_PRESETS[formatPreset].template;
@@ -125,7 +129,10 @@ export function FileManagerPage() {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify({ formatPreset, customFormat }));
         }
-        catch { }
+        catch {
+            // Persisting the format preference is best-effort (e.g. storage
+            // full or unavailable in private browsing) — not worth surfacing.
+        }
     }, [formatPreset, customFormat]);
     useEffect(() => {
         const checkFullscreen = () => {

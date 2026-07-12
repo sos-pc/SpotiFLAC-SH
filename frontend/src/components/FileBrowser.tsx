@@ -72,7 +72,9 @@ export function FileBrowser({ isOpen, onClose, onSelect, initialPath, title = "S
       const home = await GetUserHomeDir();
       setHistory(h => [...h, currentPath]);
       navigate(home);
-    } catch {}
+    } catch (err) {
+      console.error("Failed to resolve home directory:", err);
+    }
   };
 
   const handleSelect = () => {

@@ -129,7 +129,11 @@ export function WatchlistPage() {
         (lists || []).map(async (l) => {
           try {
             statsMap[l.id] = await GetWatchlistStats(l.id);
-          } catch {}
+          } catch (err) {
+            // One watchlist's stats failing shouldn't block the others —
+            // it just won't have a stats entry in the UI.
+            console.error(`Failed to load stats for watchlist ${l.id}:`, err);
+          }
         }),
       );
       setStats(statsMap);
@@ -295,7 +299,9 @@ export function WatchlistPage() {
       try {
         const items = await GetWatchlistHistory(id);
         setHistory((prev) => ({ ...prev, [id]: items || [] }));
-      } catch {}
+      } catch (err) {
+        toast.error(`Failed to load history: ${err}`);
+      }
     }
   };
 
@@ -304,7 +310,9 @@ export function WatchlistPage() {
     try {
       const s = await GetWatchlistStats(id);
       setStats((prev) => ({ ...prev, [id]: s }));
-    } catch {}
+    } catch (err) {
+      toast.error(`Failed to reload stats: ${err}`);
+    }
   };
 
   const handleSync = async (id: string) => {
