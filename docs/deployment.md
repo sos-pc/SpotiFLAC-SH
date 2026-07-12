@@ -65,6 +65,37 @@ Both need to be writable by **uid 1000**, the non-root user the image runs as (`
 
 > If you're upgrading an older deployment that bind-mounts `/home/nonroot/.SpotiFLAC` to a host folder, you don't have to switch — the bind mount still works, it just needs the same manual `chown` as the music folder on a fresh setup. Migrating to the named volume is optional; if you do, copy your existing config folder's contents into the new volume first (see the backup command below, run in reverse) so you don't lose `jobs.db`.
 
+#### Choosing where `spotiflac_config` actually lives on disk
+
+By default (above), Docker picks the storage location itself, under its
+own managed area (typically `/var/lib/docker/volumes/...`) — that's what
+gets the automatic-permissions benefit. Find it with:
+```bash
+docker volume inspect spotiflac_config --format '{{ .Mountpoint }}'
+```
+
+If you'd rather pick the exact folder yourself — e.g. to have it covered
+by a backup job that already targets a specific directory — point the
+volume at a host path via `driver_opts` instead:
+```yaml
+volumes:
+  spotiflac_config:
+    name: spotiflac_config
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /path/to/your/backed-up/folder/spotiflac-config
+```
+This trades away the automatic permissions: Docker now treats the volume
+as a plain pointer to that folder, the same as a bind mount, so it needs
+the same one-time setup as the music folder before the first
+`docker compose up`:
+```bash
+mkdir -p /path/to/your/backed-up/folder/spotiflac-config
+sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
+```
+
 ### Environment variables
 
 | Variable | Default | Description |

@@ -14,9 +14,12 @@ services:
     # AVANT le premier démarrage, sinon le conteneur crash au démarrage
     # ("permission denied") :
     #   sudo chown -R 1000:1000 /path/to/music
-    # Le volume de config (spotiflac_config, défini plus bas) est un volume
-    # Docker géré : Docker le crée avec les bonnes permissions tout seul au
-    # premier démarrage, rien à faire.
+    # Le volume de config (spotiflac_config, défini plus bas) est par défaut
+    # un volume Docker géré : Docker le crée avec les bonnes permissions
+    # tout seul au premier démarrage, rien à faire — voir le bloc
+    # "volumes:" en bas de ce fichier pour l'option "je choisis l'emplacement
+    # sur le disque" (ex: pour l'inclure dans une sauvegarde existante), qui
+    # nécessite en échange le même chown manuel que le dossier musique.
     user: "1000:1000"
     volumes:
       # Dossier de téléchargement musique — chemin hôte à adapter
@@ -25,5 +28,28 @@ services:
       - spotiflac_config:/home/nonroot/.SpotiFLAC
 
 volumes:
+  # Option A (par défaut, recommandée) — Docker choisit où stocker les
+  # données lui-même (sous /var/lib/docker/volumes/...) et les crée avec
+  # les bonnes permissions automatiquement. Aucune action requise.
   spotiflac_config:
     name: spotiflac_config
+
+  # Option B — vous choisissez l'emplacement exact sur le disque (utile par
+  # ex. si vous avez déjà une sauvegarde programmée sur un dossier donné et
+  # voulez que la config y vive aussi). Remplace le bloc "Option A"
+  # ci-dessus par celui-ci (un seul des deux à la fois) :
+  #
+  # spotiflac_config:
+  #   name: spotiflac_config
+  #   driver: local
+  #   driver_opts:
+  #     type: none
+  #     o: bind
+  #     device: /path/to/your/backed-up/folder/spotiflac-config
+  #
+  # Avec l'option B, Docker ne pré-remplit plus les permissions tout seul
+  # (il traite simplement le dossier comme un pointeur) — il faut refaire le
+  # même chown que pour le dossier musique, une seule fois avant le premier
+  # démarrage :
+  #   mkdir -p /path/to/your/backed-up/folder/spotiflac-config
+  #   sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
