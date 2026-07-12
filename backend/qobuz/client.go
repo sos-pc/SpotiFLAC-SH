@@ -649,7 +649,6 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(p DownloadParams) (string, error
 		URL:         p.SpotifyURL,
 		Copyright:   p.SpotifyCopyright,
 		Publisher:   p.SpotifyPublisher,
-		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        p.DeezerISRC,
 		Genre:       mbMeta.Genre,
 		SpotifyID:   p.SpotifyID,

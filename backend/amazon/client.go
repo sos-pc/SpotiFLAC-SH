@@ -458,7 +458,6 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		URL:         p.SpotifyURL,
 		Copyright:   p.SpotifyCopyright,
 		Publisher:   p.SpotifyPublisher,
-		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		ISRC:        isrc,
 		Genre:       mbMeta.Genre,
 		SpotifyID:   p.SpotifyTrackID,

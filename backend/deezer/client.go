@@ -249,7 +249,6 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 		URL:         p.SpotifyURL,
 		Copyright:   p.SpotifyCopyright,
 		Publisher:   p.SpotifyPublisher,
-		Description: "https://github.com/afkarxyz/SpotiFLAC",
 		SpotifyID:   p.SpotifyID,
 	}
 	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
