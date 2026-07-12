@@ -217,7 +217,7 @@ const getRegionName = (code: string) => {
             return "Kosovo";
         return regionNames.of(code) || code;
     }
-    catch (e) {
+    catch {
         return code;
     }
 };

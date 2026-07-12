@@ -296,7 +296,9 @@ export function useDownload(region: string) {
             finalTrackNumber = trackMetadata.track.track_number;
           }
         }
-      } catch (err) {}
+      } catch {
+        // Best-effort enrichment — keep the already-assigned fallback values.
+      }
     }
     const hasSubfolder =
       settings.folderTemplate && settings.folderTemplate.trim() !== "";

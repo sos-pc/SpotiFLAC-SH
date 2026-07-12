@@ -33,7 +33,8 @@ export function useAudioAnalysis() {
                 return parsed.filePath || "";
             }
         }
-        catch (err) {
+        catch {
+            // Corrupted or missing sessionStorage entry — fall through to the default below.
         }
         return "";
     });
@@ -48,7 +49,8 @@ export function useAudioAnalysis() {
                 }
             }
         }
-        catch (err) {
+        catch {
+            // Corrupted or missing sessionStorage entry — fall through to the default below.
         }
         return false;
     });
@@ -71,7 +73,7 @@ export function useAudioAnalysis() {
             if (analysisResult.spectrum) {
                 setSpectrumCache(filePath, analysisResult.spectrum);
             }
-            const { spectrum, ...detailResult } = analysisResult;
+            const { spectrum: _spectrum, ...detailResult } = analysisResult;
             try {
                 sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
                     filePath,
@@ -105,7 +107,8 @@ export function useAudioAnalysis() {
         try {
             sessionStorage.removeItem(STORAGE_KEY);
         }
-        catch (err) {
+        catch {
+            // Nothing to clean up if sessionStorage is unavailable.
         }
         clearSpectrumCache();
     }, []);

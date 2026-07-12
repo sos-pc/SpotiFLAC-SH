@@ -61,7 +61,8 @@ export function AudioConverterPage() {
                 }
             }
         }
-        catch (err) {
+        catch {
+            // Corrupted or missing sessionStorage entry — fall through to the default below.
         }
         return "mp3";
     });
@@ -75,7 +76,8 @@ export function AudioConverterPage() {
                 }
             }
         }
-        catch (err) {
+        catch {
+            // Corrupted or missing sessionStorage entry — fall through to the default below.
         }
         return "320k";
     });
@@ -89,7 +91,8 @@ export function AudioConverterPage() {
                 }
             }
         }
-        catch (err) {
+        catch {
+            // Corrupted or missing sessionStorage entry — fall through to the default below.
         }
         return "aac";
     });

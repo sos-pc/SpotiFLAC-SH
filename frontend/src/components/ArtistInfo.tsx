@@ -246,7 +246,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, tracksLoading, se
                         failCount++;
                     }
                 }
-                catch (error) {
+                catch {
                     failCount++;
                 }
             }
