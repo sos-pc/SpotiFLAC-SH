@@ -406,6 +406,13 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 
 	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
 	w.mu.Lock()
+	// Q3: this sync started from a snapshot of pl taken possibly minutes
+	// ago — if the watchlist was removed in the meantime (RemoveWatchlist
+	// is locked too, see above), saving it back here would resurrect it.
+	if _, err := w.getWatchlistByID(pl.ID); err != nil {
+		w.mu.Unlock()
+		return
+	}
 	pl.TrackIDs = append(pl.TrackIDs, newIDs...)
 	pl.LastSync = time.Now()
 	w.saveWatchlist(&pl)
@@ -591,6 +598,11 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		break
 	}
 
+	// Locked (Q3): if a sync for this same watchlist is mid-flight, its
+	// end-of-sync save (also locked, see syncPlaylist) would otherwise be
+	// able to land after this delete and resurrect the record.
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWatchlist)
 		if b == nil {
@@ -697,10 +709,18 @@ func (w *Watcher) OnPermanentFailure(watchlistID, spotifyID string) {
 // OnBatchComplete implémente JobEventHandler.
 // Trouve le SyncLog par BatchID, met à jour ses compteurs, génère le M3U8.
 func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int) {
+	// Locked (Q3): same reasoning as UpdateWatchlist — this read-modify-write
+	// of the watchlist record must not interleave with syncPlaylist's own
+	// end-of-sync save. Scoped to just the BoltDB read/save, same as
+	// syncPlaylist itself, so the slower M3U8 regeneration below doesn't
+	// hold up other watchlist operations.
+	w.mu.Lock()
 	playlists, err := w.GetWatchlists()
 	if err != nil {
+		w.mu.Unlock()
 		return
 	}
+	var matchedID string
 	for _, pl := range playlists {
 		if pl.ID != watchlistID {
 			continue
@@ -741,8 +761,13 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 		if saveErr := w.saveWatchlist(&pl); saveErr != nil {
 			fmt.Printf("[Watcher] Failed to save sync log: %v\n", saveErr)
 		}
-		_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
-		return
+		matchedID = pl.ID
+		break
+	}
+	w.mu.Unlock()
+
+	if matchedID != "" {
+		_, _ = w.generateM3U8ForPlaylist(matchedID, false)
 	}
 }
 
@@ -1062,6 +1087,12 @@ type UpdateWatchlistRequest struct {
 }
 
 func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
+	// Locked (Q3): without this, a settings change landing mid-sync could be
+	// silently overwritten by syncPlaylist's own end-of-sync save of its
+	// stale in-memory copy of this same record.
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	playlists, err := w.GetWatchlists()
 	if err != nil {
 		return err
