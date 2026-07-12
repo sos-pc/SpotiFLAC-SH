@@ -60,9 +60,8 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-      - name: Frontend lint (non-blocking — pre-existing findings not yet triaged)
+      - name: Frontend lint
         working-directory: frontend
-        continue-on-error: true
         run: bun run lint
 
   build-and-push:
