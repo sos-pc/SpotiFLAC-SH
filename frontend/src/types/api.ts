@@ -149,10 +149,6 @@ export interface DownloadResponse {
     already_exists?: boolean;
     item_id?: string;
 }
-export interface HealthResponse {
-    status: string;
-    time: string;
-}
 export interface TimeSlice {
     time: number;
     magnitudes: number[];

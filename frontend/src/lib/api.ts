@@ -1,4 +1,4 @@
-import type { SpotifyMetadataResponse, DownloadRequest, DownloadResponse, HealthResponse, LyricsDownloadRequest, LyricsDownloadResponse, CoverDownloadRequest, CoverDownloadResponse, HeaderDownloadRequest, HeaderDownloadResponse, GalleryImageDownloadRequest, GalleryImageDownloadResponse, AvatarDownloadRequest, AvatarDownloadResponse, } from "@/types/api";
+import type { SpotifyMetadataResponse, DownloadRequest, DownloadResponse, LyricsDownloadRequest, LyricsDownloadResponse, CoverDownloadRequest, CoverDownloadResponse, HeaderDownloadRequest, HeaderDownloadResponse, GalleryImageDownloadRequest, GalleryImageDownloadResponse, AvatarDownloadRequest, AvatarDownloadResponse, } from "@/types/api";
 import { GetSpotifyMetadata, DownloadTrack, DownloadLyrics, DownloadCover, DownloadHeader, DownloadGalleryImage, DownloadAvatar } from "@/lib/rpc";
 
 export async function fetchSpotifyMetadata(url: string, batch: boolean = true, _delay: number = 1.0, _timeout: number = 300.0): Promise<SpotifyMetadataResponse> {
@@ -7,13 +7,6 @@ export async function fetchSpotifyMetadata(url: string, batch: boolean = true, _
 
 export async function downloadTrack(request: DownloadRequest): Promise<DownloadResponse> {
     return await DownloadTrack(request);
-}
-
-export async function checkHealth(): Promise<HealthResponse> {
-    return {
-        status: "ok",
-        time: new Date().toISOString(),
-    };
 }
 
 export async function downloadLyrics(request: LyricsDownloadRequest): Promise<LyricsDownloadResponse> {

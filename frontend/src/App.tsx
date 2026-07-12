@@ -5,7 +5,6 @@ import { Search, X, ArrowUp } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode, applyFont } from "@/lib/settings";
 import { applyTheme } from "@/lib/themes";
-import { OpenFolder } from "@/lib/rpc";
 import { LoginPage } from "@/components/LoginPage";
 import { isAuthenticated, clearAuth, getUser, tryLocalAuth, fetchMe } from "@/lib/auth";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
@@ -292,19 +291,19 @@ function App() {
             setSelectedTracks(prev => Array.from(new Set([...prev, ...tracksWithId])));
         }
     };
-    const handleOpenFolder = async () => {
+    const handleOpenFolder = () => {
         const settings = getSettings();
         if (!settings.downloadPath) {
             toast.error("Download path not set");
             return;
         }
-        try {
-            await OpenFolder(settings.downloadPath);
+        if (!authUser?.is_admin) {
+            toast.error("Admin access required", {
+                description: "Only administrators can browse the file system.",
+            });
+            return;
         }
-        catch (error) {
-            console.error("Error opening folder:", error);
-            toast.error(`Error opening folder: ${error}`);
-        }
+        setCurrentPage("file-manager");
     };
     const renderMetadata = () => {
         if (!metadata.metadata)

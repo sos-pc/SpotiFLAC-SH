@@ -177,8 +177,6 @@ export const LoadSettings = () => rest<Settings>("GET", "/settings");
 export const SaveSettings = (settings: Settings) =>
   rest<void>("PUT", "/settings", settings);
 export const GetDefaults = () => rest<Partial<Settings>>("GET", "/system/defaults");
-export const GetConfigPath = () =>
-  rest<SystemInfo>("GET", "/system/info").then((r) => r.config_path);
 export const GetOSInfo = () =>
   rest<SystemInfo>("GET", "/system/info").then((r) => r.os);
 export const GetUserHomeDir = () =>
@@ -215,10 +213,6 @@ export const RenameFilesByMetadata = (files: string[], format: string) =>
   rest<RenameResult[]>("POST", "/files/rename/batch", { files, format });
 export const PreviewRenameFiles = (files: string[], format: string) =>
   rest<RenameResult[]>("POST", "/files/rename/preview", { files, format });
-export const UploadImage = (filePath: string) =>
-  rest<{ url: string }>("POST", "/files/upload/path", {
-    file_path: filePath,
-  }).then((r) => r.url);
 export const UploadImageBytes = (filename: string, base64Data: string) =>
   rest<{ url: string }>("POST", "/files/upload/image", {
     filename,
@@ -248,13 +242,6 @@ export const CheckFilesExistence = (
     root_dir: rootDir,
     tracks,
   });
-
-// ─── Folder / File (désactivés en web, l'UI utilise des champs texte) ─────────
-
-export const OpenFolder = (_path: string) => Promise.resolve();
-export const SelectFile = () => Promise.resolve("");
-export const SelectAudioFiles = () => Promise.resolve([] as string[]);
-export const SelectImageVideo = () => Promise.resolve([] as string[]);
 
 // ─── Watchlist ────────────────────────────────────────────────────────────────
 
