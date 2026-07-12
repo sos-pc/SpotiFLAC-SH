@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { DragEvent } from "react";
-import { UploadImageBytes, UploadImage, SelectImageVideo } from "@/lib/rpc";
+import { UploadImageBytes } from "@/lib/rpc";
 import { Upload, Loader2, ImagePlus, X, Check, FileVideo, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ interface DragDropMediaProps {
 }
 export function DragDropMedia({ value, onChange, className }: DragDropMediaProps) {
     const [isDragging, setIsDragging] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const [files, setFiles] = useState<UploadedFile[]>(() => {
         if (!value)
             return [];
@@ -98,39 +99,12 @@ export function DragDropMedia({ value, onChange, className }: DragDropMediaProps
             }
         }
     };
-    const handleSelectFile = async () => {
-        try {
-            const paths = await SelectImageVideo();
-            if (paths && paths.length > 0) {
-                const timestamp = Date.now();
-                const newFiles: UploadedFile[] = paths.map((p, i) => ({
-                    id: `select-${timestamp}-${i}`,
-                    name: p.split(/[\\/]/).pop() || 'unknown',
-                    url: '',
-                    type: p.match(/\.(mp4|mkv|webm|mov)$/i) ? 'video' : 'image',
-                    status: 'uploading'
-                }));
-                setFiles(prev => [...prev, ...newFiles]);
-                for (let i = 0; i < paths.length; i++) {
-                    const path = paths[i];
-                    const fileId = newFiles[i].id;
-                    try {
-                        const result = await UploadImage(path);
-                        setFiles(prev => prev.map(f => f.id === fileId
-                            ? { ...f, status: 'done', url: result }
-                            : f));
-                    }
-                    catch (err) {
-                        const message = err instanceof Error ? err.message : "Upload failed";
-                        setFiles(prev => prev.map(f => f.id === fileId
-                            ? { ...f, status: 'error', error: message }
-                            : f));
-                    }
-                }
-            }
-        }
-        catch (err) {
-            console.error("Select file failed", err);
+    const handleSelectFile = () => fileInputRef.current?.click();
+    const handleFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const picked = e.target.files ? Array.from(e.target.files) : [];
+        e.target.value = '';
+        if (picked.length > 0) {
+            await handleFiles(picked);
         }
     };
     const removeFile = (index: number) => {
@@ -140,6 +114,8 @@ export function DragDropMedia({ value, onChange, className }: DragDropMediaProps
             if (e.target === e.currentTarget)
                 handleSelectFile();
         }}>
+            <input ref={fileInputRef} type="file" multiple accept="image/*,video/mp4,video/x-matroska,video/webm,video/quicktime" className="hidden" onChange={handleFilePicked}/>
+
             {files.length === 0 && (<div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-50">
                     <ImagePlus className="h-10 w-10 mb-2"/>
                     <span className="text-sm font-medium">Drop media here or click to browse</span>
