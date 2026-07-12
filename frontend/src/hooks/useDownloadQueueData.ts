@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useJobsStreamEvent } from "./useJobsStreamEvent";
 
-interface Job {
+export interface Job {
   id: string;
   status: "pending" | "downloading" | "done" | "failed" | "skipped";
   track_name: string;
@@ -16,8 +16,14 @@ interface Job {
   started_at?: string;
 }
 
+export interface QueueItem extends Omit<Job, "status" | "speed"> {
+  status: "queued" | "downloading" | "completed" | "failed" | "skipped";
+  error_message: string;
+  speed: number;
+}
+
 // Map Job status/fields to the shape the existing UI expects
-function toQueueItem(job: Job) {
+function toQueueItem(job: Job): QueueItem {
   return {
     ...job,
     status:

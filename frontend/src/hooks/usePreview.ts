@@ -61,10 +61,10 @@ export function usePreview() {
             setCurrentAudio(audio);
             await audio.play();
         }
-        catch (error: any) {
+        catch (error) {
             console.error("Preview error:", error);
             toast.error("Preview not available", {
-                description: error?.message || `Could not load preview for "${trackName}"`,
+                description: error instanceof Error ? error.message : `Could not load preview for "${trackName}"`,
             });
             setLoadingPreview(null);
             setPlayingTrack(null);

@@ -28,6 +28,7 @@ import { AboutPage } from "@/components/AboutPage";
 import { HistoryPage } from "@/components/HistoryPage";
 import { WatchlistPage } from "@/components/WatchlistPage";
 import type { HistoryItem } from "@/components/FetchHistory";
+import type { TrackMetadata } from "@/types/api";
 import { useDownload } from "@/hooks/useDownload";
 import { useMetadata } from "@/hooks/useMetadata";
 import { useLyrics } from "@/hooks/useLyrics";
@@ -279,7 +280,7 @@ function App() {
     const toggleTrackSelection = (id: string) => {
         setSelectedTracks((prev) => prev.includes(id) ? prev.filter((prevId) => prevId !== id) : [...prev, id]);
     };
-    const toggleSelectAll = (tracks: any[]) => {
+    const toggleSelectAll = (tracks: TrackMetadata[]) => {
         const tracksWithId = tracks.filter((track) => track.spotify_id).map((track) => track.spotify_id || "");
         if (tracksWithId.length === 0)
             return;

@@ -6,6 +6,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { FetchHistory } from "@/components/FetchHistory";
 import type { HistoryItem } from "@/components/FetchHistory";
+import type { SpotifySearchResults, SpotifySearchTrack, SpotifySearchAlbum, SpotifySearchArtist, SpotifySearchPlaylist } from "@/types/api";
 import { SearchSpotify, SearchSpotifyByType } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 import { useTypingEffect } from "@/hooks/useTypingEffect";
@@ -242,7 +243,7 @@ interface SearchBarProps {
 }
 export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, history, onHistorySelect, onHistoryRemove, hasResult, searchMode, onSearchModeChange, region, onRegionChange, }: SearchBarProps) {
     const [searchQuery, setSearchQuery] = useState("");
-    const [searchResults, setSearchResults] = useState<any | null>(null);
+    const [searchResults, setSearchResults] = useState<SpotifySearchResults | null>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [lastSearchedQuery, setLastSearchedQuery] = useState("");
@@ -370,16 +371,16 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
                     return {
                         ...prev,
                         tracks: activeTab === "tracks"
-                            ? [...prev.tracks, ...moreResults]
+                            ? [...prev.tracks, ...(moreResults as SpotifySearchTrack[])]
                             : prev.tracks,
                         albums: activeTab === "albums"
-                            ? [...prev.albums, ...moreResults]
+                            ? [...prev.albums, ...(moreResults as SpotifySearchAlbum[])]
                             : prev.albums,
                         artists: activeTab === "artists"
-                            ? [...prev.artists, ...moreResults]
+                            ? [...prev.artists, ...(moreResults as SpotifySearchArtist[])]
                             : prev.artists,
                         playlists: activeTab === "playlists"
-                            ? [...prev.playlists, ...moreResults]
+                            ? [...prev.playlists, ...(moreResults as SpotifySearchPlaylist[])]
                             : prev.playlists,
                     };
                 });

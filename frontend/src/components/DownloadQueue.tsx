@@ -104,7 +104,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     const toggleFilter = (status: string) => {
         setFilterStatus(prev => prev === status ? "all" : status);
     };
-    const filteredQueue = queueInfo.queue.filter((item: any) => {
+    const filteredQueue = queueInfo.queue.filter((item) => {
         if (filterStatus === "all")
             return true;
         return item.status === filterStatus;
@@ -191,7 +191,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
           </div>) : filteredQueue.length === 0 ? (<div className="text-center py-12 text-muted-foreground">
              <p>No downloads with status "{filterStatus}"</p>
              <Button variant="link" onClick={() => setFilterStatus("all")}>Clear filter</Button>
-            </div>) : (filteredQueue.map((item: any) => (<div key={item.id} className="border rounded-lg p-3 hover:bg-muted/30 transition-colors">
+            </div>) : (filteredQueue.map((item) => (<div key={item.id} className="border rounded-lg p-3 hover:bg-muted/30 transition-colors">
             <div className="flex items-start gap-3">
               <div className="mt-1">{getStatusIcon(item.status)}</div>
 

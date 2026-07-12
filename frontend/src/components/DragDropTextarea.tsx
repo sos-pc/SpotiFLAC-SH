@@ -89,10 +89,11 @@ export function DragDropMedia({ value, onChange, className }: DragDropMediaProps
                     ? { ...f, status: 'done', url: result }
                     : f));
             }
-            catch (err: any) {
+            catch (err) {
                 console.error("Upload failed", err);
+                const message = err instanceof Error ? err.message : "Upload failed";
                 setFiles(prev => prev.map(f => f.id === fileId
-                    ? { ...f, status: 'error', error: err.message || "Upload failed" }
+                    ? { ...f, status: 'error', error: message }
                     : f));
             }
         }
@@ -119,15 +120,16 @@ export function DragDropMedia({ value, onChange, className }: DragDropMediaProps
                             ? { ...f, status: 'done', url: result }
                             : f));
                     }
-                    catch (err: any) {
+                    catch (err) {
+                        const message = err instanceof Error ? err.message : "Upload failed";
                         setFiles(prev => prev.map(f => f.id === fileId
-                            ? { ...f, status: 'error', error: err.message }
+                            ? { ...f, status: 'error', error: message }
                             : f));
                     }
                 }
             }
         }
-        catch (err: any) {
+        catch (err) {
             console.error("Select file failed", err);
         }
     };

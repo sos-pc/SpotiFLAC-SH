@@ -25,11 +25,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       await login(username, password);
       onLogin();
-    } catch (err: any) {
-      if (err?.rateLimited) {
+    } catch (err) {
+      if (err instanceof Error && "rateLimited" in err && err.rateLimited) {
         setRateLimited(true);
       } else {
-        setError(err.message || "Login failed");
+        setError(err instanceof Error ? err.message : "Login failed");
       }
     } finally {
       setLoading(false);

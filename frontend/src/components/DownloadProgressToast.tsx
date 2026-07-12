@@ -7,13 +7,13 @@ interface DownloadProgressToastProps {
 export function DownloadProgressToast({ onClick }: DownloadProgressToastProps) {
   const queueInfo = useDownloadQueueData();
   const downloadingItems = queueInfo.queue.filter(
-    (item: any) => item.status === "downloading",
+    (item) => item.status === "downloading",
   );
   const hasActiveDownloads = queueInfo.queue.some(
-    (item: any) => item.status === "queued" || item.status === "downloading",
+    (item) => item.status === "queued" || item.status === "downloading",
   );
   const totalMB = downloadingItems.reduce(
-    (sum: number, item: any) => sum + (item.total_size || 0),
+    (sum, item) => sum + (item.total_size || 0),
     0,
   );
   const speed = queueInfo.current_speed || 0;
