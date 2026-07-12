@@ -247,7 +247,7 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 	if s.ctr.Catalog != nil {
 		root := pl.Settings.DownloadPath
 		if root == "" {
-			root = "/home/nonroot/Music"
+			root = util.GetDefaultMusicPath()
 		}
 		if _, statErr := os.Stat(root); statErr == nil {
 			rebuildResult := libraryRebuildResult{ScanRoots: []string{root}}

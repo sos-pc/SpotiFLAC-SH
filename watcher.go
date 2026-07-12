@@ -338,7 +338,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 							fmt.Printf("[Watcher] Deleted file: %s\n", job.FilePath)
 							outputRoot := pl.Settings.DownloadPath
 							if outputRoot == "" {
-								outputRoot = "/home/nonroot/Music"
+								outputRoot = util.GetDefaultMusicPath()
 							}
 							removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
 							// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
@@ -392,7 +392,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			if createM3u8, _ := renameSettings["createM3u8File"].(bool); createM3u8 {
 				outputDir := pl.Settings.DownloadPath
 				if outputDir == "" {
-					outputDir = "/home/nonroot/Music"
+					outputDir = util.GetDefaultMusicPath()
 				}
 				oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
 				if err := os.Remove(oldM3u8Path); err == nil {
@@ -524,7 +524,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 
 		outputRoot := pl.Settings.DownloadPath
 		if outputRoot == "" {
-			outputRoot = "/home/nonroot/Music"
+			outputRoot = util.GetDefaultMusicPath()
 		}
 
 		// ── Suppression des fichiers audio (seulement si SyncDeletions) ────────
@@ -1258,7 +1258,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 
 	outputDir := pl.Settings.DownloadPath
 	if outputDir == "" {
-		outputDir = "/home/nonroot/Music"
+		outputDir = util.GetDefaultMusicPath()
 	}
 	resolved := w.resolveTrackPaths(pl, outputDir)
 
@@ -1499,7 +1499,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 
 	outputDir := pl.Settings.DownloadPath
 	if outputDir == "" {
-		outputDir = "/home/nonroot/Music"
+		outputDir = util.GetDefaultMusicPath()
 	}
 
 	paths := w.resolveTrackPaths(pl, outputDir)
