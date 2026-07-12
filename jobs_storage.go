@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -217,7 +218,7 @@ func (jm *JobManager) CleanupOldJobs() (int, []string, error) {
 	})
 
 	if err == nil && deleted > 0 {
-		fmt.Printf("[Jobs] Cleanup: deleted %d duplicate/old jobs\n", deleted)
+		slog.Info("[Jobs] Cleanup: deleted duplicate/old jobs", "count", deleted)
 	}
 	if err == nil && jm.hub != nil {
 		for _, id := range deletedIDs {

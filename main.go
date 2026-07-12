@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +23,7 @@ func main() {
 	// Capture stdout as early as possible so startup logs land in the
 	// in-memory buffer the Debug Logs page reads from too.
 	captureStdout()
+	initLogger()
 
 	// ── Config dir ────────────────────────────────────────────────────────
 	configDir, err := getConfigDir()
@@ -35,7 +36,7 @@ func main() {
 		printPermissionHintIfNeeded(err, configDir)
 		os.Exit(1)
 	}
-	fmt.Printf("[Main] Config dir: %s\n", configDir)
+	slog.Info("[Main] Config dir", "path", configDir)
 
 	// ── BoltDB ────────────────────────────────────────────────────────────
 	dbPath := filepath.Join(configDir, dbFile)
@@ -57,7 +58,7 @@ func main() {
 	// this one file shouldn't take down core Spotify->FLAC downloading.
 	catalog, err := catalogdb.Open(configDir)
 	if err != nil {
-		fmt.Printf("[Main] WARNING: catalog database unavailable, continuing without it (M3U8 generation falls back to filesystem/BoltDB, dedup falls back to BoltDB-only): %v\n", err)
+		slog.Warn("[Main] catalog database unavailable, continuing without it (M3U8 generation falls back to filesystem/BoltDB, dedup falls back to BoltDB-only)", "err", err)
 		catalog = nil
 	} else {
 		defer catalog.Close()
@@ -65,7 +66,7 @@ func main() {
 
 	// ── History buckets (partagés dans jobs.db) ───────────────────────────
 	if err := backend.InitHistoryDBShared(db); err != nil {
-		fmt.Printf("[Main] Warning: failed to init history buckets: %v\n", err)
+		slog.Warn("[Main] failed to init history buckets", "err", err)
 	}
 
 	// ── Job manager (workers + cleanup) ───────────────────────────────────
@@ -139,27 +140,27 @@ func main() {
 		// worse than a clean, restart-policy-visible exit.
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("[PANIC] recovered in HTTP server goroutine: %v\n%s\n", r, debug.Stack())
+				slog.Error("[Main] PANIC recovered in HTTP server goroutine", "recover", r, "stack", string(debug.Stack()))
 				stop <- syscall.SIGTERM
 			}
 		}()
-		fmt.Printf("[Main] SpotiFLAC listening on http://0.0.0.0:%s\n", port)
+		slog.Info("[Main] SpotiFLAC listening", "addr", "http://0.0.0.0:"+port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("FATAL: server error: %v\n", err)
+			slog.Error("[Main] server error", "err", err)
 			// Signal propre au lieu de os.Exit pour respecter les defer
 			stop <- syscall.SIGTERM
 		}
 	}()
 
 	<-stop
-	fmt.Println("[Main] Shutting down gracefully...")
+	slog.Info("[Main] Shutting down gracefully...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	httpServer.Shutdown(ctx)
 
 	app.shutdown(ctx)
-	fmt.Println("[Main] Bye.")
+	slog.Info("[Main] Bye.")
 }
 
 // getConfigDir retourne le dossier de config SpotiFLAC.

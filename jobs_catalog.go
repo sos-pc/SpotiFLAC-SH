@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,20 +50,20 @@ func (jm *JobManager) recordCatalogDone(j *Job) {
 	defer cancel()
 
 	if err := db.UpsertTrack(ctx, jm.catalog, jobToCatalogTrack(j)); err != nil {
-		fmt.Printf("[Catalog] UpsertTrack failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] UpsertTrack failed", "spotify_id", j.SpotifyID, "err", err)
 		return
 	}
 
 	libraryFileID, err := upsertActiveLibraryFile(ctx, jm.catalog, j)
 	if err != nil {
-		fmt.Printf("[Catalog] library_file write failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] library_file write failed", "spotify_id", j.SpotifyID, "err", err)
 		return
 	}
 
 	attempt := jobToCatalogAttempt(j, db.AttemptStatusDone)
 	attempt.LibraryFileID = libraryFileID
 	if err := db.CreateDownloadAttempt(ctx, jm.catalog, attempt); err != nil {
-		fmt.Printf("[Catalog] CreateDownloadAttempt(done) failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] CreateDownloadAttempt(done) failed", "spotify_id", j.SpotifyID, "err", err)
 	}
 }
 
@@ -77,14 +78,14 @@ func (jm *JobManager) recordCatalogFailed(j *Job) {
 	defer cancel()
 
 	if err := db.UpsertTrack(ctx, jm.catalog, jobToCatalogTrack(j)); err != nil {
-		fmt.Printf("[Catalog] UpsertTrack failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] UpsertTrack failed", "spotify_id", j.SpotifyID, "err", err)
 		return
 	}
 
 	attempt := jobToCatalogAttempt(j, db.AttemptStatusFailed)
 	attempt.Error = j.Error
 	if err := db.CreateDownloadAttempt(ctx, jm.catalog, attempt); err != nil {
-		fmt.Printf("[Catalog] CreateDownloadAttempt(failed) failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] CreateDownloadAttempt(failed) failed", "spotify_id", j.SpotifyID, "err", err)
 	}
 }
 
@@ -101,13 +102,13 @@ func (jm *JobManager) recordCatalogSkipped(j *Job) {
 	defer cancel()
 
 	if err := db.UpsertTrack(ctx, jm.catalog, jobToCatalogTrack(j)); err != nil {
-		fmt.Printf("[Catalog] UpsertTrack failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] UpsertTrack failed", "spotify_id", j.SpotifyID, "err", err)
 		return
 	}
 
 	attempt := jobToCatalogAttempt(j, db.AttemptStatusSkipped)
 	if err := db.CreateDownloadAttempt(ctx, jm.catalog, attempt); err != nil {
-		fmt.Printf("[Catalog] CreateDownloadAttempt(skipped) failed for %s: %v\n", j.SpotifyID, err)
+		slog.Warn("[Catalog] CreateDownloadAttempt(skipped) failed", "spotify_id", j.SpotifyID, "err", err)
 	}
 }
 
@@ -429,7 +430,7 @@ func (jm *JobManager) checkCatalogDedup(spotifyID string, settings JobSettings) 
 
 	existing, err := db.GetActiveLibraryFile(ctx, jm.catalog, spotifyID)
 	if err != nil {
-		fmt.Printf("[Catalog] dedup lookup failed for %s: %v\n", spotifyID, err)
+		slog.Warn("[Catalog] dedup lookup failed", "spotify_id", spotifyID, "err", err)
 		return catalogDedupResult{}
 	}
 	if existing == nil {
@@ -450,8 +451,8 @@ func (jm *JobManager) checkCatalogDedup(spotifyID string, settings JobSettings) 
 	// DIFFERENT track to that same collided path would make checkCatalogDedup
 	// wrongly and permanently believe THIS track is already satisfied.
 	if onDiskID, err := meta.ReadSpotifyID(existing.FilePath); err == nil && onDiskID != "" && onDiskID != spotifyID {
-		fmt.Printf("[Catalog] dedup: %s at %s actually tagged for a different track (%s) — treating as stale\n",
-			spotifyID, existing.FilePath, onDiskID)
+		slog.Info("[Catalog] dedup: file actually tagged for a different track, treating as stale",
+			"spotify_id", spotifyID, "path", existing.FilePath, "tagged_as", onDiskID)
 		return catalogDedupResult{}
 	}
 
@@ -503,7 +504,7 @@ func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchReq
 	})
 
 	if err := db.UpsertTrack(ctx, jm.catalog, t); err != nil {
-		fmt.Printf("[Catalog] UpsertTrack failed for dedup-skip %s: %v\n", track.SpotifyID, err)
+		slog.Warn("[Catalog] UpsertTrack failed for dedup-skip", "spotify_id", track.SpotifyID, "err", err)
 		return
 	}
 
@@ -518,6 +519,6 @@ func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchReq
 		Error:         reason,
 	}
 	if err := db.CreateDownloadAttempt(ctx, jm.catalog, attempt); err != nil {
-		fmt.Printf("[Catalog] CreateDownloadAttempt(dedup-skip) failed for %s: %v\n", track.SpotifyID, err)
+		slog.Warn("[Catalog] CreateDownloadAttempt(dedup-skip) failed", "spotify_id", track.SpotifyID, "err", err)
 	}
 }

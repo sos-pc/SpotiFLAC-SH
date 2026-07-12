@@ -9,6 +9,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,11 +54,11 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 				result["amazon_url"] = fallback.AmazonURL
 			}
 			if len(result) > 0 {
-				fmt.Printf("[Jobs] Deezer OK for %s (ISRC: %s)\n", job.TrackName, result["isrc"])
+				slog.Debug("[Jobs] Deezer OK", "track", job.TrackName, "isrc", result["isrc"])
 				return result
 			}
 		} else if ferr != nil {
-			fmt.Printf("[Jobs] Deezer failed for %s: %v — trying Songlink\n", job.TrackName, ferr)
+			slog.Debug("[Jobs] Deezer failed, trying Songlink", "track", job.TrackName, "err", ferr)
 		}
 	}
 
@@ -70,7 +71,7 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 	select {
 	case jm.songLinkSem <- struct{}{}:
 	case <-jm.ctx.Done():
-		fmt.Printf("[Jobs] song.link skipped for %s (shutdown)\n", job.TrackName)
+		slog.Debug("[Jobs] song.link skipped (shutdown)", "track", job.TrackName)
 		return nil
 	}
 
@@ -92,10 +93,10 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 			}
 		}
 		if err != nil {
-			fmt.Printf("[Jobs] song.link failed for %s: %v\n", job.TrackName, err)
+			slog.Debug("[Jobs] song.link failed", "track", job.TrackName, "err", err)
 		}
 	} else {
-		fmt.Printf("[Jobs] Songlink rate-limited for %s — trying HTML scraping\n", job.TrackName)
+		slog.Debug("[Jobs] Songlink rate-limited, trying HTML scraping", "track", job.TrackName)
 	}
 
 	// Fallback 1: iTunes Search + song.link /i/{appleMusicID}
@@ -106,11 +107,11 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 			data, _ := json.Marshal(amURLs)
 			json.Unmarshal(data, &result)
 			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
-				fmt.Printf("[Jobs] ✓ AppleMusic scraping OK for %s\n", job.TrackName)
+				slog.Debug("[Jobs] AppleMusic scraping OK", "track", job.TrackName)
 				return result
 			}
 		} else if amErr != nil {
-			fmt.Printf("[Jobs] AppleMusic scraping failed for %s: %v\n", job.TrackName, amErr)
+			slog.Debug("[Jobs] AppleMusic scraping failed", "track", job.TrackName, "err", amErr)
 		}
 	}
 
@@ -122,11 +123,11 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 			data, _ := json.Marshal(htmlURLs)
 			json.Unmarshal(data, &result)
 			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
-				fmt.Printf("[Jobs] ✓ HTML scraping OK for %s\n", job.TrackName)
+				slog.Debug("[Jobs] HTML scraping OK", "track", job.TrackName)
 				return result
 			}
 		} else if hErr != nil {
-			fmt.Printf("[Jobs] HTML scraping failed for %s: %v\n", job.TrackName, hErr)
+			slog.Debug("[Jobs] HTML scraping failed", "track", job.TrackName, "err", hErr)
 		}
 	}
 	return nil
@@ -216,7 +217,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 				streamingURLs["tidal_url"] = tidalURL
 				streamingURLs["tidal_api"] = tidalAPI
 				serviceURL = tidalURL
-				fmt.Printf("[Jobs] Tidal found via ISRC for %s: ID=%d\n", job.TrackName, tidalID)
+				slog.Debug("[Jobs] Tidal found via ISRC", "track", job.TrackName, "tidal_id", tidalID)
 				if service != "tidal" && service != "auto" {
 					service = "tidal"
 					audioFormat = firstNonEmpty(s.TidalQuality, "LOSSLESS")
@@ -234,7 +235,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 			}
 			streamingURLs["tidal_url"] = tidalURL
 			serviceURL = tidalURL
-			fmt.Printf("[Jobs] Tidal found via direct search for %s\n", job.TrackName)
+			slog.Debug("[Jobs] Tidal found via direct search", "track", job.TrackName)
 			if service != "tidal" && service != "auto" {
 				service = "tidal"
 				audioFormat = firstNonEmpty(s.TidalQuality, "LOSSLESS")
@@ -242,7 +243,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		} else if streamingURLs != nil && streamingURLs["isrc"] != "" && service != "qobuz" {
 			service = "qobuz"
 			audioFormat = backend.QobuzQualityFor(audioFormat)
-			fmt.Printf("[Jobs] Tidal search failed, but ISRC available for %s, switching to Qobuz\n", job.TrackName)
+			slog.Debug("[Jobs] Tidal search failed, but ISRC available, switching to Qobuz", "track", job.TrackName)
 		}
 	}
 
@@ -505,7 +506,7 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string, currentSettings JobS
 		job.Progress = 0
 		job.UpdatedAt = time.Now()
 		if err := jm.saveJob(&job); err != nil {
-			fmt.Printf("[Jobs] RequeueFailed: failed to save job %s: %v\n", job.ID, err)
+			slog.Error("[Jobs] RequeueFailed: failed to save job", "job_id", job.ID, "err", err)
 			continue
 		}
 		jm.notifyJob(&job)
@@ -514,12 +515,12 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string, currentSettings JobS
 		case jm.queue <- job.ID:
 			requeued++
 		default:
-			fmt.Printf("[Jobs] Queue full, failed job %s will be picked up later\n", job.ID)
+			slog.Warn("[Jobs] Queue full, failed job will be picked up later", "job_id", job.ID)
 			requeued++
 		}
 	}
 	if requeued > 0 {
-		fmt.Printf("[Jobs] Requeued %d failed jobs for watchlist %s\n", requeued, watchlistID)
+		slog.Info("[Jobs] Requeued failed jobs", "count", requeued, "watchlist_id", watchlistID)
 	}
 	return requeued, nil
 }

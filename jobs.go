@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"runtime/debug"
 	"sync"
@@ -231,7 +232,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 
 	util.SafeGo("jobs.cleanupLoop", jm.cleanupLoop)
 
-	fmt.Printf("[Jobs] Manager started (%d workers, db: %s)\n", jobWorkers, filepath.Join(configDir, dbFile))
+	slog.Info("[Jobs] Manager started", "workers", jobWorkers, "db", filepath.Join(configDir, dbFile))
 	return jm, nil
 }
 
@@ -270,11 +271,11 @@ func (jm *JobManager) cleanupLoop() {
 func (jm *JobManager) runCleanupSafely() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("[PANIC] recovered in jobs cleanup: %v\n%s\n", r, debug.Stack())
+			slog.Error("[Jobs] PANIC recovered in jobs cleanup", "recover", r, "stack", string(debug.Stack()))
 		}
 	}()
 	if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
-		fmt.Printf("[Jobs] Cleanup: %d old jobs deleted\n", deleted)
+		slog.Info("[Jobs] Cleanup: old jobs deleted", "count", deleted)
 	}
 }
 
@@ -282,11 +283,11 @@ func (jm *JobManager) runCleanupSafely() {
 // closedOnce ensures the channel is never closed twice.
 func (jm *JobManager) Close() {
 	jm.closedOnce.Do(func() {
-		fmt.Println("[Jobs] Shutting down...")
+		slog.Info("[Jobs] Shutting down...")
 		jm.cancel()
 		close(jm.queue)
 		jm.wg.Wait()
-		fmt.Println("[Jobs] Shutdown complete")
+		slog.Info("[Jobs] Shutdown complete")
 	})
 }
 
@@ -344,7 +345,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		// entirely. Records a skipped DownloadAttempt so the audit trail
 		// shows the track was considered.
 		if dedup := jm.checkCatalogDedup(track.SpotifyID, req.Settings); dedup.skip {
-			fmt.Printf("[Jobs] Catalog dedup: %s — %s\n", track.TrackName, dedup.reason)
+			slog.Info("[Jobs] Catalog dedup", "track", track.TrackName, "reason", dedup.reason)
 			jm.recordCatalogDedupSkip(track, req, dedup.libraryFileID, dedup.filePath, dedup.reason)
 			skipped++
 			continue
@@ -378,7 +379,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		}
 
 		if err := jm.saveJob(job); err != nil {
-			fmt.Printf("[Jobs] Failed to persist job %s: %v\n", job.ID, err)
+			slog.Error("[Jobs] Failed to persist job", "job_id", job.ID, "err", err)
 			skipped++
 			continue
 		}
@@ -388,7 +389,7 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		case jm.queue <- job.ID:
 			enqueued++
 		default:
-			fmt.Printf("[Jobs] Queue full, job %s will be picked up on next poll\n", job.ID)
+			slog.Warn("[Jobs] Queue full, job will be picked up on next poll", "job_id", job.ID)
 			enqueued++
 		}
 	}

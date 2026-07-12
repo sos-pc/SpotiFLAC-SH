@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -18,16 +19,16 @@ import (
 
 func (jm *JobManager) worker(id int) {
 	defer jm.wg.Done()
-	fmt.Printf("[Jobs] Worker %d started\n", id)
+	slog.Info("[Jobs] Worker started", "worker_id", id)
 
 	for {
 		select {
 		case <-jm.ctx.Done():
-			fmt.Printf("[Jobs] Worker %d stopped\n", id)
+			slog.Info("[Jobs] Worker stopped", "worker_id", id)
 			return
 		case jobID, ok := <-jm.queue:
 			if !ok {
-				fmt.Printf("[Jobs] Worker %d queue closed\n", id)
+				slog.Info("[Jobs] Worker queue closed", "worker_id", id)
 				return
 			}
 			jm.processJobSafely(jobID)
@@ -51,7 +52,7 @@ func (jm *JobManager) processJobSafely(jobID string) {
 		if r == nil {
 			return
 		}
-		fmt.Printf("[PANIC] recovered while processing job %s: %v\n%s\n", jobID, r, debug.Stack())
+		slog.Error("[Jobs] PANIC recovered while processing job", "job_id", jobID, "recover", r, "stack", string(debug.Stack()))
 
 		job, err := jm.loadJob(jobID)
 		if err != nil {
@@ -76,7 +77,7 @@ func (jm *JobManager) processJobSafely(jobID string) {
 func (jm *JobManager) processJob(jobID string) {
 	job, err := jm.loadJob(jobID)
 	if err != nil {
-		fmt.Printf("[Jobs] Failed to load job %s: %v\n", jobID, err)
+		slog.Error("[Jobs] Failed to load job", "job_id", jobID, "err", err)
 		return
 	}
 
@@ -93,7 +94,7 @@ func (jm *JobManager) processJob(jobID string) {
 		}
 	}
 
-	fmt.Printf("[Jobs] Processing: %s - %s\n", job.TrackName, job.ArtistName)
+	slog.Info("[Jobs] Processing", "track", job.TrackName, "artist", job.ArtistName)
 
 	job.Status = StatusDownloading
 	job.UpdatedAt = time.Now()
@@ -104,7 +105,7 @@ func (jm *JobManager) processJob(jobID string) {
 	outputDir := jm.buildOutputDir(job)
 
 	if existingPath := jm.checkFileExists(job, outputDir); existingPath != "" {
-		fmt.Printf("[Jobs] Already exists: %s\n", existingPath)
+		slog.Info("[Jobs] Already exists", "path", existingPath)
 		job.Status = StatusSkipped
 		job.FilePath = existingPath
 		if info, err := os.Stat(existingPath); err == nil {
@@ -152,7 +153,7 @@ func (jm *JobManager) processJob(jobID string) {
 		} else {
 			errMsg = resp.Error
 		}
-		fmt.Printf("[Jobs] Failed: %s - %v\n", job.TrackName, errMsg)
+		slog.Warn("[Jobs] Failed", "track", job.TrackName, "err", errMsg)
 		job.Status = StatusFailed
 		job.Error = errMsg
 		job.UpdatedAt = time.Now()
@@ -183,7 +184,7 @@ func (jm *JobManager) processJob(jobID string) {
 	jm.saveJob(job)
 	jm.notifyJob(job)
 	jm.recordCatalogDone(job)
-	fmt.Printf("[Jobs] Done: %s\n", job.TrackName)
+	slog.Info("[Jobs] Done", "track", job.TrackName)
 
 	if job.WatchlistID != "" {
 		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
@@ -242,6 +243,6 @@ func (jm *JobManager) recoverPendingJobs() {
 		}
 	}
 	if recovered > 0 {
-		fmt.Printf("[Jobs] Recovered %d interrupted jobs\n", recovered)
+		slog.Info("[Jobs] Recovered interrupted jobs", "count", recovered)
 	}
 }
