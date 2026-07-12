@@ -2,13 +2,33 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/go-flac/flacvorbis"
+	flac "github.com/go-flac/go-flac"
 )
+
+// writeTestFlacWithSpotifyID mirrors writeTestFlacWithTags (jobs_catalog_test.go)
+// but embeds SPOTIFY_ID instead of ISRC/GENRE — what scanRootForRebuild
+// actually keys its walk on (files with no SPOTIFY_ID tag are skipped as
+// NoTag, never reaching ingestLibraryFile at all).
+func writeTestFlacWithSpotifyID(t *testing.T, path, spotifyID string) {
+	t.Helper()
+	cmt := flacvorbis.New()
+	if err := cmt.Add(meta.SpotifyIDTagKey, spotifyID); err != nil {
+		t.Fatalf("add SPOTIFY_ID comment: %v", err)
+	}
+	block := cmt.Marshal()
+	f := &flac.File{Meta: []*flac.MetaDataBlock{&block}, Frames: []byte{0xFF, 0xF8}}
+	if err := os.WriteFile(path, f.Marshal(), 0644); err != nil {
+		t.Fatalf("write test FLAC: %v", err)
+	}
+}
 
 // TestIngestLibraryFileDoesNotRegressValidPath is the regression test for
 // the library-rebuild bug: a filesystem walk visiting a stale duplicate
@@ -141,5 +161,69 @@ func TestIngestLibraryFileBackfillsTrackMetadata(t *testing.T) {
 	if got.Name != tags.Title || got.ArtistName != tags.Artist || got.ISRC != tags.ISRC ||
 		got.Genre != tags.Genre || got.AlbumName != tags.Album || got.Copyright != tags.Copyright {
 		t.Errorf("track metadata not backfilled: got %+v, want it to reflect %+v", got, tags)
+	}
+}
+
+// TestIngestLibraryFileFailsFastOnExpiredContext is the regression test for
+// the "one shared clock for the whole scan" bug: library-rebuild used to
+// pass every file the SAME context, sharing one deadline across the entire
+// walk, so a large-but-healthy library could have its very last file cut
+// off by "context deadline exceeded" purely because earlier files had
+// already spent the shared budget — observed in practice on a clean
+// 1800-file scan. Each file now gets its own short-lived context
+// (scanRootForRebuild derives a fresh one via
+// context.WithTimeout(ctx, libraryRebuildPerFileTimeout) per file). This
+// test verifies the two halves of that contract: an already-expired
+// context fails the file it's used for, and — critically — does not affect
+// a subsequent call made with a fresh context for a different file.
+func TestIngestLibraryFileFailsFastOnExpiredContext(t *testing.T) {
+	database := openTestCatalogDB(t)
+	s := &Server{ctr: &Container{Catalog: database}}
+
+	expiredCtx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-expiredCtx.Done() // guarantee it's actually expired, not a timing race
+
+	badPath := filepath.Join(t.TempDir(), "stuck.flac")
+	if _, err := s.ingestLibraryFile(expiredCtx, "spotify:track:stuck", meta.FullTrackTags{SpotifyID: "spotify:track:stuck"}, badPath); err == nil {
+		t.Error("ingestLibraryFile with an expired context should fail for that file, not silently succeed")
+	}
+
+	// The next file, with its own fresh context, must succeed normally —
+	// the previous file's expired context must not have left the shared
+	// catalog connection or any other state in a way that poisons this call.
+	goodPath := filepath.Join(t.TempDir(), "fine.flac")
+	if err := os.WriteFile(goodPath, []byte("fake flac bytes"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	freshCtx, cancel2 := context.WithTimeout(context.Background(), libraryRebuildPerFileTimeout)
+	defer cancel2()
+	if _, err := s.ingestLibraryFile(freshCtx, "spotify:track:fine", meta.FullTrackTags{SpotifyID: "spotify:track:fine"}, goodPath); err != nil {
+		t.Errorf("ingestLibraryFile for a different file with a fresh context should succeed, got: %v", err)
+	}
+}
+
+// TestScanRootForRebuildImportsMultipleFiles is a sanity check for the
+// scanRootForRebuild refactor (each file now gets its own per-file context
+// instead of sharing the caller's): a normal multi-file walk must still
+// import every tagged file, unaffected by the extra context.WithTimeout
+// wrapping added around each ingestLibraryFile call.
+func TestScanRootForRebuildImportsMultipleFiles(t *testing.T) {
+	database := openTestCatalogDB(t)
+	s := &Server{ctr: &Container{Catalog: database}}
+
+	root := t.TempDir()
+	for i, id := range []string{"spotify:track:a", "spotify:track:b", "spotify:track:c"} {
+		path := filepath.Join(root, fmt.Sprintf("track-%d.flac", i))
+		writeTestFlacWithSpotifyID(t, path, id)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), libraryRebuildTimeout)
+	defer cancel()
+	result := &libraryRebuildResult{}
+	s.scanRootForRebuild(ctx, root, result, make(map[string]bool))
+
+	if result.FilesScanned != 3 || result.Imported != 3 || result.Failed != 0 {
+		t.Errorf("scanRootForRebuild = %+v, want 3 scanned/imported, 0 failed", result)
 	}
 }

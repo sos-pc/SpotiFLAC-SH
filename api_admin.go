@@ -54,11 +54,22 @@ type libraryRebuildResult struct {
 // found their music tree without bloating the JSON payload.
 const noTagSampleLimit = 50
 
-// libraryRebuildTimeout caps the total walk + write time. A library of
-// ~10 000 FLAC files is fully scanned in well under a minute on a
-// reasonable disk, so 10 minutes is a generous safety net for very
-// large or slow filesystems.
-const libraryRebuildTimeout = 10 * time.Minute
+// libraryRebuildTimeout is a last-resort circuit breaker for a genuinely
+// wedged scan (e.g. a hung network mount) — not a budget for legitimate
+// work. It used to be the ONE deadline shared across every file in the
+// walk, which meant a large-but-healthy library could have its very last
+// file cut off by "context deadline exceeded" simply because the shared
+// clock ran out — observed in practice on a clean 1800-file scan. Real
+// per-file protection now comes from libraryRebuildPerFileTimeout below;
+// this one is deliberately generous so it should never fire for legitimate
+// use, no matter the library size.
+const libraryRebuildTimeout = 2 * time.Hour
+
+// libraryRebuildPerFileTimeout bounds a single file's catalog writes
+// (ingestLibraryFile). A slow or wedged file only ever costs itself —
+// counted in result.Failed, the walk moves on to the next file — instead
+// of eating into a budget every other file also needs.
+const libraryRebuildPerFileTimeout = 30 * time.Second
 
 // registerAdminRoutes wires the /api/v1/admin/* endpoints. Each handler must
 // guard with v1RequireAdmin since the dispatch layer only checks authentication.
@@ -193,10 +204,10 @@ type watchlistRepairResult struct {
 // watchlist card, for the exact class of "M3U8 lost most of its tracks"
 // problem those two admin endpoints were built to address.
 //
-// The rebuild step can take up to libraryRebuildTimeout (10 min) on a large
-// library, well past any reverse-proxy's read timeout, so the handler only
-// kicks off the work and returns 202 immediately; completion is announced
-// over SSE (watchlist_repaired), mirroring how syncPlaylist announces
+// The rebuild step can take a while on a large library — well past any
+// reverse-proxy's read timeout — so the handler only kicks off the work and
+// returns 202 immediately; completion is announced over SSE
+// (watchlist_repaired), mirroring how syncPlaylist announces
 // watchlist_synced.
 func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 	if !v1RequirePermission(w, r, "manage") {
@@ -388,7 +399,13 @@ func (s *Server) scanRootForRebuild(
 		}
 		seenIDs[tags.SpotifyID] = true
 
-		bucket, err := s.ingestLibraryFile(ctx, tags.SpotifyID, tags, path)
+		// Derived from ctx (the overall safety-net deadline), not a fresh
+		// background context — so cancelling the whole rebuild (client
+		// disconnect, the 2h backstop) still stops an in-flight file's
+		// writes immediately instead of waiting out this shorter timeout.
+		fileCtx, cancel := context.WithTimeout(ctx, libraryRebuildPerFileTimeout)
+		bucket, err := s.ingestLibraryFile(fileCtx, tags.SpotifyID, tags, path)
+		cancel()
 		if err != nil {
 			fmt.Printf("[Catalog] library-rebuild: ingest %s -> %v\n", path, err)
 			result.Failed++
