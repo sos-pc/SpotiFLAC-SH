@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,11 +27,11 @@ var frontendFS embed.FS
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Server struct {
-	app      *App
-	ctr      *Container
-	mux      *http.ServeMux
-	loginRL  *LoginRateLimiter
-	uploads  *uploadRegistry
+	app     *App
+	ctr     *Container
+	mux     *http.ServeMux
+	loginRL *LoginRateLimiter
+	uploads *uploadRegistry
 }
 
 func NewServer(app *App, ctr *Container) *Server {
@@ -182,9 +181,6 @@ func (s *Server) registerRoutes() {
 		fileServer.ServeHTTP(w, r)
 	})
 }
-
-
-
 
 // uploadRegistry tracks the temp paths handleUpload has handed back to
 // clients, so analyze/convert (see cleanUploadOrLibraryPath in api_v1.go)

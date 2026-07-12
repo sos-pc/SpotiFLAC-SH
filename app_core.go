@@ -754,9 +754,9 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 // FFmpeg
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (a *App) IsFFmpegInstalled() (bool, error)    { return audio.IsFFmpegInstalled() }
-func (a *App) IsFFprobeInstalled() (bool, error)   { return audio.IsFFprobeInstalled() }
-func (a *App) GetFFmpegPath() (string, error)      { return util.GetFFmpegPath() }
+func (a *App) IsFFmpegInstalled() (bool, error)  { return audio.IsFFmpegInstalled() }
+func (a *App) IsFFprobeInstalled() (bool, error) { return audio.IsFFprobeInstalled() }
+func (a *App) GetFFmpegPath() (string, error)    { return util.GetFFmpegPath() }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio / File tools

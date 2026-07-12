@@ -18,8 +18,8 @@ const (
 )
 
 type rlEntry struct {
-	attempts  int
-	windowEnd time.Time
+	attempts     int
+	windowEnd    time.Time
 	blockedUntil time.Time
 }
 
