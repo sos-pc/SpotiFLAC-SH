@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 )
 
@@ -207,23 +208,32 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// FIX #16 — filepath.Base() pour éviter tout path traversal via header.Filename
 	safeFilename := filepath.Base(header.Filename)
-	tmpPath := filepath.Join(os.TempDir(), "spotiflac_upload_"+safeFilename)
 
-	dst, err := os.Create(tmpPath)
+	// os.CreateTemp's "*" is replaced with a random string, so two concurrent
+	// uploads of a file with the same original name can no longer collide on
+	// the exact same path (the previous os.Create(fixed name) truncated and
+	// reused whatever was there).
+	dst, err := os.CreateTemp(os.TempDir(), "spotiflac_upload_*_"+safeFilename)
 	if err != nil {
 		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	tmpPath := dst.Name()
 	defer dst.Close()
 
 	// FIX #15 — io.Copy remplace la boucle manuelle (plus simple, gère toutes les erreurs)
-	// FIX #1  — Le fichier temporaire sera nettoyé par le consommateur (app.go) après usage.
-	//           Un nettoyage ici supprimerait le fichier avant que le handler appelant ne le lise.
-	//           TODO : faire un defer os.Remove(tmpPath) côté consommateur après traitement.
 	if _, err := io.Copy(dst, file); err != nil {
 		http.Error(w, "failed to write temp file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// The consumer (analyze/convert) reads this file within seconds of the
+	// upload completing — no caller ever cleaned it up itself (this was a
+	// standing TODO), so schedule a bounded cleanup here instead of leaking
+	// one file per upload into the OS temp dir forever.
+	time.AfterFunc(10*time.Minute, func() {
+		os.Remove(tmpPath)
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"path": tmpPath})
