@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -525,7 +526,7 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 			// the same way every other checker failure is reported.
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("[PANIC] recovered checking status for %s: %v\n%s\n", s.name, r, debug.Stack())
+					slog.Error("[PANIC] recovered checking status", "service", s.name, "recover", r, "stack", string(debug.Stack()))
 					results[idx] = ServiceStatus{Name: s.name, URL: s.url, Status: "down", Error: fmt.Sprintf("internal error: %v", r), CheckedAt: time.Now().Unix()}
 				}
 			}()

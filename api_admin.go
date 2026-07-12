@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -237,7 +238,7 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 // runWatchlistRepair performs the actual repair steps in the background —
 // see v1RepairWatchlist for why this can't run inline in the request.
 func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
-	fmt.Printf("[Repair] %s: starting\n", pl.Name)
+	slog.Info("[Repair] starting", "playlist", pl.Name)
 	result := watchlistRepairResult{}
 
 	// 1. Retag this watchlist's own legacy files (BoltDB job record still
@@ -250,10 +251,10 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 			}
 		}
 		result.Retag = retagJobs(scoped)
-		fmt.Printf("[Repair] %s: retag scanned=%d tagged=%d skipped=%d failed=%d\n",
-			pl.Name, result.Retag.Scanned, result.Retag.Tagged, result.Retag.Skipped, result.Retag.Failed)
+		slog.Info("[Repair] retag done", "playlist", pl.Name,
+			"scanned", result.Retag.Scanned, "tagged", result.Retag.Tagged, "skipped", result.Retag.Skipped, "failed", result.Retag.Failed)
 	} else {
-		fmt.Printf("[Repair] %s: failed to list jobs for retag: %v\n", pl.Name, jobsErr)
+		slog.Warn("[Repair] failed to list jobs for retag", "playlist", pl.Name, "err", jobsErr)
 	}
 
 	// 2. Rebuild the catalog for this watchlist's own download path only
@@ -273,11 +274,12 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 			}
 			cancel()
 			result.Rebuild = rebuildResult
-			fmt.Printf("[Repair] %s: rebuild scanned=%d imported=%d verified=%d moved=%d duplicate=%d no_tag=%d failed=%d timed_out=%v\n",
-				pl.Name, rebuildResult.FilesScanned, rebuildResult.Imported, rebuildResult.Verified,
-				rebuildResult.Moved, rebuildResult.Duplicate, rebuildResult.NoTag, rebuildResult.Failed, rebuildResult.TimedOut)
+			slog.Info("[Repair] rebuild done", "playlist", pl.Name,
+				"scanned", rebuildResult.FilesScanned, "imported", rebuildResult.Imported, "verified", rebuildResult.Verified,
+				"moved", rebuildResult.Moved, "duplicate", rebuildResult.Duplicate, "no_tag", rebuildResult.NoTag,
+				"failed", rebuildResult.Failed, "timed_out", rebuildResult.TimedOut)
 		} else {
-			fmt.Printf("[Repair] %s: download path %q not accessible, skipping rebuild: %v\n", pl.Name, root, statErr)
+			slog.Warn("[Repair] download path not accessible, skipping rebuild", "playlist", pl.Name, "path", root, "err", statErr)
 		}
 	}
 
@@ -287,9 +289,9 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 	result.M3U8 = m3uResult
 	if m3uErr != nil {
 		result.M3U8Error = m3uErr.Error()
-		fmt.Printf("[Repair] %s: M3U8 regeneration failed: %v\n", pl.Name, m3uErr)
+		slog.Warn("[Repair] M3U8 regeneration failed", "playlist", pl.Name, "err", m3uErr)
 	}
-	fmt.Printf("[Repair] %s: done — %d/%d tracks resolved in M3U8\n", pl.Name, result.M3U8.Resolved, result.M3U8.Total)
+	slog.Info("[Repair] done", "playlist", pl.Name, "resolved", result.M3U8.Resolved, "total", result.M3U8.Total)
 
 	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
 		s.ctr.Jobs.hub.publish(JobEvent{
@@ -341,7 +343,7 @@ func (s *Server) collectScanRoots() []string {
 					continue
 				}
 				if !isSubPath(globalRoot, dp) {
-					fmt.Printf("[Admin] library-rebuild: ignoring watchlist download path outside library root: %s\n", dp)
+					slog.Warn("[Admin] library-rebuild: ignoring watchlist download path outside library root", "path", dp)
 					continue
 				}
 				addIfReadable(dp)
@@ -378,8 +380,9 @@ func (s *Server) scanRootForRebuild(
 		}
 		result.FilesScanned++
 		if time.Since(lastLog) >= scanProgressLogInterval {
-			fmt.Printf("[Catalog] library-rebuild: %s — %d files scanned so far (imported=%d verified=%d moved=%d duplicate=%d no_tag=%d failed=%d), still walking...\n",
-				root, result.FilesScanned, result.Imported, result.Verified, result.Moved, result.Duplicate, result.NoTag, result.Failed)
+			slog.Info("[Catalog] library-rebuild: still walking", "root", root,
+				"files_scanned", result.FilesScanned, "imported", result.Imported, "verified", result.Verified,
+				"moved", result.Moved, "duplicate", result.Duplicate, "no_tag", result.NoTag, "failed", result.Failed)
 			lastLog = time.Now()
 		}
 
@@ -410,7 +413,7 @@ func (s *Server) scanRootForRebuild(
 		bucket, err := s.ingestLibraryFile(fileCtx, tags.SpotifyID, tags, path)
 		cancel()
 		if err != nil {
-			fmt.Printf("[Catalog] library-rebuild: ingest %s -> %v\n", path, err)
+			slog.Warn("[Catalog] library-rebuild: ingest failed", "path", path, "err", err)
 			result.Failed++
 			return nil
 		}
@@ -602,7 +605,7 @@ func (s *Server) v1RetagIncompleteMetadata(w http.ResponseWriter, r *http.Reques
 func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackForRetag) retagIncompleteMetadataResult {
 	result := retagIncompleteMetadataResult{}
 	lastLog := time.Now()
-	fmt.Printf("[Retag] incomplete-metadata: starting, %d track(s) to process\n", len(tracks))
+	slog.Info("[Retag] incomplete-metadata: starting", "tracks", len(tracks))
 
 	for i, t := range tracks {
 		if ctx.Err() != nil {
@@ -610,8 +613,8 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 		}
 		result.Scanned++
 		if time.Since(lastLog) >= scanProgressLogInterval {
-			fmt.Printf("[Retag] incomplete-metadata: %d/%d processed so far (filled=%d skipped=%d failed=%d), still working...\n",
-				i, len(tracks), result.Filled, result.Skipped, result.Failed)
+			slog.Info("[Retag] incomplete-metadata: still working", "processed", i, "total", len(tracks),
+				"filled", result.Filled, "skipped", result.Skipped, "failed", result.Failed)
 			lastLog = time.Now()
 		}
 
@@ -620,7 +623,7 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 		cancel()
 		switch {
 		case err != nil:
-			fmt.Printf("[Retag] incomplete-metadata: %s -> %v\n", t.SpotifyID, err)
+			slog.Warn("[Retag] incomplete-metadata: track failed", "spotify_id", t.SpotifyID, "err", err)
 			result.Failed++
 			result.FailedIDs = append(result.FailedIDs, t.SpotifyID)
 		case filled:
@@ -637,8 +640,8 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 		}
 	}
 
-	fmt.Printf("[Retag] incomplete-metadata done: scanned=%d filled=%d skipped=%d failed=%d\n",
-		result.Scanned, result.Filled, result.Skipped, result.Failed)
+	slog.Info("[Retag] incomplete-metadata done",
+		"scanned", result.Scanned, "filled", result.Filled, "skipped", result.Skipped, "failed", result.Failed)
 	return result
 }
 

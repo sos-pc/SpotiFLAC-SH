@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 	if spotifyTrackID == "" {
 		return "", fmt.Errorf("spotify track ID is required")
 	}
-	fmt.Printf("[GetStreamingURLs] Called for track ID: %s, Region: %s\n", spotifyTrackID, region)
+	slog.Debug("[GetStreamingURLs] Called", "track_id", spotifyTrackID, "region", region)
 	jm := a.ctr.Jobs
 	if jm == nil {
 		return "", fmt.Errorf("job manager not initialized")
@@ -65,7 +66,7 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 
 	// Si Songlink échoue ou ne trouve rien (ex: 429), on tente une recherche directe sur l'API Tidal
 	if err != nil || urls == nil || (urls.TidalURL == "" && urls.AmazonURL == "") {
-		fmt.Printf("[GetStreamingURLs] Songlink failed/empty (%v), falling back to direct Tidal Search for ID: %s\n", err, spotifyTrackID)
+		slog.Debug("[GetStreamingURLs] Songlink failed/empty, falling back to direct Tidal Search", "err", err, "track_id", spotifyTrackID)
 
 		// 1. Récupérer le nom de la piste et de l'artiste depuis Spotify via l'ID
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -96,10 +97,10 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 							urls = &songlink.SongLinkURLs{}
 						}
 						urls.TidalURL = tidalURL
-						fmt.Printf("[GetStreamingURLs] ✓ Fallback successful: Found Tidal URL %s\n", tidalURL)
+						slog.Debug("[GetStreamingURLs] Fallback successful, found Tidal URL", "url", tidalURL)
 						err = nil // On efface l'erreur Songlink pour le frontend
 					} else {
-						fmt.Printf("[GetStreamingURLs] Tidal direct search failed: %v\n", tErr)
+						slog.Debug("[GetStreamingURLs] Tidal direct search failed", "err", tErr)
 					}
 				}
 			}
@@ -408,9 +409,9 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 
 	select {
 	case jm.queue <- job.ID:
-		fmt.Printf("[Download] Job %s added to queue\n", job.ID)
+		slog.Info("[Download] Job added to queue", "job_id", job.ID)
 	default:
-		fmt.Printf("[Download] Queue full, job %s will be picked up later\n", job.ID)
+		slog.Warn("[Download] Queue full, job will be picked up later", "job_id", job.ID)
 	}
 
 	// Informe le frontend (qui gère l'état via l'historique/queue)
@@ -968,7 +969,7 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 			// zero-value "not found" res satisfies both.
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("[PANIC] recovered checking file existence for %s - %s: %v\n%s\n", t.ArtistName, t.TrackName, r, debug.Stack())
+					slog.Error("[PANIC] recovered checking file existence", "artist", t.ArtistName, "track", t.TrackName, "recover", r, "stack", string(debug.Stack()))
 					resultsChan <- result{index: idx, result: res}
 				}
 			}()
