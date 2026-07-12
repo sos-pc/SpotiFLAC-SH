@@ -1,8 +1,9 @@
-const spectrumCache = new Map<string, any>();
-export function setSpectrumCache(filePath: string, spectrumData: any): void {
+import type { SpectrumData } from "@/types/api";
+const spectrumCache = new Map<string, SpectrumData>();
+export function setSpectrumCache(filePath: string, spectrumData: SpectrumData): void {
     spectrumCache.set(filePath, spectrumData);
 }
-export function getSpectrumCache(filePath: string): any | null {
+export function getSpectrumCache(filePath: string): SpectrumData | null {
     return spectrumCache.get(filePath) || null;
 }
 export function clearSpectrumCache(filePath?: string): void {

@@ -1,8 +1,12 @@
+interface WindowWithWebkitAudio extends Window {
+    webkitAudioContext?: typeof AudioContext;
+}
 class AudioManager {
     private audioContext: AudioContext | null = null;
     private getAudioContext(): AudioContext {
         if (!this.audioContext) {
-            this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const AudioContextClass = window.AudioContext || (window as WindowWithWebkitAudio).webkitAudioContext;
+            this.audioContext = new AudioContextClass();
         }
         return this.audioContext;
     }

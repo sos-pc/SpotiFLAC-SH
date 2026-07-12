@@ -242,7 +242,7 @@ export async function loadSettings(): Promise<Settings> {
     try {
         const backendSettings = await LoadSettings();
         if (backendSettings) {
-            const parsed = backendSettings as any;
+            const parsed = backendSettings as unknown as Record<string, unknown>;
             if ('darkMode' in parsed && !('themeMode' in parsed)) {
                 parsed.themeMode = parsed.darkMode ? 'dark' : 'light';
                 delete parsed.darkMode;
@@ -328,7 +328,7 @@ export async function loadSettings(): Promise<Settings> {
     }
     const local = getSettingsFromLocalStorage();
     try {
-        await SaveToBackend(local as any);
+        await SaveToBackend(local);
         cachedSettings = local;
     }
     catch (error) {
@@ -374,7 +374,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     try {
         cachedSettings = settings;
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-        await SaveToBackend(settings as any);
+        await SaveToBackend(settings);
         window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
     }
     catch (error) {
