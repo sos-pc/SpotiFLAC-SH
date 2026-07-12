@@ -43,13 +43,18 @@ RUN go mod tidy && \
 # A statically-linked ffmpeg build has no runtime library dependencies of its
 # own to carry those CVEs.
 #
-# Pinned to a specific dated release tag (BtbN/FFmpeg-Builds cuts one most
-# days), not a floating "latest" pointer — same reasoning as the trivy-action
-# commit-SHA pin elsewhere in this repo: an immutable reference can't be
-# silently repointed. Verified against the checksums.sha256 published
-# alongside that same tag rather than a hash transcribed into this file,
-# since the build environment fetching it has real internet access and can
-# verify tarball-against-its-own-published-checksum at build time.
+# Pinned to a specific dated release tag AND a specific versioned asset
+# filename (BtbN/FFmpeg-Builds cuts a dated release most days, each carrying
+# assets like ffmpeg-N-<rev>-g<hash>-linux64-lgpl.tar.xz). Deliberately not
+# the generic "ffmpeg-master-latest-linux64-lgpl.tar.xz" name: that filename
+# only exists under BtbN's separate "latest" release, which is a single tag
+# force-updated in place on every build — exactly the mutable-reference
+# pattern this repo avoids elsewhere (see the trivy-action commit-SHA pin
+# below). The dated tag + exact asset name can't be silently repointed.
+# Verified against the checksums.sha256 published alongside that same tag
+# rather than a hash transcribed into this file, since the build environment
+# fetching it has real internet access and can verify
+# tarball-against-its-own-published-checksum at build time.
 #
 # LGPL build, not GPL: this app only needs libmp3lame (LGPL-licensed LAME)
 # plus FFmpeg's own native aac/alac encoders (see backend/audio/ffmpeg.go) —
@@ -66,31 +71,56 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 ARG FFMPEG_BUILD_TAG=autobuild-2026-07-11-13-13
+ARG FFMPEG_ASSET=ffmpeg-N-125519-g300cac3078-linux64-lgpl.tar.xz
 WORKDIR /tmp/ffmpeg
-RUN curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/ffmpeg-master-latest-linux64-lgpl.tar.xz" && \
+RUN curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/${FFMPEG_ASSET}" && \
     curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/checksums.sha256" && \
-    grep 'linux64-lgpl\.tar\.xz$' checksums.sha256 | sha256sum -c - && \
-    tar xf ffmpeg-master-latest-linux64-lgpl.tar.xz --strip-components=1 && \
+    grep "${FFMPEG_ASSET}\$" checksums.sha256 | sha256sum -c - && \
+    tar xf "${FFMPEG_ASSET}" --strip-components=1 && \
     chmod +x bin/ffmpeg bin/ffprobe
+
+# Minimal root skeleton for the scratch runtime below (which has no shell to
+# mkdir/chown itself): the app's hardcoded fallback paths (/home/nonroot/Music,
+# /home/nonroot/.SpotiFLAC — see api_admin.go, watcher.go, main.go) plus /tmp
+# (server.go uses os.TempDir() for upload staging), all owned by uid/gid 1000
+# to match the non-root USER the runtime image runs as.
+RUN mkdir -p /rootfs/home/nonroot/Music /rootfs/home/nonroot/.SpotiFLAC /rootfs/tmp && \
+    chown -R 1000:1000 /rootfs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 4 — Runtime
+#
+# FROM scratch, not a Debian base: the Go binary is CGO_ENABLED=0 (statically
+# linked, no glibc dependency) and ffmpeg/ffprobe above are static builds —
+# nothing in this image actually needs a Linux distro, a package manager, or
+# a shell. The only non-negotiable OS-level artifact a Go program still needs
+# for outbound TLS is a CA certificate bundle, copied in as a plain data file
+# from the ffmpeg-static stage (which already installed ca-certificates to
+# fetch ffmpeg over HTTPS) — everything else that a Debian base would have
+# provided (bash, coreutils, apt, tzdata) is unused: no code shells out
+# anymore (see backend/util/system.go), and grep across the codebase found
+# no timezone-database lookups (time.LoadLocation). Result: zero OS packages
+# in the final image, so a vulnerability scanner has zero OS-level CVE
+# surface left to report — only our own Go binary and the ffmpeg binary,
+# both already scanned clean.
+#
+# Docker/Kubernetes always inject /etc/resolv.conf, /etc/hosts and
+# /etc/hostname into a running container regardless of what the image itself
+# contains, so DNS resolution works here even though the image ships none of
+# those files.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+FROM scratch
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        tzdata && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN useradd -u 1000 -m -s /bin/bash nonroot
-USER nonroot
-WORKDIR /home/nonroot
+COPY --from=ffmpeg-static /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=ffmpeg-static --chown=1000:1000 /rootfs/home /home
+COPY --from=ffmpeg-static --chown=1000:1000 /rootfs/tmp /tmp
 
 COPY --from=backend-builder /app/spotiflac /usr/local/bin/spotiflac
 COPY --from=ffmpeg-static /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=ffmpeg-static /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+
+USER 1000:1000
+WORKDIR /home/nonroot
 
 EXPOSE 6890
 

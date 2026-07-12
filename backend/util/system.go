@@ -2,16 +2,16 @@ package util
 
 import (
 	"fmt"
-	"os/exec"
+	"os"
 	"runtime"
 	"strings"
 )
 
 func GetOSInfo() (string, error) {
 	arch := runtime.GOARCH
-	out, err := exec.Command("cat", "/etc/os-release").Output()
+	data, err := os.ReadFile("/etc/os-release")
 	if err == nil {
-		lines := strings.Split(string(out), "\n")
+		lines := strings.Split(string(data), "\n")
 		for _, line := range lines {
 			if strings.HasPrefix(line, "PRETTY_NAME=") {
 				name := strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), "\"")
