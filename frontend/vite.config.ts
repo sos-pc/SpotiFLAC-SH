@@ -1,16 +1,12 @@
 import path from "path";
-import fs from "fs";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-let appVersion = "1.0.0";
-try {
-    const wailsJsonPath = path.resolve(__dirname, "../wails.json");
-    const wailsJson = JSON.parse(fs.readFileSync(wailsJsonPath, "utf-8"));
-    appVersion = wailsJson.info.productVersion;
-} catch (_) {
-    // wails.json absent en mode web — version par défaut
-}
+// Set by the Docker build (see Dockerfile's frontend-builder stage, fed by
+// CI's docker/metadata-action `version` output) — "dev" for any build that
+// doesn't go through that pipeline (local `bun run build`/`dev`), so an
+// unversioned build is honestly labeled instead of showing a fake version.
+const appVersion = process.env.APP_VERSION || "dev";
 export default defineConfig({
     plugins: [react(), tailwindcss()],
     resolve: {

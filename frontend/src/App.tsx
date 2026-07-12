@@ -87,7 +87,7 @@ function App() {
     }, []);
     const checkForUpdates = async () => {
         try {
-            const response = await fetch("https://api.github.com/repos/afkarxyz/SpotiFLAC/releases/latest");
+            const response = await fetch("https://api.github.com/repos/sos-pc/SpotiFLAC-SH/releases/latest");
             const data = await response.json();
             const latestVersion = data.tag_name?.replace(/^v/, "") || "";
             if (data.published_at) {

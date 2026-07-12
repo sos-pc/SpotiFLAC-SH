@@ -5,6 +5,12 @@ FROM oven/bun:1@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d
 
 WORKDIR /app/frontend
 
+# Baked into the UI's displayed version (see frontend/vite.config.ts) — CI
+# passes the real semver/branch tag here; a plain `docker build` with no
+# --build-arg falls back to vite.config.ts's own "dev" default.
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
+
 COPY frontend/ .
 RUN bun install --frozen-lockfile
 RUN bun run build
