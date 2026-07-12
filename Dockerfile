@@ -128,6 +128,17 @@ COPY --from=ffmpeg-static /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 USER 1000:1000
 WORKDIR /home/nonroot
 
+# scratch has no /etc/passwd, so the container runtime can't look up a home
+# directory for numeric UID 1000 the way it could when the previous
+# debian-based image's `useradd -m` gave USER an /etc/passwd entry to
+# resolve — it falls back to HOME=/, which broke every os.UserHomeDir()
+# caller (config dir, default music path, ffmpeg path, Tidal auth token
+# storage) into resolving paths under / instead of /home/nonroot, where
+# these mounted volumes and the skeleton dirs above actually live. Setting
+# HOME explicitly restores the same resolution the debian image gave for
+# free.
+ENV HOME=/home/nonroot
+
 EXPOSE 6890
 
 CMD ["/usr/local/bin/spotiflac"]
