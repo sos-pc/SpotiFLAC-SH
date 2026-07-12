@@ -127,7 +127,8 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		a.ClearCompletedDownloads()
+		user := GetUserFromContext(r)
+		a.ClearCompletedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
@@ -135,7 +136,8 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		a.ClearAllDownloads()
+		user := GetUserFromContext(r)
+		a.ClearAllDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
@@ -275,7 +277,8 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		message, err := a.ExportFailedDownloads()
+		user := GetUserFromContext(r)
+		message, err := a.ExportFailedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return

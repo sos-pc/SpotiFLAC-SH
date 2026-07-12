@@ -7,6 +7,7 @@ package main
 //
 // Événements :
 //   event: job_update       — état d'un job (pending/downloading/done/failed/skipped)
+//   event: job_deleted      — job supprimé (Clear Completed/All — voir jobs_storage.go)
 //   event: connected        — snapshot initial de la queue au moment de la connexion
 //   event: watchlist_synced — fin de synchronisation d'une watchlist
 //   event: watchlist_repaired — fin de réparation d'une watchlist (voir api_admin.go)

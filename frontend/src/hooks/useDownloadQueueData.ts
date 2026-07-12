@@ -58,20 +58,6 @@ export function useDownloadQueueData() {
     });
   });
 
-  useJobsStreamEvent("queue_cleared", () => {
-    setJobs((prev) => {
-      const next = new Map(prev);
-      // Supprimer tous les jobs terminaux (done/skipped/failed)
-      // Garder pending et downloading (ils sont toujours actifs)
-      for (const [id, job] of next) {
-        if (job.status !== "pending" && job.status !== "downloading") {
-          next.delete(id);
-        }
-      }
-      return next;
-    });
-  });
-
   const jobsArray = Array.from(jobs.values());
   const queue = jobsArray.map(toQueueItem);
 

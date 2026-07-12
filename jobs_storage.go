@@ -227,9 +227,15 @@ func (jm *JobManager) CleanupOldJobs() (int, []string, error) {
 	return deleted, deletedIDs, err
 }
 
-// ClearCompletedJobs removes all done/skipped-manual jobs from the DB.
-func (jm *JobManager) ClearCompletedJobs() ([]string, error) {
+// clearJobsWhere deletes every job matching pred, scoped to userID unless
+// isAdmin (in which case every user's matching jobs are deleted). Each
+// deletion is broadcast as its own job_deleted event carrying the job's
+// real owner, so v1JobsStream's existing per-user filter — the same one
+// job_update already relies on — keeps the broadcast scoped to the right
+// connected clients instead of notifying every user of every deletion.
+func (jm *JobManager) clearJobsWhere(userID string, isAdmin bool, pred func(Job) bool) ([]string, error) {
 	var deletedIDs []string
+	var deletedOwners []string
 	err := jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketJobs)
 		if b == nil {
@@ -241,11 +247,15 @@ func (jm *JobManager) ClearCompletedJobs() ([]string, error) {
 			if err := json.Unmarshal(v, &job); err != nil {
 				return nil
 			}
-			if job.Status == StatusDone ||
-				(job.Status == StatusSkipped && job.WatchlistID == "") {
-				toDelete = append(toDelete, k)
-				deletedIDs = append(deletedIDs, job.ID)
+			if !isAdmin && job.UserID != userID {
+				return nil
 			}
+			if !pred(job) {
+				return nil
+			}
+			toDelete = append(toDelete, k)
+			deletedIDs = append(deletedIDs, job.ID)
+			deletedOwners = append(deletedOwners, job.UserID)
 			return nil
 		})
 		for _, k := range toDelete {
@@ -254,32 +264,35 @@ func (jm *JobManager) ClearCompletedJobs() ([]string, error) {
 		return nil
 	})
 	if jm.hub != nil {
-		for _, id := range deletedIDs {
-			jm.hub.publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id}})
+		for i, id := range deletedIDs {
+			jm.hub.publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id, UserID: deletedOwners[i]}})
 		}
 	}
 	return deletedIDs, err
 }
 
-// ClearAllJobs removes every job from the DB (key-by-key, no bucket drop).
-func (jm *JobManager) ClearAllJobs() error {
-	err := jm.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketJobs)
-		if b == nil {
-			return nil
-		}
-		var toDelete [][]byte
-		b.ForEach(func(k, v []byte) error {
-			toDelete = append(toDelete, k)
-			return nil
-		})
-		for _, k := range toDelete {
-			b.Delete(k)
-		}
-		return nil
+// ClearCompletedJobs removes done/skipped-manual jobs belonging to userID
+// (or every user's if isAdmin). Skipped jobs tied to a watchlist are kept
+// — that record is what prevents an immediate re-enqueue of the same track
+// on the watchlist's next sync.
+func (jm *JobManager) ClearCompletedJobs(userID string, isAdmin bool) ([]string, error) {
+	return jm.clearJobsWhere(userID, isAdmin, func(job Job) bool {
+		return job.Status == StatusDone || (job.Status == StatusSkipped && job.WatchlistID == "")
 	})
-	if jm.hub != nil {
-		jm.hub.publish(JobEvent{Type: "queue_cleared", Job: nil})
-	}
-	return err
+}
+
+// ClearAllJobs removes every terminal job (done/failed/skipped-manual)
+// belonging to userID, or every user's if isAdmin. Deliberately leaves
+// pending/downloading jobs untouched — the frontend already assumes active
+// downloads survive a "clear all" click.
+func (jm *JobManager) ClearAllJobs(userID string, isAdmin bool) ([]string, error) {
+	return jm.clearJobsWhere(userID, isAdmin, func(job Job) bool {
+		if job.Status == StatusPending || job.Status == StatusDownloading {
+			return false
+		}
+		if job.Status == StatusSkipped && job.WatchlistID != "" {
+			return false
+		}
+		return true
+	})
 }

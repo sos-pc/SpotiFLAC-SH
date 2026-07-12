@@ -2,7 +2,7 @@ import { getStreamToken } from "./auth";
 
 // jobsStream is a single shared connection to the backend's multiplexed SSE
 // endpoint (/api/v1/jobs/stream — see sse.go), which already fans
-// job_update/job_deleted/queue_cleared/watchlist_synced/watchlist_repaired/
+// job_update/job_deleted/watchlist_synced/watchlist_repaired/
 // server_log events out to every connected client server-side, per
 // authenticated user. Before this, several independent frontend call sites
 // (the download queue widgets, the browser-download-mode listener, the
@@ -28,7 +28,6 @@ import { getStreamToken } from "./auth";
 export type JobsStreamEventType =
   | "job_update"
   | "job_deleted"
-  | "queue_cleared"
   | "watchlist_synced"
   | "watchlist_repaired"
   | "server_log";

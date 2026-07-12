@@ -438,19 +438,19 @@ func (a *App) GetDefaults() map[string]string {
 	}
 }
 
-func (a *App) ClearCompletedDownloads() {
+func (a *App) ClearCompletedDownloads(userID string, isAdmin bool) {
 	if jm := a.ctr.Jobs; jm != nil {
-		jm.ClearCompletedJobs()
+		jm.ClearCompletedJobs(userID, isAdmin)
 	}
 }
 
-func (a *App) ClearAllDownloads() {
+func (a *App) ClearAllDownloads(userID string, isAdmin bool) {
 	if jm := a.ctr.Jobs; jm != nil {
-		jm.ClearAllJobs()
+		jm.ClearAllJobs(userID, isAdmin)
 	}
 }
 
-func (a *App) ExportFailedDownloads() (string, error) {
+func (a *App) ExportFailedDownloads(userID string, isAdmin bool) (string, error) {
 	jm := a.ctr.Jobs
 	if jm == nil {
 		return "No failed downloads", nil
@@ -462,6 +462,9 @@ func (a *App) ExportFailedDownloads() (string, error) {
 	var failedItems []string
 	hasFailed := false
 	for _, job := range jobs {
+		if !isAdmin && job.UserID != userID {
+			continue
+		}
 		if job.Status == StatusFailed {
 			hasFailed = true
 			break
@@ -472,6 +475,9 @@ func (a *App) ExportFailedDownloads() (string, error) {
 	}
 	failedItems = append(failedItems, "Track,Artist,Album,Error")
 	for _, job := range jobs {
+		if !isAdmin && job.UserID != userID {
+			continue
+		}
 		if job.Status == StatusFailed {
 			row := fmt.Sprintf("%q,%q,%q,%q",
 				job.TrackName, job.ArtistName, job.AlbumName, job.Error)

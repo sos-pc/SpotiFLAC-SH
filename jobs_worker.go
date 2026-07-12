@@ -123,10 +123,24 @@ func (jm *JobManager) processJob(jobID string) {
 	streamingURLs := jm.getStreamingURLs(job)
 
 	req := jm.buildDownloadRequest(job, outputDir, streamingURLs)
+	lastPersisted := time.Now()
 	req.SpeedCallback = func(mbDownloaded, speedMBps float64) {
 		job.Speed = speedMBps
 		job.TotalSize = mbDownloaded
 		job.UpdatedAt = time.Now()
+		// Persisted at most once every 2s (this callback itself already
+		// fires roughly every 256KB — see ProgressWriter.Write — which for
+		// a fast connection can be many times per second) so a client that
+		// (re)connects mid-download — a page refresh, a tab coming back
+		// from the background, a brief network drop — sees near-live
+		// progress in its initial snapshot (v1JobsStream reads this same
+		// BoltDB record) instead of the zero values this job was saved
+		// with at the very start of the download, before any bytes had
+		// moved.
+		if time.Since(lastPersisted) >= 2*time.Second {
+			jm.saveJob(job)
+			lastPersisted = time.Now()
+		}
 		jm.notifyJob(job)
 	}
 
