@@ -12,7 +12,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -59,14 +59,14 @@ func (w *Watcher) mirrorWatchlistToCatalog(pl *WatchedPlaylist) {
 			continue
 		}
 		if err := db.UpsertTrackStub(ctx, catalog, id); err != nil {
-			fmt.Printf("[Catalog] UpsertTrackStub %s failed: %v\n", id, err)
+			slog.Warn("[Catalog] UpsertTrackStub failed", "spotify_id", id, "err", err)
 			return
 		}
 	}
 
 	added, removed, err := db.SetWatchlistTracks(ctx, catalog, pl.ID, pl.TrackIDs)
 	if err != nil {
-		fmt.Printf("[Catalog] SetWatchlistTracks for %s failed: %v\n", pl.Name, err)
+		slog.Warn("[Catalog] SetWatchlistTracks failed", "playlist", pl.Name, "err", err)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (w *Watcher) mirrorWatchlistToCatalog(pl *WatchedPlaylist) {
 		RemovedCount: len(removed),
 	}
 	if err := db.CreatePlaylistSnapshot(ctx, catalog, snap, pl.TrackIDs); err != nil {
-		fmt.Printf("[Catalog] CreatePlaylistSnapshot for %s failed: %v\n", pl.Name, err)
+		slog.Warn("[Catalog] CreatePlaylistSnapshot failed", "playlist", pl.Name, "err", err)
 	}
 }
 
@@ -126,7 +126,7 @@ func (w *Watcher) catalogPathsForWatchlist(pl *WatchedPlaylist) map[string]strin
 
 	rows, err := w.jm.catalog.QueryContext(ctx, query, args...)
 	if err != nil {
-		fmt.Printf("[Catalog] resolveTrackPaths query failed for %s: %v\n", pl.Name, err)
+		slog.Warn("[Catalog] resolveTrackPaths query failed", "playlist", pl.Name, "err", err)
 		return map[string]string{}
 	}
 	defer rows.Close()
@@ -135,7 +135,7 @@ func (w *Watcher) catalogPathsForWatchlist(pl *WatchedPlaylist) map[string]strin
 	for rows.Next() {
 		var id, path string
 		if err := rows.Scan(&id, &path); err != nil {
-			fmt.Printf("[Catalog] scan failed for %s: %v\n", pl.Name, err)
+			slog.Warn("[Catalog] scan failed", "playlist", pl.Name, "err", err)
 			continue
 		}
 		out[id] = path
@@ -179,7 +179,7 @@ func (w *Watcher) catalogFileSizesForWatchlist(pl *WatchedPlaylist) map[string]i
 
 	rows, err := w.jm.catalog.QueryContext(ctx, query, args...)
 	if err != nil {
-		fmt.Printf("[Catalog] GetWatchlistStats query failed for %s: %v\n", pl.Name, err)
+		slog.Warn("[Catalog] GetWatchlistStats query failed", "playlist", pl.Name, "err", err)
 		return map[string]int64{}
 	}
 	defer rows.Close()
@@ -189,7 +189,7 @@ func (w *Watcher) catalogFileSizesForWatchlist(pl *WatchedPlaylist) map[string]i
 		var id string
 		var size int64
 		if err := rows.Scan(&id, &size); err != nil {
-			fmt.Printf("[Catalog] GetWatchlistStats scan failed for %s: %v\n", pl.Name, err)
+			slog.Warn("[Catalog] GetWatchlistStats scan failed", "playlist", pl.Name, "err", err)
 			continue
 		}
 		out[id] = size

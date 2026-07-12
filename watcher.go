@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -107,7 +108,7 @@ func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
 			func(pl WatchedPlaylist) {
 				defer func() {
 					if r := recover(); r != nil {
-						fmt.Printf("[PANIC] recovered checking M3U8 integrity for %s: %v\n%s\n", pl.Name, r, debug.Stack())
+						slog.Error("[Watcher] PANIC recovered checking M3U8 integrity", "playlist", pl.Name, "recover", r, "stack", string(debug.Stack()))
 					}
 				}()
 				w.checkM3U8Integrity(pl)
@@ -115,7 +116,7 @@ func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
 		}
 	})
 	util.SafeGo("watcher.daemon", w.daemon)
-	fmt.Println("[Watcher] Daemon started")
+	slog.Info("[Watcher] Daemon started")
 	return w
 }
 
@@ -137,7 +138,7 @@ func (w *Watcher) daemon() {
 	for {
 		select {
 		case <-w.ctx.Done():
-			fmt.Println("[Watcher] Daemon stopped")
+			slog.Info("[Watcher] Daemon stopped")
 			return
 		case <-ticker.C:
 			w.checkAllSafely()
@@ -152,7 +153,7 @@ func (w *Watcher) daemon() {
 func (w *Watcher) checkAllSafely() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("[PANIC] recovered in watcher.checkAll: %v\n%s\n", r, debug.Stack())
+			slog.Error("[Watcher] PANIC recovered in checkAll", "recover", r, "stack", string(debug.Stack()))
 		}
 	}()
 	w.checkAll()
@@ -197,7 +198,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	w.mu.Lock()
 	if w.syncing[pl.ID] {
 		w.mu.Unlock()
-		fmt.Printf("[Watcher] Sync already in progress for %s — skipping\n", pl.Name)
+		slog.Debug("[Watcher] Sync already in progress, skipping", "playlist", pl.Name)
 		return
 	}
 	w.syncing[pl.ID] = true
@@ -208,20 +209,20 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		w.mu.Unlock()
 	}()
 
-	fmt.Printf("[Watcher] Syncing: %s\n", pl.SpotifyURL)
+	slog.Info("[Watcher] Syncing", "url", pl.SpotifyURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	data, err := spotify.GetFilteredSpotifyData(ctx, pl.SpotifyURL, true, time.Second)
 	if err != nil {
-		fmt.Printf("[Watcher] Failed to fetch metadata for %s: %v\n", pl.SpotifyURL, err)
+		slog.Warn("[Watcher] Failed to fetch metadata", "url", pl.SpotifyURL, "err", err)
 		return
 	}
 
 	tracks := extractTracksFromMetadata(data)
 	if len(tracks) == 0 {
-		fmt.Printf("[Watcher] No tracks found for %s\n", pl.SpotifyURL)
+		slog.Warn("[Watcher] No tracks found", "url", pl.SpotifyURL)
 		return
 	}
 
@@ -269,7 +270,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		newIDs = append(newIDs, track.SpotifyID)
 	}
 
-	fmt.Printf("[Watcher] %s — %d new tracks to download\n", playlistName, len(newTracks))
+	slog.Info("[Watcher] New tracks to download", "playlist", playlistName, "count", len(newTracks))
 
 	// FIX #4 — EnqueueBatch avant generateM3U8 (était inversé)
 	var batchID string
@@ -281,7 +282,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			UserID:      pl.UserID,
 		})
 		if err != nil {
-			fmt.Printf("[Watcher] EnqueueBatch failed for %s: %v\n", playlistName, err)
+			slog.Error("[Watcher] EnqueueBatch failed", "playlist", playlistName, "err", err)
 		} else {
 			batchID = result.BatchID
 		}
@@ -329,13 +330,13 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			// watchlist again.
 			inOtherPlaylist := otherWatchlistIDs[knownID]
 			if inOtherPlaylist {
-				fmt.Printf("[Watcher] Track %s removed from %s but present in another watchlist — skipping file deletion\n", knownID, pl.Name)
+				slog.Debug("[Watcher] Track removed from playlist but present in another watchlist, skipping file deletion", "spotify_id", knownID, "playlist", pl.Name)
 			} else if jm != nil {
 				jobs, _ := jm.GetAllJobs()
 				for _, job := range jobs {
 					if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
 						if err := os.Remove(job.FilePath); err == nil {
-							fmt.Printf("[Watcher] Deleted file: %s\n", job.FilePath)
+							slog.Info("[Watcher] Deleted file", "path", job.FilePath)
 							outputRoot := pl.Settings.DownloadPath
 							if outputRoot == "" {
 								outputRoot = util.GetDefaultMusicPath()
@@ -347,7 +348,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 							_ = jm.saveJob(&job)
 							deletedCount++
 						} else if !os.IsNotExist(err) {
-							fmt.Printf("[Watcher] Failed to delete file %s: %v\n", job.FilePath, err)
+							slog.Warn("[Watcher] Failed to delete file", "path", job.FilePath, "err", err)
 						}
 					}
 				}
@@ -396,9 +397,9 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 				}
 				oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
 				if err := os.Remove(oldM3u8Path); err == nil {
-					fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : ancien M3U8 supprimé\n", oldName, pl.Name)
+					slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
 				} else if !os.IsNotExist(err) {
-					fmt.Printf("[Watcher] Playlist renommée '%s' → '%s' : échec suppression ancien M3U8: %v\n", oldName, pl.Name, err)
+					slog.Warn("[Watcher] Playlist renamed, failed to delete old M3U8", "old_name", oldName, "new_name", pl.Name, "err", err)
 				}
 			}
 		}
@@ -505,8 +506,7 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		util.SafeGo("watcher.enqueueBatch["+pl.ID+"]", func() { w.jm.EnqueueBatch(batchReq) })
 	}
 
-	fmt.Printf("[Watcher] Added watchlist: %s (%d tracks, every %dh)\n",
-		name, len(tracks), req.IntervalHours)
+	slog.Info("[Watcher] Added watchlist", "name", name, "tracks", len(tracks), "interval_hours", req.IntervalHours)
 
 	return AddWatchlistResponse{
 		ID:      pl.ID,
@@ -544,11 +544,11 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 					continue
 				}
 				if otherIDs[job.SpotifyID] {
-					fmt.Printf("[Watcher] Track %s in another watchlist — skipping file deletion\n", job.SpotifyID)
+					slog.Debug("[Watcher] Track in another watchlist, skipping file deletion", "spotify_id", job.SpotifyID)
 					continue
 				}
 				if err := os.Remove(job.FilePath); err == nil {
-					fmt.Printf("[Watcher] Deleted file (watchlist removed): %s\n", job.FilePath)
+					slog.Info("[Watcher] Deleted file (watchlist removed)", "path", job.FilePath)
 					removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
 					// Nettoyer le FilePath dans BoltDB
 					job.FilePath = ""
@@ -581,15 +581,15 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 					filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
 				} {
 					if err := os.Remove(m3u8Path); err == nil {
-						fmt.Printf("[Watcher] Deleted M3U8 (watchlist removed): %s\n", m3u8Path)
+						slog.Info("[Watcher] Deleted M3U8 (watchlist removed)", "path", m3u8Path)
 					} else if !os.IsNotExist(err) {
-						fmt.Printf("[Watcher] Failed to delete M3U8 (watchlist removed) %s: %v\n", m3u8Path, err)
+						slog.Warn("[Watcher] Failed to delete M3U8 (watchlist removed)", "path", m3u8Path, "err", err)
 					}
 				}
 				// Nettoyer le dossier Playlists/ s'il est vide
 				if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
 					if err := os.Remove(playlistsDir); err == nil {
-						fmt.Printf("[Watcher] Deleted empty Playlists dir: %s\n", playlistsDir)
+						slog.Info("[Watcher] Deleted empty Playlists dir", "path", playlistsDir)
 					}
 				}
 			}
@@ -687,7 +687,7 @@ func (w *Watcher) SyncWatchlist(id string) error {
 	util.SafeGo("watcher.syncPlaylist["+pl.ID+"]", func() { w.syncPlaylist(*pl) })
 	// Retry des failed uniquement sur refresh manuel, avec les settings à jour
 	if requeued, err := w.jm.RequeueFailedJobs(id, pl.Settings); err == nil && requeued > 0 {
-		fmt.Printf("[Watcher] SyncWatchlist: %d failed jobs requeued pour %s\n", requeued, pl.Name)
+		slog.Info("[Watcher] SyncWatchlist: failed jobs requeued", "count", requeued, "playlist", pl.Name)
 	}
 	return nil
 }
@@ -759,7 +759,7 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 			}
 		}
 		if saveErr := w.saveWatchlist(&pl); saveErr != nil {
-			fmt.Printf("[Watcher] Failed to save sync log: %v\n", saveErr)
+			slog.Error("[Watcher] Failed to save sync log", "err", saveErr)
 		}
 		matchedID = pl.ID
 		break
@@ -798,7 +798,7 @@ func (w *Watcher) RemoveTrackID(watchlistID, spotifyID string) {
 	}
 	pl.TrackIDs = newIDs
 	_ = w.saveWatchlist(pl)
-	fmt.Printf("[Watcher] Track %s removed from %s TrackIDs (will retry next sync)\n", spotifyID, pl.Name)
+	slog.Debug("[Watcher] Track removed from TrackIDs, will retry next sync", "spotify_id", spotifyID, "playlist", pl.Name)
 }
 
 func toRawBytes(data interface{}) []byte {
@@ -830,7 +830,7 @@ func removeEmptyParents(dir, stopAt string) {
 		if err := os.Remove(dir); err != nil {
 			break
 		}
-		fmt.Printf("[Watcher] Deleted empty dir: %s\n", dir)
+		slog.Debug("[Watcher] Deleted empty dir", "path", dir)
 		dir = filepath.Dir(dir)
 	}
 }
@@ -1433,7 +1433,7 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 			continue
 		}
 		if _, err := os.Stat(job.FilePath); err != nil {
-			fmt.Printf("[Watcher] File missing for %s (%s) — will re-download\n", spotifyID, job.FilePath)
+			slog.Info("[Watcher] File missing, will re-download", "spotify_id", spotifyID, "path", job.FilePath)
 			missingIDs = append(missingIDs, spotifyID)
 		}
 	}
@@ -1450,7 +1450,7 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 			}
 		}
 		pl.TrackIDs = filtered
-		fmt.Printf("[Watcher] %d missing file(s) will be re-queued for %s\n", len(missingIDs), pl.Name)
+		slog.Info("[Watcher] Missing file(s) will be re-queued", "count", len(missingIDs), "playlist", pl.Name)
 	}
 }
 
@@ -1510,8 +1510,8 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 	}
 	if len(paths) == 0 {
 		if result.Total > 0 {
-			fmt.Printf("[Watcher] M3U8: %s — 0/%d tracks resolved, nothing written; run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild, or use the Repair button on this watchlist\n",
-				pl.Name, result.Total)
+			slog.Warn("[Watcher] M3U8: 0 tracks resolved, nothing written; run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild, or use the Repair button on this watchlist",
+				"playlist", pl.Name, "total", result.Total)
 		}
 		return result, nil
 	}
@@ -1542,12 +1542,12 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 	baseName := m3u8BaseName(pl.Name, pl.ID)
 	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
 	if result.Unresolved > 0 {
-		fmt.Printf("[Watcher] M3U8: %s — %d/%d tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them\n",
-			pl.Name, result.Unresolved, len(pl.TrackIDs))
+		slog.Warn("[Watcher] M3U8: tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them",
+			"playlist", pl.Name, "unresolved", result.Unresolved, "total", len(pl.TrackIDs))
 		if !force {
 			if existingCount, ok := countM3U8Entries(m3u8Path); ok && shouldSkipShrinkingWrite(len(paths), existingCount) {
-				fmt.Printf("[Watcher] M3U8: refusing to shrink %s.m3u8 from %d to %d entries — leaving the existing file untouched\n",
-					pl.Name, existingCount, len(paths))
+				slog.Warn("[Watcher] M3U8: refusing to shrink, leaving the existing file untouched",
+					"playlist", pl.Name, "existing_entries", existingCount, "new_entries", len(paths))
 				result.Skipped = true
 				return result, nil
 			}
@@ -1559,7 +1559,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		return result, fmt.Errorf("failed to create %s: %w", pl.Name, err)
 	}
 	result.Written = true
-	fmt.Printf("[Watcher] M3U8: %s.m3u8 written (%d entries)\n", baseName, len(paths))
+	slog.Info("[Watcher] M3U8 written", "file", baseName+".m3u8", "entries", len(paths))
 
 	// One-time migration cleanup: remove the pre-disambiguation file (no ID
 	// suffix) now that the new-format one has been written successfully.
@@ -1570,7 +1570,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 	legacyPath := filepath.Join(playlistDir, legacyM3U8BaseName(pl.Name)+".m3u8")
 	if legacyPath != m3u8Path {
 		if err := os.Remove(legacyPath); err == nil {
-			fmt.Printf("[Watcher] M3U8: migrated legacy file for %s, old file removed\n", pl.Name)
+			slog.Info("[Watcher] M3U8: migrated legacy file, old file removed", "playlist", pl.Name)
 		}
 	}
 	return result, nil
@@ -1713,7 +1713,7 @@ func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []str
 		var err error
 		index, err = meta.BuildSpotifyIDIndex(outputDir)
 		if err != nil {
-			fmt.Printf("[Watcher] M3U8: index build failed for %s: %v\n", pl.Name, err)
+			slog.Warn("[Watcher] M3U8: index build failed", "playlist", pl.Name, "err", err)
 			index = map[string]string{}
 		}
 	}
