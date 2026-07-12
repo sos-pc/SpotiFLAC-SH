@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem, } from "@/components/ui/toggle-group";
 import { Upload, X, CheckCircle2, AlertCircle, Trash2, FileMusic, WandSparkles, } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { FileBrowser } from "@/components/FileBrowser";
-import { ConvertAudio, SelectAudioFiles, ListAudioFilesInDir } from "@/lib/rpc";
+import { ConvertAudio, ListAudioFilesInDir } from "@/lib/rpc";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface AudioFile {
     path: string;
@@ -100,6 +100,7 @@ export function AudioConverterPage() {
     const [isDragging, setIsDragging] = useState(false);
     const [showFileBrowser, setShowFileBrowser] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const saveState = useCallback((stateToSave: {
         files: AudioFile[];
         outputFormat: "mp3" | "m4a";
@@ -148,20 +149,8 @@ export function AudioConverterPage() {
             window.removeEventListener("focus", checkFullscreen);
         };
     }, []);
-    const handleSelectFiles = async () => {
-        try {
-            const selectedFiles = await SelectAudioFiles();
-            if (selectedFiles && selectedFiles.length > 0) {
-                addFiles(selectedFiles);
-            }
-        }
-        catch (err) {
-            toast.error("File Selection Failed", {
-                description: err instanceof Error ? err.message : "Failed to select files",
-            });
-        }
-    };
-        const handleSelectFolder = () => setShowFileBrowser(true);
+    const handleSelectFiles = () => fileInputRef.current?.click();
+    const handleSelectFolder = () => setShowFileBrowser(true);
     const handleFolderSelected = async (selectedFolder: string) => {
         try {
             const folderFiles = await ListAudioFilesInDir(selectedFolder);
@@ -183,7 +172,7 @@ export function AudioConverterPage() {
     // doesn't run the React Compiler (no babel-plugin-react-compiler), only
     // its eslint rules for forward-compatibility.
     // eslint-disable-next-line react-hooks/preserve-manual-memoization
-    const addFiles = useCallback(async (paths: string[]) => {
+    const addFiles = useCallback(async (paths: string[], knownMeta?: Map<string, { size: number; name: string }>) => {
         const validExtensions = [".mp3", ".flac"];
         const m4aFiles = paths.filter((path) => {
             const ext = path.toLowerCase().slice(path.lastIndexOf("."));
@@ -194,23 +183,29 @@ export function AudioConverterPage() {
                 description: "Only FLAC and MP3 files are supported as input. Please convert M4A files first.",
             });
         }
-        const { GetFileSizes } = await import("@/lib/rpc");
         const validPaths = paths.filter((path) => {
             const ext = path.toLowerCase().slice(path.lastIndexOf("."));
             return validExtensions.includes(ext);
         });
-        const fileSizes = validPaths.length > 0 ? await GetFileSizes(validPaths) : {};
+        // Freshly-uploaded files (drag-drop / Select Files) already have a
+        // known size/name from the browser's File object and live outside the
+        // library root — GetFileSizes only accepts library-confined paths
+        // (Lot 1), so only ask it about paths we don't already know.
+        const unknownSizePaths = validPaths.filter((path) => !knownMeta?.has(path));
+        const { GetFileSizes } = await import("@/lib/rpc");
+        const fetchedSizes = unknownSizePaths.length > 0 ? await GetFileSizes(unknownSizePaths) : {};
         setFiles((prev) => {
             const newFiles: AudioFile[] = validPaths
                 .filter((path) => !prev.some((f) => f.path === path))
                 .map((path) => {
-                const name = path.split(/[/\\]/).pop() || path;
+                const meta = knownMeta?.get(path);
+                const name = meta?.name ?? path.split(/[/\\]/).pop() ?? path;
                 const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
                 return {
                     path,
                     name,
                     format: ext,
-                    size: fileSizes[path] || 0,
+                    size: meta?.size ?? fetchedSizes[path] ?? 0,
                     status: "pending" as const,
                 };
             });
@@ -231,25 +226,36 @@ export function AudioConverterPage() {
             return prev;
         });
     }, []);
-    const handleFileDrop = useCallback(async (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const items = Array.from(e.dataTransfer.files);
+    const uploadAndAddFiles = useCallback(async (items: File[]) => {
         if (items.length === 0) return;
         const uploadedPaths: string[] = [];
+        const knownMeta = new Map<string, { size: number; name: string }>();
         for (const file of items) {
             const formData = new FormData();
             formData.append("file", file);
             try {
                 const res = await fetch("/api/upload", { method: "POST", body: formData });
                 const data = await res.json();
-                if (data.path) uploadedPaths.push(data.path);
+                if (data.path) {
+                    uploadedPaths.push(data.path);
+                    knownMeta.set(data.path, { size: file.size, name: file.name });
+                }
             } catch (err) {
                 console.error("Upload failed:", err);
             }
         }
-        if (uploadedPaths.length > 0) addFiles(uploadedPaths);
+        if (uploadedPaths.length > 0) addFiles(uploadedPaths, knownMeta);
     }, [addFiles]);
+    const handleFileDrop = useCallback(async (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+        await uploadAndAddFiles(Array.from(e.dataTransfer.files));
+    }, [uploadAndAddFiles]);
+    const handleFilesPicked = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const items = e.target.files ? Array.from(e.target.files) : [];
+        e.target.value = "";
+        await uploadAndAddFiles(items);
+    }, [uploadAndAddFiles]);
     const removeFile = (path: string) => {
         setFiles((prev) => prev.filter((f) => f.path !== path));
     };
@@ -328,6 +334,8 @@ export function AudioConverterPage() {
     const convertableCount = files.filter((f) => f.status === "pending" || f.status === "success").length;
     const successCount = files.filter((f) => f.status === "success").length;
     return (<div className={`space-y-6 ${isFullscreen ? "h-full flex flex-col" : ""}`}>
+
+        <input ref={fileInputRef} type="file" multiple accept=".mp3,.flac" className="hidden" onChange={handleFilesPicked}/>
 
         <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold">Audio Converter</h1>
