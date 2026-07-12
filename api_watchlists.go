@@ -15,6 +15,9 @@ import (
 
 func (s *Server) registerWatchlistRoutes() {
 	s.mux.Handle("GET /api/v1/watchlists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		userID := userIDFromContext(r)
 		result, err := s.ctr.Watcher.GetWatchlistsByUser(userID)
 		if err != nil {
@@ -25,6 +28,9 @@ func (s *Server) registerWatchlistRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/watchlists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req AddWatchlistRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -55,6 +61,9 @@ func (s *Server) registerWatchlistRoutes() {
 	}))
 
 	s.mux.Handle("PUT /api/v1/watchlists/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
@@ -75,6 +84,9 @@ func (s *Server) registerWatchlistRoutes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/watchlists/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
@@ -89,6 +101,9 @@ func (s *Server) registerWatchlistRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/watchlists/{id}/sync", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
@@ -108,6 +123,9 @@ func (s *Server) registerWatchlistRoutes() {
 	// enqueues downloads, deletes files, or mutates the watchlist — safe to
 	// call synchronously, unlike sync/repair which run in the background.
 	s.mux.Handle("GET /api/v1/watchlists/{id}/freshness", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
@@ -123,6 +141,9 @@ func (s *Server) registerWatchlistRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/watchlists/{id}/stats", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
@@ -138,6 +159,9 @@ func (s *Server) registerWatchlistRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/watchlists/{id}/history", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		id := r.PathValue("id")
 		user := GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {

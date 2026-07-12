@@ -22,6 +22,9 @@ func (s *Server) registerFileRoutes() {
 
 	// ── Search ────────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/search", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		url := r.URL.Query().Get("url")
 		if url == "" {
 			writeV1Error(w, http.StatusBadRequest, "url query param required")
@@ -43,6 +46,9 @@ func (s *Server) registerFileRoutes() {
 	//   event: done          → all albums processed
 	//   event: stream_error  → fatal error
 	s.mux.Handle("GET /api/v1/search/stream", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			writeV1Error(w, http.StatusInternalServerError, "streaming not supported")
@@ -78,6 +84,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/search/query", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		q := r.URL.Query().Get("q")
 		searchType := r.URL.Query().Get("type")
 		if q == "" {
@@ -120,6 +129,9 @@ func (s *Server) registerFileRoutes() {
 
 	// ── Tracks ────────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/tracks/{id}/preview", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		id := r.PathValue("id")
 		url, err := a.GetPreviewURL(id)
 		if err != nil {
@@ -130,6 +142,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/tracks/{id}/availability", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		id := r.PathValue("id")
 		result, err := a.CheckTrackAvailability(id)
 		if err != nil {
@@ -140,6 +155,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/tracks/{id}/links", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		id := r.PathValue("id")
 		region := r.URL.Query().Get("region")
 		result, err := a.GetStreamingURLs(id, region)
@@ -152,6 +170,9 @@ func (s *Server) registerFileRoutes() {
 
 	// ── Settings ──────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/settings", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		user := GetUserFromContext(r)
 		if user != nil && s.ctr.Auth != nil {
 			if profile, err := s.ctr.Auth.GetUser(user.UserID); err == nil && len(profile.Settings) > 0 {
@@ -168,6 +189,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("PUT /api/v1/settings", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var settings map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -198,6 +222,9 @@ func (s *Server) registerFileRoutes() {
 	// already does for watchlist paths (collectScanRoots); this makes every
 	// other file-management/download surface consistent with it.
 	s.mux.Handle("GET /api/v1/files", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
@@ -212,6 +239,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/files/audio", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
@@ -271,6 +301,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/files/sizes", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		var params struct {
 			FilePaths []string `json:"file_paths"`
 		}
@@ -422,6 +455,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/files/m3u8", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var params struct {
 			M3U8Name          string   `json:"m3u8_name"`
 			OutputDir         string   `json:"output_dir"`
@@ -452,6 +488,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/files/exists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		var params struct {
 			OutputDir string                      `json:"output_dir"`
 			RootDir   string                      `json:"root_dir"`
@@ -485,6 +524,9 @@ func (s *Server) registerFileRoutes() {
 
 	// ── Audio ─────────────────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/audio/analyze", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
@@ -506,6 +548,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/audio/analyze/batch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		var params struct {
 			FilePaths []string `json:"file_paths"`
 		}
@@ -527,6 +572,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/audio/convert", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req ConvertAudioRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -552,6 +600,9 @@ func (s *Server) registerFileRoutes() {
 	// validation at all (not even cleanAbsPath), the same gap as the
 	// Files/Audio routes above.
 	s.mux.Handle("POST /api/v1/media/lyrics", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req LyricsDownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -572,6 +623,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/media/cover", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req CoverDownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -592,6 +646,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/media/header", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req HeaderDownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -612,6 +669,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/media/gallery", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req GalleryImageDownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -632,6 +692,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/media/avatar", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var req AvatarDownloadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -653,6 +716,9 @@ func (s *Server) registerFileRoutes() {
 
 	// ── System ────────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/system/info", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		osInfo, _ := a.GetOSInfo()
 		configPath, _ := a.GetConfigPath()
 		homeDir, _ := os.UserHomeDir()
@@ -665,6 +731,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/system/ffmpeg", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		installed, err := a.IsFFmpegInstalled()
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -680,6 +749,9 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/system/defaults", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		writeV1JSON(w, http.StatusOK, a.GetDefaults())
 	}))
 }

@@ -41,7 +41,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FileBrowser } from "@/components/FileBrowser";
+import { getUser } from "@/lib/auth";
 import {
   getSettings,
   loadSettings,
@@ -238,9 +240,11 @@ export function SettingsPage({
   // ── API Keys state ───────────────────────────────────────────────────────
   const [apiKeys, setApiKeys] = useState<APIKeyMeta[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyPerms, setNewKeyPerms] = useState<string[]>(["read", "manage"]);
   const [createdKey, setCreatedKey] = useState<CreatedAPIKey | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [keysLoading, setKeysLoading] = useState(false);
+  const isAdmin = getUser()?.is_admin ?? false;
 
   const loadApiKeys = useCallback(async () => {
     setKeysLoading(true);
@@ -260,15 +264,19 @@ export function SettingsPage({
     if (activeTab === "keys") loadApiKeys();
   }, [activeTab, loadApiKeys]);
 
+  const toggleNewKeyPerm = (perm: string) => {
+    setNewKeyPerms((prev) =>
+      prev.includes(perm) ? prev.filter((p) => p !== perm) : [...prev, perm]
+    );
+  };
+
   const handleCreateKey = async () => {
-    if (!newKeyName.trim()) return;
+    if (!newKeyName.trim() || newKeyPerms.length === 0) return;
     try {
-      const result = await CreateAPIKey(newKeyName.trim(), [
-        "read",
-        "download",
-      ]);
+      const result = await CreateAPIKey(newKeyName.trim(), newKeyPerms);
       setCreatedKey(result);
       setNewKeyName("");
+      setNewKeyPerms(["read", "manage"]);
       loadApiKeys();
     } catch (err) {
       toast.error("Failed to create key", {
@@ -1462,12 +1470,37 @@ export function SettingsPage({
                 />
                 <Button
                   onClick={handleCreateKey}
-                  disabled={!newKeyName.trim()}
+                  disabled={!newKeyName.trim() || newKeyPerms.length === 0}
                   className="gap-1.5"
                 >
                   <Key className="h-4 w-4" />
                   Create Key
                 </Button>
+              </div>
+              <div className="flex items-center gap-4 mt-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={newKeyPerms.includes("read")}
+                    onCheckedChange={() => toggleNewKeyPerm("read")}
+                  />
+                  Read
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={newKeyPerms.includes("manage")}
+                    onCheckedChange={() => toggleNewKeyPerm("manage")}
+                  />
+                  Manage
+                </label>
+                {isAdmin && (
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={newKeyPerms.includes("admin")}
+                      onCheckedChange={() => toggleNewKeyPerm("admin")}
+                    />
+                    Admin
+                  </label>
+                )}
               </div>
             </div>
 

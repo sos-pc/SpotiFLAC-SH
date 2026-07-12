@@ -41,7 +41,7 @@ func (s *Server) registerJobRoutes() {
 
 	// ── Jobs ──────────────────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		if !v1RequirePermission(w, r, "download") {
+		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
 		var req EnqueueBatchRequest
@@ -68,9 +68,19 @@ func (s *Server) registerJobRoutes() {
 		writeV1JSON(w, http.StatusCreated, result)
 	}))
 
-	s.mux.Handle("GET /api/v1/jobs/stream", s.v1Auth(s.v1JobsStream))
+	s.mux.Handle("GET /api/v1/jobs/stream", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
+		s.v1JobsStream(w, r)
+	}))
 
 	s.mux.Handle("GET /api/v1/jobs/{id}/download", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		// Serves the actual downloaded audio bytes, not just metadata about
+		// the job — grouped with "manage" rather than "read" for that reason.
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		id := r.PathValue("id")
 		job, err := s.ctr.Jobs.GetJob(id)
 		if err != nil {
@@ -114,18 +124,24 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/jobs/completed", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		a.ClearCompletedDownloads()
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
 	s.mux.Handle("DELETE /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		a.ClearAllDownloads()
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
 	// ── Direct downloads ──────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/downloads/track", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		if !v1RequirePermission(w, r, "download") {
+		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
 		var req DownloadRequest
@@ -136,7 +152,7 @@ func (s *Server) registerJobRoutes() {
 		a.ApplySettingsFallbacks(&req)
 		// output_dir otherwise reaches disk unconfined: any authenticated
 		// session user (v1RequirePermission passes every non-API-key caller
-		// through regardless of the "download" perm — see its doc comment)
+		// through regardless of the "manage" perm — see its doc comment)
 		// could point a download anywhere the server can write (S2).
 		if req.OutputDir != "" {
 			cleaned, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
@@ -156,6 +172,9 @@ func (s *Server) registerJobRoutes() {
 
 	// ── History ───────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/history/downloads", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		userID := userIDFromContext(r)
 		result, err := a.GetDownloadHistory(userID)
 		if err != nil {
@@ -166,6 +185,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/history/downloads", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		userID := userIDFromContext(r)
 		if err := a.ClearDownloadHistory(userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -175,6 +197,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/history/downloads/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		id := r.PathValue("id")
 		userID := userIDFromContext(r)
 		if err := a.DeleteDownloadHistoryItem(id, userID); err != nil {
@@ -185,6 +210,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		userID := userIDFromContext(r)
 		result, err := a.GetFetchHistory(userID)
 		if err != nil {
@@ -195,6 +223,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("POST /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var item backend.FetchHistoryItem
 		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -209,6 +240,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/history/fetch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		userID := userIDFromContext(r)
 		if itemType := r.URL.Query().Get("type"); itemType != "" {
 			if err := a.ClearFetchHistoryByType(itemType, userID); err != nil {
@@ -225,6 +259,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("DELETE /api/v1/history/fetch/{id}", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		id := r.PathValue("id")
 		userID := userIDFromContext(r)
 		if err := a.DeleteFetchHistoryItem(id, userID); err != nil {
@@ -235,6 +272,9 @@ func (s *Server) registerJobRoutes() {
 	}))
 
 	s.mux.Handle("GET /api/v1/history/downloads/export", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
 		message, err := a.ExportFailedDownloads()
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())

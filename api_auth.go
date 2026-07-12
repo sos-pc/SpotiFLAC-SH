@@ -131,7 +131,7 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Permissions) == 0 {
-		req.Permissions = []string{"read", "download"}
+		req.Permissions = []string{"read", "manage"}
 	}
 	// A key inherits its owner's account, not the caller's session — without
 	// this check, any authenticated non-admin user could self-issue a key

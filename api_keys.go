@@ -28,7 +28,7 @@ type APIKey struct {
 	Name        string    `json:"name"`
 	KeyHash     string    `json:"key_hash"`
 	UserID      string    `json:"user_id"`
-	Permissions []string  `json:"permissions"` // "read", "download", "admin"
+	Permissions []string  `json:"permissions"` // "read", "manage", "admin" ("download" is a pre-rename legacy alias for "manage", see v1RequirePermission)
 	CreatedAt   time.Time `json:"created_at"`
 	LastUsedAt  time.Time `json:"last_used_at,omitempty"`
 }

@@ -199,6 +199,9 @@ type watchlistRepairResult struct {
 // over SSE (watchlist_repaired), mirroring how syncPlaylist announces
 // watchlist_synced.
 func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
+	if !v1RequirePermission(w, r, "manage") {
+		return
+	}
 	id := r.PathValue("id")
 	user := GetUserFromContext(r)
 	if err := s.checkWatchlistOwnership(id, user); err != nil {

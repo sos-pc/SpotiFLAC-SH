@@ -275,7 +275,7 @@ func v1RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // v1RequirePermission returns 403 unless the caller may perform perm
-// ("download", "read", ...). Permission scoping only applies to API keys
+// ("read", "manage", "admin"). Permission scoping only applies to API keys
 // (JWTClaims.IsAPIKey) — a full browser/local session always has full
 // access to its own account, matching what CreateAPIKey's docstring and
 // the Permissions field on APIKey already promise but weren't enforcing.
@@ -289,7 +289,11 @@ func v1RequirePermission(w http.ResponseWriter, r *http.Request, perm string) bo
 		return true
 	}
 	for _, p := range user.Permissions {
-		if p == perm {
+		// "download" is the pre-rename name for "manage" (it covered only
+		// triggering downloads; "manage" now also covers settings and
+		// watchlist management) — keys created before the rename still
+		// have it stored and must keep working.
+		if p == perm || (perm == "manage" && p == "download") {
 			return true
 		}
 	}
