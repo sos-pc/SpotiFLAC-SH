@@ -247,7 +247,16 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [lastSearchedQuery, setLastSearchedQuery] = useState("");
     const [activeTab, setActiveTab] = useState<ResultTab>("tracks");
-    const [recentSearches, setRecentSearches] = useState<string[]>([]);
+    const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+        try {
+            const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+            return saved ? JSON.parse(saved) : [];
+        }
+        catch (error) {
+            console.error("Failed to load recent searches:", error);
+            return [];
+        }
+    });
     const [hasMore, setHasMore] = useState<Record<ResultTab, boolean>>({
         tracks: false,
         albums: false,
@@ -259,17 +268,6 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const placeholders = searchMode ? SEARCH_PLACEHOLDERS : FETCH_PLACEHOLDERS;
     const placeholderText = useTypingEffect(placeholders);
-    useEffect(() => {
-        try {
-            const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
-            if (saved) {
-                setRecentSearches(JSON.parse(saved));
-            }
-        }
-        catch (error) {
-            console.error("Failed to load recent searches:", error);
-        }
-    }, []);
     const saveRecentSearch = (query: string) => {
         const trimmed = query.trim();
         if (!trimmed)

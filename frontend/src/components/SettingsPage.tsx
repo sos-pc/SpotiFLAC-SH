@@ -254,6 +254,9 @@ export function SettingsPage({
   }, []);
 
   useEffect(() => {
+    // Loading the key list when the tab becomes active is external-system
+    // sync, not a derived render value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (activeTab === "keys") loadApiKeys();
   }, [activeTab, loadApiKeys]);
 
@@ -316,11 +319,17 @@ export function SettingsPage({
   }, []);
 
   useEffect(() => {
+    // Loading Tidal auth status when the tab becomes active is
+    // external-system sync, not a derived render value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (activeTab === "tidal") loadTidalStatus();
   }, [activeTab, loadTidalStatus]);
 
   // Nettoyer le poll si l'onglet change
   useEffect(() => {
+    // stopTidalPoll clears an interval ref as well as setState — an
+    // unmount-style cleanup, not a derived render value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (activeTab !== "tidal") stopTidalPoll();
   }, [activeTab, stopTidalPoll]);
 
@@ -395,13 +404,6 @@ export function SettingsPage({
     }
   }, []);
 
-  useEffect(() => {
-    if (activeTab === "apis") {
-      loadApiStatuses();
-      loadProxies();
-    }
-  }, [activeTab, loadApiStatuses]);
-
   // ── Proxy config state ───────────────────────────────────────────────────
   const [proxies, setProxies] = useState<ProxyConfig | null>(null);
   const [proxySaving, setProxySaving] = useState(false);
@@ -417,6 +419,16 @@ export function SettingsPage({
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    // Loading API/proxy status when the tab becomes active is
+    // external-system sync, not a derived render value.
+    if (activeTab === "apis") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadApiStatuses();
+      loadProxies();
+    }
+  }, [activeTab, loadApiStatuses, loadProxies]);
 
   const handleSaveProxies = async () => {
     if (!proxies) return;
@@ -504,6 +516,10 @@ export function SettingsPage({
   };
 
   const formatDiscoveryAge = (ts: number): string => {
+    // A "time ago" label a few seconds stale between renders is
+    // imperceptible here — not worth a ticking-clock state just to satisfy
+    // strict render-purity analysis.
+    // eslint-disable-next-line react-hooks/purity
     const mins = Math.round((Date.now() / 1000 - ts) / 60);
     if (mins < 60) return `${mins}m ago`;
     return `${Math.round(mins / 60)}h ago`;

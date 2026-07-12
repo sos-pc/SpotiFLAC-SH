@@ -36,6 +36,13 @@ export function DebugLoggerPage() {
         const unsubscribe = logger.subscribe(() => {
             setLogs([...logger.getLogs()].sort(byTimestamp));
         });
+        // Seeding from the external logger store on mount, same as the
+        // subscription callback above. useSyncExternalStore would be the
+        // more idiomatic tool here, but logger.getLogs() returns a fresh
+        // array on every call with no cached/stable snapshot — wiring that
+        // up without risking an infinite re-render loop needs a caching
+        // wrapper around the store itself, not worth it for a debug-only page.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLogs([...logger.getLogs()].sort(byTimestamp));
         return () => {
             unsubscribe();

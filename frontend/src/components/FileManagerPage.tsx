@@ -195,7 +195,10 @@ export function FileManagerPage() {
         }
     }, [rootPath]);
     useEffect(() => {
+        // Loading the file list when rootPath changes is external-system
+        // sync, not a derived render value.
         if (rootPath)
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             loadFiles();
     }, [rootPath, loadFiles]);
     const filteredFiles = filterFilesByType(allFiles, activeTab);

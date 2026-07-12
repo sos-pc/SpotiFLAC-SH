@@ -81,6 +81,10 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     const formatDuration = (startTimestamp: number) => {
         if (startTimestamp === 0)
             return "—";
+        // An elapsed-time label a few seconds stale between renders is
+        // imperceptible here — not worth a ticking-clock state just to
+        // satisfy strict render-purity analysis.
+        // eslint-disable-next-line react-hooks/purity
         const now = Math.floor(Date.now() / 1000);
         const durationSeconds = now - startTimestamp;
         const hours = Math.floor(durationSeconds / 3600);

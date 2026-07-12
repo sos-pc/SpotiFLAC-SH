@@ -117,10 +117,15 @@ export function AudioConverterPage() {
         saveState({ files, outputFormat, bitrate, m4aCodec });
     }, [files, outputFormat, bitrate, m4aCodec, saveState]);
     useEffect(() => {
+        // Auto-correcting the format/codec selection when the file mix
+        // changes is a reaction to an external event (the user picking new
+        // files), not a value derivable from a single render pass — the
+        // user can also change these independently via the dropdowns.
         if (files.length === 0)
             return;
         const allMP3 = files.every((f) => f.format === "mp3");
         if (allMP3 && outputFormat !== "m4a") {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setOutputFormat("m4a");
         }
         const hasFlac = files.some((f) => f.format === "flac");
@@ -173,6 +178,11 @@ export function AudioConverterPage() {
             });
         }
     };
+    // The dynamic import() below is what the React Compiler can't safely
+    // reason about for memoization purposes — moot today since this project
+    // doesn't run the React Compiler (no babel-plugin-react-compiler), only
+    // its eslint rules for forward-compatibility.
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const addFiles = useCallback(async (paths: string[]) => {
         const validExtensions = [".mp3", ".flac"];
         const m4aFiles = paths.filter((path) => {
