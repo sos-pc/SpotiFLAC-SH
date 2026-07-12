@@ -456,6 +456,111 @@ func writeSpotifyIDToFlac(path, spotifyID string) error {
 	return nil
 }
 
+// WriteMissingTags fills in FLAC vorbis comments that are currently empty
+// (per current, normally a fresh ReadFullTrackTags(path) call) using fresh
+// (values just fetched from Spotify/Deezer/MusicBrainz) — mirrors
+// WriteSpotifyIDTag's surgical approach, extended to every field
+// retag-incomplete-metadata knows how to backfill. A tag already present in
+// the file is never touched, even if fresh disagrees with it.
+//
+// FLAC only: the rest of retag-incomplete-metadata's target library is
+// exclusively FLAC in practice, and extending the same surgical merge to
+// MP3 (ID3 TXXX/standard frames) and M4A (custom atoms) is straightforward
+// but separate work — this errors instead of silently doing nothing for
+// those formats.
+//
+// Returns false if every field fresh could offer was already present in
+// the file (no write performed).
+func WriteMissingTags(path string, current, fresh FullTrackTags) (bool, error) {
+	if strings.ToLower(filepath.Ext(path)) != ".flac" {
+		return false, fmt.Errorf("WriteMissingTags: unsupported extension %s (FLAC only)", filepath.Ext(path))
+	}
+
+	unlock := lockTagWrite(path)
+	defer unlock()
+
+	ok, err := hasFlacMagic(path)
+	if err != nil {
+		return false, fmt.Errorf("read FLAC header: %w", err)
+	}
+	if !ok {
+		return false, fmt.Errorf("not a valid FLAC file (missing %q magic): %s", flacMagic, path)
+	}
+	f, err := safeParseFlac(path)
+	if err != nil {
+		return false, fmt.Errorf("parse FLAC: %w", err)
+	}
+
+	cmtIdx := -1
+	var cmt *flacvorbis.MetaDataBlockVorbisComment
+	for idx, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cmtIdx = idx
+			cmt, _ = flacvorbis.ParseFromMetaDataBlock(*block)
+			break
+		}
+	}
+	if cmt == nil {
+		cmt = flacvorbis.New()
+	}
+
+	type fillCandidate struct {
+		key      string
+		curVal   string
+		freshVal string
+	}
+	candidates := []fillCandidate{
+		{"ISRC", current.ISRC, fresh.ISRC},
+		{"TITLE", current.Title, fresh.Title},
+		{"ARTIST", current.Artist, fresh.Artist},
+		{"ALBUM", current.Album, fresh.Album},
+		{"ALBUMARTIST", current.AlbumArtist, fresh.AlbumArtist},
+		{"DATE", current.ReleaseDate, fresh.ReleaseDate},
+		{"GENRE", current.Genre, fresh.Genre},
+		{"COPYRIGHT", current.Copyright, fresh.Copyright},
+	}
+	if current.TrackNumber == 0 && fresh.TrackNumber > 0 {
+		candidates = append(candidates, fillCandidate{"TRACKNUMBER", "", strconv.Itoa(fresh.TrackNumber)})
+	}
+	if current.DiscNumber == 0 && fresh.DiscNumber > 0 {
+		candidates = append(candidates, fillCandidate{"DISCNUMBER", "", strconv.Itoa(fresh.DiscNumber)})
+	}
+
+	changed := false
+	for _, c := range candidates {
+		if c.curVal != "" || c.freshVal == "" {
+			continue // already present in the file, or fresh has nothing to offer
+		}
+		filtered := make([]string, 0, len(cmt.Comments))
+		for _, comment := range cmt.Comments {
+			parts := strings.SplitN(comment, "=", 2)
+			if len(parts) == 2 && strings.EqualFold(parts[0], c.key) {
+				continue
+			}
+			filtered = append(filtered, comment)
+		}
+		cmt.Comments = filtered
+		if err := cmt.Add(c.key, c.freshVal); err != nil {
+			return changed, fmt.Errorf("add %s tag: %w", c.key, err)
+		}
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+
+	block := cmt.Marshal()
+	if cmtIdx < 0 {
+		f.Meta = append(f.Meta, &block)
+	} else {
+		f.Meta[cmtIdx] = &block
+	}
+	if err := saveFlacAtomic(f, path); err != nil {
+		return false, fmt.Errorf("save FLAC: %w", err)
+	}
+	return true, nil
+}
+
 func writeSpotifyIDToMp3(path, spotifyID string) error {
 	tag, err := id3v2.Open(path, id3v2.Options{Parse: true})
 	if err != nil {

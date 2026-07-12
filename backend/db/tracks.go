@@ -164,6 +164,63 @@ func GetTrackByISRC(ctx context.Context, q Querier, isrc string) (*Track, error)
 	return &t, nil
 }
 
+// TrackForRetag pairs a track missing some metadata with the on-disk path
+// of its currently active file — the retag-incomplete-metadata maintenance
+// pass needs both: the track row to know what's missing, the path to
+// actually write the recovered tags somewhere.
+type TrackForRetag struct {
+	Track
+	FilePath string
+}
+
+// GetTracksNeedingRetag returns every present library file whose track row
+// is missing at least one field the retag-incomplete-metadata pass can
+// fill: isrc, name, artist_name, track_number, disc_number, duration_ms,
+// genre, release_date, album_name, album_artist, cover_url, copyright.
+// spotify_id, explicit, album_id, first_seen_at and last_seen_at are
+// deliberately not checked — see the pass's own doc comment for why.
+func GetTracksNeedingRetag(ctx context.Context, q Querier) ([]TrackForRetag, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT t.spotify_id, t.isrc, t.name, t.artist_name, COALESCE(t.album_id, ''),
+		       t.track_number, t.disc_number, t.duration_ms, t.explicit, t.genre,
+		       t.release_date, t.album_name, t.album_artist, t.cover_url, t.copyright,
+		       t.first_seen_at, t.last_seen_at, lf.file_path
+		FROM tracks t
+		JOIN library_files lf ON lf.spotify_id = t.spotify_id AND lf.status = 'present'
+		WHERE t.isrc = '' OR t.name = '' OR t.artist_name = ''
+		   OR t.track_number = 0 OR t.disc_number = 0 OR t.duration_ms = 0
+		   OR t.genre = '' OR t.release_date = '' OR t.album_name = ''
+		   OR t.album_artist = '' OR t.cover_url = '' OR t.copyright = ''
+		ORDER BY t.last_seen_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query tracks needing retag: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TrackForRetag
+	for rows.Next() {
+		var (
+			r        TrackForRetag
+			explicit int
+		)
+		if err := rows.Scan(
+			&r.SpotifyID, &r.ISRC, &r.Name, &r.ArtistName, &r.AlbumID,
+			&r.TrackNumber, &r.DiscNumber, &r.DurationMs, &explicit, &r.Genre,
+			&r.ReleaseDate, &r.AlbumName, &r.AlbumArtist, &r.CoverURL, &r.Copyright,
+			&r.FirstSeenAt, &r.LastSeenAt, &r.FilePath,
+		); err != nil {
+			return nil, fmt.Errorf("scan track needing retag: %w", err)
+		}
+		r.Explicit = explicit != 0
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tracks needing retag: %w", err)
+	}
+	return out, nil
+}
+
 // UpsertTrackStub creates a placeholder track row with only spotify_id set
 // if no row exists yet. Used by the watcher when it receives a list of
 // track IDs from a Spotify playlist sync but has not yet fetched the full

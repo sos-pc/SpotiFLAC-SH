@@ -16,6 +16,8 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
+	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -76,6 +78,7 @@ const libraryRebuildPerFileTimeout = 30 * time.Second
 func (s *Server) registerAdminRoutes() {
 	s.mux.Handle("POST /api/v1/admin/retag-legacy", s.v1Auth(s.v1RetagLegacy))
 	s.mux.Handle("POST /api/v1/admin/library-rebuild", s.v1Auth(s.v1LibraryRebuild))
+	s.mux.Handle("POST /api/v1/admin/retag-incomplete-metadata", s.v1Auth(s.v1RetagIncompleteMetadata))
 	s.mux.Handle("GET /api/v1/admin/logs", s.v1Auth(s.v1GetServerLogs))
 }
 
@@ -531,4 +534,187 @@ func fileSizeOrZero(path string) int64 {
 		return info.Size()
 	}
 	return 0
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// retag-incomplete-metadata — backfill missing catalog/tag fields on
+// already-present files, without re-downloading audio.
+//
+// library-rebuild only recovers what's ALREADY embedded in a file's own
+// tags; a file that was downloaded before a given field was embedded (or by
+// a provider that never had it, like ISRC) stays incomplete forever no
+// matter how many times it's rescanned. This pass instead re-fetches the
+// track's own metadata — a lightweight Spotify lookup (the same source
+// used for every download, just re-run per track instead of per playlist)
+// plus the existing ISRC/genre lookup (Deezer via Songlink, then
+// MusicBrainz) already used at real download time — and fills in ONLY the
+// fields the file/catalog is currently missing, exactly like
+// WriteSpotifyIDTag/applyTrackOverrides do elsewhere: an already-present
+// value, file or catalog, is never overwritten.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// retagIncompleteMetadataResult is the JSON payload returned by
+// POST /api/v1/admin/retag-incomplete-metadata.
+type retagIncompleteMetadataResult struct {
+	Scanned   int      `json:"scanned"`
+	Filled    int      `json:"filled"`  // at least one field was written (file and/or catalog)
+	Skipped   int      `json:"skipped"` // fresh metadata had nothing new to offer
+	Failed    int      `json:"failed"`
+	FailedIDs []string `json:"failed_ids,omitempty"`
+}
+
+// retagIncompleteMetadataThrottle paces the external Spotify/Deezer/
+// MusicBrainz calls this pass makes — one track at a time, a short pause
+// between each, so a library needing thousands of backfills doesn't hammer
+// those shared services.
+const retagIncompleteMetadataThrottle = 1 * time.Second
+
+// retagIncompleteMetadataPerTrackTimeout bounds a single track's Spotify +
+// ISRC/genre lookups + writes. Same reasoning as libraryRebuildPerFileTimeout:
+// one slow or wedged track only ever costs itself, never the rest of the run.
+const retagIncompleteMetadataPerTrackTimeout = 30 * time.Second
+
+// v1RetagIncompleteMetadata runs synchronously like v1LibraryRebuild (its
+// sibling maintenance endpoint) rather than the async 202+SSE pattern used
+// by watchlist repair — simplest option, consistent with the endpoint it's
+// modeled after. It can take a while on a library with many incomplete
+// tracks (one throttled external-API round trip per track) — the caller's
+// HTTP client needs a correspondingly long read timeout, same caveat as
+// library-rebuild.
+func (s *Server) v1RetagIncompleteMetadata(w http.ResponseWriter, r *http.Request) {
+	if !v1RequireAdmin(w, r) {
+		return
+	}
+	if s.ctr.Catalog == nil {
+		writeV1Error(w, http.StatusServiceUnavailable, "catalog database not available")
+		return
+	}
+
+	tracks, err := db.GetTracksNeedingRetag(r.Context(), s.ctr.Catalog)
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeV1JSON(w, http.StatusOK, s.retagIncompleteMetadata(r.Context(), tracks))
+}
+
+func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackForRetag) retagIncompleteMetadataResult {
+	result := retagIncompleteMetadataResult{}
+	lastLog := time.Now()
+	fmt.Printf("[Retag] incomplete-metadata: starting, %d track(s) to process\n", len(tracks))
+
+	for i, t := range tracks {
+		if ctx.Err() != nil {
+			break
+		}
+		result.Scanned++
+		if time.Since(lastLog) >= scanProgressLogInterval {
+			fmt.Printf("[Retag] incomplete-metadata: %d/%d processed so far (filled=%d skipped=%d failed=%d), still working...\n",
+				i, len(tracks), result.Filled, result.Skipped, result.Failed)
+			lastLog = time.Now()
+		}
+
+		trackCtx, cancel := context.WithTimeout(ctx, retagIncompleteMetadataPerTrackTimeout)
+		filled, err := s.retagOneTrack(trackCtx, t)
+		cancel()
+		switch {
+		case err != nil:
+			fmt.Printf("[Retag] incomplete-metadata: %s -> %v\n", t.SpotifyID, err)
+			result.Failed++
+			result.FailedIDs = append(result.FailedIDs, t.SpotifyID)
+		case filled:
+			result.Filled++
+		default:
+			result.Skipped++
+		}
+
+		if i < len(tracks)-1 && ctx.Err() == nil {
+			select {
+			case <-ctx.Done():
+			case <-time.After(retagIncompleteMetadataThrottle):
+			}
+		}
+	}
+
+	fmt.Printf("[Retag] incomplete-metadata done: scanned=%d filled=%d skipped=%d failed=%d\n",
+		result.Scanned, result.Filled, result.Skipped, result.Failed)
+	return result
+}
+
+// retagOneTrack re-fetches t's Spotify/ISRC/genre metadata and fills in
+// whatever the file's tags and the catalog row are currently missing.
+// Returns whether anything was actually written.
+func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, error) {
+	if _, statErr := os.Stat(t.FilePath); statErr != nil {
+		return false, fmt.Errorf("file no longer on disk: %w", statErr)
+	}
+	current := meta.ReadFullTrackTags(t.FilePath)
+
+	data, err := spotify.GetFilteredSpotifyData(ctx, "spotify:track:"+t.SpotifyID, false, 0)
+	if err != nil {
+		return false, fmt.Errorf("fetch spotify metadata: %w", err)
+	}
+	spotifyTracks := extractTracksFromMetadata(data)
+	if len(spotifyTracks) == 0 {
+		return false, fmt.Errorf("spotify returned no metadata for this track (removed or region-locked?)")
+	}
+	jt := spotifyTracks[0]
+
+	// Same ISRC->MusicBrainz lookup used at real download time (see
+	// providerutil.FetchGenreMetadataAsync) — resolves ISRC via Songlink
+	// from the track URL, then genre from MusicBrainz using that ISRC.
+	// useSingleGenre=true: a maintenance pass has no per-user setting to
+	// consult, so it defaults to the simpler single-genre form.
+	trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", t.SpotifyID)
+	var freshISRC, freshGenre string
+	select {
+	case mb := <-providerutil.FetchGenreMetadataAsync("", trackURL, jt.TrackName, jt.ArtistName, jt.AlbumName, true, true):
+		freshISRC = mb.ISRC
+		freshGenre = mb.Metadata.Genre
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+
+	fresh := meta.FullTrackTags{
+		Title:       jt.TrackName,
+		Artist:      jt.ArtistName,
+		Album:       jt.AlbumName,
+		AlbumArtist: jt.AlbumArtist,
+		ReleaseDate: jt.ReleaseDate,
+		TrackNumber: jt.TrackNumber,
+		DiscNumber:  jt.DiscNumber,
+		Copyright:   jt.Copyright,
+		ISRC:        freshISRC,
+		Genre:       freshGenre,
+	}
+
+	catalogTrack := t.Track // copy — start from the existing row, only override what's fresh
+	applyTrackOverrides(&catalogTrack, trackOverrides{
+		Name:        jt.TrackName,
+		ArtistName:  jt.ArtistName,
+		AlbumName:   jt.AlbumName,
+		AlbumArtist: jt.AlbumArtist,
+		ReleaseDate: jt.ReleaseDate,
+		CoverURL:    jt.CoverURL,
+		Copyright:   jt.Copyright,
+		TrackNumber: jt.TrackNumber,
+		DiscNumber:  jt.DiscNumber,
+		DurationMs:  jt.DurationMs,
+	})
+	if freshISRC != "" {
+		catalogTrack.ISRC = freshISRC
+	}
+	if freshGenre != "" {
+		catalogTrack.Genre = freshGenre
+	}
+	if err := db.UpsertTrack(ctx, s.ctr.Catalog, &catalogTrack); err != nil {
+		return false, fmt.Errorf("upsert track: %w", err)
+	}
+
+	written, err := meta.WriteMissingTags(t.FilePath, current, fresh)
+	if err != nil {
+		return written, fmt.Errorf("write tags: %w", err)
+	}
+	return written, nil
 }

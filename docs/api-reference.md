@@ -260,6 +260,56 @@ bumps `last_verified_at` on every row.
 - `403 forbidden` — caller is not admin.
 - `503 catalog database not available` — SQLite catalog handle is nil (mis-configured deploy).
 
+### `POST /api/v1/admin/retag-incomplete-metadata`
+
+Backfills catalog/file metadata that was never available at download time
+— `library-rebuild` only recovers what's already embedded in a file's
+tags, so a file downloaded before a given field was embedded (or by a
+provider that never supplied it, like ISRC) stays incomplete forever no
+matter how many times it's rescanned. This endpoint instead re-fetches
+each incomplete track's metadata (a lightweight Spotify lookup, plus the
+same ISRC→MusicBrainz genre lookup used at real download time) and fills
+in only what's currently missing — an already-present value, in the file
+or in the catalog, is never overwritten.
+
+A track is selected when at least one of `isrc`, `name`, `artist_name`,
+`track_number`, `disc_number`, `duration_ms`, `genre`, `release_date`,
+`album_name`, `album_artist`, `cover_url`, `copyright` is empty/zero on
+its `tracks` row, and it has an active (`status='present'`) `library_files`
+entry to write to. `spotify_id`, `explicit`, `album_id` and the
+`first_seen_at`/`last_seen_at` timestamps are never used as triggers —
+`album_id` in particular is never populated by design (see migration
+0005), so treating it as a trigger would select every track on every run.
+
+FLAC only for now. Runs synchronously (like `library-rebuild`) and paces
+itself — one track at a time, ~1s between each — to avoid hammering
+Spotify/Deezer/MusicBrainz, so it can take a while on a library with many
+incomplete tracks; use a long client read timeout.
+
+**Response `200`**
+```json
+{
+  "scanned":  1660,
+  "filled":   1600,
+  "skipped":     40,
+  "failed":      20,
+  "failed_ids": ["spotify:track:...", "..."]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `scanned` | Tracks the selection query returned. |
+| `filled` | At least one field was written (file and/or catalog). |
+| `skipped` | Fresh metadata had nothing new to offer (rare — selection already filtered to incomplete tracks). |
+| `failed` | Spotify/MusicBrainz fetch error, missing file, or write error — see server logs. |
+| `failed_ids` | The Spotify IDs of failed tracks (omitted when empty). |
+
+**Errors**
+- `403 forbidden` — caller is not admin.
+- `500 ...` — catalog query error.
+- `503 catalog database not available` — SQLite catalog handle is nil (mis-configured deploy).
+
 ---
 
 ## Search & Metadata
