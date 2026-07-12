@@ -5,7 +5,6 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -32,8 +31,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		var req AddWatchlistRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		req.UserID = userIDFromContext(r)
@@ -71,8 +69,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		var req UpdateWatchlistRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		req.ID = id

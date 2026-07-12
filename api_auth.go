@@ -5,7 +5,6 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,8 +26,7 @@ func (s *Server) v1Login(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeV1JSON(w, r, &req) {
 		return
 	}
 	if s.ctr.Auth == nil {
@@ -122,8 +120,7 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Name        string   `json:"name"`
 		Permissions []string `json:"permissions"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeV1JSON(w, r, &req) {
 		return
 	}
 	if req.Name == "" {
@@ -207,7 +204,10 @@ func (s *Server) v1TidalDevicePoll(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DeviceCode string `json:"device_code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceCode == "" {
+	if !decodeV1JSON(w, r, &req) {
+		return
+	}
+	if req.DeviceCode == "" {
 		writeV1Error(w, http.StatusBadRequest, "device_code required")
 		return
 	}
@@ -282,8 +282,7 @@ func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cfg ProxyConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeV1JSON(w, r, &cfg) {
 		return
 	}
 	if err := SaveProxyConfig(s.ctr.DB, cfg); err != nil {

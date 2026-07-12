@@ -39,6 +39,23 @@ func writeV1Error(w http.ResponseWriter, status int, msg string) {
 	writeV1JSON(w, status, map[string]string{"error": msg})
 }
 
+// decodeV1JSON reads and decodes r's JSON body into dst (a pointer, same
+// contract as json.Decoder.Decode). On failure it writes the 400 response
+// itself and returns false — every v1 handler with a JSON body follows
+// "decode or return" immediately after, so callers just do:
+//
+//	var req SomeRequest
+//	if !decodeV1JSON(w, r, &req) {
+//		return
+//	}
+func decodeV1JSON(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return false
+	}
+	return true
+}
+
 // cleanAbsPath normalizes a filesystem path and rejects anything that is not
 // absolute after cleaning (prevents ../traversal tricks and relative paths).
 func cleanAbsPath(p string) (string, error) {

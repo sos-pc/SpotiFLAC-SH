@@ -5,7 +5,6 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -45,8 +44,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		var req EnqueueBatchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		req.UserID = userIDFromContext(r)
@@ -147,8 +145,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		var req DownloadRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		a.ApplySettingsFallbacks(&req)
@@ -229,8 +226,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		var item backend.FetchHistoryItem
-		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &item) {
 			return
 		}
 		item.UserID = userIDFromContext(r)

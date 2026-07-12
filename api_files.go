@@ -193,8 +193,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var settings map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &settings) {
 			return
 		}
 		user := GetUserFromContext(r)
@@ -285,8 +284,7 @@ func (s *Server) registerFileRoutes() {
 			OldPath string `json:"old_path"`
 			NewName string `json:"new_name"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		if _, err := cleanLibraryPath(s.libraryRoot(), params.OldPath); err != nil {
@@ -307,8 +305,7 @@ func (s *Server) registerFileRoutes() {
 		var params struct {
 			FilePaths []string `json:"file_paths"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.FilePaths)
@@ -345,8 +342,7 @@ func (s *Server) registerFileRoutes() {
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
@@ -371,8 +367,7 @@ func (s *Server) registerFileRoutes() {
 			Files  []string `json:"files"`
 			Format string   `json:"format"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.Files)
@@ -392,8 +387,7 @@ func (s *Server) registerFileRoutes() {
 			Files  []string `json:"files"`
 			Format string   `json:"format"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.Files)
@@ -412,8 +406,7 @@ func (s *Server) registerFileRoutes() {
 			Filename   string `json:"filename"`
 			Base64Data string `json:"base64_data"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		url, err := a.UploadImageBytes(params.Filename, params.Base64Data)
@@ -437,8 +430,7 @@ func (s *Server) registerFileRoutes() {
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
@@ -465,8 +457,7 @@ func (s *Server) registerFileRoutes() {
 			JellyfinMusicPath string   `json:"jellyfin_music_path"`
 			MusicRoot         string   `json:"music_root"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		root := s.libraryRoot()
@@ -496,8 +487,7 @@ func (s *Server) registerFileRoutes() {
 			RootDir   string                      `json:"root_dir"`
 			Tracks    []CheckFileExistenceRequest `json:"tracks"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		root := s.libraryRoot()
@@ -530,8 +520,7 @@ func (s *Server) registerFileRoutes() {
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		path, err := s.cleanUploadOrLibraryPath(s.libraryRoot(), params.FilePath)
@@ -554,8 +543,7 @@ func (s *Server) registerFileRoutes() {
 		var params struct {
 			FilePaths []string `json:"file_paths"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &params) {
 			return
 		}
 		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRoot(), params.FilePaths)
@@ -576,8 +564,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var req ConvertAudioRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRoot(), req.InputFiles)
@@ -604,8 +591,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var req LyricsDownloadRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
@@ -627,8 +613,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var req CoverDownloadRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
@@ -650,8 +635,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var req HeaderDownloadRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
@@ -673,8 +657,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var req GalleryImageDownloadRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
@@ -696,8 +679,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var req AvatarDownloadRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		if !decodeV1JSON(w, r, &req) {
 			return
 		}
 		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
