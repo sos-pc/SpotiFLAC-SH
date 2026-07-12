@@ -492,7 +492,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
+		path, err := s.cleanUploadOrLibraryPath(s.libraryRoot(), params.FilePath)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -513,7 +513,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.FilePaths)
+		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRoot(), params.FilePaths)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -532,7 +532,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		cleaned, err := cleanLibraryPaths(s.libraryRoot(), req.InputFiles)
+		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRoot(), req.InputFiles)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return

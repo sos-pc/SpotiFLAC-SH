@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 )
@@ -31,6 +32,7 @@ type Server struct {
 	ctr      *Container
 	mux      *http.ServeMux
 	loginRL  *LoginRateLimiter
+	uploads  *uploadRegistry
 }
 
 func NewServer(app *App, ctr *Container) *Server {
@@ -39,6 +41,7 @@ func NewServer(app *App, ctr *Container) *Server {
 		ctr:     ctr,
 		mux:     http.NewServeMux(),
 		loginRL: NewLoginRateLimiter(),
+		uploads: newUploadRegistry(),
 	}
 	s.registerRoutes()
 	s.registerV1Routes()
@@ -183,6 +186,39 @@ func (s *Server) registerRoutes() {
 
 
 
+// uploadRegistry tracks the temp paths handleUpload has handed back to
+// clients, so analyze/convert (see cleanUploadOrLibraryPath in api_v1.go)
+// can accept exactly those paths without reopening the music-library path
+// confinement to arbitrary filesystem locations — membership is exact-match
+// against a path this server itself generated, not a prefix/pattern guess.
+type uploadRegistry struct {
+	mu    sync.Mutex
+	paths map[string]struct{}
+}
+
+func newUploadRegistry() *uploadRegistry {
+	return &uploadRegistry{paths: make(map[string]struct{})}
+}
+
+func (u *uploadRegistry) add(path string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.paths[path] = struct{}{}
+}
+
+func (u *uploadRegistry) remove(path string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	delete(u.paths, path)
+}
+
+func (u *uploadRegistry) contains(path string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	_, ok := u.paths[path]
+	return ok
+}
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == http.MethodOptions {
@@ -227,11 +263,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The consumer (analyze/convert) reads this file within seconds of the
-	// upload completing — no caller ever cleaned it up itself (this was a
-	// standing TODO), so schedule a bounded cleanup here instead of leaking
-	// one file per upload into the OS temp dir forever.
+	// Registered so analyze/convert can recognize and accept this exact path
+	// (see cleanUploadOrLibraryPath) even though it lives outside the music
+	// library root. The consumer reads it within seconds of the upload
+	// completing — no caller ever cleaned it up itself (this was a standing
+	// TODO), so schedule a bounded cleanup here instead of leaking one file
+	// per upload into the OS temp dir forever.
+	s.uploads.add(tmpPath)
 	time.AfterFunc(10*time.Minute, func() {
+		s.uploads.remove(tmpPath)
 		os.Remove(tmpPath)
 	})
 

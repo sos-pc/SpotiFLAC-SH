@@ -113,6 +113,34 @@ func cleanLibraryPaths(root string, paths []string) ([]string, error) {
 	return out, nil
 }
 
+// cleanUploadOrLibraryPath accepts either a path confined to root (see
+// cleanLibraryPath) or the exact path of a not-yet-expired temp file this
+// server itself created via handleUpload. Freshly uploaded files (drag-drop
+// or file-picker uploads on the Audio Converter / Analyzer pages) live in
+// the OS temp dir, outside the library root by design — this lets
+// analyze/convert accept exactly the path this server just handed back to
+// the uploading client, without reopening path confinement to arbitrary
+// caller-supplied locations.
+func (s *Server) cleanUploadOrLibraryPath(root, p string) (string, error) {
+	if clean, err := cleanAbsPath(p); err == nil && s.uploads.contains(clean) {
+		return clean, nil
+	}
+	return cleanLibraryPath(root, p)
+}
+
+// cleanUploadOrLibraryPaths is the slice form of cleanUploadOrLibraryPath.
+func (s *Server) cleanUploadOrLibraryPaths(root string, paths []string) ([]string, error) {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		c, err := s.cleanUploadOrLibraryPath(root, p)
+		if err != nil {
+			return nil, fmt.Errorf("path[%d]: %w", i, err)
+		}
+		out[i] = c
+	}
+	return out, nil
+}
+
 // isSameOriginRequest reports whether a browser-sent Origin header (when
 // present) matches the Host this request was addressed to. Requests with no
 // Origin header (same-origin navigations, curl, server-to-server calls)

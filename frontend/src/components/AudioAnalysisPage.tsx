@@ -1,36 +1,17 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, ArrowLeft, Trash2 } from "lucide-react";
 import { AudioAnalysis } from "@/components/AudioAnalysis";
 import { SpectrumVisualization } from "@/components/SpectrumVisualization";
 import { useAudioAnalysis } from "@/hooks/useAudioAnalysis";
-import { SelectFile } from "@/lib/rpc";
-import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface AudioAnalysisPageProps {
     onBack?: () => void;
 }
 export function AudioAnalysisPage({ onBack }: AudioAnalysisPageProps) {
     const { analyzing, result, analyzeFile, clearResult, selectedFilePath, spectrumLoading } = useAudioAnalysis();
     const [isDragging, setIsDragging] = useState(false);
-    const handleSelectFile = async () => {
-        try {
-            const filePath = await SelectFile();
-            if (filePath) {
-                await analyzeFile(filePath);
-            }
-        }
-        catch (err) {
-            toast.error("File Selection Failed", {
-                description: err instanceof Error ? err.message : "Failed to select file",
-            });
-        }
-    };
-    const handleFileDrop = useCallback(async (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const items = Array.from(e.dataTransfer.files);
-        if (items.length === 0) return;
-        const file = items[0];
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const uploadAndAnalyze = useCallback(async (file: File) => {
         const formData = new FormData();
         formData.append("file", file);
         try {
@@ -41,12 +22,27 @@ export function AudioAnalysisPage({ onBack }: AudioAnalysisPageProps) {
             console.error("Upload failed:", err);
         }
     }, [analyzeFile]);
+    const handleSelectFile = () => fileInputRef.current?.click();
+    const handleFilePicked = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (file) await uploadAndAnalyze(file);
+    }, [uploadAndAnalyze]);
+    const handleFileDrop = useCallback(async (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const items = Array.from(e.dataTransfer.files);
+        if (items.length === 0) return;
+        await uploadAndAnalyze(items[0]);
+    }, [uploadAndAnalyze]);
 
     const handleAnalyzeAnother = () => {
         clearResult();
     };
     return (<div className="space-y-6">
       
+      <input ref={fileInputRef} type="file" accept=".flac" className="hidden" onChange={handleFilePicked}/>
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           {onBack && (<Button variant="ghost" size="icon" onClick={onBack}>
