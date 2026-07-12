@@ -66,6 +66,7 @@ function App() {
     const downloadQueue = useDownloadQueueDialog();
     const [authed, setAuthed] = useState<boolean>(false);
     const [checkingLocalAuth, setCheckingLocalAuth] = useState<boolean>(true);
+    const [authUser, setAuthUser] = useState(getUser());
     useEffect(() => {
         const initAuth = async () => {
             if (isAuthenticated()) {
@@ -84,7 +85,33 @@ function App() {
         };
         initAuth();
     }, []);
-    const [authUser, setAuthUser] = useState(getUser());
+    const checkForUpdates = async () => {
+        try {
+            const response = await fetch("https://api.github.com/repos/afkarxyz/SpotiFLAC/releases/latest");
+            const data = await response.json();
+            const latestVersion = data.tag_name?.replace(/^v/, "") || "";
+            if (data.published_at) {
+                setReleaseDate(data.published_at);
+            }
+            if (latestVersion && latestVersion > CURRENT_VERSION) {
+                setHasUpdate(true);
+            }
+        }
+        catch (err) {
+            console.error("Failed to check for updates:", err);
+        }
+    };
+    const loadHistory = () => {
+        try {
+            const saved = localStorage.getItem(HISTORY_KEY);
+            if (saved) {
+                setFetchHistory(JSON.parse(saved));
+            }
+        }
+        catch (err) {
+            console.error("Failed to load history:", err);
+        }
+    };
     useLayoutEffect(() => {
         const savedSettings = getSettings();
         if (savedSettings) {
@@ -114,6 +141,10 @@ function App() {
             }
         };
         mediaQuery.addEventListener("change", handleChange);
+        // Fetching the latest release and reading persisted history on
+        // mount/re-auth is the external-system-sync case effects are for —
+        // there's no render-time value to derive these from.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         checkForUpdates();
         loadHistory();
         const handleScroll = () => {
@@ -136,6 +167,10 @@ function App() {
         window.scrollTo({ top: 0, behavior: "smooth" });
     }, []);
     useEffect(() => {
+        // Resets span multiple hooks' internal state (download/lyrics/cover/
+        // availability), not just local setState — not expressible as a
+        // single derived render-time value.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSelectedTracks([]);
         setSearchQuery("");
         download.resetDownloadedTracks();
@@ -145,33 +180,6 @@ function App() {
         setSortBy("default");
         setCurrentListPage(1);
     }, [metadata.metadata]);
-    const checkForUpdates = async () => {
-        try {
-            const response = await fetch("https://api.github.com/repos/afkarxyz/SpotiFLAC/releases/latest");
-            const data = await response.json();
-            const latestVersion = data.tag_name?.replace(/^v/, "") || "";
-            if (data.published_at) {
-                setReleaseDate(data.published_at);
-            }
-            if (latestVersion && latestVersion > CURRENT_VERSION) {
-                setHasUpdate(true);
-            }
-        }
-        catch (err) {
-            console.error("Failed to check for updates:", err);
-        }
-    };
-    const loadHistory = () => {
-        try {
-            const saved = localStorage.getItem(HISTORY_KEY);
-            if (saved) {
-                setFetchHistory(JSON.parse(saved));
-            }
-        }
-        catch (err) {
-            console.error("Failed to load history:", err);
-        }
-    };
     const saveHistory = (history: HistoryItem[]) => {
         try {
             localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
@@ -258,6 +266,9 @@ function App() {
             };
         }
         if (historyItem) {
+            // Persisting to localStorage-backed history in response to new
+            // metadata is external-system sync, not a derived render value.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             addToHistory(historyItem);
         }
     }, [metadata.metadata]);

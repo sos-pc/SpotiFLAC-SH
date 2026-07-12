@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Trash2, ExternalLink, Search, ArrowUpDown, History, Play, Pause, Database, CloudUpload, Music2, Disc3, ListMusic, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,6 @@ interface HistoryPageProps {
 export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const [activeTab, setActiveTab] = useState("downloads");
     const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>([]);
-    const [filteredDownloadHistory, setFilteredDownloadHistory] = useState<DownloadHistoryItem[]>([]);
     const [showClearDownloadConfirm, setShowClearDownloadConfirm] = useState(false);
     const [downloadSearchQuery, setDownloadSearchQuery] = useState("");
     const [downloadSortBy, setDownloadSortBy] = useState("default");
@@ -56,7 +55,6 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [fetchHistory, setFetchHistory] = useState<FetchHistoryItem[]>([]);
-    const [filteredFetchHistory, setFilteredFetchHistory] = useState<FetchHistoryItem[]>([]);
     const [activeFetchTab, setActiveFetchTab] = useState("track");
     const [showClearFetchConfirm, setShowClearFetchConfirm] = useState(false);
     const [fetchSearchQuery, setFetchSearchQuery] = useState("");
@@ -83,7 +81,11 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
         }
     };
     useEffect(() => {
+        // Polling on an interval is exactly the kind of external-system sync
+        // effects exist for — the initial call plus setInterval can't be
+        // expressed as derived render-time state.
         if (activeTab === "downloads") {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             fetchDownloadHistory();
             const interval = setInterval(fetchDownloadHistory, 5000);
             return () => clearInterval(interval);
@@ -101,7 +103,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
             }
         };
     }, []);
-    useEffect(() => {
+    const filteredDownloadHistory = useMemo(() => {
         let result = [...downloadHistory];
         if (downloadSearchQuery) {
             const query = downloadSearchQuery.toLowerCase();
@@ -131,12 +133,19 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                 default: return 0;
             }
         });
-        setFilteredDownloadHistory(result);
+        return result;
     }, [downloadHistory, downloadSearchQuery, downloadSortBy]);
-    useEffect(() => {
+    // Reset to page 1 when the filter changes, without a dedicated effect —
+    // computed and applied during render, same pattern React recommends for
+    // "adjusting state when a dependency changes":
+    // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+    const downloadFilterKey = `${downloadSearchQuery}|${downloadSortBy}`;
+    const [prevDownloadFilterKey, setPrevDownloadFilterKey] = useState(downloadFilterKey);
+    if (downloadFilterKey !== prevDownloadFilterKey) {
+        setPrevDownloadFilterKey(downloadFilterKey);
         setDownloadCurrentPage(1);
-    }, [downloadSearchQuery, downloadSortBy]);
-    useEffect(() => {
+    }
+    const filteredFetchHistory = useMemo(() => {
         let result = [...fetchHistory];
         if (activeFetchTab !== "all") {
             result = result.filter(item => item.type.toLowerCase() === activeFetchTab.toLowerCase());
@@ -147,11 +156,14 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                 item.info.toLowerCase().includes(query));
         }
         result.sort((a, b) => b.timestamp - a.timestamp);
-        setFilteredFetchHistory(result);
+        return result;
     }, [fetchHistory, fetchSearchQuery, activeFetchTab]);
-    useEffect(() => {
+    const fetchFilterKey = `${fetchSearchQuery}|${activeFetchTab}`;
+    const [prevFetchFilterKey, setPrevFetchFilterKey] = useState(fetchFilterKey);
+    if (fetchFilterKey !== prevFetchFilterKey) {
+        setPrevFetchFilterKey(fetchFilterKey);
         setFetchCurrentPage(1);
-    }, [fetchSearchQuery, activeFetchTab]);
+    }
     const handlePreview = async (id: string, spotifyId: string) => {
         if (playingPreviewId === id) {
             audioRef.current?.pause();
