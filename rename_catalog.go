@@ -21,7 +21,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
@@ -50,7 +50,7 @@ func syncCatalogPathOnRename(ctr *Container, oldPath, newPath string) {
 			existing, err := db.GetActiveLibraryFile(ctx, ctr.Catalog, spotifyID)
 			if err == nil && existing != nil && existing.FilePath == oldPath {
 				if err := db.UpdateLibraryFilePath(ctx, ctr.Catalog, existing.ID, newPath); err != nil {
-					fmt.Printf("[Catalog] rename sync failed for %s: %v\n", spotifyID, err)
+					slog.Warn("[Catalog] rename sync failed", "spotify_id", spotifyID, "err", err)
 				}
 			}
 			cancel()
@@ -59,15 +59,15 @@ func syncCatalogPathOnRename(ctr *Container, oldPath, newPath string) {
 
 	if ctr.Jobs != nil {
 		if n, err := ctr.Jobs.UpdateJobFilePathsForRename(oldPath, newPath); err != nil {
-			fmt.Printf("[Catalog] job FilePath rename sync failed for %s: %v\n", oldPath, err)
+			slog.Warn("[Catalog] job FilePath rename sync failed", "old_path", oldPath, "err", err)
 		} else if n > 0 {
-			fmt.Printf("[Catalog] updated %d job(s) FilePath for rename: %s -> %s\n", n, oldPath, newPath)
+			slog.Info("[Catalog] updated job(s) FilePath for rename", "count", n, "old_path", oldPath, "new_path", newPath)
 		}
 	}
 
 	if n, err := backend.UpdateHistoryItemPathsForRename(oldPath, newPath); err != nil {
-		fmt.Printf("[Catalog] history Path rename sync failed for %s: %v\n", oldPath, err)
+		slog.Warn("[Catalog] history Path rename sync failed", "old_path", oldPath, "err", err)
 	} else if n > 0 {
-		fmt.Printf("[Catalog] updated %d history item(s) Path for rename: %s -> %s\n", n, oldPath, newPath)
+		slog.Info("[Catalog] updated history item(s) Path for rename", "count", n, "old_path", oldPath, "new_path", newPath)
 	}
 }

@@ -3,6 +3,7 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -83,15 +84,14 @@ func InitHistoryDBAt(configDir string) error {
 
 	for attempt, timeout := range timeouts {
 		if attempt > 0 {
-			fmt.Printf("[History] Retry %d/%d opening history.db (timeout: %v)...\n",
-				attempt, len(timeouts)-1, timeout)
+			slog.Warn("[History] Retrying to open history.db", "attempt", attempt, "of", len(timeouts)-1, "timeout", timeout)
 			time.Sleep(time.Duration(attempt) * time.Second)
 		}
 
 		db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: timeout})
 		if err != nil {
 			lastErr = err
-			fmt.Printf("[History] Attempt %d failed: %v\n", attempt+1, err)
+			slog.Warn("[History] Attempt to open history.db failed", "attempt", attempt+1, "err", err)
 			continue
 		}
 
@@ -112,13 +112,12 @@ func InitHistoryDBAt(configDir string) error {
 
 		historyDB = db
 		historyDisabled = false
-		fmt.Printf("[History] history.db opened: %s\n", dbPath)
+		slog.Info("[History] history.db opened", "path", dbPath)
 		return nil
 	}
 
 	historyDisabled = true
-	fmt.Printf("[History] WARNING: history DB unavailable after %d attempts: %v\n",
-		len(timeouts), lastErr)
+	slog.Error("[History] history DB unavailable after retries", "attempts", len(timeouts), "err", lastErr)
 	return fmt.Errorf("history DB unavailable: %w", lastErr)
 }
 
@@ -170,7 +169,7 @@ func getHistoryDB() (*bolt.DB, error) {
 	}
 
 	historyDB = db
-	fmt.Printf("[History] history.db re-initialized: %s\n", dbPath)
+	slog.Info("[History] history.db re-initialized", "path", dbPath)
 	return historyDB, nil
 }
 
@@ -181,7 +180,7 @@ func getHistoryDB() (*bolt.DB, error) {
 func AddHistoryItem(item HistoryItem) error {
 	db, err := getHistoryDB()
 	if err != nil {
-		fmt.Printf("[History] AddHistoryItem skipped: %v\n", err)
+		slog.Warn("[History] AddHistoryItem skipped", "err", err)
 		return nil
 	}
 	return db.Update(func(tx *bolt.Tx) error {
@@ -359,7 +358,7 @@ func UpdateHistoryItemPathsForRename(oldPath, newPath string) (int, error) {
 func AddFetchHistoryItem(item FetchHistoryItem) error {
 	db, err := getHistoryDB()
 	if err != nil {
-		fmt.Printf("[History] AddFetchHistoryItem skipped: %v\n", err)
+		slog.Warn("[History] AddFetchHistoryItem skipped", "err", err)
 		return nil
 	}
 	return db.Update(func(tx *bolt.Tx) error {
@@ -540,6 +539,6 @@ func InitHistoryDBShared(db *bolt.DB) error {
 	historyDB = db
 	historyDisabled = false
 	historyShared = true
-	fmt.Printf("[History] Using shared DB (no separate history.db)\n")
+	slog.Info("[History] Using shared DB (no separate history.db)")
 	return nil
 }

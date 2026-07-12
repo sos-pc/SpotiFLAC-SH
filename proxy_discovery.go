@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"runtime/debug"
@@ -90,7 +91,7 @@ func startProxyDiscovery(ctx context.Context, db *bolt.DB) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("[Discovery] Goroutine stopped.")
+			slog.Info("[Discovery] Goroutine stopped.")
 			return
 		case <-ticker.C:
 			runDiscoveryOnceSafely(ctx, db)
@@ -106,7 +107,7 @@ func startProxyDiscovery(ctx context.Context, db *bolt.DB) {
 func runDiscoveryOnceSafely(ctx context.Context, db *bolt.DB) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("[PANIC] recovered in proxy discovery run: %v\n%s\n", r, debug.Stack())
+			slog.Error("[Discovery] PANIC recovered in proxy discovery run", "recover", r, "stack", string(debug.Stack()))
 		}
 	}()
 	runDiscoveryOnce(ctx, db)
@@ -117,7 +118,7 @@ func runDiscoveryOnceSafely(ctx context.Context, db *bolt.DB) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func runDiscoveryOnce(ctx context.Context, db *bolt.DB) {
-	fmt.Println("[Discovery] Running proxy discovery...")
+	slog.Info("[Discovery] Running proxy discovery...")
 
 	result := ProxyDiscoveryResult{
 		CheckedAt:   time.Now().Unix(),
@@ -127,7 +128,7 @@ func runDiscoveryOnce(ctx context.Context, db *bolt.DB) {
 
 	up, down, err := fetchTidalUptimeProxies(ctx)
 	if err != nil {
-		fmt.Printf("[Discovery] Failed to fetch tidal-uptime: %v\n", err)
+		slog.Warn("[Discovery] Failed to fetch tidal-uptime", "err", err)
 		result.Error = err.Error()
 		saveDiscoveryResult(db, result)
 		return
@@ -152,8 +153,7 @@ func runDiscoveryOnce(ctx context.Context, db *bolt.DB) {
 	// Apply to the in-memory effective list (never touches BoltDB user config).
 	util.SetTidalDiscovery(up, down)
 
-	fmt.Printf("[Discovery] Tidal: %d up, %d down, %d newly discovered\n",
-		len(up), len(down), len(result.TidalAdded))
+	slog.Info("[Discovery] Tidal", "up", len(up), "down", len(down), "newly_discovered", len(result.TidalAdded))
 
 	saveDiscoveryResult(db, result)
 }
@@ -206,7 +206,7 @@ func fetchTidalUptimeProxies(ctx context.Context) (up, down []string, err error)
 			return
 		}
 		if err := ValidateExternalURL(rawURL); err != nil {
-			fmt.Printf("[Discovery] Ignoring unsafe proxy URL from tidal-uptime: %v\n", err)
+			slog.Warn("[Discovery] Ignoring unsafe proxy URL from tidal-uptime", "err", err)
 			return
 		}
 		if _, ok := seen[n]; !ok {
@@ -244,7 +244,7 @@ func saveDiscoveryResult(db *bolt.DB, r ProxyDiscoveryResult) {
 	}
 	data, err := json.Marshal(r)
 	if err != nil {
-		fmt.Printf("[Discovery] Failed to marshal result: %v\n", err)
+		slog.Error("[Discovery] Failed to marshal result", "err", err)
 		return
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
@@ -254,7 +254,7 @@ func saveDiscoveryResult(db *bolt.DB, r ProxyDiscoveryResult) {
 		}
 		return b.Put(keyDiscoveryResult, data)
 	}); err != nil {
-		fmt.Printf("[Discovery] Failed to save result to BoltDB: %v\n", err)
+		slog.Error("[Discovery] Failed to save result to BoltDB", "err", err)
 	}
 }
 
@@ -295,12 +295,11 @@ func loadSavedDiscovery(db *bolt.DB) {
 		return
 	}
 	if time.Since(time.Unix(result.CheckedAt, 0)) > maxDiscoveryAge {
-		fmt.Printf("[Discovery] Cached result is stale (%s old), skipping restore\n",
-			time.Since(time.Unix(result.CheckedAt, 0)).Round(time.Minute))
+		slog.Info("[Discovery] Cached result is stale, skipping restore",
+			"age", time.Since(time.Unix(result.CheckedAt, 0)).Round(time.Minute))
 		return
 	}
 	util.SetTidalDiscovery(result.TidalUp, result.TidalDown)
-	fmt.Printf("[Discovery] Restored: %d up, %d down (checked %s ago)\n",
-		len(result.TidalUp), len(result.TidalDown),
-		time.Since(time.Unix(result.CheckedAt, 0)).Round(time.Minute))
+	slog.Info("[Discovery] Restored", "up", len(result.TidalUp), "down", len(result.TidalDown),
+		"checked_ago", time.Since(time.Unix(result.CheckedAt, 0)).Round(time.Minute))
 }
