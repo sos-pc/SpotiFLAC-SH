@@ -723,7 +723,7 @@ export function SettingsPage({
                 <div className="flex gap-2 flex-wrap">
                   <Select
                     value={tempSettings.downloader}
-                    onValueChange={(value: any) =>
+                    onValueChange={(value: SettingsType["downloader"]) =>
                       setTempSettings((prev) => ({
                         ...prev,
                         downloader: value,
@@ -766,7 +766,7 @@ export function SettingsPage({
                     <>
                       <Select
                         value={tempSettings.autoOrder || "tidal-qobuz-amazon"}
-                        onValueChange={(value: any) =>
+                        onValueChange={(value: string) =>
                           setTempSettings((prev) => ({
                             ...prev,
                             autoOrder: value,
@@ -1749,7 +1749,7 @@ export function SettingsPage({
                 <div className="flex gap-2">
                   <Select
                     value={newProxyService}
-                    onValueChange={(v: any) => setNewProxyService(v)}
+                    onValueChange={(v: string) => setNewProxyService(v as "tidal" | "qobuz" | "amazon" | "deezer")}
                   >
                     <SelectTrigger className="w-36 shrink-0">
                       <SelectValue />

@@ -4,7 +4,7 @@ import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { logger } from "@/lib/logger";
 import { AddFetchHistory } from "@/lib/rpc";
 import { getStreamToken } from "@/lib/auth";
-import type { SpotifyMetadataResponse } from "@/types/api";
+import type { SpotifyMetadataResponse, ArtistDiscographyResponse, ArtistInfo, DiscographyAlbum, TrackMetadata } from "@/types/api";
 export function useMetadata() {
     const [loading, setLoading] = useState(false);
     const [tracksLoading, setTracksLoading] = useState(false);
@@ -97,7 +97,7 @@ export function useMetadata() {
             activeStreamRef.current = es;
 
             // Accumulate data in a plain object — avoids stale-closure issues with state
-            const accumulated: { artist_info: any; album_list: any[]; track_list: any[] } = {
+            const accumulated: { artist_info: ArtistInfo | null; album_list: DiscographyAlbum[]; track_list: TrackMetadata[] } = {
                 artist_info: null,
                 album_list: [],
                 track_list: [],
@@ -108,7 +108,7 @@ export function useMetadata() {
                 accumulated.artist_info = data.artist_info;
                 accumulated.album_list = data.album_list ?? [];
                 accumulated.track_list = [];
-                setMetadata({ ...accumulated } as any);
+                setMetadata({ ...accumulated } as ArtistDiscographyResponse);
                 setLoading(false);
                 setTracksLoading(true);
                 logger.success(`fetched artist: ${data.artist_info?.name}`);
@@ -118,14 +118,14 @@ export function useMetadata() {
             es.addEventListener("album_tracks", (e: MessageEvent) => {
                 const data = JSON.parse(e.data);
                 accumulated.track_list = [...accumulated.track_list, ...(data.tracks ?? [])];
-                setMetadata({ ...accumulated } as any);
+                setMetadata({ ...accumulated } as ArtistDiscographyResponse);
             });
 
             es.addEventListener("done", () => {
                 es.close();
                 activeStreamRef.current = null;
                 setTracksLoading(false);
-                saveToHistory(url, { ...accumulated } as any);
+                saveToHistory(url, { ...accumulated } as ArtistDiscographyResponse);
                 logger.info(`streaming complete: ${accumulated.track_list.length} tracks`);
                 toast.success("Metadata fetched successfully");
                 resolve();

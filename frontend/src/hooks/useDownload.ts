@@ -10,7 +10,7 @@ import {
 import { logger } from "@/lib/logger";
 import { getStreamToken } from "@/lib/auth";
 import { useJobsStreamEvent } from "./useJobsStreamEvent";
-import type { TrackMetadata, FileExistsCheck } from "@/types/api";
+import type { TrackMetadata, FileExistsCheck, TrackAvailability, DownloadResponse } from "@/types/api";
 import type { Settings } from "@/lib/settings";
 import {
   CheckFilesExistence,
@@ -61,7 +61,7 @@ function buildExistenceCheckRequests(
 }
 
 async function enqueueTracksBatch(
-  settings: any,
+  settings: Settings,
   orderedTracks: TrackMetadata[],
   tracksToDownload: TrackMetadata[],
   folderName: string | undefined,
@@ -140,7 +140,7 @@ async function enqueueTracksBatch(
 }
 
 async function maybeCreateM3U8(
-  settings: any,
+  settings: Settings,
   folderName: string | undefined,
   outputDir: string,
   paths: string[],
@@ -240,7 +240,7 @@ export function useDownload(region: string) {
   );
   const downloadWithAutoFallback = async (
     id: string,
-    settings: any,
+    settings: Settings,
     trackName?: string,
     artistName?: string,
     albumName?: string,
@@ -353,7 +353,7 @@ export function useDownload(region: string) {
       }
     }
     if (service === "auto") {
-      let streamingURLs: any = null;
+      let streamingURLs: TrackAvailability | null = null;
       if (spotifyId) {
         try {
           streamingURLs = await GetStreamingURLs(spotifyId, region);
@@ -365,8 +365,9 @@ export function useDownload(region: string) {
         ? Math.round(durationMs / 1000)
         : undefined;
       const order = (settings.autoOrder || "tidal-amazon-qobuz").split("-");
-      let lastResponse: any = {
+      let lastResponse: DownloadResponse = {
         success: false,
+        message: "No matching services found",
         error: "No matching services found",
       };
       const fallbackErrors: string[] = [];
@@ -418,7 +419,7 @@ export function useDownload(region: string) {
           } catch (err) {
             logger.error(`tidal error: ${err}`);
             fallbackErrors.push(`[Tidal] ${String(err)}`);
-            lastResponse = { success: false, error: String(err) };
+            lastResponse = { success: false, message: String(err), error: String(err) };
           }
         } else if (s === "amazon" && streamingURLs?.amazon_url) {
           try {
@@ -461,7 +462,7 @@ export function useDownload(region: string) {
           } catch (err) {
             logger.error(`amazon error: ${err}`);
             fallbackErrors.push(`[Amazon] ${String(err)}`);
-            lastResponse = { success: false, error: String(err) };
+            lastResponse = { success: false, message: String(err), error: String(err) };
           }
         } else if (s === "qobuz") {
           try {
@@ -504,7 +505,7 @@ export function useDownload(region: string) {
           } catch (err) {
             logger.error(`qobuz error: ${err}`);
             fallbackErrors.push(`[Qobuz] ${String(err)}`);
-            lastResponse = { success: false, error: String(err) };
+            lastResponse = { success: false, message: String(err), error: String(err) };
           }
         } else if (s === "deezer") {
           try {
@@ -549,7 +550,7 @@ export function useDownload(region: string) {
           } catch (err) {
             logger.error(`deezer error: ${err}`);
             fallbackErrors.push(`[Deezer] ${String(err)}`);
-            lastResponse = { success: false, error: String(err) };
+            lastResponse = { success: false, message: String(err), error: String(err) };
           }
         }
       }

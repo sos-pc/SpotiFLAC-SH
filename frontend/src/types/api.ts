@@ -322,6 +322,7 @@ export interface FileEntry {
 export interface RenameResult {
     old_name: string;
     new_name: string;
+    success?: boolean;
     error?: string;
 }
 export interface FileExistsCheck {

@@ -15,6 +15,7 @@ import { FileBrowser } from "@/components/FileBrowser";
 import { ListDirectoryFiles, PreviewRenameFiles, RenameFilesByMetadata } from "@/lib/rpc";
 import { ReadFileMetadata, ReadTextFile, RenameFileTo, ReadImageAsBase64 } from "@/lib/rpc";
 import { getUser } from "@/lib/auth";
+import type { AudioMetadata, RenameResult } from "@/types/api";
 interface FileNode {
     name: string;
     path: string;
@@ -22,15 +23,6 @@ interface FileNode {
     size: number;
     children?: FileNode[];
     expanded?: boolean;
-}
-interface FileMetadata {
-    title: string;
-    artist: string;
-    album: string;
-    album_artist: string;
-    track_number: number;
-    disc_number: number;
-    year: string;
 }
 type TabType = "track" | "lyric" | "cover";
 const FORMAT_PRESETS: Record<string, {
@@ -104,14 +96,14 @@ export function FileManagerPage() {
     });
     const renameFormat = formatPreset === "custom" ? (customFormat || FORMAT_PRESETS["custom"].template) : FORMAT_PRESETS[formatPreset].template;
     const [showPreview, setShowPreview] = useState(false);
-    const [previewData, setPreviewData] = useState<any[]>([]);
+    const [previewData, setPreviewData] = useState<RenameResult[]>([]);
     const [renaming, setRenaming] = useState(false);
     const [previewOnly, setPreviewOnly] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showMetadata, setShowMetadata] = useState(false);
     const [metadataFile, setMetadataFile] = useState<string>("");
-    const [metadataInfo, setMetadataInfo] = useState<FileMetadata | null>(null);
+    const [metadataInfo, setMetadataInfo] = useState<AudioMetadata | null>(null);
     const [loadingMetadata, setLoadingMetadata] = useState(false);
     const [showLyricsPreview, setShowLyricsPreview] = useState(false);
     const [lyricsContent, setLyricsContent] = useState("");
@@ -285,7 +277,7 @@ export function FileManagerPage() {
         setLoadingMetadata(true);
         try {
             const metadata = await ReadFileMetadata(filePath);
-            setMetadataInfo(metadata as FileMetadata);
+            setMetadataInfo(metadata);
             setShowMetadata(true);
         }
         catch (err) {
@@ -401,8 +393,8 @@ export function FileManagerPage() {
         setRenaming(true);
         try {
             const result = await RenameFilesByMetadata(Array.from(selectedFiles), renameFormat);
-            const successCount = result.filter((r: any) => r.success).length;
-            const failCount = result.filter((r: any) => !r.success).length;
+            const successCount = result.filter((r) => r.success).length;
+            const failCount = result.filter((r) => !r.success).length;
             if (successCount > 0)
                 toast.success("Rename Complete", { description: `${successCount} file(s) renamed${failCount > 0 ? `, ${failCount} failed` : ""}` });
             else
