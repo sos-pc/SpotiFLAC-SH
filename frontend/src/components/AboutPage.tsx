@@ -2,14 +2,11 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { openExternal } from "@/lib/utils";
 import { GetOSInfo } from "@/lib/rpc";
-import { Card, CardContent, CardHeader, CardTitle, } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Bug, Lightbulb, ExternalLink, CircleHelp, Heart, } from "lucide-react";
-import KofiLogo from "@/assets/kofi_symbol.svg";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Bug, Lightbulb, ExternalLink, } from "lucide-react";
 import { DragDropMedia } from "./DragDropTextarea";
 interface AboutPageProps {
     version: string;
@@ -23,7 +20,7 @@ export function AboutPage({ version }: AboutPageProps) {
     // silently leaking geolocation to a third party. A lazy initializer
     // needs no effect since it's a synchronous, side-effect-free read.
     const [location] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
-    const [activeTab, setActiveTab] = useState<"bug_report" | "feature_request" | "faq" | "support">("bug_report");
+    const [activeTab, setActiveTab] = useState<"bug_report" | "feature_request">("bug_report");
     const [bugType, setBugType] = useState("Track");
     const [problem, setProblem] = useState("");
     const [spotifyUrl, setSpotifyUrl] = useState("");
@@ -49,28 +46,6 @@ export function AboutPage({ version }: AboutPageProps) {
         };
         fetchOS();
     }, []);
-    const faqs = [
-        {
-            q: "Is this software free?",
-            a: "Yes. This software is completely free. You do not need an account, login, or subscription. All you need is an internet connection.",
-        },
-        {
-            q: "Can using this software get my Spotify account suspended or banned?",
-            a: "No. This software has no connection to your Spotify account. Spotify data is obtained through reverse engineering of the Spotify Web Player, not through user authentication.",
-        },
-        {
-            q: "Where does the audio come from?",
-            a: "The audio is fetched using third-party APIs.",
-        },
-        {
-            q: "Why does metadata fetching sometimes fail?",
-            a: "This usually happens because your IP address has been rate-limited. You can wait and try again later, or use a VPN to bypass the rate limit.",
-        },
-        {
-            q: "Why does Windows Defender or antivirus flag or delete the file?",
-            a: "This is a false positive. It likely happens because the executable is compressed using UPX. If you are concerned, you can fork the repository and build the software yourself from source.",
-        },
-    ];
     const handleSubmit = () => {
         const title = activeTab === "bug_report"
             ? `[Bug Report] ${problem.substring(0, 50)}${problem.length > 50 ? "..." : ""}`
@@ -121,7 +96,7 @@ ${contextContent}`;
         const url = `https://github.com/sos-pc/SpotiFLAC-SH/issues/new?${params.toString()}`;
         openExternal(url);
     };
-    return (<div className={`flex flex-col space-y-4 ${activeTab === "faq" ? "h-[calc(100vh-10rem)]" : ""}`}>
+    return (<div className="flex flex-col space-y-4">
       <div className="flex items-center justify-between shrink-0">
         <h2 className="text-2xl font-bold tracking-tight">About</h2>
       </div>
@@ -135,17 +110,9 @@ ${contextContent}`;
           <Lightbulb className="h-4 w-4"/>
           Feature Request
         </Button>
-        <Button variant={activeTab === "faq" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("faq")} className="rounded-b-none">
-          <CircleHelp className="h-4 w-4"/>
-          FAQ
-        </Button>
-        <Button variant={activeTab === "support" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("support")} className="rounded-b-none">
-          <Heart className="h-4 w-4"/>
-          Support Me
-        </Button>
       </div>
 
-      <div className={`flex-1 min-h-0 ${activeTab === "faq" ? "overflow-hidden" : ""}`}>
+      <div className="flex-1 min-h-0">
         {activeTab === "bug_report" && (<div className="flex flex-col">
             <div className="space-y-4 pt-4 flex flex-col">
               <div className="mt-4 pr-2">
@@ -216,44 +183,6 @@ ${contextContent}`;
             <div className="flex justify-center pt-4 shrink-0">
               <Button className="w-[200px] cursor-pointer gap-2" onClick={handleSubmit}>
                 <ExternalLink className="h-4 w-4"/> Create Issue on GitHub
-              </Button>
-            </div>
-          </div>)}
-
-        {activeTab === "faq" && (<ScrollArea className="h-full">
-            <div className="p-1 pr-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Frequently Asked Questions</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {faqs.map((faq, index) => (<div key={index} className="space-y-2">
-                      <h3 className="font-medium text-base text-foreground/90">
-                        {faq.q}
-                      </h3>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {faq.a}
-                      </p>
-                    </div>))}
-                </CardContent>
-              </Card>
-            </div>
-          </ScrollArea>)}
-
-        {activeTab === "support" && (<div className="flex flex-col items-center justify-center p-8 space-y-8">
-            <div className="text-center space-y-2">
-              <h3 className="text-2xl font-bold tracking-tight">Support Me</h3>
-              <p className="text-muted-foreground max-w-[500px]">
-                If this software is useful and brings you value, consider
-                supporting the project on Ko-fi. Your support helps keep
-                development going.
-              </p>
-            </div>
-
-            <div className="flex justify-center w-full max-w-lg">
-              <Button size="lg" className="h-16 text-lg font-semibold text-white gap-3 group" style={{ backgroundColor: "#72a4f2" }} onClick={() => openExternal("https://ko-fi.com/afkarxyz")}>
-                <img src={KofiLogo} className="h-8 w-8 transition-transform group-hover:scale-110" alt="Ko-fi"/>
-                Support me on Ko-fi
               </Button>
             </div>
           </div>)}
