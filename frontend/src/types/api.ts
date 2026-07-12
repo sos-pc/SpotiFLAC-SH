@@ -276,3 +276,156 @@ export interface AudioMetadata {
     disc_number: number;
     year: string;
 }
+export interface SpotifySearchTrack {
+    id: string;
+    name: string;
+    artists: string;
+    images: string;
+    duration_ms: number;
+    is_explicit?: boolean;
+    external_urls: string;
+}
+export interface SpotifySearchAlbum {
+    id: string;
+    name: string;
+    artists: string;
+    images: string;
+    release_date?: string;
+    external_urls: string;
+}
+export interface SpotifySearchArtist {
+    id: string;
+    name: string;
+    images: string;
+    external_urls: string;
+}
+export interface SpotifySearchPlaylist {
+    id: string;
+    name: string;
+    owner?: string;
+    images: string;
+    external_urls: string;
+}
+export interface SpotifySearchResults {
+    tracks: SpotifySearchTrack[];
+    albums: SpotifySearchAlbum[];
+    artists: SpotifySearchArtist[];
+    playlists: SpotifySearchPlaylist[];
+}
+export interface FileEntry {
+    name: string;
+    path: string;
+    is_dir: boolean;
+    size: number;
+    children?: FileEntry[];
+}
+export interface RenameResult {
+    old_name: string;
+    new_name: string;
+    error?: string;
+}
+export interface FileExistsCheck {
+    spotify_id: string;
+    track_name: string;
+    artist_name: string;
+    album_name?: string;
+    album_artist?: string;
+    release_date?: string;
+    track_number?: number;
+    disc_number?: number;
+    position?: number;
+    use_album_track_number?: boolean;
+    filename_format?: string;
+    include_track_number?: boolean;
+    audio_format?: string;
+    relative_path?: string;
+}
+export interface FileExistsResult {
+    spotify_id: string;
+    exists: boolean;
+    file_path?: string;
+}
+export interface ConvertAudioRequest {
+    input_files: string[];
+    output_format: string;
+    bitrate: string;
+    codec: string;
+}
+export interface ConvertAudioResult {
+    input_file: string;
+    output_file: string;
+    success: boolean;
+    error?: string;
+}
+export interface SystemInfo {
+    os: string;
+    config_path: string;
+    home_dir: string;
+    version: string;
+}
+export interface DownloadHistoryItem {
+    id: string;
+    spotify_id: string;
+    title: string;
+    artists: string;
+    album: string;
+    duration_str: string;
+    cover_url: string;
+    quality: string;
+    format: string;
+    path: string;
+    timestamp: number;
+}
+export interface FetchHistoryItem {
+    id: string;
+    url: string;
+    type: string;
+    name: string;
+    info: string;
+    image: string;
+    data: string;
+    timestamp: number;
+}
+export interface WatchlistSyncLog {
+    time: string;
+    new_tracks: number;
+    downloaded: number;
+    skipped: number;
+    failed: number;
+    deleted: number;
+}
+export interface WatchlistStats {
+    watchlist_id: string;
+    total_tracks: number;
+    downloaded: number;
+    skipped: number;
+    failed: number;
+    pending: number;
+    total_size_mb: number;
+}
+export interface WatchlistHistoryItem {
+    track_name: string;
+    artist_name: string;
+    album_name: string;
+    status: string;
+    total_size: number;
+    updated_at: number;
+    file_path: string;
+    error: string;
+}
+export interface WatchedPlaylist {
+    id: string;
+    spotify_url: string;
+    name: string;
+    interval_hours: number;
+    last_sync: string;
+    track_ids: string[];
+    created_at: string;
+    sync_deletions: boolean;
+    sync_logs?: WatchlistSyncLog[];
+}
+export interface EnqueueBatchResponse {
+    enqueued: number;
+    skipped: number;
+    batch_id?: string;
+}

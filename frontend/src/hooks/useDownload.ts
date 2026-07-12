@@ -10,23 +10,8 @@ import {
 import { logger } from "@/lib/logger";
 import { getStreamToken } from "@/lib/auth";
 import { useJobsStreamEvent } from "./useJobsStreamEvent";
-import type { TrackMetadata } from "@/types/api";
-interface CheckFileExistenceRequest {
-  spotify_id: string;
-  track_name: string;
-  artist_name: string;
-  album_name?: string;
-  album_artist?: string;
-  release_date?: string;
-  track_number?: number;
-  disc_number?: number;
-  position?: number;
-  use_album_track_number?: boolean;
-  filename_format?: string;
-  include_track_number?: boolean;
-  audio_format?: string;
-  relative_path?: string;
-}
+import type { TrackMetadata, FileExistsCheck } from "@/types/api";
+import type { Settings } from "@/lib/settings";
 import {
   CheckFilesExistence,
   CreateM3U8File,
@@ -43,9 +28,9 @@ import {
 // brand new playlist/album) while handleDownloadSelected correctly skipped
 // the call in that case.
 function buildExistenceCheckRequests(
-  settings: any,
+  settings: Settings,
   tracks: TrackMetadata[],
-): CheckFileExistenceRequest[] {
+): FileExistsCheck[] {
   const useAlbumTrackNumber =
     settings.folderTemplate?.includes("{album}") || false;
   return tracks.map((track) => {
@@ -335,7 +320,7 @@ export function useDownload(region: string) {
 
     if (trackName && artistName) {
       try {
-        const checkRequest: CheckFileExistenceRequest = {
+        const checkRequest: FileExistsCheck = {
           spotify_id: spotifyId || id,
           track_name: trackName,
           artist_name: displayArtist || "",
