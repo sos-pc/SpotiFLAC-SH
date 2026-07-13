@@ -104,7 +104,14 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	// No "Connection: keep-alive" here: it's an HTTP/1.1 hop-by-hop header,
+	// forbidden by the HTTP/2 spec (RFC 9113 §8.2.2) since h2 multiplexes
+	// over one connection and has no such semantic. Go's own h2 server
+	// strips it automatically, but a reverse proxy in front (nginx,
+	// Cloudflare, etc.) forwarding it verbatim to a browser negotiating
+	// HTTP/2 can turn it into a protocol violation the browser flags as
+	// net::ERR_HTTP2_PROTOCOL_ERROR on this exact kind of long-lived
+	// streaming response — better to never set it at all.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Accel-Buffering", "no") // désactive le buffering nginx
 

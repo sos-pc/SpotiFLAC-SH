@@ -61,7 +61,10 @@ func (s *Server) registerFileRoutes() {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		// See sse.go's v1JobsStream for why "Connection: keep-alive" is
+		// deliberately not set here — it's an HTTP/2 protocol violation
+		// that can surface as net::ERR_HTTP2_PROTOCOL_ERROR through a
+		// reverse proxy.
 		w.Header().Set("X-Accel-Buffering", "no")
 
 		emit := func(eventType string, data interface{}) error {
