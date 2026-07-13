@@ -228,7 +228,24 @@ Spotify metadata.
 The handler is **idempotent** — re-running on a stable library only
 bumps `last_verified_at` on every row.
 
-**Response `200`**
+Runs **asynchronously**: the walk can take several minutes on a large
+library, easily longer than a reverse-proxy's read timeout, so the
+request no longer blocks for the full duration (a production instance hit
+exactly this — the client/proxy gave up on the connection mid-scan, which
+cancelled the request context and aborted the walk after 1200+ files had
+already imported cleanly). Inputs are validated synchronously; once
+they're accepted the scan runs in the background against an
+uncancellable context and the response returns immediately.
+
+**Response `202`**
+```json
+{ "ok": true }
+```
+
+Completion is announced on the shared SSE stream
+(`GET /api/v1/jobs/stream`, below) as a `library_rebuild_done` event
+whose `data` is the same result shape this endpoint used to return
+directly:
 ```json
 {
   "scan_roots": ["/home/nonroot/Music"],
@@ -254,8 +271,9 @@ bumps `last_verified_at` on every row.
 | `no_tag` | Files without `SPOTIFY_ID` tag — re-tag them via `/admin/retag-legacy` if their job is still in BoltDB, else use `/admin/library-match` (upcoming). |
 | `failed` | Per-file errors (catalog write, FFprobe, FS) — see server logs for details. |
 | `no_tag_sample` | First 50 orphan paths to help locate them. |
+| `timed_out` | The scan hit its internal timeout before finishing every root — re-run to continue; already-scanned files are skipped fast. |
 
-**Errors**
+**Errors** (returned synchronously, before the background scan starts)
 - `400 no scan roots: …` — neither watchlists nor settings supply a `downloadPath`.
 - `403 forbidden` — caller is not admin.
 - `503 catalog database not available` — SQLite catalog handle is nil (mis-configured deploy).
@@ -281,12 +299,25 @@ entry to write to. `spotify_id`, `explicit`, `album_id` and the
 `album_id` in particular is never populated by design (see migration
 0005), so treating it as a trigger would select every track on every run.
 
-FLAC only for now. Runs synchronously (like `library-rebuild`) and paces
-itself — one track at a time, ~1s between each — to avoid hammering
-Spotify/Deezer/MusicBrainz, so it can take a while on a library with many
-incomplete tracks; use a long client read timeout.
+FLAC only for now. Paces itself — one track at a time, ~1s between each —
+to avoid hammering Spotify/Deezer/MusicBrainz, so it can take a while on a
+library with many incomplete tracks.
 
-**Response `200`**
+Runs **asynchronously**, same reasoning and contract as `library-rebuild`
+above: the per-track pacing means this can easily outlive a reverse-proxy's
+read timeout, so the track selection query runs synchronously (fast — it's
+just a catalog read) but the actual re-fetch/write pass runs in the
+background against an uncancellable context.
+
+**Response `202`**
+```json
+{ "ok": true }
+```
+
+Completion is announced on the shared SSE stream
+(`GET /api/v1/jobs/stream`, above) as a `retag_incomplete_metadata_done`
+event whose `data` is the same result shape this endpoint used to return
+directly:
 ```json
 {
   "scanned":  1660,
@@ -305,9 +336,9 @@ incomplete tracks; use a long client read timeout.
 | `failed` | Spotify/MusicBrainz fetch error, missing file, or write error — see server logs. |
 | `failed_ids` | The Spotify IDs of failed tracks (omitted when empty). |
 
-**Errors**
+**Errors** (returned synchronously, before the background pass starts)
 - `403 forbidden` — caller is not admin.
-- `500 ...` — catalog query error.
+- `500 ...` — catalog query error (selecting tracks needing retag).
 - `503 catalog database not available` — SQLite catalog handle is nil (mis-configured deploy).
 
 ---
@@ -500,6 +531,12 @@ data: null
 
 event: watchlist_synced
 data: { "watchlist_id": "...", "new_tracks": 3, "deleted": 0, "name": "Today Top Hits" }
+
+event: library_rebuild_done
+data: { "scan_roots": [...], "files_scanned": 3000, "imported": 459, ... }
+
+event: retag_incomplete_metadata_done
+data: { "scanned": 1660, "filled": 1600, "skipped": 40, "failed": 20, ... }
 ```
 
 `progress` is a float `0.0..1.0`. `speed` is in MB/s. `total_size` is in MB.

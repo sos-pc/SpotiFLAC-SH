@@ -156,6 +156,15 @@ func retagJobs(jobs []Job) retagLegacyResult {
 //
 // Idempotent: re-running on a stable library bumps last_verified_at on
 // every existing row and adds nothing.
+//
+// The walk can take many minutes on a large library — well past any
+// reverse-proxy's read timeout, which in production silently cancelled
+// the in-flight scan the moment the browser/proxy gave up on the
+// connection (r.Context() cancellation propagates straight into the
+// walk). Like v1RepairWatchlist, this handler only validates inputs
+// inline and returns 202 immediately; the actual walk runs in the
+// background against a fresh context and announces completion over SSE
+// (library_rebuild_done).
 func (s *Server) v1LibraryRebuild(w http.ResponseWriter, r *http.Request) {
 	if !v1RequireAdmin(w, r) {
 		return
@@ -172,7 +181,16 @@ func (s *Server) v1LibraryRebuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), libraryRebuildTimeout)
+	util.SafeGo("admin.library-rebuild", func() { s.runLibraryRebuildAsync(roots) })
+	writeV1JSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// runLibraryRebuildAsync performs the actual walk in the background — see
+// v1LibraryRebuild for why this can't run inline in the request.
+func (s *Server) runLibraryRebuildAsync(roots []string) {
+	slog.Info("[Catalog] library-rebuild: starting", "roots", roots)
+
+	ctx, cancel := context.WithTimeout(context.Background(), libraryRebuildTimeout)
 	defer cancel()
 
 	result := libraryRebuildResult{ScanRoots: roots}
@@ -184,7 +202,16 @@ func (s *Server) v1LibraryRebuild(w http.ResponseWriter, r *http.Request) {
 		result.TimedOut = true
 	}
 
-	writeV1JSON(w, http.StatusOK, result)
+	slog.Info("[Catalog] library-rebuild: done", "files_scanned", result.FilesScanned,
+		"imported", result.Imported, "verified", result.Verified, "moved", result.Moved,
+		"duplicate", result.Duplicate, "no_tag", result.NoTag, "failed", result.Failed, "timed_out", result.TimedOut)
+
+	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
+		s.ctr.Jobs.hub.publish(JobEvent{
+			Type: "library_rebuild_done",
+			Data: result,
+		})
+	}
 }
 
 // watchlistRepairResult is the JSON payload returned by
@@ -577,13 +604,15 @@ const retagIncompleteMetadataThrottle = 1 * time.Second
 // one slow or wedged track only ever costs itself, never the rest of the run.
 const retagIncompleteMetadataPerTrackTimeout = 30 * time.Second
 
-// v1RetagIncompleteMetadata runs synchronously like v1LibraryRebuild (its
-// sibling maintenance endpoint) rather than the async 202+SSE pattern used
-// by watchlist repair — simplest option, consistent with the endpoint it's
-// modeled after. It can take a while on a library with many incomplete
-// tracks (one throttled external-API round trip per track) — the caller's
-// HTTP client needs a correspondingly long read timeout, same caveat as
-// library-rebuild.
+// v1RetagIncompleteMetadata used to run synchronously like v1LibraryRebuild
+// (its sibling maintenance endpoint), but the same failure mode hit it: a
+// library with many incomplete tracks needs one throttled external-API
+// round trip per track, easily running well past a reverse-proxy's read
+// timeout — the moment the client/proxy gave up on the connection,
+// r.Context() cancellation killed the whole in-flight pass. Same fix as
+// library-rebuild: validate inputs inline, return 202 immediately, run the
+// actual work in the background against a fresh context, announce
+// completion over SSE (retag_incomplete_metadata_done).
 func (s *Server) v1RetagIncompleteMetadata(w http.ResponseWriter, r *http.Request) {
 	if !v1RequireAdmin(w, r) {
 		return
@@ -599,7 +628,21 @@ func (s *Server) v1RetagIncompleteMetadata(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeV1JSON(w, http.StatusOK, s.retagIncompleteMetadata(r.Context(), tracks))
+	util.SafeGo("admin.retag-incomplete-metadata", func() { s.runRetagIncompleteMetadataAsync(tracks) })
+	writeV1JSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// runRetagIncompleteMetadataAsync performs the actual retag pass in the
+// background — see v1RetagIncompleteMetadata for why this can't run inline
+// in the request.
+func (s *Server) runRetagIncompleteMetadataAsync(tracks []db.TrackForRetag) {
+	result := s.retagIncompleteMetadata(context.Background(), tracks)
+	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
+		s.ctr.Jobs.hub.publish(JobEvent{
+			Type: "retag_incomplete_metadata_done",
+			Data: result,
+		})
+	}
 }
 
 func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackForRetag) retagIncompleteMetadataResult {

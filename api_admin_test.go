@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
@@ -225,5 +226,78 @@ func TestScanRootForRebuildImportsMultipleFiles(t *testing.T) {
 
 	if result.FilesScanned != 3 || result.Imported != 3 || result.Failed != 0 {
 		t.Errorf("scanRootForRebuild = %+v, want 3 scanned/imported, 0 failed", result)
+	}
+}
+
+// TestLibraryRebuildAsyncPublishesSSEEvent is the regression test for a
+// production bug: v1LibraryRebuild used to run the filesystem walk
+// synchronously inside the request handler, deriving its context from
+// r.Context() — a walk that can take many minutes on a real library
+// easily outlives a reverse-proxy's read timeout, and the moment the
+// client/proxy gave up on the connection, the cancelled r.Context()
+// killed the in-flight scan (observed live in production: "upsert track:
+// ... context canceled" after 1200+ files had already imported cleanly).
+// runLibraryRebuildAsync now runs against context.Background() instead,
+// so a client disconnect can no longer abort the scan; completion is
+// announced over SSE instead of in the (now long-gone) HTTP response.
+func TestLibraryRebuildAsyncPublishesSSEEvent(t *testing.T) {
+	jm := newTestJobManager(t, true)
+	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm}}
+
+	root := t.TempDir()
+	writeTestFlacWithSpotifyID(t, filepath.Join(root, "track.flac"), "spotify:track:a")
+
+	sub := jm.hub.subscribe()
+	defer jm.hub.unsubscribe(sub)
+
+	s.runLibraryRebuildAsync([]string{root})
+
+	select {
+	case ev := <-sub:
+		if ev.Type != "library_rebuild_done" {
+			t.Fatalf("event type = %q, want %q", ev.Type, "library_rebuild_done")
+		}
+		result, ok := ev.Data.(libraryRebuildResult)
+		if !ok {
+			t.Fatalf("event.Data type = %T, want libraryRebuildResult", ev.Data)
+		}
+		if result.FilesScanned != 1 || result.Imported != 1 {
+			t.Errorf("result = %+v, want 1 scanned/imported", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for library_rebuild_done SSE event")
+	}
+}
+
+// TestRetagIncompleteMetadataAsyncPublishesSSEEvent covers the same fix
+// applied to retag-incomplete-metadata's sibling maintenance endpoint —
+// same failure mode (a slow per-track pass outliving a proxy's read
+// timeout), same fix (run against context.Background(), announce
+// completion over SSE instead of returning it in the HTTP response).
+func TestRetagIncompleteMetadataAsyncPublishesSSEEvent(t *testing.T) {
+	jm := newTestJobManager(t, true)
+	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm}}
+
+	sub := jm.hub.subscribe()
+	defer jm.hub.unsubscribe(sub)
+
+	// No tracks needing retag — this test only verifies the async+publish
+	// plumbing, not the retag logic itself (already covered elsewhere).
+	s.runRetagIncompleteMetadataAsync(nil)
+
+	select {
+	case ev := <-sub:
+		if ev.Type != "retag_incomplete_metadata_done" {
+			t.Fatalf("event type = %q, want %q", ev.Type, "retag_incomplete_metadata_done")
+		}
+		result, ok := ev.Data.(retagIncompleteMetadataResult)
+		if !ok {
+			t.Fatalf("event.Data type = %T, want retagIncompleteMetadataResult", ev.Data)
+		}
+		if result.Scanned != 0 {
+			t.Errorf("result.Scanned = %d, want 0", result.Scanned)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for retag_incomplete_metadata_done SSE event")
 	}
 }

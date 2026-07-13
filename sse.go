@@ -11,6 +11,8 @@ package main
 //   event: connected        — snapshot initial de la queue au moment de la connexion
 //   event: watchlist_synced — fin de synchronisation d'une watchlist
 //   event: watchlist_repaired — fin de réparation d'une watchlist (voir api_admin.go)
+//   event: library_rebuild_done — fin du scan/import de bibliothèque (voir api_admin.go)
+//   event: retag_incomplete_metadata_done — fin du retag des métadonnées incomplètes (voir api_admin.go)
 //   event: server_log       — ligne de log backend (admin only, voir logbuffer.go)
 // ─────────────────────────────────────────────────────────────────────────────
 

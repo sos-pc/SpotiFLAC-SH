@@ -332,8 +332,12 @@ export interface LibraryRebuildResult {
   no_tag_sample?: string[];
   timed_out?: boolean;
 }
+// Fire-and-forget: the backend runs the scan in the background and reports
+// completion via the "library_rebuild_done" SSE event (see jobsStream.ts) —
+// a synchronous response would outlive a reverse-proxy's read timeout on a
+// large library.
 export const LibraryRebuild = () =>
-  rest<LibraryRebuildResult>("POST", "/admin/library-rebuild");
+  rest<void>("POST", "/admin/library-rebuild");
 
 export interface RetagIncompleteMetadataResult {
   scanned: number;
@@ -342,8 +346,10 @@ export interface RetagIncompleteMetadataResult {
   failed: number;
   failed_ids?: string[];
 }
+// Fire-and-forget — see LibraryRebuild; result arrives via the
+// "retag_incomplete_metadata_done" SSE event.
 export const RetagIncompleteMetadata = () =>
-  rest<RetagIncompleteMetadataResult>("POST", "/admin/retag-incomplete-metadata");
+  rest<void>("POST", "/admin/retag-incomplete-metadata");
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 

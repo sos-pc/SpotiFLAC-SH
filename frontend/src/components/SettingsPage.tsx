@@ -45,6 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FileBrowser } from "@/components/FileBrowser";
 import { getUser } from "@/lib/auth";
+import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import {
   getSettings,
   loadSettings,
@@ -437,10 +438,11 @@ export function SettingsPage({
   }, []);
 
   // ── Library maintenance state ────────────────────────────────────────────
-  // Both actions below run synchronously on the backend (no 202+SSE like
-  // watchlist repair) and can take several minutes on a large library —
-  // the button disables and shows a spinner for the whole duration rather
-  // than returning immediately.
+  // Both actions run in the background on the backend (202 + SSE, same
+  // pattern as watchlist repair) — a scan can take several minutes on a
+  // large library, which would otherwise outlive a reverse-proxy's read
+  // timeout and kill the request mid-scan (observed in production). The
+  // button shows a spinner until the matching SSE event arrives.
   const [rebuildLoading, setRebuildLoading] = useState(false);
   const [rebuildResult, setRebuildResult] = useState<LibraryRebuildResult | null>(null);
   const [retagLoading, setRetagLoading] = useState(false);
@@ -449,42 +451,50 @@ export function SettingsPage({
   const runLibraryRebuild = useCallback(async () => {
     setRebuildLoading(true);
     try {
-      const result = await LibraryRebuild();
-      setRebuildResult(result);
-      if (result.timed_out) {
-        toast.warning("Library rebuild timed out", {
-          description: "Re-run to continue — already-scanned files are skipped fast.",
-        });
-      } else {
-        toast.success("Library rebuild complete", {
-          description: `${result.files_scanned} files scanned, ${result.imported} imported, ${result.failed} failed.`,
-        });
-      }
+      await LibraryRebuild();
     } catch (err) {
-      toast.error("Library rebuild failed", {
+      toast.error("Library rebuild failed to start", {
         description: err instanceof Error ? err.message : "Unknown error",
       });
-    } finally {
       setRebuildLoading(false);
     }
   }, []);
 
+  useJobsStreamEvent("library_rebuild_done", (e: MessageEvent) => {
+    const result = JSON.parse(e.data) as LibraryRebuildResult;
+    setRebuildLoading(false);
+    setRebuildResult(result);
+    if (result.timed_out) {
+      toast.warning("Library rebuild timed out", {
+        description: "Re-run to continue — already-scanned files are skipped fast.",
+      });
+    } else {
+      toast.success("Library rebuild complete", {
+        description: `${result.files_scanned} files scanned, ${result.imported} imported, ${result.failed} failed.`,
+      });
+    }
+  });
+
   const runRetagIncompleteMetadata = useCallback(async () => {
     setRetagLoading(true);
     try {
-      const result = await RetagIncompleteMetadata();
-      setRetagResult(result);
-      toast.success("Retag complete", {
-        description: `${result.scanned} tracks scanned, ${result.filled} filled, ${result.failed} failed.`,
-      });
+      await RetagIncompleteMetadata();
     } catch (err) {
-      toast.error("Retag failed", {
+      toast.error("Retag failed to start", {
         description: err instanceof Error ? err.message : "Unknown error",
       });
-    } finally {
       setRetagLoading(false);
     }
   }, []);
+
+  useJobsStreamEvent("retag_incomplete_metadata_done", (e: MessageEvent) => {
+    const result = JSON.parse(e.data) as RetagIncompleteMetadataResult;
+    setRetagLoading(false);
+    setRetagResult(result);
+    toast.success("Retag complete", {
+      description: `${result.scanned} tracks scanned, ${result.filled} filled, ${result.failed} failed.`,
+    });
+  });
 
   // ── Proxy config state ───────────────────────────────────────────────────
   const [proxies, setProxies] = useState<ProxyConfig | null>(null);

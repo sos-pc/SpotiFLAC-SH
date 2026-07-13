@@ -30,6 +30,8 @@ export type JobsStreamEventType =
   | "job_deleted"
   | "watchlist_synced"
   | "watchlist_repaired"
+  | "library_rebuild_done"
+  | "retag_incomplete_metadata_done"
   | "server_log";
 
 type Listener = (e: MessageEvent) => void;
