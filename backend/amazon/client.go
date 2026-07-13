@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -126,7 +127,7 @@ func NewAmazonDownloader() *AmazonDownloader {
 }
 
 func (a *AmazonDownloader) GetAmazonURLFromSpotify(spotifyTrackID string) (string, error) {
-	fmt.Println("Getting Amazon URL...")
+	slog.Debug("[Amazon] Getting Amazon URL")
 
 	client := songlink.GetSongLinkClient()
 	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, "")
@@ -146,7 +147,7 @@ func (a *AmazonDownloader) GetAmazonURLFromSpotify(spotifyTrackID string) (strin
 		}
 	}
 
-	fmt.Printf("Found Amazon URL: %s\n", amazonURL)
+	slog.Debug("[Amazon] Found Amazon URL", "url", amazonURL)
 	return amazonURL, nil
 }
 
@@ -190,7 +191,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		return "", fmt.Errorf("failed to extract ASIN from URL: %s", amazonURL)
 	}
 
-	fmt.Printf("Fetching from Amazon API (ASIN: %s)...\n", asin)
+	slog.Debug("[Amazon] Fetching from Amazon API", "asin", asin)
 	var apiResp *AmazonStreamResponse
 	var lastErr error
 	for _, proxy := range util.GetAmazonProxies() {
@@ -200,7 +201,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 			break
 		}
 		lastErr = err
-		fmt.Printf("[Amazon] Proxy %s failed: %v, trying next...\n", proxy, err)
+		slog.Debug("[Amazon] Proxy failed, trying next", "proxy", proxy, "err", err)
 	}
 	if apiResp == nil {
 		return "", fmt.Errorf("all Amazon proxies failed: %v", lastErr)
@@ -219,16 +220,16 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	}
 	defer dlResp.Body.Close()
 
-	fmt.Printf("Downloading track: %s\n", fileName)
+	slog.Debug("[Amazon] Downloading track", "filename", fileName)
 	written, err := providerutil.DownloadToFileAtomic(filePath, dlResp.Body, a.SpeedCallback)
 	if err != nil {
 		return "", err
 	}
 
-	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(written)/(1024*1024))
+	slog.Debug("[Amazon] Downloaded", "mb", float64(written)/(1024*1024))
 
 	if apiResp.DecryptionKey != "" {
-		fmt.Printf("Decrypting file...\n")
+		slog.Debug("[Amazon] Decrypting file")
 
 		ffprobePath, err := util.GetFFprobePath()
 		var codec string
@@ -242,7 +243,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 			)
 			codecOutput, _ := cmdProbe.Output()
 			codec = strings.TrimSpace(string(codecOutput))
-			fmt.Printf("Detected codec: %s\n", codec)
+			slog.Debug("[Amazon] Detected codec", "codec", codec)
 		}
 
 		targetExt := ".m4a"
@@ -292,7 +293,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		}
 
 		if err := os.Remove(filePath); err != nil {
-			fmt.Printf("Warning: Failed to remove encrypted file: %v\n", err)
+			slog.Warn("[Amazon] Failed to remove encrypted file", "err", err)
 		}
 
 		finalPath := filepath.Join(outputDir, strings.TrimPrefix(decryptedFilename, "dec_"))
@@ -301,7 +302,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		}
 		filePath = finalPath
 
-		fmt.Println("Decryption successful")
+		slog.Debug("[Amazon] Decryption successful")
 	}
 
 	return filePath, nil
@@ -326,14 +327,14 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		expectedPath := filepath.Join(p.OutputDir, expectedFilename)
 
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
-			fmt.Printf("File already exists: %s (%.2f MB)\n", expectedPath, float64(fileInfo.Size())/(1024*1024))
+			slog.Debug("[Amazon] File already exists", "path", expectedPath, "mb", float64(fileInfo.Size())/(1024*1024))
 			return "EXISTS:" + expectedPath, nil
 		}
 	}
 
 	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, p.SpotifyTrackName, p.SpotifyArtistName, p.SpotifyAlbumName, p.UseSingleGenre, p.EmbedGenre)
 
-	fmt.Printf("Using Amazon URL: %s\n", p.URL)
+	slog.Debug("[Amazon] Using URL", "url", p.URL)
 
 	filePath, err := a.DownloadFromAfkarXYZ(p.URL, p.OutputDir, p.Quality)
 	if err != nil {
@@ -417,14 +418,14 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		newFilePath := filepath.Join(p.OutputDir, newFilename)
 
 		if err := os.Rename(filePath, newFilePath); err != nil {
-			fmt.Printf("Warning: Failed to rename file: %v\n", err)
+			slog.Warn("[Amazon] Failed to rename file", "err", err)
 		} else {
 			filePath = newFilePath
-			fmt.Printf("Renamed to: %s\n", newFilename)
+			slog.Debug("[Amazon] Renamed", "filename", newFilename)
 		}
 	}
 
-	fmt.Println("Embedding Spotify metadata...")
+	slog.Debug("[Amazon] Embedding Spotify metadata")
 
 	coverPath := ""
 
@@ -432,11 +433,11 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		coverPath = filePath + ".cover.jpg"
 		coverClient := meta.NewCoverClient()
 		if err := coverClient.DownloadCoverToPath(p.SpotifyCoverURL, coverPath, p.EmbedMaxQualityCover); err != nil {
-			fmt.Printf("Warning: Failed to download Spotify cover: %v\n", err)
+			slog.Warn("[Amazon] Failed to download Spotify cover", "err", err)
 			coverPath = ""
 		} else {
 			defer os.Remove(coverPath)
-			fmt.Println("Spotify cover downloaded")
+			slog.Debug("[Amazon] Spotify cover downloaded")
 		}
 	}
 
@@ -465,9 +466,9 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 
 	embedErr := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath)
 	if embedErr != nil {
-		fmt.Printf("Warning: Failed to embed metadata: %v\n", embedErr)
+		slog.Warn("[Amazon] Failed to embed metadata", "err", embedErr)
 	} else {
-		fmt.Println("Metadata embedded successfully")
+		slog.Debug("[Amazon] Metadata embedded successfully")
 	}
 
 	if strings.HasSuffix(strings.ToLower(filePath), ".flac") {
@@ -475,9 +476,9 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		originalM4aPath := filepath.Join(originalFileDir, originalFileBase+".m4a")
 		if _, err := os.Stat(originalM4aPath); err == nil {
 			if err := os.Remove(originalM4aPath); err != nil {
-				fmt.Printf("Warning: Failed to remove M4A file: %v\n", err)
+				slog.Warn("[Amazon] Failed to remove M4A file", "err", err)
 			} else {
-				fmt.Printf("Cleaned up original M4A file: %s\n", filepath.Base(originalM4aPath))
+				slog.Debug("[Amazon] Cleaned up original M4A file", "path", filepath.Base(originalM4aPath))
 			}
 		}
 	}
@@ -490,8 +491,8 @@ func (a *AmazonDownloader) DownloadByURL(p DownloadParams) (string, error) {
 		return "", fmt.Errorf("failed to embed metadata: %w", embedErr)
 	}
 
-	fmt.Println("Done")
-	fmt.Println("✓ Downloaded successfully from Amazon Music")
+	slog.Debug("[Amazon] Done")
+	slog.Debug("[Amazon] Downloaded successfully")
 	return filePath, nil
 }
 
