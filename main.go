@@ -100,6 +100,7 @@ func main() {
 		Auth:    auth,
 		Watcher: watcher,
 		System:  &SystemService{},
+		Media:   &MediaService{},
 	}
 
 	// ── App + HTTP server ─────────────────────────────────────────────────
@@ -159,7 +160,6 @@ func main() {
 	defer cancel()
 	httpServer.Shutdown(ctx)
 
-	app.shutdown(ctx)
 	slog.Info("[Main] Bye.")
 }
 

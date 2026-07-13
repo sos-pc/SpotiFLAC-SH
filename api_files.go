@@ -603,7 +603,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		req.OutputDir = outputDir
-		result, err := a.DownloadLyrics(req)
+		result, err := s.ctr.Media.DownloadLyrics(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -625,7 +625,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		req.OutputDir = outputDir
-		result, err := a.DownloadCover(req)
+		result, err := s.ctr.Media.DownloadCover(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -647,7 +647,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		req.OutputDir = outputDir
-		result, err := a.DownloadHeader(req)
+		result, err := s.ctr.Media.DownloadHeader(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -669,7 +669,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		req.OutputDir = outputDir
-		result, err := a.DownloadGalleryImage(req)
+		result, err := s.ctr.Media.DownloadGalleryImage(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -691,7 +691,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		req.OutputDir = outputDir
-		result, err := a.DownloadAvatar(req)
+		result, err := s.ctr.Media.DownloadAvatar(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return

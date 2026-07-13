@@ -19,4 +19,5 @@ type Container struct {
 	// only the dependencies it actually needs; stateless ones (System) have
 	// none.
 	System *SystemService
+	Media  *MediaService
 }
