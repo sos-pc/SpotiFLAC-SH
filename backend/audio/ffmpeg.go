@@ -6,6 +6,7 @@ import (
 
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -122,7 +123,7 @@ func DownloadFFmpeg(progressCallback func(int)) error {
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
-	fmt.Printf("[FFmpeg] Downloading from: %s\n", url)
+	slog.Info("[FFmpeg] Downloading", "url", url)
 	if err := downloadAndExtract(url, ffmpegDir, progressCallback, 0, 100); err != nil {
 		return err
 	}
@@ -133,13 +134,13 @@ func DownloadFFmpeg(progressCallback func(int)) error {
 func downloadWithFallback(urls []string, destDir string, progressCallback func(int), start, end int) error {
 	var lastErr error
 	for _, url := range urls {
-		fmt.Printf("[FFmpeg] Trying to download from: %s\n", url)
+		slog.Info("[FFmpeg] Trying to download", "url", url)
 		err := downloadAndExtract(url, destDir, progressCallback, start, end)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
-		fmt.Printf("[FFmpeg] Attempt failed: %v\n", err)
+		slog.Warn("[FFmpeg] Download attempt failed", "err", err)
 	}
 	return fmt.Errorf("all download attempts failed: %w", lastErr)
 }
@@ -172,14 +173,12 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 
 	totalSize := resp.ContentLength
 	var downloaded int64
-	lastTime := time.Now()
-	var lastBytes int64
 
 	if totalSize > 0 {
 		totalSizeMB := float64(totalSize) / (1024 * 1024)
-		fmt.Printf("[FFmpeg] Total size: %.2f MB\n", totalSizeMB)
+		slog.Info("[FFmpeg] Total size", "mb", totalSizeMB)
 	} else {
-		fmt.Printf("[FFmpeg] Downloading... (size unknown)\n")
+		slog.Info("[FFmpeg] Downloading (size unknown)")
 	}
 
 	buf := make([]byte, 32*1024)
@@ -192,39 +191,10 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 			}
 			downloaded += int64(n)
 
-			mbDownloaded := float64(downloaded) / (1024 * 1024)
-			now := time.Now()
-			timeDiff := now.Sub(lastTime).Seconds()
-			var speedMBps float64
-
-			if timeDiff > 0.1 {
-				bytesDiff := float64(downloaded - lastBytes)
-				speedMBps = (bytesDiff / (1024 * 1024)) / timeDiff
-				lastTime = now
-				lastBytes = downloaded
-			}
-
 			if totalSize > 0 && progressCallback != nil {
 				rawProgress := float64(downloaded) / float64(totalSize)
 				scaledProgress := progressStart + int(rawProgress*float64(progressEnd-progressStart))
 				progressCallback(scaledProgress)
-			}
-
-			if totalSize > 0 {
-				percent := float64(downloaded) * 100 / float64(totalSize)
-				if speedMBps > 0 {
-					fmt.Printf("\r[FFmpeg] Downloading: %.2f MB / %.2f MB (%.1f%%) - %.2f MB/s",
-						mbDownloaded, float64(totalSize)/(1024*1024), percent, speedMBps)
-				} else {
-					fmt.Printf("\r[FFmpeg] Downloading: %.2f MB / %.2f MB (%.1f%%)",
-						mbDownloaded, float64(totalSize)/(1024*1024), percent)
-				}
-			} else {
-				if speedMBps > 0 {
-					fmt.Printf("\r[FFmpeg] Downloading: %.2f MB - %.2f MB/s", mbDownloaded, speedMBps)
-				} else {
-					fmt.Printf("\r[FFmpeg] Downloading: %.2f MB", mbDownloaded)
-				}
 			}
 		}
 		if err == io.EOF {
@@ -238,12 +208,11 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 	tmpFile.Close()
 
 	if totalSize > 0 {
-		fmt.Printf("\r[FFmpeg] Download complete: %.2f MB / %.2f MB (100%%)          \n",
-			float64(downloaded)/(1024*1024), float64(totalSize)/(1024*1024))
+		slog.Info("[FFmpeg] Download complete", "mb", float64(downloaded)/(1024*1024), "total_mb", float64(totalSize)/(1024*1024))
 	} else {
-		fmt.Printf("\r[FFmpeg] Download complete: %.2f MB          \n", float64(downloaded)/(1024*1024))
+		slog.Info("[FFmpeg] Download complete", "mb", float64(downloaded)/(1024*1024))
 	}
-	fmt.Printf("[FFmpeg] Extracting...\n")
+	slog.Info("[FFmpeg] Extracting")
 
 	if strings.HasSuffix(url, ".tar.xz") || runtime.GOOS == "linux" {
 		return extractTarXz(tmpFile.Name(), destDir)
@@ -286,7 +255,7 @@ func extractZip(zipPath, destDir string) error {
 			continue
 		}
 
-		fmt.Printf("[FFmpeg] Found: %s\n", f.Name)
+		slog.Debug("[FFmpeg] Found", "file", f.Name)
 
 		rc, err := f.Open()
 		if err != nil {
@@ -307,7 +276,7 @@ func extractZip(zipPath, destDir string) error {
 			return fmt.Errorf("failed to extract file: %w", err)
 		}
 
-		fmt.Printf("[FFmpeg] Extracted to: %s\n", destPath)
+		slog.Debug("[FFmpeg] Extracted", "path", destPath)
 	}
 
 	if !foundFFmpeg && !foundFFprobe {
@@ -315,10 +284,10 @@ func extractZip(zipPath, destDir string) error {
 	}
 
 	if foundFFmpeg {
-		fmt.Printf("[FFmpeg] ffmpeg extracted successfully\n")
+		slog.Info("[FFmpeg] ffmpeg extracted successfully")
 	}
 	if foundFFprobe {
-		fmt.Printf("[FFmpeg] ffprobe extracted successfully\n")
+		slog.Info("[FFmpeg] ffprobe extracted successfully")
 	}
 
 	return nil
@@ -370,7 +339,7 @@ func extractTarXz(tarXzPath, destDir string) error {
 			continue
 		}
 
-		fmt.Printf("[FFmpeg] Found: %s\n", header.Name)
+		slog.Debug("[FFmpeg] Found", "file", header.Name)
 
 		outFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
 		if err != nil {
@@ -384,7 +353,7 @@ func extractTarXz(tarXzPath, destDir string) error {
 			return fmt.Errorf("failed to extract file: %w", err)
 		}
 
-		fmt.Printf("[FFmpeg] Extracted to: %s\n", destPath)
+		slog.Debug("[FFmpeg] Extracted", "path", destPath)
 	}
 
 	if !foundFFmpeg && !foundFFprobe {
@@ -392,10 +361,10 @@ func extractTarXz(tarXzPath, destDir string) error {
 	}
 
 	if foundFFmpeg {
-		fmt.Printf("[FFmpeg] ffmpeg extracted successfully\n")
+		slog.Info("[FFmpeg] ffmpeg extracted successfully")
 	}
 	if foundFFprobe {
-		fmt.Printf("[FFmpeg] ffprobe extracted successfully\n")
+		slog.Info("[FFmpeg] ffprobe extracted successfully")
 	}
 
 	return nil
@@ -472,7 +441,7 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 			// per-file failure in this function already does.
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("[PANIC] recovered converting %s: %v\n%s\n", inputFile, r, debug.Stack())
+					slog.Error("[PANIC] recovered converting file", "file", inputFile, "recover", r, "stack", string(debug.Stack()))
 					mu.Lock()
 					results[idx] = ConvertAudioResult{InputFile: inputFile, Success: false, Error: fmt.Sprintf("internal error: %v", r)}
 					mu.Unlock()
@@ -515,17 +484,17 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 
 			inputMetadata, err = meta.ExtractFullMetadataFromFile(inputFile)
 			if err != nil {
-				fmt.Printf("[FFmpeg] Warning: Failed to extract metadata from %s: %v\n", inputFile, err)
+				slog.Warn("[FFmpeg] Failed to extract metadata", "file", inputFile, "err", err)
 			}
 
 			coverArtPath, _ = meta.ExtractCoverArt(inputFile)
 			lyrics, err = meta.ExtractLyrics(inputFile)
 			if err != nil {
-				fmt.Printf("[FFmpeg] Warning: Failed to extract lyrics from %s: %v\n", inputFile, err)
+				slog.Warn("[FFmpeg] Failed to extract lyrics", "file", inputFile, "err", err)
 			} else if lyrics != "" {
-				fmt.Printf("[FFmpeg] Lyrics extracted from %s: %d characters\n", inputFile, len(lyrics))
+				slog.Debug("[FFmpeg] Lyrics extracted", "file", inputFile, "chars", len(lyrics))
 			} else {
-				fmt.Printf("[FFmpeg] No lyrics found in %s\n", inputFile)
+				slog.Debug("[FFmpeg] No lyrics found", "file", inputFile)
 			}
 
 			inputMetadata.Lyrics = lyrics
@@ -568,7 +537,7 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 
 			args = append(args, outputFile)
 
-			fmt.Printf("[FFmpeg] Converting: %s -> %s\n", inputFile, outputFile)
+			slog.Debug("[FFmpeg] Converting", "input", inputFile, "output", outputFile)
 
 			cmd := exec.Command(ffmpegPath, args...)
 
@@ -589,18 +558,18 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 
 			var warnings []string
 			if err := meta.EmbedMetadataToConvertedFile(outputFile, inputMetadata, coverArtPath); err != nil {
-				fmt.Printf("[FFmpeg] Warning: Failed to embed metadata: %v\n", err)
+				slog.Warn("[FFmpeg] Failed to embed metadata", "err", err)
 				warnings = append(warnings, fmt.Sprintf("failed to embed metadata: %v", err))
 			} else {
-				fmt.Printf("[FFmpeg] Metadata embedded successfully\n")
+				slog.Debug("[FFmpeg] Metadata embedded successfully")
 			}
 
 			if lyrics != "" {
 				if err := meta.EmbedLyricsOnlyUniversal(outputFile, lyrics); err != nil {
-					fmt.Printf("[FFmpeg] Warning: Failed to embed lyrics: %v\n", err)
+					slog.Warn("[FFmpeg] Failed to embed lyrics", "err", err)
 					warnings = append(warnings, fmt.Sprintf("failed to embed lyrics: %v", err))
 				} else {
-					fmt.Printf("[FFmpeg] Lyrics embedded successfully\n")
+					slog.Debug("[FFmpeg] Lyrics embedded successfully")
 				}
 			}
 			if len(warnings) > 0 {
@@ -612,7 +581,7 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 			}
 
 			result.Success = true
-			fmt.Printf("[FFmpeg] Successfully converted: %s\n", outputFile)
+			slog.Debug("[FFmpeg] Successfully converted", "output", outputFile)
 
 			mu.Lock()
 			results[idx] = result

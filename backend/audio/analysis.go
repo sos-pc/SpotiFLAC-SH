@@ -2,6 +2,7 @@ package audio
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -80,7 +81,7 @@ func AnalyzeTrack(filepath string) (*AnalysisResult, error) {
 	spectrum, err := AnalyzeSpectrum(filepath)
 	if err != nil {
 
-		fmt.Printf("Warning: failed to analyze spectrum: %v\n", err)
+		slog.Warn("[Audio] Failed to analyze spectrum", "err", err)
 	} else {
 		result.Spectrum = spectrum
 
