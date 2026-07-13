@@ -146,7 +146,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) registerRoutes() {
-	s.mux.Handle("/api/upload", corsMiddleware(localBypassMiddleware(RequireAuth(http.HandlerFunc(s.handleUpload)))))
+	s.mux.Handle("/api/upload", corsMiddleware(localBypassMiddleware(s.RequireAuth(http.HandlerFunc(s.handleUpload)))))
 
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {

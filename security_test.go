@@ -299,3 +299,68 @@ func TestGetOrCreateUserHealsMissingID(t *testing.T) {
 		t.Fatalf("healed profile IsAdmin = false, want true")
 	}
 }
+
+// TestSaveUserSettingsSetsIDOnFirstWrite covers the same bug class as
+// TestGetOrCreateUserHealsMissingID, found by auditing every other writer
+// of bucketUsers after fixing GetOrCreateUser: SaveUserSettings is the
+// sole writer for a userID that has never logged in through
+// GetOrCreateUser (e.g. the local-admin bypass profile, never persisted
+// by design) — without setting ID explicitly here too, that first write
+// would freeze ID="" forever, same as the original bug.
+func TestSaveUserSettingsSetsIDOnFirstWrite(t *testing.T) {
+	am := newTestAuthManager(t)
+
+	if err := am.SaveUserSettings("u2", map[string]interface{}{"theme": "dark"}); err != nil {
+		t.Fatalf("SaveUserSettings: %v", err)
+	}
+	profile, err := am.GetUser("u2")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if profile.ID != "u2" {
+		t.Fatalf("profile.ID = %q, want %q", profile.ID, "u2")
+	}
+}
+
+// TestRequireAuthRejectsRevokedTokenVersion is the regression test for the
+// gap found while auditing auth.go for other issues after the ID-healing
+// fix: v1Auth compares the live TokenVersion to reject a JWT issued before
+// a privilege change (see UserProfile.TokenVersion), but RequireAuth
+// (guarding /api/upload) validated only the JWT signature and expiry —
+// a demoted/disabled admin's existing token would keep working there up
+// to its full 24h natural expiry, bypassing the "revoke now" mechanism
+// that works everywhere else.
+func TestRequireAuthRejectsRevokedTokenVersion(t *testing.T) {
+	am := newTestAuthManager(t)
+	s := &Server{ctr: &Container{Auth: am}}
+
+	profile, err := am.GetOrCreateUser("u1", "Alice", true)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	staleToken, err := GenerateJWT(profile)
+	if err != nil {
+		t.Fatalf("GenerateJWT: %v", err)
+	}
+
+	// Privilege change bumps TokenVersion — every JWT issued before this
+	// point (including staleToken above) must stop working immediately.
+	if _, err := am.GetOrCreateUser("u1", "Alice", false); err != nil {
+		t.Fatalf("GetOrCreateUser (demote): %v", err)
+	}
+
+	handlerCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handlerCalled = true })
+	r := httptest.NewRequest(http.MethodPost, "/api/upload", nil)
+	r.Header.Set("Authorization", "Bearer "+staleToken)
+	w := httptest.NewRecorder()
+
+	s.RequireAuth(next).ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d — body: %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if handlerCalled {
+		t.Errorf("next handler should not run for a revoked token")
+	}
+}
