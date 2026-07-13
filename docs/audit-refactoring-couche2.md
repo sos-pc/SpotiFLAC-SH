@@ -28,6 +28,7 @@
 | **R8** | `app_core.go` — `SaveSettings`/`LoadSettings` `map[string]interface{}` | Réglages stringly-typed côté Go | Faible | Moyen (risque de drift) | 5 (optionnel) |
 | **R9** | `frontend/…/useDownload.ts` (849 l.) | Gros hook (déjà partiellement découpé) | Faible | Faible | 5 |
 | **R10** | retag `incomplete-metadata` (terrain) | Non-convergent : sur-sélection sur `genre` (99 % skip) | Moyen | Faible | **voir §6** |
+| **R11** | Dépendances (ffmpeg/Go/front) | ffmpeg & front déjà à jour ; `modernc.org/sqlite` en retard ; pas de cadence (Dependabot) | Faible-moyen | Faible | **voir §7** |
 
 **Déjà propre — à ne PAS toucher** (pour équilibrer : tout n'est pas à refaire) :
 `frontend/src/lib/rpc.ts` (helper `rest<T>()` partagé + wrappers d'une ligne), `backend/providerutil/*`
@@ -468,6 +469,60 @@ Un simple retry/backoff sur 5xx suffirait, mais l'impact est faible.
 **Bon signe au passage.** Ce run — comme le `library-rebuild` de 2556 fichiers — s'est terminé
 proprement (`done`, pas de `context canceled`), ce qui **confirme une nouvelle fois** que la
 conversion async 202+SSE tient sous charge réelle prolongée.
+
+---
+
+## 7. Dépendances & cadence de mise à jour (R11)
+
+> Ajouté suite à la question « mettre à jour des dépendances comme ffmpeg pour des gains de perf ou
+> de fonctionnalité ». Réponse constatée par lecture des versions réelles (Dockerfile, `go list -m
+> -u all`, `package.json`), pas supposée.
+
+### Réponse directe sur ffmpeg : **pas de gain ici.**
+- ffmpeg est **déjà** un build statique BtbN épinglé à `autobuild-2026-07-11-13-13` (asset
+  `ffmpeg-N-125519-g300cac3078-linux64-lgpl.tar.xz`), soit un snapshot du **master FFmpeg du
+  11/07/2026** — quasi bleeding-edge.
+- Surtout, la charge ffmpeg de l'app est du transcodage basique : FLAC→MP3 (`libmp3lame`), →AAC
+  (encodeur natif), →ALAC (natif), + ffprobe pour métadonnées/analyse (`backend/audio/ffmpeg.go`).
+  **Aucun filtre, pas de hwaccel, pas de loudnorm.** Ces encodeurs sont stables depuis des années →
+  une version plus récente n'apporte ni perf ni fonctionnalité mesurable pour ce cas d'usage.
+- (Le chemin de dev macOS local télécharge `afkarxyz/ffmpeg-binaries v8.0` — FFmpeg 8.0 stable, hors
+  Docker ; sans impact prod.)
+
+### Front-end : rien à faire.
+Tout est déjà sur les derniers majeurs : React 19.2, Vite 7.3, Tailwind 4.2, ESLint 10, TypeScript
+5.9, `@types/node` 25, Radix/lucide/motion récents. Aucune mise à jour en attente à valeur.
+
+### Go : trois bumps réels, un seul à intérêt tangible.
+| Dép (directe) | Actuel | Dispo | Intérêt |
+|---|---|---|---|
+| `modernc.org/sqlite` | 1.40.0 | 1.53.0 | **Le plus intéressant.** Driver du catalogue (dédup, freshness, sélection retag). Embarque un SQLite upstream plus récent : corrections + améliorations du planner. Gain perf **réel mais probablement marginal** vu la simplicité des requêtes ; la vraie raison est correctness / rester à jour. |
+| `go.etcd.io/bbolt` | 1.4.3 | 1.5.0 | Store KV (jobs/auth/watchlists). Minor release avec fixes. Faible risque. |
+| `golang.org/x/text` | 0.31.0 | 0.40.0 | Normalisation Unicode (noms de fichiers). Bump de routine. |
+
+Transitives notables très en retard : `golang.org/x/net` (0.38→0.57), `golang.org/x/crypto`,
+`golang.org/x/sys`. `govulncheck` est **vert** en CI (aucune vuln connue atteignable aujourd'hui),
+mais ce sont les libs où atterrissent les correctifs HTTP/2 et crypto ; un `go get -u ./... && go mod
+tidy` les remonterait au passage.
+
+### Le vrai finding : **rien ne met à jour ces pins.**
+L'épinglage est excellent pour la reproductibilité (images Docker par digest SHA, ffmpeg par tag daté
++ vérif checksum, lockfiles gelés) — mais aucun mécanisme ne les bumpe, donc ils **dérivent en
+silence**. C'est exactement **I5 du premier audit (Dependabot absent), toujours non fait**. L'action à
+valeur n'est pas une mise à jour ponctuelle mais une **cadence** :
+- Activer **Dependabot** (Go modules + npm/bun) ou **Renovate** → PR de bump régulières, validées
+  automatiquement par la CI déjà en place (tests, vet, govulncheck, Trivy).
+- Renovate sait aussi proposer des bumps de digest/tag pour ffmpeg et les images de base épinglées ;
+  à défaut, un rappel manuel trimestriel.
+
+### Recommandation concrète (lot « deps » à faible risque, si souhaité)
+Un seul commit :
+```
+go get -u modernc.org/sqlite go.etcd.io/bbolt golang.org/x/text && go mod tidy
+go test -race ./...    # la couverture catalogue/jobs existante sert de garde-fou
+```
+**sans toucher ffmpeg ni le front** (rien à y gagner). La cadence Dependabot est un durcissement CI
+séparé, à traiter avec les autres items infra restants.
 
 ---
 
