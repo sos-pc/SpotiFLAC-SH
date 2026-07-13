@@ -419,27 +419,9 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	slog.Debug("[Qobuz] Starting file download")
 
 	downloadClient := util.NewHTTPClient(5 * time.Minute)
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	written, err := providerutil.GetToFile(downloadClient, url, filepath, q.SpeedCallback)
 	if err != nil {
-		return fmt.Errorf("failed to create download request: %w", err)
-	}
-	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
-	resp, err := downloadClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
-
-	slog.Debug("[Qobuz] Creating file", "path", filepath)
-
-	written, err := providerutil.DownloadToFileAtomic(filepath, resp.Body, q.SpeedCallback)
-	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return err
 	}
 
 	slog.Debug("[Qobuz] Downloaded", "mb", float64(written)/(1024*1024))

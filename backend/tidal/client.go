@@ -320,27 +320,9 @@ func (t *TidalDownloader) DownloadFile(url, filepath string) error {
 		return t.DownloadFromManifest(strings.TrimPrefix(url, "MANIFEST:"), filepath)
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	written, err := providerutil.GetToFile(t.client, url, filepath, t.SpeedCallback)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
-
-	resp, err := t.client.Do(req)
-
-	if err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
-
-	written, err := providerutil.DownloadToFileAtomic(filepath, resp.Body, t.SpeedCallback)
-	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return err
 	}
 
 	slog.Debug("[Tidal] Downloaded", "mb", float64(written)/(1024*1024))

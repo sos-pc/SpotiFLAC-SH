@@ -134,28 +134,12 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 
 	slog.Debug("[Deezer] Downloading FLAC from deezmate CDN")
 
-	dlReq, err := http.NewRequest("GET", flacURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("deezmate: failed to create download request: %w", err)
-	}
-	dlReq.Header.Set("User-Agent", providerutil.ChromeUserAgent)
-
-	dlResp, err := d.client.Do(dlReq)
-	if err != nil {
-		return "", fmt.Errorf("deezmate: download failed: %w", err)
-	}
-	defer dlResp.Body.Close()
-
-	if dlResp.StatusCode != 200 {
-		return "", fmt.Errorf("deezmate: CDN returned status %d", dlResp.StatusCode)
-	}
-
 	tempFileName := fmt.Sprintf("deezer_%d.flac", time.Now().UnixNano())
 	filePath := filepath.Join(outputDir, tempFileName)
 
-	written, err := providerutil.DownloadToFileAtomic(filePath, dlResp.Body, d.SpeedCallback)
+	written, err := providerutil.GetToFile(d.client, flacURL, filePath, d.SpeedCallback)
 	if err != nil {
-		return "", fmt.Errorf("deezmate: download stream failed: %w", err)
+		return "", fmt.Errorf("deezmate: %w", err)
 	}
 
 	slog.Debug("[Deezer] deezmate downloaded", "mb", float64(written)/(1024*1024))

@@ -49,6 +49,16 @@ type WatchedPlaylist struct {
 	UserID        string      `json:"user_id,omitempty"`
 }
 
+// EffectiveDownloadPath returns this watchlist's configured output directory,
+// falling back to the default music directory when none is set. Centralizes a
+// fallback that was previously duplicated at every scan/M3U8 call site (R7).
+func (pl *WatchedPlaylist) EffectiveDownloadPath() string {
+	if pl.Settings.DownloadPath != "" {
+		return pl.Settings.DownloadPath
+	}
+	return util.GetDefaultMusicPath()
+}
+
 type AddWatchlistRequest struct {
 	SpotifyURL    string      `json:"spotify_url"`
 	IntervalHours int         `json:"interval_hours"`
@@ -337,10 +347,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 					if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
 						if err := os.Remove(job.FilePath); err == nil {
 							slog.Info("[Watcher] Deleted file", "path", job.FilePath)
-							outputRoot := pl.Settings.DownloadPath
-							if outputRoot == "" {
-								outputRoot = util.GetDefaultMusicPath()
-							}
+							outputRoot := pl.EffectiveDownloadPath()
 							removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
 							// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
 							job.FilePath = ""
@@ -391,10 +398,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		}
 		if renameSettings != nil {
 			if createM3u8, _ := renameSettings["createM3u8File"].(bool); createM3u8 {
-				outputDir := pl.Settings.DownloadPath
-				if outputDir == "" {
-					outputDir = util.GetDefaultMusicPath()
-				}
+				outputDir := pl.EffectiveDownloadPath()
 				oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
 				if err := os.Remove(oldM3u8Path); err == nil {
 					slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
@@ -522,10 +526,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 			continue
 		}
 
-		outputRoot := pl.Settings.DownloadPath
-		if outputRoot == "" {
-			outputRoot = util.GetDefaultMusicPath()
-		}
+		outputRoot := pl.EffectiveDownloadPath()
 
 		// ── Suppression des fichiers audio (seulement si SyncDeletions) ────────
 		if pl.SyncDeletions {
@@ -1256,10 +1257,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 		spotifyTrackIDs = append(spotifyTrackIDs, t.SpotifyID)
 	}
 
-	outputDir := pl.Settings.DownloadPath
-	if outputDir == "" {
-		outputDir = util.GetDefaultMusicPath()
-	}
+	outputDir := pl.EffectiveDownloadPath()
 	resolved := w.resolveTrackPaths(pl, outputDir)
 
 	var pending, failed int
@@ -1497,10 +1495,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		return m3u8GenerationResult{}, fmt.Errorf("M3U8 generation is disabled (createM3u8File setting)")
 	}
 
-	outputDir := pl.Settings.DownloadPath
-	if outputDir == "" {
-		outputDir = util.GetDefaultMusicPath()
-	}
+	outputDir := pl.EffectiveDownloadPath()
 
 	paths := w.resolveTrackPaths(pl, outputDir)
 	result := m3u8GenerationResult{
