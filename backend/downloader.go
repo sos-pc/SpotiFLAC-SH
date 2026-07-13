@@ -371,56 +371,72 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 	}
 
-	switch req.Service {
-	case "amazon":
-		downloader := amazon.NewAmazonDownloader()
-		downloader.SpeedCallback = req.SpeedCallback
-		if req.ServiceURL != "" {
-			filename, err = downloader.DownloadByURL(amazonParams())
-		} else {
-			filename, err = downloader.DownloadBySpotifyID(amazonParams())
-		}
-
-	case "tidal":
+	// ensureTidalServiceURL resolves a Tidal URL by track/artist name when only
+	// the name is known, populating req.ServiceURL. No-op if it's already set.
+	ensureTidalServiceURL := func(logMsg string) {
 		if req.ServiceURL == "" && req.TrackName != "" && req.ArtistName != "" {
 			dl := tidal.NewTidalDownloader("")
 			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
 				req.ServiceURL = tidalURL
-				slog.Debug("[DownloadTrack] Found Tidal URL via fallback search", "url", tidalURL)
+				slog.Debug(logMsg, "url", tidalURL)
 			}
 		}
+	}
 
-		if req.ApiURL == "" || req.ApiURL == "auto" {
-			downloader := tidal.NewTidalDownloader("")
-			downloader.SpeedCallback = req.SpeedCallback
+	// runService builds the client for one provider and runs the download.
+	// Previously this per-provider logic was written twice — once in the direct
+	// switch below and once inside the "auto" fallback loop — which diverged
+	// only in how Tidal's API URL was chosen. tidalApiURL captures that one
+	// difference ("" / "auto" → public HiFi endpoints with fallback, otherwise
+	// the specific proxy); it's ignored for the other providers. Returns the
+	// downloaded filename and error from the underlying client.
+	runService := func(svc, tidalApiURL string) (string, error) {
+		switch svc {
+		case "amazon":
+			dl := amazon.NewAmazonDownloader()
+			dl.SpeedCallback = req.SpeedCallback
+			if req.ServiceURL != "" {
+				return dl.DownloadByURL(amazonParams())
+			}
+			return dl.DownloadBySpotifyID(amazonParams())
+		case "tidal":
+			if tidalApiURL == "" || tidalApiURL == "auto" {
+				dl := tidal.NewTidalDownloader("")
+				dl.SpeedCallback = req.SpeedCallback
+				p := tidalParams(tidalFmt)
+				if req.ServiceURL != "" {
+					return dl.DownloadByURLWithFallback(p)
+				}
+				return dl.Download(p)
+			}
+			dl := tidal.NewTidalDownloader(tidalApiURL)
+			dl.SpeedCallback = req.SpeedCallback
 			p := tidalParams(tidalFmt)
 			if req.ServiceURL != "" {
-				filename, err = downloader.DownloadByURLWithFallback(p)
-			} else {
-				filename, err = downloader.Download(p)
+				return dl.DownloadByURL(p)
 			}
-		} else {
-			downloader := tidal.NewTidalDownloader(req.ApiURL)
-			downloader.SpeedCallback = req.SpeedCallback
-			p := tidalParams(tidalFmt)
-			if req.ServiceURL != "" {
-				filename, err = downloader.DownloadByURL(p)
-			} else {
-				filename, err = downloader.Download(p)
-			}
+			return dl.Download(p)
+		case "qobuz":
+			isrc := <-isrcChan
+			dl := qobuz.NewQobuzDownloader()
+			dl.SpeedCallback = req.SpeedCallback
+			return dl.DownloadTrackWithISRC(qobuzParams(isrc))
+		case "deezer":
+			dl := deezer.NewDeezerDownloader()
+			dl.SpeedCallback = req.SpeedCallback
+			return dl.Download(deezerParams())
+		default:
+			return "", fmt.Errorf("unknown service: %s", svc)
 		}
+	}
 
-	case "qobuz":
-		slog.Debug("[Downloader] Waiting for ISRC (Qobuz dependency)")
-		isrc := <-isrcChan
-		downloader := qobuz.NewQobuzDownloader()
-		downloader.SpeedCallback = req.SpeedCallback
-		filename, err = downloader.DownloadTrackWithISRC(qobuzParams(isrc))
+	switch req.Service {
+	case "amazon", "qobuz", "deezer":
+		filename, err = runService(req.Service, "")
 
-	case "deezer":
-		downloader := deezer.NewDeezerDownloader()
-		downloader.SpeedCallback = req.SpeedCallback
-		filename, err = downloader.Download(deezerParams())
+	case "tidal":
+		ensureTidalServiceURL("[DownloadTrack] Found Tidal URL via fallback search")
+		filename, err = runService("tidal", req.ApiURL)
 
 	case "auto":
 		// Respecter l'ordre configuré par l'user (AutoOrder)
@@ -430,46 +446,16 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 		order := strings.Split(orderStr, "-")
 
-		if req.ServiceURL == "" && req.TrackName != "" && req.ArtistName != "" {
-			dl := tidal.NewTidalDownloader("")
-			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
-				req.ServiceURL = tidalURL
-				slog.Debug("[DownloadTrack/Auto] Found Tidal URL via fallback search", "url", tidalURL)
-			}
-		}
+		ensureTidalServiceURL("[DownloadTrack/Auto] Found Tidal URL via fallback search")
 
 		var lastErr error
 		for _, svc := range order {
 			switch svc {
-			case "tidal":
-				downloader := tidal.NewTidalDownloader("")
-				downloader.SpeedCallback = req.SpeedCallback
-				p := tidalParams(tidalFmt)
-				if req.ServiceURL != "" {
-					filename, err = downloader.DownloadByURLWithFallback(p)
-				} else {
-					filename, err = downloader.Download(p)
-				}
-			case "amazon":
-				downloader := amazon.NewAmazonDownloader()
-				downloader.SpeedCallback = req.SpeedCallback
-				if req.ServiceURL != "" {
-					filename, err = downloader.DownloadByURL(amazonParams())
-				} else {
-					filename, err = downloader.DownloadBySpotifyID(amazonParams())
-				}
-			case "qobuz":
-				isrc := <-isrcChan
-				downloader := qobuz.NewQobuzDownloader()
-				downloader.SpeedCallback = req.SpeedCallback
-				filename, err = downloader.DownloadTrackWithISRC(qobuzParams(isrc))
-			case "deezer":
-				downloader := deezer.NewDeezerDownloader()
-				downloader.SpeedCallback = req.SpeedCallback
-				filename, err = downloader.Download(deezerParams())
+			case "tidal", "amazon", "qobuz", "deezer":
 			default:
 				continue
 			}
+			filename, err = runService(svc, "")
 			if err == nil {
 				break
 			}
