@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestValidateExternalURL(t *testing.T) {
@@ -243,5 +247,55 @@ func TestGetOrCreateUserBumpsTokenVersionOnPrivilegeChange(t *testing.T) {
 	}
 	if p4.TokenVersion != 2 {
 		t.Fatalf("TokenVersion after demotion = %d, want 2", p4.TokenVersion)
+	}
+}
+
+// TestGetOrCreateUserHealsMissingID is the regression test for a real
+// production bug: a profile persisted under BoltDB key jellyfinID whose
+// JSON blob has ID="" baked in (e.g. from before the ID field existed, or
+// any other historical write that lost it) stayed permanently ID="" —
+// every subsequent login refreshed Name/DisplayName/IsAdmin/UpdatedAt but
+// never re-derived ID from the lookup key itself. A real Jellyfin admin
+// hit this: their session correctly showed is_admin=true, but any API key
+// they created inherited UserID="" and ValidateAPIKey's GetUser("") always
+// failed, silently downgrading every admin-scoped key to non-admin.
+func TestGetOrCreateUserHealsMissingID(t *testing.T) {
+	am := newTestAuthManager(t)
+
+	corrupted, err := json.Marshal(UserProfile{
+		ID:          "", // the bug: stored blob has no ID even though the BoltDB key does
+		Name:        "jf-legacy",
+		DisplayName: "Legacy Admin",
+		IsAdmin:     true,
+		Settings:    make(map[string]interface{}),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := am.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketUsers)
+		return b.Put([]byte("jf-legacy"), corrupted)
+	}); err != nil {
+		t.Fatalf("seed corrupted profile: %v", err)
+	}
+
+	profile, err := am.GetOrCreateUser("jf-legacy", "Legacy Admin", true)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	if profile.ID != "jf-legacy" {
+		t.Fatalf("GetOrCreateUser did not heal ID: got %q, want %q", profile.ID, "jf-legacy")
+	}
+
+	// The real-world symptom: ValidateAPIKey looks up the profile via
+	// GetUser(found.UserID) — this must now succeed and report IsAdmin.
+	healed, err := am.GetUser("jf-legacy")
+	if err != nil {
+		t.Fatalf("GetUser after healing: %v", err)
+	}
+	if !healed.IsAdmin {
+		t.Fatalf("healed profile IsAdmin = false, want true")
 	}
 }

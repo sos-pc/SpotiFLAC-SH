@@ -177,6 +177,15 @@ func (a *AuthManager) GetOrCreateUser(jellyfinID, name string, isAdmin bool) (*U
 			if err := json.Unmarshal(data, &profile); err != nil {
 				return err
 			}
+			// Auto-réparation : réaligne toujours ID sur jellyfinID (la
+			// clé BoltDB utilisée pour ce Get/Put). Un profil persisté
+			// avant l'ajout du champ ID à la struct (ou par tout autre
+			// bug historique) se retrouve avec ID="" gelé pour toujours
+			// sinon — IsAdmin/Name/etc. se rafraîchissent bien à chaque
+			// login ci-dessous, mais ID ne l'était pas, laissant un
+			// compte réellement admin coincé avec un ID vide (et donc
+			// injoignable via GetUser côté clés API).
+			profile.ID = jellyfinID
 			// Mettre à jour nom + isAdmin
 			profile.Name = jellyfinID
 			profile.DisplayName = name
