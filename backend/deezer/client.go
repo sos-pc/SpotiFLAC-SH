@@ -3,6 +3,7 @@ package deezer
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -115,7 +116,7 @@ func (d *DeezerDownloader) getFlacURL(base, deezerTrackID string) (string, error
 
 // DownloadFromDeezmate — télécharge directement via un proxy compatible avec l'ID Deezer
 func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string) (string, error) {
-	fmt.Printf("[Deezer] Fetching FLAC URL for ID: %s...\n", deezerTrackID)
+	slog.Debug("[Deezer] Fetching FLAC URL", "track_id", deezerTrackID)
 	var flacURL string
 	var lastErr error
 	for _, proxy := range util.GetDeezerProxies() {
@@ -125,13 +126,13 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 			break
 		}
 		lastErr = err
-		fmt.Printf("[Deezer] Proxy %s failed: %v, trying next...\n", proxy, err)
+		slog.Debug("[Deezer] Proxy failed, trying next", "proxy", proxy, "err", err)
 	}
 	if flacURL == "" {
 		return "", fmt.Errorf("all Deezer proxies failed: %v", lastErr)
 	}
 
-	fmt.Printf("[Deezer] Downloading FLAC from deezmate CDN...\n")
+	slog.Debug("[Deezer] Downloading FLAC from deezmate CDN")
 
 	dlReq, err := http.NewRequest("GET", flacURL, nil)
 	if err != nil {
@@ -157,7 +158,7 @@ func (d *DeezerDownloader) DownloadFromDeezmate(deezerTrackID, outputDir string)
 		return "", fmt.Errorf("deezmate: download stream failed: %w", err)
 	}
 
-	fmt.Printf("\r[Deezer] deezmate downloaded: %.2f MB\n", float64(written)/(1024*1024))
+	slog.Debug("[Deezer] deezmate downloaded", "mb", float64(written)/(1024*1024))
 	return filePath, nil
 }
 
@@ -180,7 +181,7 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 		expectedPath := filepath.Join(p.OutputDir, expectedFilename)
 
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
-			fmt.Printf("File already exists: %s (%.2f MB)\n", expectedPath, float64(fileInfo.Size())/(1024*1024))
+			slog.Debug("[Deezer] File already exists", "path", expectedPath, "mb", float64(fileInfo.Size())/(1024*1024))
 			return "EXISTS:" + expectedPath, nil
 		}
 	}
@@ -210,21 +211,21 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 		newFilename = newFilename + ext
 		newFilePath := filepath.Join(p.OutputDir, newFilename)
 		if err := os.Rename(filePath, newFilePath); err != nil {
-			fmt.Printf("Warning: Failed to rename file: %v\n", err)
+			slog.Warn("[Deezer] Failed to rename file", "err", err)
 		} else {
 			filePath = newFilePath
-			fmt.Printf("Renamed to: %s\n", newFilename)
+			slog.Debug("[Deezer] Renamed", "filename", newFilename)
 		}
 	}
 
-	fmt.Println("Embedding Spotify metadata...")
+	slog.Debug("[Deezer] Embedding Spotify metadata")
 
 	coverPath := ""
 	if p.SpotifyCoverURL != "" {
 		coverPath = filePath + ".cover.jpg"
 		coverClient := meta.NewCoverClient()
 		if err := coverClient.DownloadCoverToPath(p.SpotifyCoverURL, coverPath, p.EmbedMaxQualityCover); err != nil {
-			fmt.Printf("Warning: Failed to download cover: %v\n", err)
+			slog.Warn("[Deezer] Failed to download cover", "err", err)
 			coverPath = ""
 		} else {
 			defer os.Remove(coverPath)
@@ -254,8 +255,8 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 	if err := meta.EmbedMetadataToConvertedFile(filePath, metadata, coverPath); err != nil {
 		return "", fmt.Errorf("failed to embed metadata: %w", err)
 	}
-	fmt.Println("Metadata embedded successfully")
+	slog.Debug("[Deezer] Metadata embedded successfully")
 
-	fmt.Println("✓ Downloaded successfully from Deezer")
+	slog.Debug("[Deezer] Downloaded successfully")
 	return filePath, nil
 }

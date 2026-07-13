@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -42,7 +43,7 @@ func (s *SongLinkClient) RateLimitedUntil() time.Time {
 // markRateLimited must be called with s.mu held.
 func (s *SongLinkClient) markRateLimited() {
 	s.rateLimitedUntil = time.Now().Add(5 * time.Minute)
-	fmt.Printf("[Songlink] Rate limited -- skipping calls for 5 minutes\n")
+	slog.Warn("[Songlink] Rate limited, skipping calls for 5 minutes")
 }
 
 type SongLinkURLs struct {
@@ -100,7 +101,7 @@ func (s *SongLinkClient) acquireSlot() error {
 		waitTime := time.Minute - now.Sub(s.apiCallResetTime)
 		s.mu.Unlock()
 		if waitTime > 0 {
-			fmt.Printf("Rate limit reached, waiting %v...\n", waitTime.Round(time.Second))
+			slog.Debug("[Songlink] Rate limit reached, waiting", "wait", waitTime.Round(time.Second))
 			time.Sleep(waitTime)
 		}
 		s.mu.Lock()
@@ -113,7 +114,7 @@ func (s *SongLinkClient) acquireSlot() error {
 		const minDelay = 7 * time.Second
 		if elapsed := time.Since(lastCall); elapsed < minDelay {
 			wait := minDelay - elapsed
-			fmt.Printf("Rate limiting: waiting %v...\n", wait.Round(time.Second))
+			slog.Debug("[Songlink] Rate limiting, waiting", "wait", wait.Round(time.Second))
 			time.Sleep(wait)
 		}
 	}
@@ -138,7 +139,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	fmt.Println("Getting streaming URLs from song.link...")
+	slog.Debug("[Songlink] Getting streaming URLs from song.link")
 
 	maxRetries := 3
 	var resp *http.Response
@@ -212,7 +213,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 	if tidalLink, ok := songLinkResp.LinksByPlatform["tidal"]; ok && tidalLink.URL != "" {
 		urls.TidalURL = tidalLink.URL
-		fmt.Printf("âœ“ Tidal URL found\n")
+		slog.Debug("[Songlink] Tidal URL found")
 	}
 
 	if amazonLink, ok := songLinkResp.LinksByPlatform["amazonMusic"]; ok && amazonLink.URL != "" {
@@ -220,7 +221,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 		if len(amazonURL) > 0 {
 			urls.AmazonURL = amazonURL
-			fmt.Printf("âœ“ Amazon URL found\n")
+			slog.Debug("[Songlink] Amazon URL found")
 		}
 	}
 
@@ -251,7 +252,7 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	fmt.Printf("Checking availability for track: %s\n", spotifyTrackID)
+	slog.Debug("[Songlink] Checking availability for track", "spotify_id", spotifyTrackID)
 
 	maxRetries := 3
 	var resp *http.Response
@@ -388,7 +389,7 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	fmt.Println("Getting Deezer URL from song.link...")
+	slog.Debug("[Songlink] Getting Deezer URL from song.link")
 
 	maxRetries := 3
 	var resp *http.Response
@@ -445,7 +446,7 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 	}
 
 	deezerURL := deezerLink.URL
-	fmt.Printf("Found Deezer URL: %s\n", deezerURL)
+	slog.Debug("[Songlink] Found Deezer URL", "url", deezerURL)
 	return deezerURL, nil
 }
 
@@ -490,7 +491,7 @@ func getDeezerISRC(deezerURL string) (string, error) {
 		return "", fmt.Errorf("ISRC not found in Deezer API response for track %s", trackID)
 	}
 
-	fmt.Printf("Found ISRC from Deezer: %s (track: %s)\n", deezerTrack.ISRC, deezerTrack.Title)
+	slog.Debug("[Songlink] Found ISRC from Deezer", "isrc", deezerTrack.ISRC, "track", deezerTrack.Title)
 	return deezerTrack.ISRC, nil
 }
 
@@ -556,7 +557,7 @@ func GetDeezerSearchFallback(trackName, artistName string) (*SongLinkURLs, error
 		return nil, fmt.Errorf("deezer: failed to get ISRC for track %d (%s - %s): %v", trackID, trackName, artistName, err)
 	}
 
-	fmt.Printf("[Deezer fallback] Found ISRC %s for %s - %s\n", isrc, trackName, artistName)
+	slog.Debug("[Deezer fallback] Found ISRC", "isrc", isrc, "track", trackName, "artist", artistName)
 	return &SongLinkURLs{ISRC: isrc}, nil
 }
 
@@ -654,20 +655,20 @@ func (s *SongLinkClient) ScrapeSongLinkHTML(spotifyTrackID string) (*SongLinkURL
 	if tidalLink, ok := links["tidal"]; ok && tidalLink.URL != "" {
 		urls.TidalURL = tidalLink.URL
 		found = true
-		fmt.Printf("[Songlink HTML] ✓ Tidal: %s\n", tidalLink.URL)
+		slog.Debug("[Songlink HTML] Tidal found", "url", tidalLink.URL)
 	}
 
 	if amazonLink, ok := links["amazonMusic"]; ok && amazonLink.URL != "" {
 		urls.AmazonURL = amazonLink.URL
 		found = true
-		fmt.Printf("[Songlink HTML] ✓ Amazon: %s\n", amazonLink.URL)
+		slog.Debug("[Songlink HTML] Amazon found", "url", amazonLink.URL)
 	}
 
 	if deezerLink, ok := links["deezer"]; ok && deezerLink.URL != "" {
 		if isrc, iErr := getDeezerISRC(deezerLink.URL); iErr == nil && isrc != "" {
 			urls.ISRC = isrc
 			found = true
-			fmt.Printf("[Songlink HTML] ✓ ISRC via Deezer: %s\n", isrc)
+			slog.Debug("[Songlink HTML] ISRC via Deezer found", "isrc", isrc)
 		}
 	}
 
@@ -787,7 +788,7 @@ func (s *SongLinkClient) ScrapeSongLinkViaAppleMusic(trackName, artistName, albu
 	}
 
 	trackID := itunes.TrackID
-	fmt.Printf("[Songlink AppleMusic] iTunes track ID: %d for %s - %s\n", trackID, trackName, artistName)
+	slog.Debug("[Songlink AppleMusic] iTunes track found", "track_id", trackID, "track", trackName, "artist", artistName)
 
 	// ── Étape 2 : scrape song.link/{region}/i/{trackID} ───────────────────
 	if region == "" {
@@ -888,18 +889,18 @@ func (s *SongLinkClient) ScrapeSongLinkViaAppleMusic(trackName, artistName, albu
 	if tidalURL, ok := platformURLs["tidal"]; ok {
 		urls.TidalURL = tidalURL
 		found = true
-		fmt.Printf("[Songlink AppleMusic] ✓ Tidal: %s\n", tidalURL)
+		slog.Debug("[Songlink AppleMusic] Tidal found", "url", tidalURL)
 	}
 	if amazonURL, ok := platformURLs["amazonMusic"]; ok {
 		urls.AmazonURL = amazonURL
 		found = true
-		fmt.Printf("[Songlink AppleMusic] ✓ Amazon: %s\n", amazonURL)
+		slog.Debug("[Songlink AppleMusic] Amazon found", "url", amazonURL)
 	}
 	if deezerURL, ok := platformURLs["deezer"]; ok {
 		if isrc, iErr := getDeezerISRC(deezerURL); iErr == nil && isrc != "" {
 			urls.ISRC = isrc
 			found = true
-			fmt.Printf("[Songlink AppleMusic] ✓ ISRC via Deezer: %s\n", isrc)
+			slog.Debug("[Songlink AppleMusic] ISRC via Deezer found", "isrc", isrc)
 		}
 	}
 
