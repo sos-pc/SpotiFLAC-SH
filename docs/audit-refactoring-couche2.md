@@ -20,7 +20,7 @@
 |----|------|-------|--------|--------|----------|
 | **R1** | `frontend/…/SettingsPage.tsx` (2230 l.) | God component : 6 onglets inline, 26 `useState` | Élevé | Moyen-élevé | **1** |
 | **R2** | `backend/spotify/*.go` (`FilterTrack` 312 l., etc.) | Primitive obsession : traversée de `map[string]interface{}` | Élevé | Élevé | **2** |
-| **R3** | `app_core.go` — struct `App` (50+ méthodes, 1183 l.) | God object (façade Wails vestigiale) | Moyen | Élevé (mécanique) | 3 |
+| **R3** ✅ | `app_core.go` — struct `App` (50+ méthodes, 1183 l.) | God object (façade Wails vestigiale) → **découpé en 7 services de domaine ; `App` supprimé** | Moyen | Élevé (mécanique) | **fait** |
 | **R4** | `watcher.go` — `syncPlaylist` (252 l.), fichier 1783 l. | Méthode longue + fichier fourre-tout | Moyen | Moyen | 3 |
 | **R5** | `backend/downloader.go` dispatch providers | Pas d'interface `Provider` ; `switch` dupliqué ; entrées mal nommées | Moyen | Faible-moyen | 4 |
 | **R6** | `backend/{tidal,qobuz,amazon,deezer}` `DownloadFile` | Boilerplate requête HTTP dupliqué 4× | Faible | Faible | 4 |
@@ -40,8 +40,8 @@
 contenu (découpage mécanique, pas de logique modifiée). R2 est le plus payant à long terme mais le
 plus risqué (le parsing Spotify est du code chaud, peu testé) — à faire **incrémentalement, une
 fonction `Filter*` à la fois, avec des tests de caractérisation posés AVANT**. R5-R7 sont des quick
-wins DRY à faible risque, bons à grouper. R3/R8 sont optionnels et peuvent être différés
-indéfiniment sans coût.
+wins DRY à faible risque, bons à grouper. **R3 a finalement été fait** (maintenabilité long terme —
+voir sa section) ; R8 reste optionnel et peut être différé indéfiniment sans coût.
 
 ---
 
@@ -99,7 +99,19 @@ transformation sont énormes :
 
 ### R3 — `app_core.go` : God object `App` (façade Wails vestigiale)
 
-**Constat vérifié.** La struct `App` porte **50+ méthodes** (1183 l.) couvrant des domaines sans
+**✅ Fait (13/07).** `App` **entièrement supprimé** et remplacé par 7 services de domaine portés par
+le `Container`, chacun ne détenant que ses vraies dépendances :
+`SystemService`/`MediaService`/`AudioService` (sans état), `HistoryService` (jobs),
+`MetadataService`/`DownloadService` (jobs + system), `FileService` (`*Container` — ses deux méthodes
+de renommage coordonnent Catalog/Jobs/historique via `syncCatalogPathOnRename`, une dépendance
+honnête, pas une façade). Les handlers appellent désormais `s.ctr.<Service>.<Méthode>` partout,
+cohérent avec le style déjà employé pour Media/System/History/Jobs. `NewApp`/`Server.app` retirés,
+`NewServer` perd son paramètre `app`. Aucun changement de comportement (déplacement pur + injection
+de dépendances étroite ; build+vet+`-race` verts). Commits : `5aae8d8` (System), `45ac11c` (Media),
+`2c00609` (History), `0187d8a` (File/Audio/Metadata/Download + suppression d'`App`). `app_core.go` et
+`app_test.go` supprimés ; tests répartis dans `file_service_test.go`/`metadata_service_test.go`.
+
+**Constat initial (vérifié).** La struct `App` portait **50+ méthodes** (1183 l.) couvrant des domaines sans
 rapport : streaming (`GetStreamingURLs`), métadonnées (`GetSpotifyMetadata`, `SearchSpotify*`),
 téléchargement (`DownloadTrack`, `ApplySettingsFallbacks`), historique (10 méthodes
 `*History*`), analyse audio (`AnalyzeTrack`), téléchargements média (`DownloadLyrics/Cover/Header/
@@ -114,10 +126,12 @@ HTTP appellent déjà `a.ctr.*` directement à beaucoup d'endroits.
 tout le backend référence, ce qui gêne le test unitaire (il faut un `App` complet pour tester une
 méthode isolée) et brouille la carte mentale du code.
 
-**Nuance honnête.** La plupart de ces méthodes sont des **délégations d'une ligne** vers `backend.*`
-ou `a.ctr.*`. Le smell est réel mais le risque de le corriger est surtout mécanique, et le gain est
-modéré (c'est une façade, pas de la logique enfouie). **À différer** sauf si un domaine précis
-devient actif.
+**Nuance (contexte de décision).** La plupart de ces méthodes étaient des **délégations d'une ligne**
+vers `backend.*` ou `a.ctr.*` : le risque de correction était surtout mécanique et le gain modéré,
+d'où le classement initial « optionnel ». Le découpage a finalement été mené pour la **maintenabilité
+à long terme** (un god object de 50 méthodes décourage la contribution et brouille la carte du code) —
+en veillant à ce que chaque service ne détienne que ses vraies dépendances plutôt qu'un `*Container`
+qui ne serait qu'un faux découplage.
 
 ### R4 — `watcher.go` : méthode longue + fichier fourre-tout
 
@@ -236,8 +250,9 @@ possible d'un sous-hook `useBrowserDownloadMode`, mais gain modéré → basse p
     `watcher_parsing.go`. Aucun changement de logique — juste déplacer des fonctions (le compilateur
     garantit l'exactitude). Extraire ensuite les phases de `syncPlaylist` en sous-méthodes nommées.
 
-### Phase E — Optionnels (R3, R8, R9) · à différer
-11. R3/R8/R9 ne sont **pas** planifiés tant qu'un besoin concret ne les rend pas rentables.
+### Phase E — Optionnels (R8, R9) · à différer
+11. **R3 fait (13/07)** — voir la section R3 ci-dessus. R8/R9 ne sont **pas** planifiés tant qu'un
+    besoin concret ne les rend pas rentables.
 
 ---
 
