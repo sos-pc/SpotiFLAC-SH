@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -24,16 +23,11 @@ import (
 )
 
 type App struct {
-	ctx context.Context
 	ctr *Container
 }
 
 func NewApp(ctr *Container) *App {
 	return &App{ctr: ctr}
-}
-
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +150,7 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 	defer metaCancel()
 
 	var spotFetchAPIURL string
-	settings, err := a.LoadSettings()
+	settings, err := a.ctr.System.LoadSettings()
 	if err == nil && settings != nil {
 		if apiURL, ok := settings["spotFetchAPIUrl"].(string); ok {
 			spotFetchAPIURL = apiURL
@@ -236,7 +230,7 @@ func (a *App) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([]spotify.Sea
 // global settings. Intended for REST API callers that send minimal payloads;
 // the Wails frontend always provides all fields explicitly.
 func (a *App) ApplySettingsFallbacks(req *DownloadRequest) {
-	settings, err := a.LoadSettings()
+	settings, err := a.ctr.System.LoadSettings()
 	if err != nil || settings == nil {
 		return
 	}
@@ -432,19 +426,6 @@ func (a *App) OpenFolder(path string) error {
 		return fmt.Errorf("path is required")
 	}
 	return backend.OpenFolderInExplorer(path)
-}
-
-func (a *App) GetDefaults() map[string]string {
-	return map[string]string{
-		"downloadPath": util.GetDefaultMusicPath(),
-		// The server's OS family (runtime.GOOS: "linux"/"windows"/"darwin").
-		// The frontend builds a download's output_dir for THIS server's
-		// filesystem, so it must use the server's path separator + filename
-		// rules, not the browser's — a Windows browser talking to a Linux
-		// server would otherwise build backslash paths. See the frontend's
-		// serverOSFamily() in lib/settings.ts.
-		"os": runtime.GOOS,
-	}
 }
 
 func (a *App) ClearCompletedDownloads(userID string, isAdmin bool) {
@@ -1052,125 +1033,6 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 	}
 
 	return results
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Settings
-// ─────────────────────────────────────────────────────────────────────────────
-
-func (a *App) GetConfigPath() (string, error) {
-	dir, err := util.GetFFmpegDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "config.json"), nil
-}
-
-func (a *App) SaveSettings(settings map[string]interface{}) error {
-	configPath, err := a.GetConfigPath()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(configPath)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Atomic write (Q7): same temp-file + rename pattern as CreateM3U8File
-	// below — a crash or concurrent save mid-write can no longer leave
-	// config.json truncated/corrupted on disk.
-	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return os.Rename(tmpPath, configPath)
-}
-
-func (a *App) LoadSettings() (map[string]interface{}, error) {
-	configPath, err := a.GetConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, nil
-	}
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil, err
-	}
-	return settings, nil
-}
-
-func (a *App) GetOSInfo() (string, error) { return util.GetOSInfo() }
-
-// CreateM3U8File génère un fichier .m3u8 de manière atomique (write-then-rename).
-// musicRoot est le répertoire racine de la bibliothèque musicale locale
-// (ex: "/home/nonroot/Music") utilisé pour calculer le chemin Jellyfin.
-func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []string, jellyfinMusicPath string, musicRoot string) error {
-	if len(filePaths) == 0 {
-		return nil
-	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return err
-	}
-	safeName := util.SanitizeFilename(m3u8Name)
-	if safeName == "" {
-		safeName = "playlist"
-	}
-	m3u8Path := filepath.Join(outputDir, safeName+".m3u8")
-	tmpPath := m3u8Path + ".tmp"
-
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return err
-	}
-
-	// Écriture dans le fichier temporaire — closure pour gestion d'erreur propre
-	var werr error
-	write := func(s string) {
-		if werr != nil {
-			return
-		}
-		_, werr = f.WriteString(s)
-	}
-
-	write("#EXTM3U\n")
-	for _, path := range filePaths {
-		if path == "" {
-			continue
-		}
-		var entry string
-		if jellyfinMusicPath != "" {
-			// Remplacer le préfixe local (musicRoot) par le chemin Jellyfin
-			localRoot := filepath.ToSlash(strings.TrimRight(musicRoot, "/"))
-			entry = strings.Replace(filepath.ToSlash(path), localRoot, strings.TrimRight(jellyfinMusicPath, "/"), 1)
-		} else {
-			relPath, relErr := filepath.Rel(outputDir, path)
-			if relErr != nil {
-				relPath = path
-			}
-			entry = filepath.ToSlash(relPath)
-		}
-		write(entry + "\n")
-	}
-
-	f.Close()
-	if werr != nil {
-		os.Remove(tmpPath)
-		return werr
-	}
-	// Rename atomique : jamais de fichier corrompu visible
-	return os.Rename(tmpPath, m3u8Path)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

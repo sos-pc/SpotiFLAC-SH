@@ -183,7 +183,7 @@ func (s *Server) registerFileRoutes() {
 				return
 			}
 		}
-		settings, err := a.LoadSettings()
+		settings, err := s.ctr.System.LoadSettings()
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -208,7 +208,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 			return
 		}
-		if err := a.SaveSettings(settings); err != nil {
+		if err := s.ctr.System.SaveSettings(settings); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -474,7 +474,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := a.CreateM3U8File(params.M3U8Name, outputDir, cleanedPaths, params.JellyfinMusicPath, params.MusicRoot); err != nil {
+		if err := s.ctr.System.CreateM3U8File(params.M3U8Name, outputDir, cleanedPaths, params.JellyfinMusicPath, params.MusicRoot); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -704,8 +704,8 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		osInfo, _ := a.GetOSInfo()
-		configPath, _ := a.GetConfigPath()
+		osInfo, _ := s.ctr.System.GetOSInfo()
+		configPath, _ := s.ctr.System.GetConfigPath()
 		homeDir, _ := os.UserHomeDir()
 		writeV1JSON(w, http.StatusOK, map[string]string{
 			"os":          osInfo,
@@ -737,6 +737,6 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.GetDefaults())
+		writeV1JSON(w, http.StatusOK, s.ctr.System.GetDefaults())
 	}))
 }

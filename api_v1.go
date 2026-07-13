@@ -103,7 +103,7 @@ func isSubPath(root, target string) bool {
 // so every caller that needs to confine a client-supplied path resolves the
 // root the same way, instead of each recomputing its own copy.
 func (s *Server) libraryRoot() string {
-	if settings, err := s.app.LoadSettings(); err == nil && settings != nil {
+	if settings, err := s.ctr.System.LoadSettings(); err == nil && settings != nil {
 		if root, _ := settings["downloadPath"].(string); root != "" {
 			return filepath.Clean(root)
 		}

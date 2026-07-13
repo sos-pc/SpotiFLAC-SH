@@ -225,7 +225,7 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spotFetchURL := ""
-	if settings, err := s.app.LoadSettings(); err == nil && settings != nil {
+	if settings, err := s.ctr.System.LoadSettings(); err == nil && settings != nil {
 		if u, _ := settings["spotFetchAPIUrl"].(string); u != "" {
 			spotFetchURL = u
 		}

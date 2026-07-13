@@ -99,11 +99,11 @@ func main() {
 		Jobs:    jobs,
 		Auth:    auth,
 		Watcher: watcher,
+		System:  &SystemService{},
 	}
 
 	// ── App + HTTP server ─────────────────────────────────────────────────
 	app := NewApp(ctr)
-	app.startup(context.Background())
 
 	LoadProxyConfig(db)
 

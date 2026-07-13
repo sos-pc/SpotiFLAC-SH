@@ -445,7 +445,7 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 	if oldName == "" {
 		return
 	}
-	appInst := &App{}
+	sys := &SystemService{}
 	var renameSettings map[string]interface{}
 	if pl.UserID != "" && w.auth != nil {
 		if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
@@ -453,7 +453,7 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 		}
 	}
 	if renameSettings == nil {
-		renameSettings, _ = appInst.LoadSettings()
+		renameSettings, _ = sys.LoadSettings()
 	}
 	if renameSettings == nil {
 		return
@@ -585,7 +585,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		}
 
 		// ── Suppression du fichier M3U8 (toujours, indépendamment de SyncDeletions) ──
-		app := &App{}
+		sys := &SystemService{}
 		var settings map[string]interface{}
 		if pl.UserID != "" && w.auth != nil {
 			if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
@@ -593,7 +593,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 			}
 		}
 		if settings == nil {
-			settings, _ = app.LoadSettings()
+			settings, _ = sys.LoadSettings()
 		}
 		if settings != nil {
 			if createM3u8, _ := settings["createM3u8File"].(bool); createM3u8 {
@@ -1574,8 +1574,8 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		}
 	}
 
-	app := &App{}
-	if err := app.CreateM3U8File(baseName, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
+	sys := &SystemService{}
+	if err := sys.CreateM3U8File(baseName, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
 		return result, fmt.Errorf("failed to create %s: %w", pl.Name, err)
 	}
 	result.Written = true
@@ -1669,7 +1669,7 @@ type m3u8Settings struct {
 // loadM3U8Settings returns the user (or global) settings if M3U8 generation is
 // enabled, or nil if it is disabled.
 func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
-	app := &App{}
+	sys := &SystemService{}
 	var settings map[string]interface{}
 	if pl.UserID != "" && w.auth != nil {
 		if profile, err := w.auth.GetUser(pl.UserID); err == nil && profile != nil && len(profile.Settings) > 0 {
@@ -1678,7 +1678,7 @@ func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
 	}
 	if settings == nil {
 		var err error
-		settings, err = app.LoadSettings()
+		settings, err = sys.LoadSettings()
 		if err != nil || settings == nil {
 			return nil
 		}
