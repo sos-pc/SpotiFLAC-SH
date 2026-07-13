@@ -176,7 +176,10 @@ export const ExportFailedDownloads = () =>
 export const LoadSettings = () => rest<Settings>("GET", "/settings");
 export const SaveSettings = (settings: Settings) =>
   rest<void>("PUT", "/settings", settings);
-export const GetDefaults = () => rest<Partial<Settings>>("GET", "/system/defaults");
+// `os` is the server's runtime.GOOS ("linux"/"windows"/"darwin") — used to
+// build download output paths for the server's filesystem, not the browser's.
+export const GetDefaults = () =>
+  rest<{ downloadPath?: string; os?: string }>("GET", "/system/defaults");
 export const GetOSInfo = () =>
   rest<SystemInfo>("GET", "/system/info").then((r) => r.os);
 export const GetUserHomeDir = () =>

@@ -89,6 +89,41 @@ function detectOS(): "Windows" | "linux/MacOS" {
     }
     return "linux/MacOS";
 }
+// A download's output_dir is built for the SERVER's filesystem (that's where
+// files land), so its path separator and filename-sanitization rules must
+// follow the server's OS — not the browser's, which detectOS() reports. In a
+// self-hosted web deployment the two often differ (a Windows browser talking
+// to a Linux Docker server would otherwise build backslash paths the server
+// can't place files under). The server OS is learned from GetDefaults (see
+// getSettingsWithDefaults) and cached in localStorage so it survives reloads
+// and is available synchronously wherever the OS is needed. Until it's been
+// learned once, we fall back to the browser's OS (the backend also tolerates
+// this by folding "\"→"/" — see cleanAbsPath).
+const SERVER_OS_KEY = "spotiflac-server-os";
+let cachedServerOS: "Windows" | "linux/MacOS" | null = null;
+function serverOSFamily(): "Windows" | "linux/MacOS" {
+    if (cachedServerOS) return cachedServerOS;
+    try {
+        const stored = localStorage.getItem(SERVER_OS_KEY);
+        if (stored === "Windows" || stored === "linux/MacOS") {
+            cachedServerOS = stored;
+            return stored;
+        }
+    } catch {
+        /* ignore */
+    }
+    return detectOS();
+}
+function rememberServerOS(goos: string | undefined): void {
+    if (!goos) return;
+    const family = goos === "windows" ? "Windows" : "linux/MacOS";
+    cachedServerOS = family;
+    try {
+        localStorage.setItem(SERVER_OS_KEY, family);
+    } catch {
+        /* ignore */
+    }
+}
 export const DEFAULT_SETTINGS: Settings = {
     downloadPath: "",
     downloader: "auto",
@@ -103,7 +138,7 @@ export const DEFAULT_SETTINGS: Settings = {
     sfxEnabled: true,
     embedLyrics: false,
     embedMaxQualityCover: false,
-    operatingSystem: detectOS(),
+    operatingSystem: serverOSFamily(),
     tidalQuality: "LOSSLESS",
     qobuzQuality: "6",
     amazonQuality: "original",
@@ -146,16 +181,6 @@ export function applyFont(fontFamily: FontFamily): void {
     if (font) {
         document.documentElement.style.setProperty('--font-sans', font.fontFamily);
         document.body.style.fontFamily = font.fontFamily;
-    }
-}
-async function fetchDefaultPath(): Promise<string> {
-    try {
-        const data = await GetDefaults();
-        return data.downloadPath || "";
-    }
-    catch (error) {
-        console.error("Failed to fetch default path:", error);
-        return "";
     }
 }
 const SETTINGS_KEY = "spotiflac-settings";
@@ -204,7 +229,7 @@ function getSettingsFromLocalStorage(): Settings {
                     parsed.filenameTemplate = "{title}";
                 }
             }
-            parsed.operatingSystem = detectOS();
+            parsed.operatingSystem = serverOSFamily();
             if (!('tidalQuality' in parsed)) {
                 parsed.tidalQuality = "LOSSLESS";
             }
@@ -282,7 +307,7 @@ export async function loadSettings(): Promise<Settings> {
                     parsed.filenameTemplate = "{title}";
                 }
             }
-            parsed.operatingSystem = detectOS();
+            parsed.operatingSystem = serverOSFamily();
             if (!('tidalQuality' in parsed)) {
                 parsed.tidalQuality = "LOSSLESS";
             }
@@ -364,9 +389,20 @@ export function parseTemplate(template: string, data: TemplateData): string {
 }
 export async function getSettingsWithDefaults(): Promise<Settings> {
     const settings = await loadSettings();
-    if (!settings.downloadPath) {
-        settings.downloadPath = await fetchDefaultPath();
-        await saveSettings(settings);
+    try {
+        const defaults = await GetDefaults();
+        // Learn the server's OS (cached for synchronous use everywhere the
+        // path separator / filename rules are needed) and align this
+        // settings object's operatingSystem to it.
+        rememberServerOS(defaults.os);
+        settings.operatingSystem = serverOSFamily();
+        if (!settings.downloadPath && defaults.downloadPath) {
+            settings.downloadPath = defaults.downloadPath;
+            await saveSettings(settings);
+        }
+    }
+    catch (error) {
+        console.error("Failed to fetch defaults:", error);
     }
     return settings;
 }
@@ -388,8 +424,22 @@ export async function updateSettings(partial: Partial<Settings>): Promise<Settin
     return updated;
 }
 export async function resetToDefaultSettings(): Promise<Settings> {
-    const defaultPath = await fetchDefaultPath();
-    const defaultSettings = { ...DEFAULT_SETTINGS, downloadPath: defaultPath };
+    let defaultPath = "";
+    try {
+        const defaults = await GetDefaults();
+        rememberServerOS(defaults.os);
+        defaultPath = defaults.downloadPath || "";
+    }
+    catch (error) {
+        console.error("Failed to fetch defaults:", error);
+    }
+    // DEFAULT_SETTINGS.operatingSystem was frozen at module load (possibly
+    // before the server OS was known) — re-derive it here.
+    const defaultSettings: Settings = {
+        ...DEFAULT_SETTINGS,
+        downloadPath: defaultPath,
+        operatingSystem: serverOSFamily(),
+    };
     await saveSettings(defaultSettings);
     return defaultSettings;
 }

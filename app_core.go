@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -436,6 +437,13 @@ func (a *App) OpenFolder(path string) error {
 func (a *App) GetDefaults() map[string]string {
 	return map[string]string{
 		"downloadPath": util.GetDefaultMusicPath(),
+		// The server's OS family (runtime.GOOS: "linux"/"windows"/"darwin").
+		// The frontend builds a download's output_dir for THIS server's
+		// filesystem, so it must use the server's path separator + filename
+		// rules, not the browser's — a Windows browser talking to a Linux
+		// server would otherwise build backslash paths. See the frontend's
+		// serverOSFamily() in lib/settings.ts.
+		"os": runtime.GOOS,
 	}
 }
 
