@@ -73,3 +73,57 @@ func TestV1AuthAcceptsStreamTokenOnJobDownload(t *testing.T) {
 		}
 	})
 }
+
+// TestGenerateStreamTokenPreservesTokenVersion is the regression test for a
+// bug found in production: GenerateStreamToken built its derived JWTClaims
+// from scratch and never copied TokenVersion from the originating session,
+// so every stream token was minted with TokenVersion=0 regardless of the
+// account's real value. v1Auth's live revocation check
+// (profile.TokenVersion != claims.TokenVersion) then rejected every such
+// token as "session revoked" the moment an account's TokenVersion was ever
+// bumped above 0 (any Jellyfin admin-flag change) - SSE connections and
+// job-download links looped on 401 forever, even for a fully valid,
+// un-revoked session.
+func TestGenerateStreamTokenPreservesTokenVersion(t *testing.T) {
+	am := newTestAuthManager(t)
+	s := &Server{ctr: &Container{Auth: am}}
+
+	if _, err := am.GetOrCreateUser("u1", "Alice", true); err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	// Bump TokenVersion above zero, matching any account that has ever had
+	// a Jellyfin admin-flag change.
+	if _, err := am.GetOrCreateUser("u1", "Alice", false); err != nil {
+		t.Fatalf("GetOrCreateUser (demote): %v", err)
+	}
+	profile, err := am.GetUser("u1")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if profile.TokenVersion == 0 {
+		t.Fatalf("test setup: TokenVersion should be > 0 after a privilege change")
+	}
+
+	sessionToken, err := GenerateJWT(profile)
+	if err != nil {
+		t.Fatalf("GenerateJWT: %v", err)
+	}
+	sessionClaims, err := ValidateJWT(sessionToken)
+	if err != nil {
+		t.Fatalf("ValidateJWT: %v", err)
+	}
+
+	streamToken, err := GenerateStreamToken(sessionClaims)
+	if err != nil {
+		t.Fatalf("GenerateStreamToken: %v", err)
+	}
+
+	handler := s.v1Auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/stream?token="+streamToken, nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (stream token should not be treated as revoked) — body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}

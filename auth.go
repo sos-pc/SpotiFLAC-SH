@@ -334,11 +334,12 @@ func GenerateJWT(profile *UserProfile) (string, error) {
 // of endpoints in streamScopedPaths/isJobDownloadPath. See streamTokenTTL.
 func GenerateStreamToken(claims *JWTClaims) (string, error) {
 	return signClaims(JWTClaims{
-		UserID:      claims.UserID,
-		DisplayName: claims.DisplayName,
-		IsAdmin:     claims.IsAdmin,
-		ExpiresAt:   time.Now().Add(streamTokenTTL).Unix(),
-		Scope:       "stream",
+		UserID:       claims.UserID,
+		DisplayName:  claims.DisplayName,
+		IsAdmin:      claims.IsAdmin,
+		ExpiresAt:    time.Now().Add(streamTokenTTL).Unix(),
+		TokenVersion: claims.TokenVersion,
+		Scope:        "stream",
 	})
 }
 
