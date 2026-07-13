@@ -101,6 +101,7 @@ func main() {
 		Watcher: watcher,
 		System:  &SystemService{},
 		Media:   &MediaService{},
+		History: NewHistoryService(jobs),
 	}
 
 	// ── App + HTTP server ─────────────────────────────────────────────────

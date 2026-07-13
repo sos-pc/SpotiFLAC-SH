@@ -126,7 +126,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		user := GetUserFromContext(r)
-		a.ClearCompletedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
+		s.ctr.History.ClearCompletedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
@@ -135,7 +135,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		user := GetUserFromContext(r)
-		a.ClearAllDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
+		s.ctr.History.ClearAllDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
@@ -175,7 +175,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		userID := userIDFromContext(r)
-		result, err := a.GetDownloadHistory(userID)
+		result, err := s.ctr.History.GetDownloadHistory(userID)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -188,7 +188,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		userID := userIDFromContext(r)
-		if err := a.ClearDownloadHistory(userID); err != nil {
+		if err := s.ctr.History.ClearDownloadHistory(userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -201,7 +201,7 @@ func (s *Server) registerJobRoutes() {
 		}
 		id := r.PathValue("id")
 		userID := userIDFromContext(r)
-		if err := a.DeleteDownloadHistoryItem(id, userID); err != nil {
+		if err := s.ctr.History.DeleteDownloadHistoryItem(id, userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -213,7 +213,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		userID := userIDFromContext(r)
-		result, err := a.GetFetchHistory(userID)
+		result, err := s.ctr.History.GetFetchHistory(userID)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -230,7 +230,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		item.UserID = userIDFromContext(r)
-		if err := a.AddFetchHistory(item); err != nil {
+		if err := s.ctr.History.AddFetchHistory(item); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -243,12 +243,12 @@ func (s *Server) registerJobRoutes() {
 		}
 		userID := userIDFromContext(r)
 		if itemType := r.URL.Query().Get("type"); itemType != "" {
-			if err := a.ClearFetchHistoryByType(itemType, userID); err != nil {
+			if err := s.ctr.History.ClearFetchHistoryByType(itemType, userID); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		} else {
-			if err := a.ClearFetchHistory(userID); err != nil {
+			if err := s.ctr.History.ClearFetchHistory(userID); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -262,7 +262,7 @@ func (s *Server) registerJobRoutes() {
 		}
 		id := r.PathValue("id")
 		userID := userIDFromContext(r)
-		if err := a.DeleteFetchHistoryItem(id, userID); err != nil {
+		if err := s.ctr.History.DeleteFetchHistoryItem(id, userID); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -274,7 +274,7 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		user := GetUserFromContext(r)
-		message, err := a.ExportFailedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
+		message, err := s.ctr.History.ExportFailedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return

@@ -18,6 +18,7 @@ type Container struct {
 	// Domain services carved out of the former App god-object (R3). Each holds
 	// only the dependencies it actually needs; stateless ones (System) have
 	// none.
-	System *SystemService
-	Media  *MediaService
+	System  *SystemService
+	Media   *MediaService
+	History *HistoryService
 }
