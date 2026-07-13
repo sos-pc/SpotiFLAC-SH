@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,7 +66,7 @@ func StartTidalDeviceAuth() (*DeviceAuthResponse, error) {
 	}
 
 	// Logger le body brut pour diagnostiquer le format exact retourné par Tidal
-	fmt.Printf("[Tidal] device_authorization raw response: %s\n", string(body))
+	slog.Debug("[Tidal] device_authorization raw response", "body", string(body))
 
 	// Parser en map générique pour gérer camelCase ET snake_case
 	var raw map[string]interface{}
@@ -122,8 +123,7 @@ func StartTidalDeviceAuth() (*DeviceAuthResponse, error) {
 	result.VerificationURI = ensureHTTPS(result.VerificationURI)
 	result.VerificationURIComplete = ensureHTTPS(result.VerificationURIComplete)
 
-	fmt.Printf("[Tidal] Device auth started — user_code=%q verification_uri_complete=%q device_code=%q\n",
-		result.UserCode, result.VerificationURIComplete, result.DeviceCode)
+	slog.Debug("[Tidal] Device auth started", "user_code", result.UserCode, "verification_uri_complete", result.VerificationURIComplete)
 
 	return result, nil
 }
@@ -162,7 +162,7 @@ func PollTidalDeviceAuth(deviceCode string) DevicePollResult {
 
 		countryCode := FetchTidalCountryCode(tokenResp.AccessToken)
 		if countryCode != "" {
-			fmt.Printf("[Tidal] Country code: %s\n", countryCode)
+			slog.Debug("[Tidal] Country code", "country_code", countryCode)
 		}
 		tokenData := &TidalTokenData{
 			AccessToken:  tokenResp.AccessToken,

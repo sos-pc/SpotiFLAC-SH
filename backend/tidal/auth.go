@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -167,9 +168,9 @@ func RefreshTidalToken(tokenData *TidalTokenData) (*TidalTokenData, error) {
 	tokenData.ExpiresAt = time.Now().Unix() + int64(respData.ExpiresIn)
 
 	if err := SaveTidalToken(tokenData); err != nil {
-		fmt.Printf("[Tidal Auth] Failed to persist refreshed token: %v\n", err)
+		slog.Warn("[Tidal Auth] Failed to persist refreshed token", "err", err)
 	}
-	fmt.Println("[Tidal Auth] Token refreshed successfully.")
+	slog.Info("[Tidal Auth] Token refreshed successfully")
 	return tokenData, nil
 }
 
@@ -194,7 +195,7 @@ func GetValidTidalToken() (*TidalTokenData, error) {
 	if time.Now().Unix() > (token.ExpiresAt - 300) {
 		refreshedToken, err := RefreshTidalToken(token)
 		if err != nil {
-			fmt.Printf("[Tidal Auth] Refresh failed (%v), token is invalid.\n", err)
+			slog.Warn("[Tidal Auth] Refresh failed, token is invalid", "err", err)
 			DeleteTidalToken() // On supprime le token corrompu/révoqué
 			return nil, fmt.Errorf("tidal token expired and refresh failed")
 		}
@@ -206,9 +207,9 @@ func GetValidTidalToken() (*TidalTokenData, error) {
 		if cc := FetchTidalCountryCode(token.AccessToken); cc != "" {
 			token.CountryCode = cc
 			if err := SaveTidalToken(token); err != nil {
-				fmt.Printf("[Tidal Auth] Failed to persist country code: %v\n", err)
+				slog.Warn("[Tidal Auth] Failed to persist country code", "err", err)
 			}
-			fmt.Printf("[Tidal Auth] Country code fetched: %s\n", cc)
+			slog.Debug("[Tidal Auth] Country code fetched", "country_code", cc)
 		}
 	}
 
