@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -274,50 +275,50 @@ func (c *LyricsClient) FetchLyricsAllSources(spotifyID, trackName, artistName, a
 	resp, _ = c.FetchLyricsWithMetadata(trackName, artistName, albumName, duration)
 	resp, src, found = check(resp, nil, "LRCLIB")
 	if found {
-		fmt.Printf("   [LRCLIB] Synced found via exact match (with album)\n")
+		slog.Debug("[LRCLIB] Synced found via exact match (with album)")
 		return resp, src, nil
 	}
-	fmt.Printf("   LRCLIB exact (with album): no synced\n")
+	slog.Debug("[LRCLIB] Exact match (with album): no synced lyrics")
 
 	if albumName != "" {
 		resp, _ = c.FetchLyricsWithMetadata(trackName, artistName, "", duration)
 		resp, src, found = check(resp, nil, "LRCLIB (no album)")
 		if found {
-			fmt.Printf("   [LRCLIB] Synced found via exact match (no album)\n")
+			slog.Debug("[LRCLIB] Synced found via exact match (no album)")
 			return resp, src, nil
 		}
-		fmt.Printf("   LRCLIB exact (no album): no synced\n")
+		slog.Debug("[LRCLIB] Exact match (no album): no synced lyrics")
 	}
 
 	resp, _ = c.FetchLyricsFromLRCLibSearch(trackName, artistName)
 	resp, src, found = check(resp, nil, "LRCLIB Search")
 	if found {
-		fmt.Printf("   [LRCLIB] Synced found via search\n")
+		slog.Debug("[LRCLIB] Synced found via search")
 		return resp, src, nil
 	}
-	fmt.Printf("   LRCLIB search: no synced\n")
+	slog.Debug("[LRCLIB] Search: no synced lyrics")
 
 	simplifiedTrack := simplifyTrackName(trackName)
 	if simplifiedTrack != trackName {
-		fmt.Printf("   Trying simplified name: %s\n", simplifiedTrack)
+		slog.Debug("[LRCLIB] Trying simplified name", "name", simplifiedTrack)
 
 		resp, _ = c.FetchLyricsWithMetadata(simplifiedTrack, artistName, albumName, duration)
 		resp, src, found = check(resp, nil, "LRCLIB (simplified)")
 		if found {
-			fmt.Printf("   [LRCLIB] Synced found via simplified exact\n")
+			slog.Debug("[LRCLIB] Synced found via simplified exact")
 			return resp, src, nil
 		}
 
 		resp, _ = c.FetchLyricsFromLRCLibSearch(simplifiedTrack, artistName)
 		resp, src, found = check(resp, nil, "LRCLIB Search (simplified)")
 		if found {
-			fmt.Printf("   [LRCLIB] Synced found via simplified search\n")
+			slog.Debug("[LRCLIB] Synced found via simplified search")
 			return resp, src, nil
 		}
 	}
 
 	if unsyncedFallback != nil {
-		fmt.Printf("   [LRCLIB] No synced found, using unsynced from: %s\n", unsyncedSource)
+		slog.Debug("[LRCLIB] No synced found, using unsynced", "source", unsyncedSource)
 		return unsyncedFallback, unsyncedSource + " (unsynced)", nil
 	}
 
@@ -501,7 +502,7 @@ func (c *LyricsClient) DownloadLyrics(req LyricsDownloadRequest) (*LyricsDownloa
 		duration, err := GetAudioDuration(audioFile)
 		if err == nil && duration > 0 {
 			audioDuration = int(duration)
-			fmt.Printf("[DownloadLyrics] Found audio file, duration: %d seconds\n", audioDuration)
+			slog.Debug("[DownloadLyrics] Found audio file", "duration_seconds", audioDuration)
 		}
 	}
 

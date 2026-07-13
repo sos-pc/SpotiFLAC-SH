@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,7 +117,7 @@ func BuildSpotifyIDIndex(rootDir string) (map[string]string, error) {
 	index := make(map[string]string)
 	err := filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			fmt.Printf("[SpotifyIndex] skip %s: %v\n", path, walkErr)
+			slog.Warn("[SpotifyIndex] Skipping path", "path", path, "err", walkErr)
 			return nil
 		}
 		if d.IsDir() {

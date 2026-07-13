@@ -3,6 +3,7 @@ package meta
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	pathfilepath "path/filepath"
@@ -134,7 +135,7 @@ func embedMetadataFlac(filepath string, metadata Metadata, coverPath string) err
 
 	if coverPath != "" && util.FileExists(coverPath) {
 		if err := embedCoverArt(f, coverPath); err != nil {
-			fmt.Printf("Warning: Failed to embed cover art: %v\n", err)
+			slog.Warn("[Meta] Failed to embed cover art", "err", err)
 		}
 	}
 
@@ -331,22 +332,22 @@ func extractLyricsFromMp3(filePath string) (string, error) {
 
 	usltFrames := tag.GetFrames(tag.CommonID("Unsynchronised lyrics/text transcription"))
 	if len(usltFrames) == 0 {
-		fmt.Printf("[ExtractLyrics] No USLT frames found in MP3: %s\n", filePath)
+		slog.Debug("[ExtractLyrics] No USLT frames found in MP3", "file", filePath)
 		return "", nil
 	}
 
 	uslt, ok := usltFrames[0].(id3v2.UnsynchronisedLyricsFrame)
 	if !ok {
-		fmt.Printf("[ExtractLyrics] USLT frame type assertion failed in MP3: %s\n", filePath)
+		slog.Debug("[ExtractLyrics] USLT frame type assertion failed in MP3", "file", filePath)
 		return "", nil
 	}
 
 	if uslt.Lyrics == "" {
-		fmt.Printf("[ExtractLyrics] USLT frame has empty lyrics in MP3: %s\n", filePath)
+		slog.Debug("[ExtractLyrics] USLT frame has empty lyrics in MP3", "file", filePath)
 		return "", nil
 	}
 
-	fmt.Printf("[ExtractLyrics] Successfully extracted lyrics from MP3: %s (%d characters)\n", filePath, len(uslt.Lyrics))
+	slog.Debug("[ExtractLyrics] Successfully extracted lyrics from MP3", "file", filePath, "chars", len(uslt.Lyrics))
 	return uslt.Lyrics, nil
 }
 
@@ -369,7 +370,7 @@ func extractLyricsFromFlac(filePath string) (string, error) {
 					fieldName := strings.ToUpper(parts[0])
 					if fieldName == "LYRICS" || fieldName == "UNSYNCEDLYRICS" {
 						lyrics := parts[1]
-						fmt.Printf("[ExtractLyrics] Successfully extracted lyrics from FLAC: %s (%d characters)\n", filePath, len(lyrics))
+						slog.Debug("[ExtractLyrics] Successfully extracted lyrics from FLAC", "file", filePath, "chars", len(lyrics))
 						return lyrics, nil
 					}
 				}
@@ -377,7 +378,7 @@ func extractLyricsFromFlac(filePath string) (string, error) {
 		}
 	}
 
-	fmt.Printf("[ExtractLyrics] No lyrics found in FLAC: %s\n", filePath)
+	slog.Debug("[ExtractLyrics] No lyrics found in FLAC", "file", filePath)
 	return "", nil
 }
 
@@ -436,7 +437,7 @@ func EmbedLyricsOnlyMP3(filepath string, lyrics string) error {
 
 	validatedLyrics, err := validateLyricsDuration(lyrics, filepath)
 	if err != nil {
-		fmt.Printf("[EmbedLyricsOnlyMP3] Warning: Failed to validate lyrics duration: %v, using original lyrics\n", err)
+		slog.Warn("[EmbedLyricsOnlyMP3] Failed to validate lyrics duration, using original lyrics", "err", err)
 		validatedLyrics = lyrics
 	}
 	lyrics = validatedLyrics
@@ -468,7 +469,7 @@ func embedLyricsToM4A(filepath string, lyrics string) error {
 
 	validatedLyrics, err := validateLyricsDuration(lyrics, filepath)
 	if err != nil {
-		fmt.Printf("[embedLyricsToM4A] Warning: Failed to validate lyrics duration: %v, using original lyrics\n", err)
+		slog.Warn("[embedLyricsToM4A] Failed to validate lyrics duration, using original lyrics", "err", err)
 		validatedLyrics = lyrics
 	}
 	lyrics = validatedLyrics
@@ -505,7 +506,7 @@ func embedLyricsToM4A(filepath string, lyrics string) error {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("[FFmpeg] Error embedding lyrics to M4A: %s\n", string(output))
+		slog.Warn("[FFmpeg] Error embedding lyrics to M4A", "output", string(output))
 		return fmt.Errorf("ffmpeg failed to embed lyrics: %s - %w", string(output), err)
 	}
 
@@ -513,7 +514,7 @@ func embedLyricsToM4A(filepath string, lyrics string) error {
 		return fmt.Errorf("failed to replace original file: %w", err)
 	}
 
-	fmt.Printf("[FFmpeg] Lyrics embedded to M4A successfully: %d characters\n", len(lyrics))
+	slog.Debug("[FFmpeg] Lyrics embedded to M4A successfully", "chars", len(lyrics))
 	return nil
 }
 
@@ -530,7 +531,7 @@ func EmbedLyricsOnlyUniversal(filepath string, lyrics string) error {
 
 	validatedLyrics, err := validateLyricsDuration(lyrics, filepath)
 	if err != nil {
-		fmt.Printf("[EmbedLyricsOnlyUniversal] Warning: Failed to validate lyrics duration: %v, using original lyrics\n", err)
+		slog.Warn("[EmbedLyricsOnlyUniversal] Failed to validate lyrics duration, using original lyrics", "err", err)
 		validatedLyrics = lyrics
 	}
 	lyrics = validatedLyrics
@@ -641,13 +642,13 @@ func validateLyricsDuration(lyrics string, filepath string) (string, error) {
 	duration, err := GetAudioDuration(filepath)
 	if err != nil {
 
-		fmt.Printf("[ValidateLyrics] Warning: Could not get audio duration: %v, skipping validation\n", err)
+		slog.Warn("[ValidateLyrics] Could not get audio duration, skipping validation", "err", err)
 		return lyrics, nil
 	}
 
 	if duration <= 0 {
 
-		fmt.Printf("[ValidateLyrics] Warning: Invalid duration (%f seconds), skipping validation\n", duration)
+		slog.Warn("[ValidateLyrics] Invalid duration, skipping validation", "duration_seconds", duration)
 		return lyrics, nil
 	}
 
@@ -674,7 +675,7 @@ func validateLyricsDuration(lyrics string, filepath string) (string, error) {
 					if ms <= durationMs {
 						validLines = append(validLines, line)
 					} else {
-						fmt.Printf("[ValidateLyrics] Filtered out line with timestamp %s (exceeds duration %d ms): %s\n", timestampStr, durationMs, trimmedLine)
+						slog.Debug("[ValidateLyrics] Filtered out line exceeding duration", "timestamp", timestampStr, "duration_ms", durationMs, "line", trimmedLine)
 					}
 				} else {
 
@@ -879,7 +880,7 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 			}
 			tag.AddAttachedPicture(pic)
 		} else {
-			fmt.Printf("[EmbedMetadataToMP3] Warning: Failed to read cover art file: %v\n", err)
+			slog.Warn("[EmbedMetadataToMP3] Failed to read cover art file", "err", err)
 		}
 	}
 
