@@ -318,6 +318,33 @@ export interface ServerLogEntry {
 }
 export const GetServerLogs = () => rest<ServerLogEntry[]>("GET", "/admin/logs");
 
+// ─── Admin — library maintenance ───────────────────────────────────────────────
+
+export interface LibraryRebuildResult {
+  scan_roots: string[];
+  files_scanned: number;
+  imported: number;
+  verified: number;
+  moved: number;
+  duplicate: number;
+  no_tag: number;
+  failed: number;
+  no_tag_sample?: string[];
+  timed_out?: boolean;
+}
+export const LibraryRebuild = () =>
+  rest<LibraryRebuildResult>("POST", "/admin/library-rebuild");
+
+export interface RetagIncompleteMetadataResult {
+  scanned: number;
+  filled: number;
+  skipped: number;
+  failed: number;
+  failed_ids?: string[];
+}
+export const RetagIncompleteMetadata = () =>
+  rest<RetagIncompleteMetadataResult>("POST", "/admin/retag-incomplete-metadata");
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export interface APIKeyMeta {

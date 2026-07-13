@@ -31,6 +31,7 @@ import {
   RefreshCw,
   ExternalLink,
   Zap,
+  Wrench,
 } from "lucide-react";
 import {
   Dialog,
@@ -75,12 +76,16 @@ import {
   UpdateAPIProxies,
   StartTidalDeviceAuth,
   PollTidalDeviceAuth,
+  LibraryRebuild,
+  RetagIncompleteMetadata,
   type APIKeyMeta,
   type CreatedAPIKey,
   type TidalStatus,
   type TidalDeviceAuth,
   type ServiceStatus,
   type ProxyConfig,
+  type LibraryRebuildResult,
+  type RetagIncompleteMetadataResult,
 } from "@/lib/rpc";
 const TidalIcon = ({ className }: { className?: string }) => (
   <svg
@@ -128,6 +133,25 @@ const DeezerIcon = ({ className }: { className?: string }) => (
     />
   </svg>
 );
+const StatRow = ({
+  label,
+  value,
+  warn,
+}: {
+  label: string;
+  value: number;
+  warn?: boolean;
+}) => (
+  <div className="flex items-center justify-between gap-2">
+    <span className="text-muted-foreground">{label}</span>
+    <span
+      className={`font-mono font-medium ${warn ? "text-destructive" : ""}`}
+    >
+      {value}
+    </span>
+  </div>
+);
+
 interface SettingsPageProps {
   onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
   onResetRequest?: (resetFn: () => void) => void;
@@ -234,7 +258,7 @@ export function SettingsPage({
     setTempSettings((prev) => ({ ...prev, autoQuality: value }));
   };
   const [activeTab, setActiveTab] = useState<
-    "general" | "files" | "keys" | "tidal" | "apis"
+    "general" | "files" | "keys" | "tidal" | "apis" | "maintenance"
   >("general");
 
   // ── API Keys state ───────────────────────────────────────────────────────
@@ -409,6 +433,56 @@ export function SettingsPage({
       });
     } finally {
       setApisLoading(false);
+    }
+  }, []);
+
+  // ── Library maintenance state ────────────────────────────────────────────
+  // Both actions below run synchronously on the backend (no 202+SSE like
+  // watchlist repair) and can take several minutes on a large library —
+  // the button disables and shows a spinner for the whole duration rather
+  // than returning immediately.
+  const [rebuildLoading, setRebuildLoading] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState<LibraryRebuildResult | null>(null);
+  const [retagLoading, setRetagLoading] = useState(false);
+  const [retagResult, setRetagResult] = useState<RetagIncompleteMetadataResult | null>(null);
+
+  const runLibraryRebuild = useCallback(async () => {
+    setRebuildLoading(true);
+    try {
+      const result = await LibraryRebuild();
+      setRebuildResult(result);
+      if (result.timed_out) {
+        toast.warning("Library rebuild timed out", {
+          description: "Re-run to continue — already-scanned files are skipped fast.",
+        });
+      } else {
+        toast.success("Library rebuild complete", {
+          description: `${result.files_scanned} files scanned, ${result.imported} imported, ${result.failed} failed.`,
+        });
+      }
+    } catch (err) {
+      toast.error("Library rebuild failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setRebuildLoading(false);
+    }
+  }, []);
+
+  const runRetagIncompleteMetadata = useCallback(async () => {
+    setRetagLoading(true);
+    try {
+      const result = await RetagIncompleteMetadata();
+      setRetagResult(result);
+      toast.success("Retag complete", {
+        description: `${result.scanned} tracks scanned, ${result.filled} filled, ${result.failed} failed.`,
+      });
+    } catch (err) {
+      toast.error("Retag failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setRetagLoading(false);
     }
   }, []);
 
@@ -601,6 +675,17 @@ export function SettingsPage({
           <Link className="h-4 w-4" />
           APIs
         </Button>
+        {isAdmin && (
+          <Button
+            variant={activeTab === "maintenance" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("maintenance")}
+            className="rounded-b-none gap-2"
+          >
+            <Wrench className="h-4 w-4" />
+            Maintenance
+          </Button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto pt-4">
@@ -1941,6 +2026,130 @@ export function SettingsPage({
                 </Button>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "maintenance" && (
+          <div className="space-y-8 max-w-2xl">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold mb-1">
+                    Discover / Rebuild Library
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Scans your configured music folder(s) and re-syncs the
+                    catalog from each file's embedded Spotify tag. Use this
+                    after moving/adding files outside of SpotiFLAC. Can take
+                    several minutes on a large library — leave this page open
+                    until it finishes.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={runLibraryRebuild}
+                  disabled={rebuildLoading}
+                  className="gap-1.5 shrink-0"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 ${rebuildLoading ? "animate-spin" : ""}`}
+                  />
+                  {rebuildLoading ? "Scanning..." : "Run"}
+                </Button>
+              </div>
+
+              {rebuildResult && (
+                <div className="border rounded-lg p-3 bg-muted/10 space-y-2">
+                  {rebuildResult.timed_out && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                      Timed out before finishing — re-run to continue.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-1.5 text-sm">
+                    <StatRow label="Files scanned" value={rebuildResult.files_scanned} />
+                    <StatRow label="Imported" value={rebuildResult.imported} />
+                    <StatRow label="Verified" value={rebuildResult.verified} />
+                    <StatRow label="Moved" value={rebuildResult.moved} />
+                    <StatRow label="Duplicate" value={rebuildResult.duplicate} />
+                    <StatRow label="No tag" value={rebuildResult.no_tag} />
+                    <StatRow
+                      label="Failed"
+                      value={rebuildResult.failed}
+                      warn={rebuildResult.failed > 0}
+                    />
+                  </div>
+                  {rebuildResult.no_tag_sample && rebuildResult.no_tag_sample.length > 0 && (
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer">
+                        {rebuildResult.no_tag_sample.length} file(s) without a Spotify tag (sample)
+                      </summary>
+                      <ul className="mt-1 space-y-0.5 font-mono">
+                        {rebuildResult.no_tag_sample.map((p) => (
+                          <li key={p} className="truncate">{p}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3 border-t pt-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold mb-1">
+                    Retag Incomplete Metadata
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Re-fetches metadata (ISRC, genre, release date, etc.) for
+                    catalog tracks missing at least one field, and fills in
+                    only what's missing — existing tags and catalog values are
+                    never overwritten. One external lookup per track, throttled
+                    — can take a while on a library with many incomplete tracks.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={runRetagIncompleteMetadata}
+                  disabled={retagLoading}
+                  className="gap-1.5 shrink-0"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 ${retagLoading ? "animate-spin" : ""}`}
+                  />
+                  {retagLoading ? "Retagging..." : "Run"}
+                </Button>
+              </div>
+
+              {retagResult && (
+                <div className="border rounded-lg p-3 bg-muted/10 space-y-2">
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-1.5 text-sm">
+                    <StatRow label="Scanned" value={retagResult.scanned} />
+                    <StatRow label="Filled" value={retagResult.filled} />
+                    <StatRow label="Skipped" value={retagResult.skipped} />
+                    <StatRow
+                      label="Failed"
+                      value={retagResult.failed}
+                      warn={retagResult.failed > 0}
+                    />
+                  </div>
+                  {retagResult.failed_ids && retagResult.failed_ids.length > 0 && (
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer">
+                        {retagResult.failed_ids.length} track(s) that failed
+                      </summary>
+                      <ul className="mt-1 space-y-0.5 font-mono">
+                        {retagResult.failed_ids.map((id) => (
+                          <li key={id} className="truncate">{id}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
