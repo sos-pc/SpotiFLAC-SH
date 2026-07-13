@@ -302,67 +302,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// NOTE : intentionnellement absent du daemon — seulement sur refresh manuel (SyncWatchlist)
 
 	// ── Sync deletions ──
-	deletedCount := 0
-	if pl.SyncDeletions && len(currentTrackIDs) > 0 {
-		currentSet := make(map[string]bool)
-		for _, id := range currentTrackIDs {
-			currentSet[id] = true
-		}
-		jm := w.jm
-		allPlaylists, _ := w.GetWatchlists()
-		otherWatchlistIDs := make(map[string]bool)
-		for _, other := range allPlaylists {
-			if other.ID == pl.ID {
-				continue
-			}
-			for _, id := range other.TrackIDs {
-				otherWatchlistIDs[id] = true
-			}
-		}
-
-		remainingIDs := make([]string, 0, len(pl.TrackIDs))
-		for _, knownID := range pl.TrackIDs {
-			if currentSet[knownID] {
-				remainingIDs = append(remainingIDs, knownID)
-				continue
-			}
-			// Track left THIS watchlist's Spotify playlist — it always
-			// drops out of OUR TrackIDs (note: no append to remainingIDs
-			// below, in either branch). Whether to physically delete the
-			// underlying file is a separate question, gated by whether
-			// another watchlist still wants it. The old code kept the ID
-			// in remainingIDs when another watchlist still had it — which
-			// meant it never actually left this watchlist's list, and if
-			// the other watchlist later dropped it too, THAT watchlist's
-			// own "is it in another playlist" check would see this stale
-			// retention and also keep it — a permanent mutual deadlock
-			// where a once-shared track could never be purged from either
-			// watchlist again.
-			inOtherPlaylist := otherWatchlistIDs[knownID]
-			if inOtherPlaylist {
-				slog.Debug("[Watcher] Track removed from playlist but present in another watchlist, skipping file deletion", "spotify_id", knownID, "playlist", pl.Name)
-			} else if jm != nil {
-				jobs, _ := jm.GetAllJobs()
-				for _, job := range jobs {
-					if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
-						if err := os.Remove(job.FilePath); err == nil {
-							slog.Info("[Watcher] Deleted file", "path", job.FilePath)
-							outputRoot := pl.EffectiveDownloadPath()
-							removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
-							// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
-							job.FilePath = ""
-							job.UpdatedAt = time.Now()
-							_ = jm.saveJob(&job)
-							deletedCount++
-						} else if !os.IsNotExist(err) {
-							slog.Warn("[Watcher] Failed to delete file", "path", job.FilePath, "err", err)
-						}
-					}
-				}
-			}
-		}
-		pl.TrackIDs = remainingIDs
-	}
+	deletedCount := w.syncDeletions(&pl, currentTrackIDs)
 
 	// ── SyncLog ──
 	syncLog := SyncLog{
@@ -385,29 +325,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// saveWatchlist refait détecter le rename au prochain sync (retry
 	// naturel) ; un crash après ce bloc mais avant saveWatchlist ne fait
 	// qu'un os.Remove redondant et sans danger sur un fichier déjà absent.
-	if oldName != "" {
-		appInst := &App{}
-		var renameSettings map[string]interface{}
-		if pl.UserID != "" && w.auth != nil {
-			if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
-				renameSettings = profile.Settings
-			}
-		}
-		if renameSettings == nil {
-			renameSettings, _ = appInst.LoadSettings()
-		}
-		if renameSettings != nil {
-			if createM3u8, _ := renameSettings["createM3u8File"].(bool); createM3u8 {
-				outputDir := pl.EffectiveDownloadPath()
-				oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
-				if err := os.Remove(oldM3u8Path); err == nil {
-					slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
-				} else if !os.IsNotExist(err) {
-					slog.Warn("[Watcher] Playlist renamed, failed to delete old M3U8", "old_name", oldName, "new_name", pl.Name, "err", err)
-				}
-			}
-		}
-	}
+	w.deleteStaleM3U8OnRename(&pl, oldName)
 
 	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
 	w.mu.Lock()
@@ -443,6 +361,113 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			"name":         pl.Name,
 		},
 	})
+}
+
+// syncDeletions handles tracks that have left this watchlist's Spotify
+// playlist since the last sync. Such a track always drops out of pl.TrackIDs
+// (pl is mutated in place); its downloaded file is deleted too, unless another
+// watchlist still references the same Spotify ID. Returns the number of files
+// deleted. No-op returning 0 when deletion-sync is disabled or the freshly
+// fetched playlist came back empty. Extracted from syncPlaylist (R4).
+func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) int {
+	if !pl.SyncDeletions || len(currentTrackIDs) == 0 {
+		return 0
+	}
+
+	currentSet := make(map[string]bool)
+	for _, id := range currentTrackIDs {
+		currentSet[id] = true
+	}
+	jm := w.jm
+	allPlaylists, _ := w.GetWatchlists()
+	otherWatchlistIDs := make(map[string]bool)
+	for _, other := range allPlaylists {
+		if other.ID == pl.ID {
+			continue
+		}
+		for _, id := range other.TrackIDs {
+			otherWatchlistIDs[id] = true
+		}
+	}
+
+	deletedCount := 0
+	remainingIDs := make([]string, 0, len(pl.TrackIDs))
+	for _, knownID := range pl.TrackIDs {
+		if currentSet[knownID] {
+			remainingIDs = append(remainingIDs, knownID)
+			continue
+		}
+		// Track left THIS watchlist's Spotify playlist — it always
+		// drops out of OUR TrackIDs (note: no append to remainingIDs
+		// below, in either branch). Whether to physically delete the
+		// underlying file is a separate question, gated by whether
+		// another watchlist still wants it. The old code kept the ID
+		// in remainingIDs when another watchlist still had it — which
+		// meant it never actually left this watchlist's list, and if
+		// the other watchlist later dropped it too, THAT watchlist's
+		// own "is it in another playlist" check would see this stale
+		// retention and also keep it — a permanent mutual deadlock
+		// where a once-shared track could never be purged from either
+		// watchlist again.
+		inOtherPlaylist := otherWatchlistIDs[knownID]
+		if inOtherPlaylist {
+			slog.Debug("[Watcher] Track removed from playlist but present in another watchlist, skipping file deletion", "spotify_id", knownID, "playlist", pl.Name)
+		} else if jm != nil {
+			jobs, _ := jm.GetAllJobs()
+			for _, job := range jobs {
+				if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
+					if err := os.Remove(job.FilePath); err == nil {
+						slog.Info("[Watcher] Deleted file", "path", job.FilePath)
+						outputRoot := pl.EffectiveDownloadPath()
+						removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
+						// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
+						job.FilePath = ""
+						job.UpdatedAt = time.Now()
+						_ = jm.saveJob(&job)
+						deletedCount++
+					} else if !os.IsNotExist(err) {
+						slog.Warn("[Watcher] Failed to delete file", "path", job.FilePath, "err", err)
+					}
+				}
+			}
+		}
+	}
+	pl.TrackIDs = remainingIDs
+	return deletedCount
+}
+
+// deleteStaleM3U8OnRename removes the old M3U8 file after a playlist was
+// renamed on Spotify (oldName is the previous name, "" when there was no
+// rename). Must run before saveWatchlist persists the new name — see the call
+// site in syncPlaylist for the crash-ordering rationale. Extracted from
+// syncPlaylist (R4).
+func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
+	if oldName == "" {
+		return
+	}
+	appInst := &App{}
+	var renameSettings map[string]interface{}
+	if pl.UserID != "" && w.auth != nil {
+		if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
+			renameSettings = profile.Settings
+		}
+	}
+	if renameSettings == nil {
+		renameSettings, _ = appInst.LoadSettings()
+	}
+	if renameSettings == nil {
+		return
+	}
+	if createM3u8, _ := renameSettings["createM3u8File"].(bool); !createM3u8 {
+		return
+	}
+	outputDir := pl.EffectiveDownloadPath()
+	oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
+	if err := os.Remove(oldM3u8Path); err == nil {
+		slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
+	} else if !os.IsNotExist(err) {
+		slog.Warn("[Watcher] Playlist renamed, failed to delete old M3U8", "old_name", oldName, "new_name", pl.Name, "err", err)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -121,6 +121,12 @@ devient actif.
 
 ### R4 — `watcher.go` : méthode longue + fichier fourre-tout
 
+**✅ Partiellement fait (13/07).** `syncPlaylist` décomposé : les blocs cohésifs *sync-deletions* et
+*stale-M3U8-on-rename* extraits en méthodes dédiées (`syncDeletions`, `deleteStaleM3U8OnRename`) →
+`syncPlaylist` passe de **245 à 159 lignes**, comportement préservé (build+vet+`-race` verts). Le
+**découpage du fichier** en unités cohésives (`watcher_sync.go`/`watcher_crud.go`/… ) reste à faire —
+optionnel, faible valeur (pure relocalisation), et plus fastidieux sans `goimports` ; laissé de côté.
+
 **Constat vérifié.** 1783 lignes, 40 fonctions. `syncPlaylist` (196-448) fait **252 lignes** et
 enchaîne plusieurs phases distinctes dans une seule fonction (verrou initial → fetch metadata →
 diff des pistes → enqueue → génération M3U8 → verrou final). Les frontières sont visibles via les
@@ -454,6 +460,11 @@ introuvable en amont.
 (~40 min de run) pour ~17 remplissages utiles, et l'ensemble « needs retag » **ne décroît jamais**.
 C'est du travail répété sans convergence — et si un jour un indicateur UI « X pistes incomplètes »
 est ajouté, il restera bloqué haut en permanence.
+
+**⏸️ Différé (décision du 13/07)** : à traiter plus tard, après une **analyse de
+l'upstream** — l'objectif est d'abord de trouver le **bon service de tag pour le genre**
+(MusicBrainz est trop lacunaire) plutôt que de bricoler la clause de sélection. Deux approches
+avaient été étudiées (voir ci-dessous), non retenues pour l'instant.
 
 **Pistes (à décider, non tranché) :**
 - **Retirer `genre` (et éventuellement `copyright`) de la clause de sélection** — le genre est déjà
