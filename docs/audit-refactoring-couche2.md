@@ -28,7 +28,7 @@
 | **R8** | `app_core.go` — `SaveSettings`/`LoadSettings` `map[string]interface{}` | Réglages stringly-typed côté Go | Faible | Moyen (risque de drift) | 5 (optionnel) |
 | **R9** | `frontend/…/useDownload.ts` (849 l.) | Gros hook (déjà partiellement découpé) | Faible | Faible | 5 |
 | **R10** | retag `incomplete-metadata` (terrain) | Non-convergent : sur-sélection sur `genre` (99 % skip) | Moyen | Faible | **voir §6** |
-| **R11** | Dépendances (ffmpeg/Go/front) | ffmpeg & front déjà à jour ; `modernc.org/sqlite` en retard ; pas de cadence (Dependabot) | Faible-moyen | Faible | **voir §7** |
+| **R11** | Dépendances (ffmpeg/Go/front) | ffmpeg & front déjà à jour ; Dependabot **actif** (11 PR ouvertes non triées, dont sqlite/bbolt/x/text) | Faible-moyen | Faible | **voir §7** |
 | **R12** | Résolution/proxy tierce (terrain) | Songlink (401 + 429) & proxies Tidal en échec en prod = I1/I2 en direct ; M3U8 `/all` OK à 2546/2547 | Externe | — | **voir §6** |
 
 **Déjà propre — à ne PAS toucher** (pour équilibrer : tout n'est pas à refaire) :
@@ -541,24 +541,36 @@ Transitives notables très en retard : `golang.org/x/net` (0.38→0.57), `golang
 mais ce sont les libs où atterrissent les correctifs HTTP/2 et crypto ; un `go get -u ./... && go mod
 tidy` les remonterait au passage.
 
-### Le vrai finding : **rien ne met à jour ces pins.**
-L'épinglage est excellent pour la reproductibilité (images Docker par digest SHA, ffmpeg par tag daté
-+ vérif checksum, lockfiles gelés) — mais aucun mécanisme ne les bumpe, donc ils **dérivent en
-silence**. C'est exactement **I5 du premier audit (Dependabot absent), toujours non fait**. L'action à
-valeur n'est pas une mise à jour ponctuelle mais une **cadence** :
-- Activer **Dependabot** (Go modules + npm/bun) ou **Renovate** → PR de bump régulières, validées
-  automatiquement par la CI déjà en place (tests, vet, govulncheck, Trivy).
-- Renovate sait aussi proposer des bumps de digest/tag pour ffmpeg et les images de base épinglées ;
-  à défaut, un rappel manuel trimestriel.
+### Le vrai finding : **la cadence existe déjà — ce sont ses PR qui traînent.**
+> ⚠️ **Correction.** Une première version de ce finding affirmait « I5 (Dependabot) toujours non
+> fait ». **C'est faux, vérifié après coup** : `.github/dependabot.yml` existe et couvre `gomod` +
+> `npm` + `docker` + `github-actions` (hebdomadaire). I5 **est fait**. L'erreur venait d'une reprise
+> de mémoire du premier audit au lieu d'une vérification — corrigé ici.
 
-### Recommandation concrète (lot « deps » à faible risque, si souhaité)
-Un seul commit :
-```
-go get -u modernc.org/sqlite go.etcd.io/bbolt golang.org/x/text && go mod tidy
-go test -race ./...    # la couverture catalogue/jobs existante sert de garde-fou
-```
-**sans toucher ffmpeg ni le front** (rien à y gagner). La cadence Dependabot est un durcissement CI
-séparé, à traiter avec les autres items infra restants.
+L'épinglage est excellent pour la reproductibilité (images Docker par digest SHA, ffmpeg par tag daté
++ vérif checksum, lockfiles gelés), **et** Dependabot les bumpe bien : **11 PR ouvertes** au moment
+de l'audit, dont exactement les 3 bumps Go identifiés ci-dessus. Le vrai finding n'est donc pas
+« rien ne met à jour » mais « **les PR de bump s'accumulent sans être triées** » :
+
+| PR | Bump | Risque / action |
+|----|------|-----------------|
+| #14 | `modernc.org/sqlite` 1.40→1.53 | Faible — **mergeable** dès CI verte (couverture catalogue/jobs = garde-fou) |
+| #13 | `go.etcd.io/bbolt` 1.4.3→1.5.0 | Faible — mergeable dès CI verte |
+| #16 | `golang.org/x/text` 0.31→0.40 | Faible — mergeable dès CI verte |
+| #11 #12 #15 #10 | actions gh-release 2→3, trivy 0.35→0.36, github-script 7→9, checkout 4→7 | Très faible (CI uniquement) |
+| #18 | **TypeScript 5.9→7.0** (majeur) | À **tester** — saut de major, peut casser le typecheck |
+| #19 | **Vite 7→8** (majeur) | À tester — saut de major du bundler |
+| #17 #20 | `@types/node` 25→26, `@vitejs/plugin-react` 5→6 (majeurs) | À tester avec #18/#19 |
+
+### Recommandation concrète (triage, pas « activer Dependabot »)
+1. **Backend, à faible risque** : merger #13, #14, #16 après CI verte (idéalement groupés, un cycle CI
+   complet chacun) — c'est le lot « deps » à valeur, `modernc.org/sqlite` en tête.
+2. **CI/actions** : #10/#11/#12/#15, risque quasi nul.
+3. **Frontend majeurs** (#17/#18/#19/#20) : à traiter ensemble, avec `bun run build` + `bun run lint`
+   + vérif navigateur, car TypeScript 7 et Vite 8 sont des sauts de major.
+4. **ffmpeg** reste **hors cadence auto** : l'ARG `FFMPEG_BUILD_TAG` est un `curl` dans un `RUN`, pas
+   un `FROM`, donc l'écosystème `docker` de Dependabot ne le voit pas. Comme établi plus haut, ce
+   n'est pas gênant (rien à y gagner) — un bump manuel occasionnel du tag daté suffit.
 
 ---
 
