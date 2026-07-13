@@ -1,7 +1,7 @@
 package providerutil
 
 import (
-	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
@@ -51,12 +51,12 @@ func FetchGenreMetadataAsync(isrc, spotifyURL, trackTitle, artistName, albumTitl
 		}
 		res := MBResult{ISRC: resolvedISRC}
 		if resolvedISRC != "" {
-			fmt.Println("Fetching MusicBrainz metadata...")
+			slog.Debug("[Genre] Fetching MusicBrainz metadata")
 			if fetchedMeta, err := meta.FetchMusicBrainzMetadata(resolvedISRC, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
 				res.Metadata = fetchedMeta
-				fmt.Println("✓ MusicBrainz metadata fetched")
+				slog.Debug("[Genre] MusicBrainz metadata fetched")
 			} else {
-				fmt.Printf("Warning: Failed to fetch MusicBrainz metadata: %v\n", err)
+				slog.Warn("[Genre] Failed to fetch MusicBrainz metadata", "err", err)
 			}
 		}
 		ch <- res

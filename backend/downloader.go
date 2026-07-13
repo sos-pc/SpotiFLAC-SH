@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,7 +195,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		// path already sends).
 		util.SafeGoOrElse("downloader.resolveISRC", func() {
 			if req.ISRC != "" {
-				fmt.Printf("[ISRC] Using pre-fetched ISRC: %s\n", req.ISRC)
+				slog.Debug("[ISRC] Using pre-fetched ISRC", "isrc", req.ISRC)
 				isrcChan <- req.ISRC
 				return
 			}
@@ -204,7 +205,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			if req.TrackName != "" && req.ArtistName != "" {
 				if fallback, ferr := songlink.GetDeezerSearchFallback(req.TrackName, req.ArtistName); ferr == nil && fallback != nil && fallback.ISRC != "" {
 					finalIsrc = fallback.ISRC
-					fmt.Printf("[ISRC] Found via Deezer API: %s\n", finalIsrc)
+					slog.Debug("[ISRC] Found via Deezer API", "isrc", finalIsrc)
 				}
 			}
 
@@ -216,19 +217,19 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 					urls, err := sl.GetAllURLsFromSpotify(req.SpotifyID, "")
 					if err == nil && urls != nil && urls.ISRC != "" {
 						finalIsrc = urls.ISRC
-						fmt.Printf("[ISRC] Found via Songlink JSON: %s\n", finalIsrc)
+						slog.Debug("[ISRC] Found via Songlink JSON", "isrc", finalIsrc)
 					} else {
 						// Fallback ultime : Scraping HTML (si l'appel global ne l'a pas déjà fait)
 						if htmlURLs, hErr := sl.ScrapeSongLinkHTML(req.SpotifyID); hErr == nil && htmlURLs != nil && htmlURLs.ISRC != "" {
 							finalIsrc = htmlURLs.ISRC
-							fmt.Printf("[ISRC] Found via Songlink HTML: %s\n", finalIsrc)
+							slog.Debug("[ISRC] Found via Songlink HTML", "isrc", finalIsrc)
 						}
 					}
 				}
 			}
 
 			if finalIsrc == "" {
-				fmt.Printf("[ISRC] All lookup methods failed for %s\n", req.TrackName)
+				slog.Debug("[ISRC] All lookup methods failed", "track", req.TrackName)
 			}
 
 			isrcChan <- finalIsrc
@@ -385,7 +386,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			dl := tidal.NewTidalDownloader("")
 			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
 				req.ServiceURL = tidalURL
-				fmt.Printf("[DownloadTrack] Found Tidal URL via fallback search: %s\n", tidalURL)
+				slog.Debug("[DownloadTrack] Found Tidal URL via fallback search", "url", tidalURL)
 			}
 		}
 
@@ -410,7 +411,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 
 	case "qobuz":
-		fmt.Println("Waiting for ISRC (Qobuz dependency)...")
+		slog.Debug("[Downloader] Waiting for ISRC (Qobuz dependency)")
 		isrc := <-isrcChan
 		downloader := qobuz.NewQobuzDownloader()
 		downloader.SpeedCallback = req.SpeedCallback
@@ -433,7 +434,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			dl := tidal.NewTidalDownloader("")
 			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
 				req.ServiceURL = tidalURL
-				fmt.Printf("[DownloadTrack/Auto] Found Tidal URL via fallback search: %s\n", tidalURL)
+				slog.Debug("[DownloadTrack/Auto] Found Tidal URL via fallback search", "url", tidalURL)
 			}
 		}
 
@@ -473,7 +474,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				break
 			}
 			lastErr = err
-			fmt.Printf("[Auto] %s failed for %s, trying next...\n", svc, req.TrackName)
+			slog.Debug("[Auto] Service failed, trying next", "service", svc, "track", req.TrackName)
 		}
 		if err != nil {
 			err = lastErr
@@ -489,9 +490,9 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	if err != nil {
 		if filename != "" && !strings.HasPrefix(filename, "EXISTS:") {
 			if _, statErr := os.Stat(filename); statErr == nil {
-				fmt.Printf("Removing corrupted/partial file after failed download: %s\n", filename)
+				slog.Warn("[Downloader] Removing corrupted/partial file after failed download", "file", filename)
 				if removeErr := os.Remove(filename); removeErr != nil {
-					fmt.Printf("Warning: Failed to remove corrupted file %s: %v\n", filename, removeErr)
+					slog.Warn("[Downloader] Failed to remove corrupted file", "file", filename, "err", removeErr)
 				}
 			}
 		}
@@ -509,20 +510,17 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	if !alreadyExists && req.SpotifyID != "" && req.EmbedLyrics && (strings.HasSuffix(filename, ".flac") || strings.HasSuffix(filename, ".mp3") || strings.HasSuffix(filename, ".m4a")) {
-		fmt.Printf("\nWaiting for lyrics fetch to complete...\n")
+		slog.Debug("[Downloader] Waiting for lyrics fetch to complete")
 		lyrics := <-lyricsChan
 		if lyrics != "" {
-			fmt.Printf("\n--- Full LRC Content ---\n")
-			fmt.Println(lyrics)
-			fmt.Printf("--- End LRC Content ---\n\n")
-			fmt.Printf("Embedding into: %s\n", filename)
+			slog.Debug("[Downloader] Embedding lyrics", "file", filename, "content", lyrics)
 			if err := meta.EmbedLyricsOnlyUniversal(filename, lyrics); err != nil {
-				fmt.Printf("Failed to embed lyrics: %v\n", err)
+				slog.Warn("[Downloader] Failed to embed lyrics", "err", err)
 			} else {
-				fmt.Printf("Lyrics embedded successfully!\n")
+				slog.Debug("[Downloader] Lyrics embedded successfully")
 			}
 		} else {
-			fmt.Println("No lyrics found to embed.")
+			slog.Debug("[Downloader] No lyrics found to embed")
 		}
 	} else {
 		select {
@@ -536,7 +534,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		message = "File already exists"
 	} else {
 		if _, statErr := os.Stat(filename); statErr != nil {
-			fmt.Printf("Warning: Could not stat completed file %s: %v\n", filename, statErr)
+			slog.Warn("[Downloader] Could not stat completed file", "file", filename, "err", statErr)
 		}
 
 		// FIX #4 — capture req.UserID pour le taguer dans l'item d'historique
@@ -557,7 +555,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				d := int(meta.Duration)
 				durationStr = fmt.Sprintf("%d:%02d", d/60, d%60)
 			} else {
-				fmt.Printf("[History] Failed to get metadata for %s: %v\n", fPath, err)
+				slog.Warn("[History] Failed to get metadata for file", "file", fPath, "err", err)
 			}
 
 			item := HistoryItem{
@@ -585,7 +583,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			}
 
 			if err := AddHistoryItem(item); err != nil {
-				fmt.Printf("[History] Failed to record history for %s: %v\n", fPath, err)
+				slog.Warn("[History] Failed to record history for file", "file", fPath, "err", err)
 			}
 		})
 	}
