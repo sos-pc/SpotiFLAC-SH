@@ -18,7 +18,6 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) registerFileRoutes() {
-	a := s.app
 
 	// ── Search ────────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/search", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +31,7 @@ func (s *Server) registerFileRoutes() {
 		}
 		batchStr := r.URL.Query().Get("batch")
 		batch := batchStr == "true" || batchStr == "1"
-		result, err := a.GetSpotifyMetadata(SpotifyMetadataRequest{URL: url, Batch: batch})
+		result, err := s.ctr.Metadata.GetSpotifyMetadata(SpotifyMetadataRequest{URL: url, Batch: batch})
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -109,7 +108,7 @@ func (s *Server) registerFileRoutes() {
 			}
 		}
 		if searchType != "" {
-			result, err := a.SearchSpotifyByType(SpotifySearchByTypeRequest{
+			result, err := s.ctr.Metadata.SearchSpotifyByType(SpotifySearchByTypeRequest{
 				Query:      q,
 				SearchType: searchType,
 				Limit:      limit,
@@ -121,7 +120,7 @@ func (s *Server) registerFileRoutes() {
 			}
 			writeV1JSON(w, http.StatusOK, result)
 		} else {
-			result, err := a.SearchSpotify(SpotifySearchRequest{Query: q, Limit: limit})
+			result, err := s.ctr.Metadata.SearchSpotify(SpotifySearchRequest{Query: q, Limit: limit})
 			if err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return
@@ -136,7 +135,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		url, err := a.GetPreviewURL(id)
+		url, err := s.ctr.Metadata.GetPreviewURL(id)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -149,7 +148,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		result, err := a.CheckTrackAvailability(id)
+		result, err := s.ctr.Metadata.CheckTrackAvailability(id)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -163,7 +162,7 @@ func (s *Server) registerFileRoutes() {
 		}
 		id := r.PathValue("id")
 		region := r.URL.Query().Get("region")
-		result, err := a.GetStreamingURLs(id, region)
+		result, err := s.ctr.Metadata.GetStreamingURLs(id, region)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -232,7 +231,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		result, err := a.ListDirectoryFiles(path)
+		result, err := s.ctr.Files.ListDirectoryFiles(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -249,7 +248,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		result, err := a.ListAudioFilesInDir(path)
+		result, err := s.ctr.Files.ListAudioFilesInDir(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -269,7 +268,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		result, err := a.ReadFileMetadata(path)
+		result, err := s.ctr.Files.ReadFileMetadata(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -294,7 +293,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, "old_path: "+err.Error())
 			return
 		}
-		if err := a.RenameFileTo(params.OldPath, params.NewName); err != nil {
+		if err := s.ctr.Files.RenameFileTo(params.OldPath, params.NewName); err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -316,7 +315,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.GetFileSizes(cleaned))
+		writeV1JSON(w, http.StatusOK, s.ctr.Files.GetFileSizes(cleaned))
 	}))
 
 	// Admin-only: returns raw image as base64.
@@ -329,7 +328,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		data, err := a.ReadImageAsBase64(path)
+		data, err := s.ctr.Files.ReadImageAsBase64(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -353,7 +352,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		content, err := a.ReadTextFile(path)
+		content, err := s.ctr.Files.ReadTextFile(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -378,7 +377,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.RenameFilesByMetadata(cleaned, params.Format))
+		writeV1JSON(w, http.StatusOK, s.ctr.Files.RenameFilesByMetadata(cleaned, params.Format))
 	}))
 
 	// Admin-only: File Manager is the only caller.
@@ -398,7 +397,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, a.PreviewRenameFiles(cleaned, params.Format))
+		writeV1JSON(w, http.StatusOK, s.ctr.Files.PreviewRenameFiles(cleaned, params.Format))
 	}))
 
 	// Uploads client-supplied bytes (not a server-side path) to the
@@ -412,7 +411,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		url, err := a.UploadImageBytes(params.Filename, params.Base64Data)
+		url, err := s.ctr.Files.UploadImageBytes(params.Filename, params.Base64Data)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -441,7 +440,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		url, err := a.UploadImage(path)
+		url, err := s.ctr.Files.UploadImage(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -512,7 +511,7 @@ func (s *Server) registerFileRoutes() {
 				return
 			}
 		}
-		writeV1JSON(w, http.StatusOK, a.CheckFilesExistence(outputDir, rootDir, params.Tracks))
+		writeV1JSON(w, http.StatusOK, s.ctr.Files.CheckFilesExistence(outputDir, rootDir, params.Tracks))
 	}))
 
 	// ── Audio ─────────────────────────────────────────────────────────────
@@ -531,7 +530,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		result, err := a.AnalyzeTrack(path)
+		result, err := s.ctr.Audio.AnalyzeTrack(path)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -554,7 +553,7 @@ func (s *Server) registerFileRoutes() {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		result, err := a.AnalyzeMultipleTracks(cleaned)
+		result, err := s.ctr.Audio.AnalyzeMultipleTracks(cleaned)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -576,7 +575,7 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		req.InputFiles = cleaned
-		result, err := a.ConvertAudio(req)
+		result, err := s.ctr.Audio.ConvertAudio(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -719,13 +718,13 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		installed, err := a.IsFFmpegInstalled()
+		installed, err := s.ctr.Audio.IsFFmpegInstalled()
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		ffprobeInstalled, _ := a.IsFFprobeInstalled()
-		ffmpegPath, _ := a.GetFFmpegPath()
+		ffprobeInstalled, _ := s.ctr.Audio.IsFFprobeInstalled()
+		ffmpegPath, _ := s.ctr.Audio.GetFFmpegPath()
 		writeV1JSON(w, http.StatusOK, map[string]interface{}{
 			"installed":         installed,
 			"ffprobe_installed": ffprobeInstalled,

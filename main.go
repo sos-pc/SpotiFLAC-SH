@@ -93,19 +93,24 @@ func main() {
 	jobs.SetEventHandler(watcher)
 
 	// ── Container (DI) ───────────────────────────────────────────────────
+	system := &SystemService{}
 	ctr := &Container{
-		DB:      db,
-		Catalog: catalog,
-		Jobs:    jobs,
-		Auth:    auth,
-		Watcher: watcher,
-		System:  &SystemService{},
-		Media:   &MediaService{},
-		History: NewHistoryService(jobs),
+		DB:       db,
+		Catalog:  catalog,
+		Jobs:     jobs,
+		Auth:     auth,
+		Watcher:  watcher,
+		System:   system,
+		Media:    &MediaService{},
+		History:  NewHistoryService(jobs),
+		Audio:    &AudioService{},
+		Metadata: NewMetadataService(jobs, system),
+		Download: NewDownloadService(jobs, system),
 	}
-
-	// ── App + HTTP server ─────────────────────────────────────────────────
-	app := NewApp(ctr)
+	// FileService needs the container itself (its rename methods coordinate
+	// across Catalog/Jobs/history via syncCatalogPathOnRename), so it's wired
+	// after the literal above rather than inside it.
+	ctr.Files = NewFileService(ctr)
 
 	LoadProxyConfig(db)
 
@@ -118,7 +123,7 @@ func main() {
 	defer cancelDiscovery()
 	util.SafeGo("proxyDiscovery", func() { startProxyDiscovery(discoveryCtx, db) })
 
-	server := NewServer(app, ctr)
+	server := NewServer(ctr)
 
 	httpServer := &http.Server{
 		Addr:              "0.0.0.0:" + port,

@@ -27,16 +27,14 @@ var frontendFS embed.FS
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Server struct {
-	app     *App
 	ctr     *Container
 	mux     *http.ServeMux
 	loginRL *LoginRateLimiter
 	uploads *uploadRegistry
 }
 
-func NewServer(app *App, ctr *Container) *Server {
+func NewServer(ctr *Container) *Server {
 	s := &Server{
-		app:     app,
 		ctr:     ctr,
 		mux:     http.NewServeMux(),
 		loginRL: NewLoginRateLimiter(),

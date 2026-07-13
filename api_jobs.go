@@ -36,7 +36,6 @@ func audioContentType(filename string) string {
 }
 
 func (s *Server) registerJobRoutes() {
-	a := s.app
 
 	// ── Jobs ──────────────────────────────────────────────────────────────
 	s.mux.Handle("POST /api/v1/jobs", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +147,7 @@ func (s *Server) registerJobRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		a.ApplySettingsFallbacks(&req)
+		s.ctr.Download.ApplySettingsFallbacks(&req)
 		// output_dir otherwise reaches disk unconfined: any authenticated
 		// session user (v1RequirePermission passes every non-API-key caller
 		// through regardless of the "manage" perm — see its doc comment)
@@ -161,7 +160,7 @@ func (s *Server) registerJobRoutes() {
 			}
 			req.OutputDir = cleaned
 		}
-		result, err := a.DownloadTrack(req)
+		result, err := s.ctr.Download.DownloadTrack(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
