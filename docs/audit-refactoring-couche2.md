@@ -29,6 +29,7 @@
 | **R9** | `frontend/…/useDownload.ts` (849 l.) | Gros hook (déjà partiellement découpé) | Faible | Faible | 5 |
 | **R10** | retag `incomplete-metadata` (terrain) | Non-convergent : sur-sélection sur `genre` (99 % skip) | Moyen | Faible | **voir §6** |
 | **R11** | Dépendances (ffmpeg/Go/front) | ffmpeg & front déjà à jour ; `modernc.org/sqlite` en retard ; pas de cadence (Dependabot) | Faible-moyen | Faible | **voir §7** |
+| **R12** | Résolution/proxy tierce (terrain) | Songlink (401 + 429) & proxies Tidal en échec en prod = I1/I2 en direct ; M3U8 `/all` OK à 2546/2547 | Externe | — | **voir §6** |
 
 **Déjà propre — à ne PAS toucher** (pour équilibrer : tout n'est pas à refaire) :
 `frontend/src/lib/rpc.ts` (helper `rest<T>()` partagé + wrappers d'une ligne), `backend/providerutil/*`
@@ -469,6 +470,41 @@ Un simple retry/backoff sur 5xx suffirait, mais l'impact est faible.
 **Bon signe au passage.** Ce run — comme le `library-rebuild` de 2556 fichiers — s'est terminé
 proprement (`done`, pas de `context canceled`), ce qui **confirme une nouvelle fois** que la
 conversion async 202+SSE tient sous charge réelle prolongée.
+
+### R12 — Couche de résolution/proxy tierce dégradée en prod (I1/I2 en direct)
+
+**Observé** pendant le téléchargement du playlist `/all` (2547 pistes), sources vérifiées par `grep`
+de chaque message :
+- `API returned status 401` (nu) → **Songlink** (song.link/odesli, `backend/songlink/client.go:181/290/427`).
+- `Songlink Rate limited, skipping calls for 5 minutes` (429) → coupe-circuit 5 min
+  (`songlink/client.go:46`) qui casse **en cascade** les pistes suivantes nécessitant une résolution
+  ISRC (`songlink rate limited, skipping call`).
+- `failed to get download URL: … 401 and fallbacks failed` → API Tidal officielle 401 **par design**
+  (tokens client-TV privés du scope playback, cf. commentaire `tidal/client.go:209-212`), **et** tous
+  les proxies communautaires (`util.GetTidalProxiesEffective()`) en échec simultané.
+- `no streaming URLs found` / `tidal link not found` → pistes réellement absentes de Tidal (attendu).
+
+**Diagnostic.** Dénominateur commun : la **couche de résolution/proxy tierce non officielle**
+(Songlink + proxies Tidal communautaires), dégradée sur la fenêtre observée. C'est **I1/I2 du premier
+audit** matérialisé en direct. Impact borné : seuls les *nouveaux* téléchargements échouent ; les
+pistes déjà en bibliothèque ne sont pas touchées.
+
+**À surveiller.** Le **401 Songlink** — song.link ne requiert normalement pas d'auth. Si c'est un
+**changement d'API** (auth désormais requise) et non un hoquet transitoire, la résolution
+Spotify→Tidal/Deezer serait cassée **durablement** → à trancher par une investigation quand ce sera
+utile.
+
+**Piste (mineure).** Pacing plus doux des appels Songlink sur les gros batches, pour éviter de
+déclencher le 429/coupe-circuit qui pénalise ensuite tout le reste du batch.
+
+**Validation positive au passage (M3U8).** La génération M3U8 du playlist `/all` a résolu
+**2546/2547** pistes (99,96 %) via catalogue + tag + job — la chaîne rebuild→dédup→M3U8 fonctionne de
+bout en bout sur une bibliothèque réelle. La seule `unresolved=1` est un orphelin (ni catalogue, ni
+tag, ni job), vraisemblablement un des downloads échoués ci-dessus. **Nuance :** le conseil affiché
+par le watcher (« run retag-legacy then library-rebuild ») ne récupère un orphelin **que si son
+fichier existe sur disque** ; pour un download échoué le fichier n'existe pas, donc ni retag ni
+rebuild n'y changent rien — il faut d'abord un téléchargement réussi. Le message de remédiation est
+donc légèrement trompeur dans le cas « download échoué » (petit item UX/wording).
 
 ---
 
