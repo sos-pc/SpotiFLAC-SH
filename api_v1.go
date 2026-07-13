@@ -58,11 +58,23 @@ func decodeV1JSON(w http.ResponseWriter, r *http.Request, dst interface{}) bool 
 
 // cleanAbsPath normalizes a filesystem path and rejects anything that is not
 // absolute after cleaning (prevents ../traversal tricks and relative paths).
+//
+// Backslashes are folded to forward slashes first. Output paths in this app
+// are server-side paths, but in a self-hosted web deployment the browser
+// building a download's output_dir may run a different OS than the server:
+// a Windows browser joins path segments with "\" (see joinPath in the
+// frontend), producing e.g. "/home/nonroot/Music\Artist\Album" for a Linux
+// server. Without this fold, filepath.Clean on Linux keeps "\" as a literal
+// filename character, so the path reads as a sibling of the library root
+// rather than a descendant and the confinement check below wrongly rejects
+// it. This matches util.SanitizeFolderPath, which already converts "\"→"/"
+// unconditionally as the app's path convention; on a Windows server
+// filepath.Clean converts the slashes back, so this is a no-op there.
 func cleanAbsPath(p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	clean := filepath.Clean(p)
+	clean := filepath.Clean(strings.ReplaceAll(p, "\\", "/"))
 	if !filepath.IsAbs(clean) {
 		return "", fmt.Errorf("path must be absolute")
 	}

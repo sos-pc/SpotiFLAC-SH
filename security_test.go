@@ -84,6 +84,11 @@ func TestCleanLibraryPath(t *testing.T) {
 		{"sibling directory", "/music-backup/x", "", true},
 		{"dot-dot escape", "/music/../etc/passwd", "", true},
 		{"dot-dot escape disguised as nested", "/music/Artist/../../etc/passwd", "", true},
+		// A Windows browser joins a download's output_dir with "\" even when
+		// the server is Linux; the confinement must fold those to "/" so the
+		// path is recognized as under the root rather than a sibling.
+		{"backslash-separated subfolder", `/music\Artist\Album`, "/music/Artist/Album", false},
+		{"backslash traversal still rejected", `/music\..\etc\passwd`, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
