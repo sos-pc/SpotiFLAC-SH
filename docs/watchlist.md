@@ -72,7 +72,7 @@ curl -s -X POST http://spotiflac.example.com/api/v1/watchlists \
 
 If `interval_hours <= 0`, the watcher uses `24`. If `spotify_url` is empty, the request is rejected.
 
-The settings block follows the `JobSettings` shape (camelCase). It is **stored as-is on the watchlist** and used for every download triggered by this watchlist (jobs are re-resolved at runtime via `getWatchlistSettings` to honor edits — the daemon won't reuse stale settings if you ever change them via direct DB access).
+The settings block follows the `JobSettings` shape (camelCase). It is **stored as-is on the watchlist** and used for every download triggered by this watchlist — `JobManager.getWatchlistSettings` (a lookup closure wired in `watcher.go`, not a settings copy baked into the job) re-reads the watchlist's current `Settings` when a job actually runs, so the daemon won't reuse stale settings if you ever change them via direct DB access.
 
 ---
 
