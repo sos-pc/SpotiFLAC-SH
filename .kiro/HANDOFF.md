@@ -187,6 +187,14 @@ correctly." Catches formatter-only diffs vs. real logic changes.
 - `docs/audit-refactoring-couche2.md` — the maintainability audit (R1–R12),
   full findings + rationale + what shipped. **Read this first** for any
   question about why the current architecture looks the way it does.
+- `docs/upstream-catchup.md` — manual catch-up audit of spotbye/SpotiFLAC
+  (S1–S14), started 2026-07-14 after ~6 months of untriaged drift. Distinct
+  from `.github/upstream-map.txt` (mechanical file classification) and the
+  `upstream-sync` issue (live diff) — this doc is why each subject matters
+  and what's already been learned reading the actual upstream code. S6
+  (Qobuz) and S10 (metadata) are linked to known open problems (the parked
+  Qobuz 401 issue, and R10's deferred genre-tagging fix) — check it before
+  independently investigating either.
 - `docs/api-reference.md` — REST API reference, including the admin
   maintenance endpoints (`retag-legacy`, `library-rebuild`,
   `retag-incomplete-metadata`) and the catalog-backed M3U8 generation.
