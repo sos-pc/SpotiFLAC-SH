@@ -96,24 +96,41 @@ func isSubPath(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// libraryRoot returns the operator-configured music library root that every
-// file-management and download operation must stay within — the same
-// downloadPath setting, with the same default fallback, that buildOutputDir
-// (jobs_helpers.go) already uses to place downloaded files. Centralized here
-// so every caller that needs to confine a client-supplied path resolves the
-// root the same way, instead of each recomputing its own copy.
-func (s *Server) libraryRoot() string {
-	if settings, err := s.ctr.System.LoadSettings(); err == nil && settings != nil {
-		if root, _ := settings["downloadPath"].(string); root != "" {
-			return filepath.Clean(root)
-		}
+// libraryRootForUser returns the music library root that file-management and
+// download operations must stay within, for userID: their own saved
+// downloadPath override if they have one, else the operator's global
+// config.json — see EffectiveDownloadSettings (R8). userID == "" always
+// resolves to the global default, which is also what buildOutputDir
+// (jobs_helpers.go) falls back to when placing downloaded files.
+func (s *Server) libraryRootForUser(userID string) string {
+	if root := EffectiveDownloadSettings(s.ctr.Auth, userID).DownloadPath; root != "" {
+		return filepath.Clean(root)
 	}
 	return filepath.Clean(util.GetDefaultMusicPath())
 }
 
+// libraryRoot returns the GLOBAL library root (the operator's config.json
+// downloadPath, ignoring any per-user override). Use this only for
+// operations that must see one canonical root across every user — currently
+// just api_admin.go's library-wide maintenance walk (collectScanRoots). Any
+// per-request path confinement check must use libraryRootFor instead, or an
+// authenticated user's own downloadPath override would be silently ignored.
+func (s *Server) libraryRoot() string {
+	return s.libraryRootForUser("")
+}
+
+// libraryRootFor returns the library root that should confine THIS request:
+// the authenticated caller's own downloadPath override if they have one,
+// else the global default. Use this (via cleanLibraryPath) for any
+// client-supplied path — see api_files.go's file-routes doc comment.
+func (s *Server) libraryRootFor(r *http.Request) string {
+	return s.libraryRootForUser(userIDFromContext(r))
+}
+
 // cleanLibraryPath validates that p is an absolute path confined to root —
 // the root itself or one of its descendants — returning the cleaned path.
-// Use this (via s.libraryRoot()) instead of cleanAbsPath for any path that
+// Use this (via s.libraryRootFor(r) for a per-request path, or s.libraryRoot()
+// for a library-wide operation) instead of cleanAbsPath for any path that
 // arrives in a request body/query and is used for file-management or
 // download I/O: cleanAbsPath alone only rejects relative paths, it does not
 // stop a client from naming any absolute path on the host filesystem.

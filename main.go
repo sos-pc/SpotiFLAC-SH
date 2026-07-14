@@ -93,19 +93,18 @@ func main() {
 	jobs.SetEventHandler(watcher)
 
 	// ── Container (DI) ───────────────────────────────────────────────────
-	system := &SystemService{}
 	ctr := &Container{
 		DB:       db,
 		Catalog:  catalog,
 		Jobs:     jobs,
 		Auth:     auth,
 		Watcher:  watcher,
-		System:   system,
+		System:   &SystemService{},
 		Media:    &MediaService{},
 		History:  NewHistoryService(jobs),
 		Audio:    &AudioService{},
-		Metadata: NewMetadataService(jobs, system),
-		Download: NewDownloadService(jobs, system),
+		Metadata: NewMetadataService(jobs, auth),
+		Download: NewDownloadService(jobs, auth),
 	}
 	// FileService needs the container itself (its rename methods coordinate
 	// across Catalog/Jobs/history via syncCatalogPathOnRename), so it's wired

@@ -5,7 +5,8 @@ package main
 // track-availability lookups carved out of the former App god-object (R3).
 //
 // Holds only its real dependencies: the JobManager (for its shared songlink
-// client) and SystemService (to read the saved SpotFetch API URL fallback).
+// client) and AuthManager (for EffectiveDownloadSettings' per-user lookup —
+// see GetSpotifyMetadata / DownloadSettings, R8).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
@@ -23,12 +24,12 @@ import (
 )
 
 type MetadataService struct {
-	jobs   *JobManager
-	system *SystemService
+	jobs *JobManager
+	auth *AuthManager
 }
 
-func NewMetadataService(jobs *JobManager, system *SystemService) *MetadataService {
-	return &MetadataService{jobs: jobs, system: system}
+func NewMetadataService(jobs *JobManager, auth *AuthManager) *MetadataService {
+	return &MetadataService{jobs: jobs, auth: auth}
 }
 
 type SpotifyMetadataRequest struct {
@@ -135,7 +136,12 @@ func normalizeSpotifyURL(rawURL string) string {
 	return parsed.String()
 }
 
-func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
+// GetSpotifyMetadata fetches track/album/playlist/artist metadata natively,
+// falling back to userID's effective SpotFetch API URL (their own saved
+// settings if any, else the operator's global config.json — see
+// EffectiveDownloadSettings) if the native client fails. userID == ""
+// resolves to the global settings.
+func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest, userID string) (string, error) {
 	if req.URL == "" {
 		return "", fmt.Errorf("URL parameter is required")
 	}
@@ -151,13 +157,7 @@ func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest) (string
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), time.Duration(req.Timeout*float64(time.Second)))
 	defer metaCancel()
 
-	var spotFetchAPIURL string
-	settings, err := m.system.LoadSettings()
-	if err == nil && settings != nil {
-		if apiURL, ok := settings["spotFetchAPIUrl"].(string); ok {
-			spotFetchAPIURL = apiURL
-		}
-	}
+	spotFetchAPIURL := EffectiveDownloadSettings(m.auth, userID).SpotFetchAPIURL
 
 	// Client natif Spotify (TOTP) — avec fallback automatique vers SpotFetch si échec
 	data, nativeErr := spotify.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))

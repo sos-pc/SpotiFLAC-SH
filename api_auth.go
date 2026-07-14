@@ -224,12 +224,7 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 		writeV1JSON(w, http.StatusOK, cached)
 		return
 	}
-	spotFetchURL := ""
-	if settings, err := s.ctr.System.LoadSettings(); err == nil && settings != nil {
-		if u, _ := settings["spotFetchAPIUrl"].(string); u != "" {
-			spotFetchURL = u
-		}
-	}
+	spotFetchURL := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r)).SpotFetchAPIURL
 	results := CheckAllServices(jellyfinURL, spotFetchURL)
 	setCachedStatuses(results)
 	writeV1JSON(w, http.StatusOK, results)

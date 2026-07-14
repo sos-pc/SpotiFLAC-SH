@@ -31,7 +31,7 @@ func (s *Server) registerFileRoutes() {
 		}
 		batchStr := r.URL.Query().Get("batch")
 		batch := batchStr == "true" || batchStr == "1"
-		result, err := s.ctr.Metadata.GetSpotifyMetadata(SpotifyMetadataRequest{URL: url, Batch: batch})
+		result, err := s.ctr.Metadata.GetSpotifyMetadata(SpotifyMetadataRequest{URL: url, Batch: batch}, userIDFromContext(r))
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -216,17 +216,18 @@ func (s *Server) registerFileRoutes() {
 
 	// ── Files ─────────────────────────────────────────────────────────────
 	// Every route below that accepts a client-supplied filesystem path uses
-	// cleanLibraryPath(s.libraryRoot(), ...) instead of the bare cleanAbsPath
-	// — cleanAbsPath only rejects relative paths, it does not stop a caller
-	// from naming any absolute path on the host (S3). Confining to the
-	// configured music library root is what api_admin.go's rebuild-scan
-	// already does for watchlist paths (collectScanRoots); this makes every
-	// other file-management/download surface consistent with it.
+	// cleanLibraryPath(s.libraryRootFor(r), ...) instead of the bare
+	// cleanAbsPath — cleanAbsPath only rejects relative paths, it does not
+	// stop a caller from naming any absolute path on the host (S3).
+	// libraryRootFor resolves the authenticated caller's own downloadPath
+	// override if they have one, else the operator's global default (R8) —
+	// unlike the plain global-only libraryRoot() that api_admin.go's
+	// rebuild-scan uses for its library-wide walk (collectScanRoots).
 	s.mux.Handle("GET /api/v1/files", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRootFor(r), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -243,7 +244,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRootFor(r), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -263,7 +264,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequireAdmin(w, r) {
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRootFor(r), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -289,7 +290,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		if _, err := cleanLibraryPath(s.libraryRoot(), params.OldPath); err != nil {
+		if _, err := cleanLibraryPath(s.libraryRootFor(r), params.OldPath); err != nil {
 			writeV1Error(w, http.StatusBadRequest, "old_path: "+err.Error())
 			return
 		}
@@ -310,7 +311,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.FilePaths)
+		cleaned, err := cleanLibraryPaths(s.libraryRootFor(r), params.FilePaths)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -323,7 +324,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequireAdmin(w, r) {
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), r.URL.Query().Get("path"))
+		path, err := cleanLibraryPath(s.libraryRootFor(r), r.URL.Query().Get("path"))
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -347,7 +348,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
+		path, err := cleanLibraryPath(s.libraryRootFor(r), params.FilePath)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -372,7 +373,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.Files)
+		cleaned, err := cleanLibraryPaths(s.libraryRootFor(r), params.Files)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -392,7 +393,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		cleaned, err := cleanLibraryPaths(s.libraryRoot(), params.Files)
+		cleaned, err := cleanLibraryPaths(s.libraryRootFor(r), params.Files)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -435,7 +436,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		path, err := cleanLibraryPath(s.libraryRoot(), params.FilePath)
+		path, err := cleanLibraryPath(s.libraryRootFor(r), params.FilePath)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -462,7 +463,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		root := s.libraryRoot()
+		root := s.libraryRootFor(r)
 		outputDir, err := cleanLibraryPath(root, params.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
@@ -492,7 +493,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		root := s.libraryRoot()
+		root := s.libraryRootFor(r)
 		outputDir, err := cleanLibraryPath(root, params.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
@@ -525,7 +526,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		path, err := s.cleanUploadOrLibraryPath(s.libraryRoot(), params.FilePath)
+		path, err := s.cleanUploadOrLibraryPath(s.libraryRootFor(r), params.FilePath)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -548,7 +549,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRoot(), params.FilePaths)
+		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRootFor(r), params.FilePaths)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -569,7 +570,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRoot(), req.InputFiles)
+		cleaned, err := s.cleanUploadOrLibraryPaths(s.libraryRootFor(r), req.InputFiles)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -596,7 +597,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return
@@ -618,7 +619,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return
@@ -640,7 +641,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return
@@ -662,7 +663,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return
@@ -684,7 +685,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRoot(), req.OutputDir)
+		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
 		if err != nil {
 			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
 			return

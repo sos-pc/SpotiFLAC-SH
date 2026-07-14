@@ -6,7 +6,8 @@ package main
 // god-object (R3).
 //
 // Holds only its real dependencies: the JobManager (queue + persistence) and
-// SystemService (to read the saved global settings used as fallbacks).
+// AuthManager (for EffectiveDownloadSettings' per-user lookup — see
+// ApplySettingsFallbacks / DownloadSettings, R8).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
@@ -24,89 +25,59 @@ type DownloadRequest = backend.DownloadRequest
 type DownloadResponse = backend.DownloadResponse
 
 type DownloadService struct {
-	jobs   *JobManager
-	system *SystemService
+	jobs *JobManager
+	auth *AuthManager
 }
 
-func NewDownloadService(jobs *JobManager, system *SystemService) *DownloadService {
-	return &DownloadService{jobs: jobs, system: system}
+func NewDownloadService(jobs *JobManager, auth *AuthManager) *DownloadService {
+	return &DownloadService{jobs: jobs, auth: auth}
 }
 
-// ApplySettingsFallbacks fills zero-value fields in req with the user's saved
-// global settings. Intended for REST API callers that send minimal payloads;
-// the Wails frontend always provides all fields explicitly.
-func (d *DownloadService) ApplySettingsFallbacks(req *DownloadRequest) {
-	settings, err := d.system.LoadSettings()
-	if err != nil || settings == nil {
-		return
-	}
-	getBool := func(key string) (bool, bool) {
-		if v, ok := settings[key]; ok {
-			if b, ok := v.(bool); ok {
-				return b, true
-			}
-		}
-		return false, false
-	}
-	getString := func(key string) string {
-		if v, ok := settings[key]; ok {
-			if s, ok := v.(string); ok {
-				return s
-			}
-		}
-		return ""
-	}
+// ApplySettingsFallbacks fills zero-value fields in req with userID's
+// effective settings (their own saved settings if any, else the operator's
+// global config.json — see EffectiveDownloadSettings). Intended for REST API
+// callers that send minimal payloads; the Wails frontend always provides all
+// fields explicitly. userID == "" resolves to the global settings.
+func (d *DownloadService) ApplySettingsFallbacks(req *DownloadRequest, userID string) {
+	settings := EffectiveDownloadSettings(d.auth, userID)
+
 	if req.OutputDir == "" {
-		req.OutputDir = getString("downloadPath")
+		req.OutputDir = settings.DownloadPath
 	}
 	if req.FilenameFormat == "" {
-		req.FilenameFormat = getString("filenameTemplate")
+		req.FilenameFormat = settings.FilenameTemplate
 	}
 	if req.AudioFormat == "" {
 		switch req.Service {
 		case "qobuz":
-			req.AudioFormat = getString("qobuzQuality")
+			req.AudioFormat = settings.QobuzQuality
 		default:
-			req.AudioFormat = getString("tidalQuality")
+			req.AudioFormat = settings.TidalQuality
 		}
 	}
 	if req.AutoOrder == "" {
-		req.AutoOrder = getString("autoOrder")
+		req.AutoOrder = settings.AutoOrder
 	}
 	if !req.EmbedLyrics {
-		if v, ok := getBool("embedLyrics"); ok {
-			req.EmbedLyrics = v
-		}
+		req.EmbedLyrics = settings.EmbedLyrics
 	}
 	if !req.EmbedMaxQualityCover {
-		if v, ok := getBool("embedMaxQualityCover"); ok {
-			req.EmbedMaxQualityCover = v
-		}
+		req.EmbedMaxQualityCover = settings.EmbedMaxQualityCover
 	}
 	if !req.AllowFallback {
-		if v, ok := getBool("allowFallback"); ok {
-			req.AllowFallback = v
-		}
+		req.AllowFallback = settings.AllowFallback
 	}
 	if !req.UseFirstArtistOnly {
-		if v, ok := getBool("useFirstArtistOnly"); ok {
-			req.UseFirstArtistOnly = v
-		}
+		req.UseFirstArtistOnly = settings.UseFirstArtistOnly
 	}
 	if !req.UseSingleGenre {
-		if v, ok := getBool("useSingleGenre"); ok {
-			req.UseSingleGenre = v
-		}
+		req.UseSingleGenre = settings.UseSingleGenre
 	}
 	if !req.EmbedGenre {
-		if v, ok := getBool("embedGenre"); ok {
-			req.EmbedGenre = v
-		}
+		req.EmbedGenre = settings.EmbedGenre
 	}
 	if !req.TrackNumber {
-		if v, ok := getBool("trackNumber"); ok {
-			req.TrackNumber = v
-		}
+		req.TrackNumber = settings.TrackNumber
 	}
 }
 

@@ -445,20 +445,7 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 	if oldName == "" {
 		return
 	}
-	sys := &SystemService{}
-	var renameSettings map[string]interface{}
-	if pl.UserID != "" && w.auth != nil {
-		if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
-			renameSettings = profile.Settings
-		}
-	}
-	if renameSettings == nil {
-		renameSettings, _ = sys.LoadSettings()
-	}
-	if renameSettings == nil {
-		return
-	}
-	if createM3u8, _ := renameSettings["createM3u8File"].(bool); !createM3u8 {
+	if !EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
 		return
 	}
 	outputDir := pl.EffectiveDownloadPath()
@@ -585,38 +572,26 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		}
 
 		// ── Suppression du fichier M3U8 (toujours, indépendamment de SyncDeletions) ──
-		sys := &SystemService{}
-		var settings map[string]interface{}
-		if pl.UserID != "" && w.auth != nil {
-			if profile, err2 := w.auth.GetUser(pl.UserID); err2 == nil && profile != nil && len(profile.Settings) > 0 {
-				settings = profile.Settings
-			}
-		}
-		if settings == nil {
-			settings, _ = sys.LoadSettings()
-		}
-		if settings != nil {
-			if createM3u8, _ := settings["createM3u8File"].(bool); createM3u8 {
-				playlistsDir := filepath.Join(outputRoot, "Playlists")
-				// Try both the current (ID-suffixed) and legacy (pre-migration,
-				// no suffix) filenames — a watchlist removed before ever
-				// re-syncing after the naming-collision fix could still only
-				// have the legacy file on disk.
-				for _, m3u8Path := range []string{
-					filepath.Join(playlistsDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8"),
-					filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
-				} {
-					if err := os.Remove(m3u8Path); err == nil {
-						slog.Info("[Watcher] Deleted M3U8 (watchlist removed)", "path", m3u8Path)
-					} else if !os.IsNotExist(err) {
-						slog.Warn("[Watcher] Failed to delete M3U8 (watchlist removed)", "path", m3u8Path, "err", err)
-					}
+		if EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
+			playlistsDir := filepath.Join(outputRoot, "Playlists")
+			// Try both the current (ID-suffixed) and legacy (pre-migration,
+			// no suffix) filenames — a watchlist removed before ever
+			// re-syncing after the naming-collision fix could still only
+			// have the legacy file on disk.
+			for _, m3u8Path := range []string{
+				filepath.Join(playlistsDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8"),
+				filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
+			} {
+				if err := os.Remove(m3u8Path); err == nil {
+					slog.Info("[Watcher] Deleted M3U8 (watchlist removed)", "path", m3u8Path)
+				} else if !os.IsNotExist(err) {
+					slog.Warn("[Watcher] Failed to delete M3U8 (watchlist removed)", "path", m3u8Path, "err", err)
 				}
-				// Nettoyer le dossier Playlists/ s'il est vide
-				if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
-					if err := os.Remove(playlistsDir); err == nil {
-						slog.Info("[Watcher] Deleted empty Playlists dir", "path", playlistsDir)
-					}
+			}
+			// Nettoyer le dossier Playlists/ s'il est vide
+			if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
+				if err := os.Remove(playlistsDir); err == nil {
+					slog.Info("[Watcher] Deleted empty Playlists dir", "path", playlistsDir)
 				}
 			}
 		}
@@ -1669,25 +1644,11 @@ type m3u8Settings struct {
 // loadM3U8Settings returns the user (or global) settings if M3U8 generation is
 // enabled, or nil if it is disabled.
 func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
-	sys := &SystemService{}
-	var settings map[string]interface{}
-	if pl.UserID != "" && w.auth != nil {
-		if profile, err := w.auth.GetUser(pl.UserID); err == nil && profile != nil && len(profile.Settings) > 0 {
-			settings = profile.Settings
-		}
-	}
-	if settings == nil {
-		var err error
-		settings, err = sys.LoadSettings()
-		if err != nil || settings == nil {
-			return nil
-		}
-	}
-	if enabled, _ := settings["createM3u8File"].(bool); !enabled {
+	settings := EffectiveDownloadSettings(w.auth, pl.UserID)
+	if !settings.CreateM3u8File {
 		return nil
 	}
-	jellyfinPath, _ := settings["jellyfinMusicPath"].(string)
-	return &m3u8Settings{JellyfinPath: jellyfinPath}
+	return &m3u8Settings{JellyfinPath: settings.JellyfinMusicPath}
 }
 
 // resolveTrackPaths returns the ordered list of file paths matching pl.TrackIDs.

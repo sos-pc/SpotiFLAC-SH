@@ -43,7 +43,7 @@ func (s *Server) registerWatchlistRoutes() {
 		// every downstream sync would silently inherit an unconfined
 		// download path (S2 — watchlist creation isn't admin-gated).
 		if req.Settings.DownloadPath != "" {
-			cleaned, err := cleanLibraryPath(s.libraryRoot(), req.Settings.DownloadPath)
+			cleaned, err := cleanLibraryPath(s.libraryRootFor(r), req.Settings.DownloadPath)
 			if err != nil {
 				writeV1Error(w, http.StatusBadRequest, "settings.downloadPath: "+err.Error())
 				return
