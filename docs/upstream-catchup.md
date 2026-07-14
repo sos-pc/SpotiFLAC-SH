@@ -25,7 +25,7 @@
 | **S3** | Retry/cooldown réseau (429/503) | community_endpoints.go (`doCommunityRequest`) | Pattern identifié, à adapter | **1** |
 | **S4** | Déchiffrement DRM | mp4ff_decrypt.go | À part — décision utilisateur requise avant tout triage technique | — |
 | **S5** | Client Tidal | tidal.go, tidal_community.go | Pas encore lu en détail | 3 |
-| **S6** | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | Piste sérieuse trouvée (voir §S6) | **2** |
+| **S6** ✅ | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **lu en entier** — hypothèse concrète et vérifiable sur le 401 (`searchByISRC` utilise encore l'ancien app_id non signé), + gap de scoring indépendant (voir §S6) | **2** |
 | **S7** | Client Amazon | amazon.go | Pas encore lu en détail | 3 |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** ✅ | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **lu en entier** — notre vraie chaîne (`jobs_helpers.go`) a déjà 4 étages, plus robuste que prévu ; ISRC-direct reste le meilleur candidat de portage (voir §S9) | 3 (portage) |
@@ -106,11 +106,46 @@ détail. Notre équivalent : `backend/tidal/{client,params,auth,device}.go`.
 
 **Fichiers :** `qobuz.go` (+350/-125), `qobuz_api.go` (+343/-0, nouveau), `qobuz_community.go`.
 
-**`qobuz_api.go` scrape et met en cache les identifiants "open app" de Qobuz** pour signer des
-requêtes directement contre leur API — une voie différente de notre `musicdl.me` (qui retourne 401
-depuis longtemps, problème parké dans les handoffs précédents) et différente aussi du simple proxy
-communautaire. **Piste sérieuse pour résoudre le bug Qobuz 401** — pas encore vérifiée en profondeur,
-mais c'est la trouvaille la plus prometteuse de tout ce rattrapage à ce stade.
+**Triangé le 2026-07-15, diffs lus en entier (`qobuz.go` 701 lignes, `qobuz_api.go` 413 lignes),
+comparés à `backend/qobuz/client.go`.**
+
+**`qobuz_api.go`** scrape le bundle JS du web player officiel (`open.qobuz.com/track/1` → `main.js`)
+pour en extraire `app_id`/`app_secret` par regex, signe chaque requête (MD5 de `path + params triés +
+timestamp + secret`), cache le résultat 24h sur disque, revalide en sondant une recherche connue, et
+se rafraîchit automatiquement sur 400/401. Un `app_id`/`app_secret` par défaut (`712109809` /
+`589be88e...`) sert de repli si le scraping échoue — ce sont les identifiants publics du web player
+Qobuz lui-même (embarqués dans leur propre site, pas un secret privé façon S1).
+
+**Découverte clé en comparant à notre `searchByISRC` actuel** (`backend/qobuz/client.go:182`) :
+**on utilise encore l'ancien `appID = "798273057"`, en requête non signée** — exactement la valeur
+qu'upstream a abandonnée dans ce diff. Le flux complet chez nous est : `searchByISRC` (recherche
+publique non authentifiée, ce vieil app_id) → si ça trouve un `track.ID` → `GetDownloadURL` → 
+`musicdl.me` en premier. **Le bug "Qobuz 401" documenté comme venant de musicdl.me pourrait en fait
+se produire une étape plus tôt, dans `searchByISRC` lui-même** — musicdl.me ne serait jamais atteint
+si la recherche non signée échoue déjà. Pas confirmé par des logs (je n'ai pas accès à la prod), mais
+c'est une hypothèse concrète et vérifiable, pas une supposition en l'air.
+
+**Deuxième trouvaille indépendante du sujet 401 :** `qobuz.go` upstream a aussi un vrai algorithme de
+scoring des résultats de recherche (`scoreQobuzSearchCandidate` — titre/artiste/album normalisés,
+pénalités sur les mots-clés "karaoke/instrumental/cover/..."), et un fallback recherche-par-nom si la
+recherche par ISRC échoue. **Notre `searchByISRC` prend juste `Items[0]` sans scoring et sans
+fallback** — un vrai gap indépendant de la question 401, avec un risque de mauvais matchs silencieux.
+
+**Autre point confirmé :** `DownloadTrack` upstream résout maintenant l'ISRC via
+`linkClient.GetISRCDirect(spotifyID)` (le chemin direct-Spotify de S9) plutôt que via Song.link/Deezer
+— renforce encore la priorité de S9. Ils embarquent aussi l'UPC album (récupéré via la même voie S9)
+dans les tags — **on n'a aucun support UPC actuellement** (zéro occurrence dans `backend/meta/` ou
+`backend/qobuz/`).
+
+**`GetDownloadURL` lui-même n'utilise PAS l'API signée** — il essaie `q.customURL` (instance perso
+configurée), puis leur proxy communautaire chiffré (`qobuz_community.go`, déjà écarté en S1). Donc
+`qobuz_api.go` ne remplacerait que l'étape de recherche/matching chez nous, pas l'obtention de l'URL de
+streaming elle-même — **à garder en tête pour ne pas sur-promettre** : ça peut réparer `searchByISRC`,
+pas forcément tout le pipeline Qobuz.
+
+**Recommandation : candidat de portage sérieux**, mais à valider d'abord en observant si l'échec réel
+en prod est bien dans `searchByISRC` (pas juste dans `musicdl.me`) avant d'investir le temps de porter
+`qobuz_api.go`.
 
 ### S7 — Client Amazon
 
