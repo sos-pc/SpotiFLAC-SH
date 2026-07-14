@@ -211,6 +211,30 @@ Returns `202`. Manual sync runs the same `syncPlaylist` flow as the daemon **plu
 
 ---
 
+## Freshness check
+
+`GET /api/v1/watchlists/{id}/freshness` is a **read-only** "is this playlist up to date" check — it fetches the live Spotify playlist and compares it against local state without enqueuing anything, deleting anything, or mutating the watchlist. Safe to call as often as you like (e.g. before deciding whether to sync).
+
+```bash
+curl -s http://spotiflac.example.com/api/v1/watchlists/{id}/freshness \
+  -H "Authorization: Bearer <token>"
+```
+
+Returns counts of tracks new on Spotify but not tracked locally, tracked locally but removed from Spotify, tracked but missing a resolvable file, and whether the M3U8 on disk has fewer entries than are actually resolvable right now (`m3u8_stale` — the signal to run Repair). Full response shape in [api-reference.md](api-reference.md#get-apiv1watchlistsidfreshness).
+
+## Repair
+
+`POST /api/v1/watchlists/{id}/repair` — the "fix this playlist" button. It's the per-watchlist, UI-reachable equivalent of the admin-only `retag-legacy` + `library-rebuild` maintenance endpoints: it retags this watchlist's own files that are missing their `SPOTIFY_ID` tag, rebuilds the catalog for this watchlist's own download path, then force-regenerates the M3U8 (bypassing the shrink-guard normal sync respects, since an explicit repair should reflect the true current state even if it's smaller than what's on disk right now).
+
+```bash
+curl -s -X POST http://spotiflac.example.com/api/v1/watchlists/{id}/repair \
+  -H "Authorization: Bearer <token>"
+```
+
+Returns `202` — the walk can take a while on a large library, so it runs in the background; completion arrives as a `watchlist_repaired` event on the same SSE stream as sync/download progress. Reach for this when `freshness` reports `m3u8_stale: true`, or after upgrading from a build that didn't embed `SPOTIFY_ID` tags yet.
+
+---
+
 ## Removing a watchlist
 
 `DELETE /api/v1/watchlists/{id}` returns `204`. Behaviour:

@@ -186,6 +186,9 @@ Browser → /api/v1/auth/login  → Jellyfin auth → JWT (24h, HMAC-SHA256)
 Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true and request is LAN-direct)
 Browser → /api/v1/* + JWT     → handlers (per-user filtered)
                               → BoltDB (jobs, watchlists, history, users, settings, api_keys, api_proxies, proxy_discovery)
+                              → SQLite catalog (tracks, albums, library_files, download_attempts,
+                                playlist_snapshots — long-term source of truth for what's on disk;
+                                additive to BoltDB, M3U8 generation reads it first)
                               → JobManager (1 worker, unified queue: manual + watchlist downloads)
                                 → Tidal  (Device Code token → Community HiFi proxies, fallback loop)
                                 → Qobuz  (musicdl.me primary → community proxies, fallback loop)
@@ -209,14 +212,26 @@ Background goroutines (started in main.go):
 .
 ├── main.go              # Entry point, graceful shutdown, background goroutines
 ├── server.go            # HTTP server, mux, middleware (CORS, LAN bypass)
-├── container.go         # DI container (DB, Jobs, Auth, Watcher)
-├── app_core.go          # Core App type: metadata, downloads, files, audio orchestration
+├── container.go         # DI container — DB, Catalog, Jobs, Auth, Watcher, plus the
+│                        #   domain services below
+├── system_service.go    # SystemService: settings (load/save), OS/defaults, M3U8 write
+├── media_service.go     # MediaService: lyrics/cover/header/gallery/avatar downloads
+├── audio_service.go     # AudioService: analyze, convert, ffmpeg checks
+├── history_service.go   # HistoryService: download & fetch history
+├── metadata_service.go  # MetadataService: Spotify metadata/search/links/availability
+├── download_service.go  # DownloadService: DownloadTrack, EnqueueBatch, settings fallbacks
+├── download_settings.go # DownloadSettings (typed view) + EffectiveDownloadSettings
+│                        #   (single per-user/global settings resolver used by every
+│                        #   backend read site — see docs/settings-reference.md)
+├── file_service.go      # FileService: list/rename/upload/existence (holds *Container —
+│                        #   its rename methods coordinate Catalog+Jobs+history)
 ├── auth.go              # Jellyfin auth, JWT (HMAC-SHA256), middleware
 ├── api_v1.go            # REST API v1 route registration + shared helpers (v1Auth, errors)
 ├── api_auth.go          # /auth/* + /apis/proxies handlers
-├── api_admin.go         # /admin/* admin-only maintenance (retag-legacy)
+├── api_admin.go         # /admin/* admin-only maintenance (retag-legacy, library-rebuild,
+│                        #   retag-incomplete-metadata, per-watchlist repair, server logs)
 ├── api_jobs.go          # /jobs/*, /downloads/*, /history/* handlers
-├── api_watchlists.go    # /watchlists/* CRUD + sync handlers
+├── api_watchlists.go    # /watchlists/* CRUD + sync/repair/freshness handlers
 ├── api_files.go         # /search/*, /tracks/*, /settings, /files/*, /audio/*, /media/*, /system/*
 ├── api_keys.go          # API key CRUD with SHA-256 hashing
 ├── api_proxies.go       # Proxy configuration handler helpers
@@ -225,8 +240,13 @@ Background goroutines (started in main.go):
 ├── jobs_worker.go       # Download worker goroutine (single worker)
 ├── jobs_storage.go      # BoltDB persistence for jobs
 ├── jobs_helpers.go      # Job business logic helpers
+├── jobs_catalog.go      # Mirrors terminal job transitions + dedup into the SQLite catalog
 ├── watcher.go           # Watchlist scheduler, sync logic, M3U8 from filesystem
+├── watcher_catalog.go   # Mirrors watchlist state into the SQLite catalog
+├── rename_catalog.go    # Keeps Catalog/Jobs/history in sync when a file is renamed
 ├── sse.go               # Server-Sent Events hub (real-time progress)
+├── applog.go / logbuffer.go # In-memory ring buffer backing the Debug Logs page
+│                        #   (GET /admin/logs snapshot + server_log SSE events)
 ├── ratelimit.go         # Login rate limiter (10/1min, 5min block)
 ├── proxy_discovery.go   # Auto-refresh Tidal proxy list from tidal-uptime.geeked.wtf
 ├── backend/
@@ -267,7 +287,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o spotiflac .
 ```
 
 ```bash
-# Or with Docker (multi-stage: bun → go → debian-slim)
+# Or with Docker (multi-stage: bun → go → static ffmpeg fetch → scratch runtime)
 docker build -t spotiflac:local .
 ```
 
@@ -278,11 +298,12 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 | File | Description |
 |------|-------------|
 | `jobs.db` | BoltDB — download jobs, watchlists, users, settings, history, api keys, proxies, discovery cache |
+| `catalog.db` (+ `-wal`/`-shm`) | SQLite — long-term track/file/playlist-snapshot history (`albums`, `tracks`, `library_files`, `download_attempts`, `playlist_snapshots`). Additive: BoltDB still drives the live queue, so a missing/corrupt catalog degrades gracefully (M3U8 generation falls back to a filesystem tag scan) rather than breaking core downloads. |
 | `jwt_secret` | Auto-generated JWT signing key (mode 0600). Skipped when `JWT_SECRET` env var is set. |
 | `tidal_token.json` | Cached Tidal Device Code token (mode 0644). Created on successful auth, deleted on disconnect or refresh failure. |
 | `config.json` | Global settings fallback (legacy — kept so handlers can fall back to it when a user has no per-user settings yet). |
 
-> **Backup:** a single `cp jobs.db jobs.db.bak` snapshots the entire application state.
+> **Backup:** `catalog.db` holds real state now (not just a cache) — back up both `jobs.db` and `catalog.db` together (stop the container first, or use SQLite's own backup API / `.backup` command for a live copy, since a raw `cp` of a WAL-mode database mid-write can be inconsistent).
 
 ## Differences from original SpotiFLAC
 
@@ -299,6 +320,39 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 | Real-time progress | Polling | Server-Sent Events |
 
 ## Changelog
+
+### Unreleased (on `kiro`, not yet tagged)
+
+A maintainability/refactoring audit (`docs/audit-refactoring-couche2.md`) ran alongside normal feature work; every item it identified is done:
+
+- **fix(admin):** `library-rebuild` and `retag-incomplete-metadata` converted from synchronous to `202 Accepted` + SSE completion events (`library_rebuild_done`, `retag_incomplete_metadata_done`) — a production instance hit exactly the failure mode this fixes: a reverse-proxy gave up on the long-running request mid-scan, cancelling the context and aborting an otherwise-healthy scan partway through.
+- **feat(ui):** Maintenance tab in Settings — trigger library-rebuild/retag-incomplete-metadata/retag-legacy from the UI, live progress via the same SSE events above.
+- **fix(paths):** Download output paths are now built for the *server's* OS, not the browser's — a Windows browser talking to a Linux Docker server no longer builds backslash paths the server can't place files under.
+- **refactor:** `App`, a 48-method Wails-vestige facade every backend capability used to hang off, is gone — replaced by 7 narrow domain services on `Container` (`System/Media/Audio/History/Metadata/Download/File`Service), each holding only the dependencies it actually needs.
+- **refactor:** The five Spotify `Filter*` parsing functions (up to 312 lines each, `map[string]interface{}`-based) now build their typed output contract directly instead of round-tripping through JSON marshal/unmarshal, guarded by characterization tests frozen on real captured Spotify responses.
+- **fix(settings):** An authenticated user's own saved settings (their custom `downloadPath` in particular) were silently ignored by 4 backend call sites — most importantly the confinement root checked on every file/download path — which read the operator's global settings unconditionally instead. Unified behind a single resolver (`DownloadSettings` / `EffectiveDownloadSettings`); see [Settings Reference](docs/settings-reference.md).
+- **refactor(frontend):** `SettingsPage.tsx` (2230 lines, 6 tabs inline) split into one component per tab. `useDownload.ts`'s 359-line provider-fallback engine extracted into its own module.
+- **refactor(backend):** Deduplicated provider-dispatch `switch` statements, `DownloadFile` HTTP boilerplate across tidal/qobuz/amazon/deezer, and a 4×-duplicated settings-resolution block in `watcher.go`.
+
+### v3.7.1 — 2026-07-12
+- **fix(docker):** Set `HOME` explicitly in the `scratch` runtime image — fixed a `FATAL` crash on startup that only manifested in that minimal base (no passwd entry to derive a home directory from).
+
+### v3.7.0 — 2026-07-12
+
+A large batch covering a full security-hardening pass, the SQLite catalog refactor, CI/supply-chain hardening, and a frontend lint debt cleanup — 61 commits. Highlights:
+
+- **fix(security):** Path confinement enforced on every client-supplied filesystem path (file management + downloads), closing an unconfined-`OutputDir`/arbitrary-path class of issue across several endpoints at once.
+- **fix(security):** SSE connections and the browser job-download link now use a short-lived (60s), narrowly-scoped stream token (`GET /api/v1/auth/stream-token`) instead of the 24h session JWT in the URL — see [Authentication](docs/authentication.md).
+- **fix(security):** API key `read`/`manage` (renamed from `download`) permissions are now actually enforced server-side instead of being decorative; a non-admin account can no longer self-issue a key with `admin` permission; a key's admin claim is re-checked live against its owning account's current status instead of what that account could do at creation time.
+- **fix(security):** JWT concurrency hardening — the shared Spotify client is synchronized against concurrent 401/re-auth races, every long-running goroutine recovers from panics instead of taking the whole process down, and `EnqueueBatch`'s duplicate-detection TOCTOU window is closed.
+- **fix(security):** File rename now syncs BoltDB job records and download history paths, not just the catalog — a rename no longer silently orphans references to the old path in other stores.
+- **feat(catalog):** SQLite catalog (`catalog.db`) added alongside BoltDB as the long-term source of truth for what's actually on disk (`tracks`, `albums`, `library_files`, `download_attempts`, `playlist_snapshots`) — additive, BoltDB still drives the live queue. `POST /api/v1/admin/library-rebuild` ingests an existing library by reading embedded `SPOTIFY_ID` tags; M3U8 generation reads the catalog first, falls back to a filesystem tag scan, then legacy BoltDB job records.
+- **feat(watchlist):** Per-playlist Repair action (`POST /api/v1/watchlists/{id}/repair`) and a real freshness check (`GET /api/v1/watchlists/{id}/freshness`) — see [Watchlists](docs/watchlist.md).
+- **feat:** Debug Logs page unifying backend and frontend logs, with cache-busting so a redeploy doesn't leave a stale frontend bundle running against a new backend.
+- **refactor(logging):** Backend logging migrated to structured `log/slog` throughout (was a mix of `fmt.Printf`/`Println`).
+- **chore(ci):** Docker base images pinned by digest, `govulncheck` + `golangci-lint` + Trivy added as blocking CI gates, Dependabot enabled, a real `bun.lock` committed (was silently unpinned).
+- **chore(frontend):** Full ESLint debt cleared — 167 findings across 29 files (`no-explicit-any`, react-hooks rules, unused vars) — then the lint gate made blocking so it can't regress.
+- **fix(version):** Stopped showing a fake `1.0.0` version string; fixed the update-check pointing at the wrong upstream repo.
 
 ### v3.6.0 — 2026-07-10
 

@@ -166,7 +166,8 @@ The Song.link probe also overrides itself with `ratelimited` if the in-memory ra
 
 ## 6. Dependencies & binaries
 
-- **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — used by the legacy desktop build for first-launch FFmpeg auto-install. **Not used by the web build** — the Docker image installs `ffmpeg` from the Debian repos in stage 3 of the Dockerfile.
+- **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — used by the legacy desktop build for first-launch FFmpeg auto-install. **Not used by the web build.**
+- **GitHub Releases (`https://github.com/BtbN/FFmpeg-Builds/releases/...`)** — the web build's actual FFmpeg source: a statically-linked FFmpeg/FFprobe build, fetched and checksum-verified in the Dockerfile's build stage, then copied into the (shell-less, `FROM scratch`) runtime image — deliberately not `apt install ffmpeg`, which on both Debian bookworm and trixie pulls ~30 transitive shared-library dependencies carrying dozens of CVEs this headless audio-only service never exercises. See [deployment.md](deployment.md#building-from-source).
 
 ---
 

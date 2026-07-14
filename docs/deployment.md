@@ -223,7 +223,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o spotiflac .
 ```
 
 ```bash
-# Or with Docker (multi-stage build: bun → go → debian:bookworm-slim)
+# Or with Docker (multi-stage build: bun → go → ffmpeg fetch → scratch)
 docker build -t spotiflac:local .
 docker run -p 6890:6890 \
   -e JELLYFIN_URL=http://your-jellyfin:8096 \
@@ -233,11 +233,14 @@ docker run -p 6890:6890 \
   spotiflac:local
 ```
 
-The Dockerfile pipeline:
+The Dockerfile pipeline (4 stages):
 
 1. **Stage 1 (`oven/bun:1`)** — install frontend dependencies and run `bun run build`.
-2. **Stage 2 (`golang:1.26-bookworm`)** — copy frontend `dist`, run `go mod tidy`, build a static binary with `-s -w` flags.
-3. **Stage 3 (`debian:bookworm-slim`)** — install `ffmpeg`, `ca-certificates`, `tzdata`, drop privileges to `nonroot` (uid `1000`), copy the binary to `/usr/local/bin/spotiflac`.
+2. **Stage 2 (`golang:1.26-bookworm`)** — copy frontend `dist`, run `go mod tidy`, build a static binary (`CGO_ENABLED=0`, `-s -w`).
+3. **Stage 3 (`debian:bookworm-slim`, build-only)** — downloads a **statically-linked** FFmpeg/FFprobe build (BtbN/FFmpeg-Builds, pinned by a dated release tag + checksum verification) instead of `apt install ffmpeg` — deliberately avoids pulling in ~30 transitive shared-library dependencies that a Trivy scan found carried dozens of CVEs this headless audio-only service never actually exercises (GPU hwaccel, SSH, XML parsing, etc.). This stage's own Debian packages (`curl`, `ca-certificates`, `xz-utils`) never reach the runtime image.
+4. **Stage 4 (`FROM scratch`)** — the actual runtime. Just the Go binary, the two static FFmpeg binaries, and a CA certificate bundle for outbound TLS — **no shell, no package manager, no `/bin`, nothing else**. Runs as numeric `USER 1000:1000` (there's no `/etc/passwd` in `scratch` to resolve a named user against, so `HOME=/home/nonroot` is set explicitly via `ENV` instead of relying on a `useradd`-created home directory).
+
+Because stage 4 has no shell, `docker exec spotiflac sh -c '...'` and similar debugging commands **do not work** on this image — see [troubleshooting.md](troubleshooting.md) for the alternative.
 
 ---
 

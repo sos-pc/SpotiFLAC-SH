@@ -6,11 +6,9 @@
 
 ### "Invalid credentials" on a correct Jellyfin password
 
-- Verify `JELLYFIN_URL` is reachable **from inside the container**:
+- Verify `JELLYFIN_URL` is reachable **from inside the container's network**. The image runs `FROM scratch` (no shell, no `wget`/`curl`, nothing but the app itself — see [deployment.md](deployment.md#building-from-source)), so `docker exec spotiflac ...` won't work for this. Instead, run a throwaway container sharing the app's network namespace:
   ```bash
-  docker exec spotiflac wget -qO- $JELLYFIN_URL/health
-  # or
-  docker exec spotiflac sh -c 'wget -qS -O- $JELLYFIN_URL 2>&1 | head'
+  docker run --rm --network container:spotiflac curlimages/curl -sv $JELLYFIN_URL/health
   ```
 - Inside Docker, `localhost` points to the container itself — never to the host. Use the host's LAN IP, the Docker bridge gateway (`172.17.0.1`), `host.docker.internal` (Docker Desktop), or put both services on a shared Docker network.
 - If your Jellyfin is behind a reverse proxy too, make sure the URL you set is the **internal** one (no auth headers, no SSO).
@@ -116,16 +114,16 @@ If you see broken paths:
 
 ### "ffmpeg not found" error
 
-In Docker deployments this should never happen — `apt install ffmpeg` runs in stage 3 of the Dockerfile.
+In Docker deployments this should never happen — a statically-linked FFmpeg/FFprobe build is fetched and verified against a checksum in the Dockerfile's build stage, then copied straight into the (shell-less) runtime image at `/usr/local/bin/ffmpeg` / `/usr/local/bin/ffprobe`.
 
 - If running from source on bare metal: install FFmpeg system-wide (`apt install ffmpeg`, `brew install ffmpeg`, etc.). The web build does not bundle a fallback installer; the Wails desktop build did, but those code paths are unused here.
-- Verify SpotiFLAC sees it: `GET /api/v1/system/ffmpeg` returns `{"installed": true, "ffprobe_installed": true, "ffmpeg_path": "/usr/bin/ffmpeg"}`.
+- Verify SpotiFLAC sees it: `GET /api/v1/system/ffmpeg` returns `{"installed": true, "ffprobe_installed": true, "ffmpeg_path": "/usr/local/bin/ffmpeg"}`.
 
 ### FFmpeg decryption fails (Amazon Music)
 
 Amazon tracks are delivered as encrypted `.m4a` and decrypted via `ffmpeg -decryption_key`. If decryption fails:
 
-- Make sure FFmpeg version ≥ 4.4. The Dockerfile's `debian:bookworm-slim` base provides 5.x.
+- Make sure FFmpeg version ≥ 4.4 — the Docker image bundles a recent BtbN/FFmpeg-Builds static release (well past that), so this only matters if you're running from source with your own system FFmpeg.
 - The job's `error` field contains the tail of the FFmpeg output — it usually pinpoints the issue (network error during fetch, missing key, malformed stream).
 
 ---
@@ -155,7 +153,7 @@ The download queue uses Server-Sent Events (`/api/v1/jobs/stream`). If your reve
 chown -R 1000:1000 /path/to/config /path/to/music
 ```
 
-The container runs as `nonroot` with **uid 1000** (defined in the Dockerfile: `useradd -u 1000 -m -s /bin/bash nonroot`).
+The container runs as numeric **uid/gid 1000** (`USER 1000:1000` in the Dockerfile — the runtime image is `FROM scratch`, which has no `/etc/passwd` to resolve a named user against, so there's no `useradd`/shell involved at all).
 
 ### Container exits immediately on startup
 
@@ -230,4 +228,4 @@ The server logs to stdout. In Docker, follow them with:
 docker compose logs -f spotiflac
 ```
 
-In the UI, the **Debug Logger** tab (last sidebar entry) shows a live stream of recent log lines and is useful when you can't reach the server's stdout.
+In the UI, the **Debug Logger** tab (last sidebar entry, admin-only) shows the same log lines without needing shell/`docker` access — useful on a managed host or when you can't reach the server's stdout. It loads an initial snapshot from `GET /api/v1/admin/logs` (last 1000 lines, in-memory) then tails new lines live over the same SSE connection as the download queue (`server_log` events on `GET /api/v1/jobs/stream`).

@@ -17,7 +17,7 @@ The whole flow is implemented in three files:
 1. Client sends `POST /api/v1/auth/login` with Jellyfin username + password.
 2. SpotiFLAC forwards the credentials to the Jellyfin server (`JELLYFIN_URL`) using the `MediaBrowser Client="SpotiFLAC", DeviceId="spotiflac"` `X-Emby-Authorization` header.
 3. On `200`, SpotiFLAC upserts the user in BoltDB (`users` bucket) and issues a JWT (24-hour expiry).
-4. Every subsequent request carries the token in `Authorization: Bearer <token>` (or `?token=<jwt>` for SSE endpoints).
+4. Every subsequent request carries the token in `Authorization: Bearer <token>` — except SSE connections and the browser job-download link, which can't set custom headers and use a short-lived **stream token** instead (see "Stream tokens" below), not the raw session JWT.
 
 ### Admin vs. regular users
 
@@ -55,15 +55,19 @@ Tokens are signed with `HMAC-SHA256` using the secret from the `jwt_secret` file
 | `uid` | string | Jellyfin user ID (or `local-admin` for LAN bypass) |
 | `name` | string | Display name |
 | `admin` | bool | Admin flag |
-| `exp` | int | Expiry timestamp, Unix seconds (24 h from issue) |
+| `exp` | int | Expiry timestamp, Unix seconds |
+| `tv` | int | Token version — must match the user's current `UserProfile.TokenVersion` at validation time, or the token is rejected even if `exp` hasn't passed yet |
+| `perms` | string[] | Present only on API-key-derived claims (omitted for a normal session) |
+| `is_key` | bool | `true` only for API-key-derived claims |
+| `scope` | string | Empty for a normal session; `"stream"` for a stream token (see below) — a stream-scoped token is rejected on every endpoint outside its narrow allow-list |
 
-> The claim names follow the abbreviated form used in `auth.go` (`UserID` → `uid`, `DisplayName` → `name`, `IsAdmin` → `admin`, `ExpiresAt` → `exp`). They are **not** the standard `sub`/`iat` claims — keep this in mind if you decode them with a generic JWT library.
+> The claim names follow the abbreviated form used in `auth.go` (`UserID` → `uid`, `DisplayName` → `name`, `IsAdmin` → `admin`, `ExpiresAt` → `exp`, `TokenVersion` → `tv`, `Permissions` → `perms`, `IsAPIKey` → `is_key`, `Scope` → `scope`). They are **not** the standard `sub`/`iat` claims — keep this in mind if you decode them with a generic JWT library.
 
-The token is passed as:
-- `Authorization: Bearer <token>` header (recommended)
-- `?token=<token>` query parameter (used by SSE endpoints — `EventSource` cannot set custom headers)
+**Token revocation (`tv`).** JWTs are otherwise fully stateless — there's no server-side blocklist, so a normal session JWT stays valid for its full 24h lifetime no matter what happens to the account afterward. `tv` is the one exception: when a user's Jellyfin admin flag changes, `UserProfile.TokenVersion` is bumped on their next login, which immediately invalidates every JWT issued before that bump (they still decode fine, but `tv` no longer matches and the request is rejected) — without this, a demoted admin's existing token would keep working with the old privilege level for up to 24h.
 
-On expiry, every protected handler returns `401`. The frontend listens and dispatches an `auth:expired` event, redirecting to the login page.
+**Stream tokens.** `Authorization: Bearer <token>` is the normal path (recommended for everything except SSE/download links). SSE connections (`EventSource`) and the browser's "Download" `<a href>` link can't set custom headers, so those instead call `GET /api/v1/auth/stream-token` first to mint a **60-second**, `scope: "stream"` token and put *that* in the URL (`?token=<stream-token>`) — never the 24h session JWT. A stream token is rejected on every endpoint except the small allow-list it was minted for (`streamScopedPaths` / `isJobDownloadPath` in `api_v1.go`), so even if it leaks into a reverse-proxy access log or browser history, it's both short-lived and narrowly scoped.
+
+On expiry (or `tv` mismatch), every protected handler returns `401`. The frontend listens and dispatches an `auth:expired` event, redirecting to the login page.
 
 ### Verifying a token manually
 
@@ -96,11 +100,13 @@ Permission strings recognized by the system:
 
 | Permission | Effect |
 |------------|--------|
-| `read` | (Reserved — no enforcement yet) |
-| `download` | (Reserved — no enforcement yet) |
+| `read` | Grants read-only routes (`v1RequirePermission(..., "read")`) — search, metadata, job/history listings, file browsing, etc. |
+| `manage` | Grants mutating routes (`v1RequirePermission(..., "manage")`) — triggering downloads, settings, watchlist management. Renamed from `download`; keys created before the rename still carry `"download"` and are still honored (`v1RequirePermission` treats `"download"` as an alias for `"manage"`). |
 | `admin` | Sets `IsAdmin: true` on the synthesized JWT claims, granting access to admin-only routes (e.g. `POST /api/v1/admin/retag-legacy`) |
 
-If you don't pass `permissions` when creating a key, the default is `["read", "download"]`. Only `admin` is currently enforced server-side; the others document the *intended* scope for the human reading the key list.
+**Only API keys are checked against this list at all** — `v1RequirePermission` short-circuits to "allowed" for every normal Jellyfin-session JWT (admin or not); the permission model exists specifically to let an API key be scoped *narrower* than the account that created it, not to restrict logged-in users.
+
+If you don't pass `permissions` when creating a key, the default is `["read", "manage"]`. A non-admin account can never self-issue a key with `admin` permission — even though a non-admin's own session can otherwise call `POST /api/v1/auth/keys` freely, the handler rejects `"admin"` in the requested list unless the caller is already an admin (a key would otherwise be a way to mint a permanent, non-expiring admin credential from a demoted or never-admin account).
 
 ### Creating a key
 
@@ -111,7 +117,7 @@ Via API:
 curl -s -X POST http://spotiflac.example.com/api/v1/auth/keys \
   -H "Authorization: Bearer <jwt>" \
   -H "Content-Type: application/json" \
-  -d '{"name":"my-script","permissions":["read","download"]}'
+  -d '{"name":"my-script","permissions":["read","manage"]}'
 ```
 
 Response (`201`):
@@ -120,7 +126,7 @@ Response (`201`):
   "key": "sk_spotiflac_e4a9d596...",
   "id": "key-...",
   "name": "my-script",
-  "permissions": ["read", "download"],
+  "permissions": ["read", "manage"],
   "created_at": "2026-05-19T00:00:00Z"
 }
 ```
@@ -136,8 +142,10 @@ When validated, the key is mapped to a synthetic `JWTClaims` value:
 
 - `UserID = key.UserID`
 - `DisplayName = "API Key: <name>"`
-- `IsAdmin = (key.Permissions contains "admin")`
+- `IsAdmin = (key.Permissions contains "admin")` — re-checked live against the owning account's **current** admin status, not just baked in at key-creation time, so a key created while its account was admin loses admin API access the moment that account is demoted (its other permissions still work)
 - `ExpiresAt = 0` (no expiry)
+- `Permissions = key.Permissions` — this is what `v1RequirePermission` checks on every route
+- `IsAPIKey = true` — this is what makes `v1RequirePermission` check `Permissions` at all; a normal session JWT never has this set and always passes
 
 The `LastUsedAt` timestamp on the key is updated asynchronously (`go a.touchAPIKey(...)`) — no blocking on the request hot path.
 
