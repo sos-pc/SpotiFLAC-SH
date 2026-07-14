@@ -32,7 +32,7 @@
 | **S10** ✅ | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | **lu en entier** — R10 a probablement 2 causes (MusicBrainz + résolution ISRC en amont via Song.link, lié à S9), pas une seule (voir §S10) | **2** |
 | **S11** | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | Sujet retrouvé, lié à une nouvelle dépendance (voir §S11) | 4 |
 | **S12** | Formatage noms/artistes | artist_format.go, filename.go | Pas encore lu en détail | 4 |
-| **S13** | Utilitaires bas signal | config, progress, filemanager, history, analysis, ffmpeg, resample, recent_fetches | Balayage rapide seulement | 5 |
+| **S13** ✅ | Utilitaires bas signal | config, progress, filemanager, history, analysis, ffmpeg, resample, recent_fetches | **balayé** — signal effectivement faible confirmé, rien à porter sauf resample.go (feature, pas bug, à soumettre si intéressant) | 5 |
 | **S14** | go.mod | dépendances upstream | Diff déjà vu, pas encore creusé | 5 |
 
 **Recommandation de séquencement.** S2 et S3 sont des gains rapides déjà cernés. S6 et S10 restent
@@ -345,16 +345,32 @@ d'écraser ou de sauter un fichier existant. **On n'a rien d'équivalent** (zér
 repo). C'est une vraie fonctionnalité produit, pas un bug — à soumettre à l'utilisateur comme option
 plutôt qu'à trancher ici.
 
-### S13 — Utilitaires bas signal
+### S13 — Utilitaires bas signal ✅ balayé
 
 **Fichiers :** `config.go`, `progress.go`, `filemanager.go`, `history.go`, `analysis.go`, `ffmpeg.go`,
-`resample.go`, `recent_fetches.go`.
+`resample.go`, `recent_fetches.go`. Balayage structurel (signatures de fonctions, pas ligne à ligne) —
+confirme que le signal est bien faible sur ce lot, comme prévu au découpage initial.
 
-`progress.go` confirmé après lecture : pattern d'état global de queue/progress typique Wails —
-exactement ce qu'on a supprimé nous-mêmes en v3.4.0 ("removed dual queue system"). Rien à porter,
-juste une confirmation qu'on a eu raison. `resample.go` (feature de resampling FLAC) : à vérifier si
-déjà couvert par notre "audio converter" existant ou vraiment nouveau — pas encore tranché, voir
-`.github/upstream-map.txt` (laissé volontairement `UNMAPPED`).
+- `config.go` — que des réglages déjà couverts ailleurs (S9 : `GetLinkResolverSetting`, S12 :
+  `GetRedownloadWithSuffixSetting`) ou de la plomberie de config desktop propre à eux.
+- `progress.go` — confirmé : pattern d'état global de queue Wails, exactement ce qu'on a supprimé
+  nous-mêmes en v3.4.0 ("removed dual queue system"). Rien à porter.
+- `filemanager.go` / `history.go` — diffs trop petits pour être structurels (+34/-1 et +11/-13),
+  probablement des ajustements internes mineurs. Rien identifié.
+- `analysis.go` — restructuration vers un decode-PCM-vers-base64 pour analyse **côté frontend**
+  (pattern desktop Wails). On a déjà notre propre `backend/audio/analysis.go` + `spectrum.go`,
+  architecture différente (web) — pas comparable terme à terme.
+- `ffmpeg.go` (607 lignes) — quasi entièrement de la découverte/installation locale de ffmpeg
+  (Homebrew, chemins multi-OS) pour une appli desktop. Sans objet : on bundle ffmpeg à un chemin fixe
+  dans Docker.
+- `resample.go` — **nouvelle fonctionnalité** (changer sample rate/bit depth d'un FLAC), pas un bug.
+  Pas confirmé si ça recoupe notre "audio converter" existant ou si c'est vraiment différent (conversion
+  de format vs resampling). Laissé volontairement `UNMAPPED` dans `.github/upstream-map.txt` — à
+  soumettre comme option produit si intéressant, pas une correction à porter.
+- `recent_fetches.go` — cache JSON local de recherches récentes pour l'UI desktop. On a déjà
+  `backend/history.go` (multi-utilisateur, BoltDB) qui couvre un besoin équivalent en mieux.
+
+**Rien de ce lot ne justifie une lecture ligne à ligne supplémentaire.**
 
 ### S14 — go.mod
 
