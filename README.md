@@ -321,7 +321,7 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 ## Changelog
 
-### Unreleased (on `kiro`, not yet tagged)
+### v3.9.0 — 2026-07-14
 
 A maintainability/refactoring audit (`docs/audit-refactoring-couche2.md`) ran alongside normal feature work; every item it identified is done:
 
