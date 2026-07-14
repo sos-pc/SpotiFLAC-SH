@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*.*.*'
     branches:
-      - kiro
+      - dev
   workflow_dispatch:
 
 env:
