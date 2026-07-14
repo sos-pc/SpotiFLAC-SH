@@ -497,18 +497,7 @@ func (c *SpotifyMetadataClient) fetchTrack(ctx context.Context, trackID string) 
 		}
 	}
 
-	filteredData := FilterTrack(data, albumFetchData)
-
-	jsonData, err := json.Marshal(filteredData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal filtered data: %w", err)
-	}
-
-	var result apiTrackResponse
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal to apiTrackResponse: %w", err)
-	}
-
+	result := FilterTrack(data, albumFetchData)
 	return &result, nil
 }
 

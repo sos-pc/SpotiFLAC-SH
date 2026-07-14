@@ -562,282 +562,100 @@ func extractDuration(ms float64) map[string]interface{} {
 	}
 }
 
-func FilterTrack(data map[string]interface{}, albumFetchData ...map[string]interface{}) map[string]interface{} {
-	dataMap := getMap(data, "data")
-	trackData := getMap(dataMap, "trackUnion")
+// FilterTrack builds the typed track contract directly from the raw trackUnion
+// response (R2). The optional albumFetchData (a reshaped second album fetch, see
+// fetchTrack) refines disc/total-disc numbers. Decomposed into focused helpers;
+// input parsing stays on the tolerant getMap/getString helpers because the raw
+// GraphQL is optional-heavy and has polymorphic fields (e.g. album "artists" is
+// read as both an object and a string).
+func FilterTrack(data map[string]interface{}, albumFetchData ...map[string]interface{}) apiTrackResponse {
+	trackData := getMap(getMap(data, "data"), "trackUnion")
 	if len(trackData) == 0 {
-		return make(map[string]interface{})
+		return apiTrackResponse{}
 	}
-
 	var albumFetchDataMap map[string]interface{}
 	if len(albumFetchData) > 0 {
 		albumFetchDataMap = albumFetchData[0]
 	}
 
-	artists := extractArtists(getMap(trackData, "artists"))
-
-	if len(artists) == 0 {
-		artists = []map[string]interface{}{}
-		firstArtistItems := getSlice(getMap(trackData, "firstArtist"), "items")
-		for _, item := range firstArtistItems {
-			itemMap, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if profile, exists := itemMap["profile"]; exists {
-				profileMap, ok := profile.(map[string]interface{})
-				if ok {
-					artistInfo := map[string]interface{}{
-						"name": getString(profileMap, "name"),
-					}
-					artists = append(artists, artistInfo)
-				}
-			}
-		}
-
-		otherArtistItems := getSlice(getMap(trackData, "otherArtists"), "items")
-		for _, item := range otherArtistItems {
-			itemMap, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if profile, exists := itemMap["profile"]; exists {
-				profileMap, ok := profile.(map[string]interface{})
-				if ok {
-					artistInfo := map[string]interface{}{
-						"name": getString(profileMap, "name"),
-					}
-					artists = append(artists, artistInfo)
-				}
-			}
-		}
-	}
-
-	if len(artists) == 0 {
-		albumData := getMap(trackData, "albumOfTrack")
-		if len(albumData) > 0 {
-			artists = extractArtists(getMap(albumData, "artists"))
-		}
-	}
-
 	albumData := getMap(trackData, "albumOfTrack")
-	var albumInfo map[string]interface{}
-	copyrightInfo := []map[string]interface{}{}
-	discInfo := map[string]interface{}{
-		"discNumber": getFloat64(trackData, "discNumber"),
-		"totalDiscs": nil,
+
+	var result apiTrackResponse
+	result.ID = getString(trackData, "id")
+	result.Name = getString(trackData, "name")
+	result.Artists = strings.Join(resolveTrackArtistNames(trackData), ", ")
+	result.Track = int(getFloat64(trackData, "trackNumber"))
+	result.Plays = getString(trackData, "playcount")
+	result.IsExplicit = getString(getMap(trackData, "contentRating"), "label") == "EXPLICIT"
+	result.Duration = getString(extractDuration(getFloat64(getMap(trackData, "duration"), "totalMilliseconds")), "formatted")
+
+	coverObj := extractCoverImage(getMap(trackData, "visualIdentity"))
+	if coverObj == nil && len(albumData) > 0 {
+		coverObj = extractCoverImage(getMap(albumData, "coverArt"))
+	}
+	if coverObj != nil {
+		result.Cover.Small = getString(coverObj, "small")
+		result.Cover.Medium = getString(coverObj, "medium")
+		result.Cover.Large = getString(coverObj, "large")
 	}
 
+	// Highest disc number across the album's own track list — the fallback for
+	// total discs when albumFetchData carries none.
+	albumTracksMaxDisc := 0
 	if len(albumData) > 0 {
-		copyrightData := getMap(albumData, "copyright")
-		if len(copyrightData) > 0 {
-			copyrightItems := getSlice(copyrightData, "items")
-			if copyrightItems != nil {
-				for _, item := range copyrightItems {
-					itemMap, ok := item.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					if getString(itemMap, "type") != "P" {
-						copyrightInfo = append(copyrightInfo, map[string]interface{}{
-							"text": getString(itemMap, "text"),
-						})
-					}
-				}
-			}
-		}
+		result.Copyright = joinAlbumCopyright(albumData)
+		albumTracksMaxDisc = maxDiscAcrossAlbumTracks(albumData)
 
-		tracksData := getMap(albumData, "tracks")
-		if len(tracksData) > 0 {
-			discNumbers := make(map[int]bool)
-			trackItems := getSlice(tracksData, "items")
-			if trackItems != nil {
-				for _, item := range trackItems {
-					itemMap, ok := item.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					trackItem := getMap(itemMap, "track")
-					if len(trackItem) > 0 {
-						discNum := int(getFloat64(trackItem, "discNumber"))
-						if discNum == 0 {
-							discNum = 1
-						}
-						discNumbers[discNum] = true
-					}
-				}
-			}
-			if len(discNumbers) > 0 {
-				maxDisc := 1
-				for discNum := range discNumbers {
-					if discNum > maxDisc {
-						maxDisc = discNum
-					}
-				}
-				discInfo["totalDiscs"] = maxDisc
-			}
-		}
-
-		dateInfo := getMap(albumData, "date")
-		releaseDate := getString(dateInfo, "isoString")
-		var releaseYear interface{}
-		if releaseDate == "" && len(dateInfo) > 0 {
-			yearStr := getString(dateInfo, "year")
-			monthStr := getString(dateInfo, "month")
-			dayStr := getString(dateInfo, "day")
-			if yearStr != "" {
-				year, err := strconv.Atoi(yearStr)
-				if err == nil {
-					releaseYear = year
-					if monthStr != "" && dayStr != "" {
-						month, _ := strconv.Atoi(monthStr)
-						day, _ := strconv.Atoi(dayStr)
-						releaseDate = fmt.Sprintf("%s-%02d-%02d", yearStr, month, day)
-					} else {
-						releaseDate = yearStr
-					}
-				}
-			}
-		} else if releaseDate != "" {
-			parts := strings.Split(releaseDate, "T")
-			if len(parts) > 0 {
-				releaseDate = parts[0]
-			} else {
-				parts = strings.Split(releaseDate, " ")
-				if len(parts) > 0 {
-					releaseDate = parts[0]
-				}
-			}
-			dateParts := strings.Split(releaseDate, "-")
-			if len(dateParts) > 0 && dateParts[0] != "" {
-				year, err := strconv.Atoi(dateParts[0])
-				if err == nil {
-					releaseYear = year
-				}
-			}
-		}
-
-		tracksTotalCount := float64(0)
-		if len(tracksData) > 0 {
-			tracksTotalCount = getFloat64(tracksData, "totalCount")
-		}
+		releaseDate, releaseYear := parseTrackReleaseDate(getMap(albumData, "date"))
+		albumArtists, albumLabel := resolveAlbumArtistsAndLabel(albumData, albumFetchDataMap)
 
 		albumID := getString(albumData, "id")
 		if albumID == "" {
-			albumURI := getString(albumData, "uri")
-			if strings.Contains(albumURI, ":") {
+			if albumURI := getString(albumData, "uri"); strings.Contains(albumURI, ":") {
 				parts := strings.Split(albumURI, ":")
 				albumID = parts[len(parts)-1]
 			}
 		}
 
-		albumArtistsString := ""
-		albumLabel := ""
-		if albumFetchDataMap != nil && len(albumFetchDataMap) > 0 {
-			albumUnionData := getMap(getMap(albumFetchDataMap, "data"), "albumUnion")
-			if len(albumUnionData) > 0 {
-				albumArtists := extractArtists(getMap(albumUnionData, "artists"))
-				if len(albumArtists) > 0 {
-					albumArtistNames := []string{}
-					for _, artist := range albumArtists {
-						albumArtistNames = append(albumArtistNames, getString(artist, "name"))
-					}
-					albumArtistsString = strings.Join(albumArtistNames, ", ")
-				}
-				if albumArtistsString == "" {
-					albumArtistsString = getString(albumUnionData, "artists")
-				}
-				albumLabel = getString(albumUnionData, "label")
-			}
-		}
-
-		if albumArtistsString == "" {
-			albumArtists := extractArtists(getMap(albumData, "artists"))
-			if len(albumArtists) > 0 {
-				albumArtistNames := []string{}
-				for _, artist := range albumArtists {
-					albumArtistNames = append(albumArtistNames, getString(artist, "name"))
-				}
-				albumArtistsString = strings.Join(albumArtistNames, ", ")
-			}
-		}
-
-		albumInfo = map[string]interface{}{
-			"id":       albumID,
-			"name":     getString(albumData, "name"),
-			"released": releaseDate,
-			"year":     releaseYear,
-			"tracks":   int(tracksTotalCount),
-		}
-
-		if albumArtistsString != "" {
-			albumInfo["artists"] = albumArtistsString
-		}
-
-		if albumLabel != "" {
-			albumInfo["label"] = albumLabel
-		}
+		result.Album.ID = albumID
+		result.Album.Name = getString(albumData, "name")
+		result.Album.Released = releaseDate
+		result.Album.Year = releaseYear
+		result.Album.Tracks = int(getFloat64(getMap(albumData, "tracks"), "totalCount"))
+		result.Album.Artists = albumArtists
+		result.Album.Label = albumLabel
 	}
-
-	cover := extractCoverImage(getMap(trackData, "visualIdentity"))
-	if cover == nil && len(albumData) > 0 {
-		cover = extractCoverImage(getMap(albumData, "coverArt"))
-	}
-
-	durationMs := getFloat64(getMap(trackData, "duration"), "totalMilliseconds")
-	durationObj := extractDuration(durationMs)
-	durationString := getString(durationObj, "formatted")
-
-	artistNames := []string{}
-	for _, artist := range artists {
-		artistNames = append(artistNames, getString(artist, "name"))
-	}
-	artistsString := strings.Join(artistNames, ", ")
-
-	copyrightTexts := []string{}
-	for _, item := range copyrightInfo {
-		copyrightTexts = append(copyrightTexts, getString(item, "text"))
-	}
-	copyrightString := strings.Join(copyrightTexts, ", ")
 
 	discNumber := int(getFloat64(trackData, "discNumber"))
 	if discNumber == 0 {
 		discNumber = 1
 	}
-
-	maxDiscFromAlbum := 0
 	totalDiscsFromAlbum := 0
-
-	if len(albumFetchData) > 0 && albumFetchData[0] != nil {
-		albumUnion := getMap(getMap(albumFetchData[0], "data"), "albumUnion")
+	maxDiscFromAlbum := 0
+	if albumFetchDataMap != nil {
+		albumUnion := getMap(getMap(albumFetchDataMap, "data"), "albumUnion")
 		if len(albumUnion) > 0 {
-			discsData := getMap(albumUnion, "discs")
-			if len(discsData) > 0 {
+			if discsData := getMap(albumUnion, "discs"); len(discsData) > 0 {
 				totalDiscsFromAlbum = int(getFloat64(discsData, "totalCount"))
 			}
-
-			albumTracks := getMap(albumUnion, "tracks")
-			if len(albumTracks) > 0 {
-				albumTrackItems := getSlice(albumTracks, "items")
-				currentTrackID := getString(trackData, "id")
-				for _, item := range albumTrackItems {
-					itemMap, ok := item.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					trackItem := getMap(itemMap, "track")
-					if len(trackItem) > 0 {
-						dNum := int(getFloat64(trackItem, "discNumber"))
-						if dNum > maxDiscFromAlbum {
-							maxDiscFromAlbum = dNum
-						}
-
-						trackURI := getString(trackItem, "uri")
-						if strings.Contains(trackURI, currentTrackID) || getString(trackItem, "id") == currentTrackID {
-							if dNum > 0 {
-								discNumber = dNum
-							}
-						}
+			currentTrackID := getString(trackData, "id")
+			for _, item := range getSlice(getMap(albumUnion, "tracks"), "items") {
+				itemMap, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				trackItem := getMap(itemMap, "track")
+				if len(trackItem) == 0 {
+					continue
+				}
+				dNum := int(getFloat64(trackItem, "discNumber"))
+				if dNum > maxDiscFromAlbum {
+					maxDiscFromAlbum = dNum
+				}
+				trackURI := getString(trackItem, "uri")
+				if strings.Contains(trackURI, currentTrackID) || getString(trackItem, "id") == currentTrackID {
+					if dNum > 0 {
+						discNumber = dNum
 					}
 				}
 			}
@@ -849,29 +667,184 @@ func FilterTrack(data map[string]interface{}, albumFetchData ...map[string]inter
 		totalDiscs = totalDiscsFromAlbum
 	} else if maxDiscFromAlbum > 0 {
 		totalDiscs = maxDiscFromAlbum
-	} else if discInfo["totalDiscs"] != nil {
-		totalDiscs = discInfo["totalDiscs"].(int)
+	} else if albumTracksMaxDisc > 0 {
+		totalDiscs = albumTracksMaxDisc
 	}
 
-	contentRating := getMap(trackData, "contentRating")
-	isExplicit := getString(contentRating, "label") == "EXPLICIT"
+	result.Disc = discNumber
+	result.Discs = totalDiscs
+	return result
+}
 
-	filtered := map[string]interface{}{
-		"id":          getString(trackData, "id"),
-		"name":        getString(trackData, "name"),
-		"artists":     artistsString,
-		"album":       albumInfo,
-		"duration":    durationString,
-		"track":       int(getFloat64(trackData, "trackNumber")),
-		"disc":        discNumber,
-		"discs":       totalDiscs,
-		"copyright":   copyrightString,
-		"plays":       getString(trackData, "playcount"),
-		"cover":       cover,
-		"is_explicit": isExplicit,
+// resolveTrackArtistNames returns the track's artist names, trying trackUnion
+// .artists first, then the firstArtist/otherArtists profile lists, then
+// albumOfTrack.artists — the same three-way cascade the pre-R2 code used.
+func resolveTrackArtistNames(trackData map[string]interface{}) []string {
+	artists := extractArtists(getMap(trackData, "artists"))
+
+	if len(artists) == 0 {
+		artists = []map[string]interface{}{}
+		for _, item := range getSlice(getMap(trackData, "firstArtist"), "items") {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if profileMap, ok := itemMap["profile"].(map[string]interface{}); ok {
+				artists = append(artists, map[string]interface{}{"name": getString(profileMap, "name")})
+			}
+		}
+		for _, item := range getSlice(getMap(trackData, "otherArtists"), "items") {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if profileMap, ok := itemMap["profile"].(map[string]interface{}); ok {
+				artists = append(artists, map[string]interface{}{"name": getString(profileMap, "name")})
+			}
+		}
 	}
 
-	return filtered
+	if len(artists) == 0 {
+		if albumData := getMap(trackData, "albumOfTrack"); len(albumData) > 0 {
+			artists = extractArtists(getMap(albumData, "artists"))
+		}
+	}
+
+	names := make([]string, 0, len(artists))
+	for _, a := range artists {
+		names = append(names, getString(a, "name"))
+	}
+	return names
+}
+
+// joinAlbumCopyright joins the album's non-"P" copyright texts (comma-separated).
+func joinAlbumCopyright(albumData map[string]interface{}) string {
+	texts := []string{}
+	copyrightData := getMap(albumData, "copyright")
+	if len(copyrightData) > 0 {
+		for _, item := range getSlice(copyrightData, "items") {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if getString(itemMap, "type") != "P" {
+				texts = append(texts, getString(itemMap, "text"))
+			}
+		}
+	}
+	return strings.Join(texts, ", ")
+}
+
+// maxDiscAcrossAlbumTracks returns the highest disc number seen in the album's
+// own track list (0 if none — treated as "unknown" by the caller).
+func maxDiscAcrossAlbumTracks(albumData map[string]interface{}) int {
+	tracksData := getMap(albumData, "tracks")
+	if len(tracksData) == 0 {
+		return 0
+	}
+	discNumbers := map[int]bool{}
+	for _, item := range getSlice(tracksData, "items") {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		trackItem := getMap(itemMap, "track")
+		if len(trackItem) == 0 {
+			continue
+		}
+		discNum := int(getFloat64(trackItem, "discNumber"))
+		if discNum == 0 {
+			discNum = 1
+		}
+		discNumbers[discNum] = true
+	}
+	if len(discNumbers) == 0 {
+		return 0
+	}
+	maxDisc := 1
+	for discNum := range discNumbers {
+		if discNum > maxDisc {
+			maxDisc = discNum
+		}
+	}
+	return maxDisc
+}
+
+// parseTrackReleaseDate returns the album release date (YYYY-MM-DD or YYYY) and
+// year from a raw date node, handling both the isoString form and the
+// year/month/day form.
+func parseTrackReleaseDate(dateInfo map[string]interface{}) (string, int) {
+	releaseDate := getString(dateInfo, "isoString")
+	releaseYear := 0
+	if releaseDate == "" && len(dateInfo) > 0 {
+		yearStr := getString(dateInfo, "year")
+		monthStr := getString(dateInfo, "month")
+		dayStr := getString(dateInfo, "day")
+		if yearStr != "" {
+			if year, err := strconv.Atoi(yearStr); err == nil {
+				releaseYear = year
+				if monthStr != "" && dayStr != "" {
+					month, _ := strconv.Atoi(monthStr)
+					day, _ := strconv.Atoi(dayStr)
+					releaseDate = fmt.Sprintf("%s-%02d-%02d", yearStr, month, day)
+				} else {
+					releaseDate = yearStr
+				}
+			}
+		}
+	} else if releaseDate != "" {
+		parts := strings.Split(releaseDate, "T")
+		if len(parts) > 0 {
+			releaseDate = parts[0]
+		} else {
+			parts = strings.Split(releaseDate, " ")
+			if len(parts) > 0 {
+				releaseDate = parts[0]
+			}
+		}
+		dateParts := strings.Split(releaseDate, "-")
+		if len(dateParts) > 0 && dateParts[0] != "" {
+			if year, err := strconv.Atoi(dateParts[0]); err == nil {
+				releaseYear = year
+			}
+		}
+	}
+	return releaseDate, releaseYear
+}
+
+// resolveAlbumArtistsAndLabel derives the album-artist string and label,
+// preferring the reshaped albumFetchData (which may store "artists" as a
+// pre-joined string) and falling back to albumOfTrack.artists.
+func resolveAlbumArtistsAndLabel(albumData, albumFetchDataMap map[string]interface{}) (string, string) {
+	albumArtistsString := ""
+	albumLabel := ""
+	if len(albumFetchDataMap) > 0 {
+		albumUnionData := getMap(getMap(albumFetchDataMap, "data"), "albumUnion")
+		if len(albumUnionData) > 0 {
+			if names := artistNames(extractArtists(getMap(albumUnionData, "artists"))); len(names) > 0 {
+				albumArtistsString = strings.Join(names, ", ")
+			}
+			if albumArtistsString == "" {
+				albumArtistsString = getString(albumUnionData, "artists")
+			}
+			albumLabel = getString(albumUnionData, "label")
+		}
+	}
+	if albumArtistsString == "" {
+		if names := artistNames(extractArtists(getMap(albumData, "artists"))); len(names) > 0 {
+			albumArtistsString = strings.Join(names, ", ")
+		}
+	}
+	return albumArtistsString, albumLabel
+}
+
+// artistNames maps extractArtists' output to a plain name slice.
+func artistNames(artists []map[string]interface{}) []string {
+	names := make([]string, 0, len(artists))
+	for _, a := range artists {
+		names = append(names, getString(a, "name"))
+	}
+	return names
 }
 
 // FilterAlbum builds the typed album contract directly from the raw albumUnion
