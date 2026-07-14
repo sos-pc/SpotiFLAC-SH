@@ -274,17 +274,19 @@ type apiArtistResponse struct {
 	} `json:"stats"`
 	Gallery     []string `json:"gallery"`
 	Discography struct {
-		All []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Cover       string `json:"cover"`
-			Date        string `json:"date"`
-			Year        int    `json:"year"`
-			TotalTracks int    `json:"total_tracks"`
-			Type        string `json:"type"`
-		} `json:"all"`
-		Total int `json:"total"`
+		All   []apiDiscographyItem `json:"all"`
+		Total int                  `json:"total"`
 	} `json:"discography"`
+}
+
+type apiDiscographyItem struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Cover       string `json:"cover"`
+	Date        string `json:"date"`
+	Year        int    `json:"year"`
+	TotalTracks int    `json:"total_tracks"`
+	Type        string `json:"type"`
 }
 
 type apiSearchTrack struct {
@@ -843,18 +845,7 @@ func (c *SpotifyMetadataClient) fetchArtistDiscography(ctx context.Context, pars
 		}
 	}
 
-	filteredData := FilterArtist(data)
-
-	jsonData, err := json.Marshal(filteredData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal filtered data: %w", err)
-	}
-
-	var result apiArtistResponse
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal to apiArtistResponse: %w", err)
-	}
-
+	result := FilterArtist(data)
 	return &result, nil
 }
 

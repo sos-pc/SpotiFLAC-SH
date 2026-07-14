@@ -1244,9 +1244,9 @@ func FilterPlaylist(data map[string]interface{}) map[string]interface{} {
 	return filtered
 }
 
-func extractRelease(release map[string]interface{}) map[string]interface{} {
+func extractRelease(release map[string]interface{}) (apiDiscographyItem, bool) {
 	if len(release) == 0 {
-		return nil
+		return apiDiscographyItem{}, false
 	}
 
 	dateInfo := getMap(release, "date")
@@ -1265,74 +1265,55 @@ func extractRelease(release map[string]interface{}) map[string]interface{} {
 			}
 		}
 	} else if releaseDate != "" && strings.Contains(releaseDate, "T") {
-		parts := strings.Split(releaseDate, "T")
-		releaseDate = parts[0]
+		releaseDate = strings.Split(releaseDate, "T")[0]
 	}
 
-	coverObj := extractCoverImage(getMap(release, "coverArt"))
-	var cover interface{}
-	if coverObj != nil {
+	cover := ""
+	if coverObj := extractCoverImage(getMap(release, "coverArt")); coverObj != nil {
 		cover = getString(coverObj, "medium")
 	}
 
 	releaseID := getString(release, "id")
 	if releaseID == "" {
-		releaseURI := getString(release, "uri")
-		if strings.Contains(releaseURI, ":") {
+		if releaseURI := getString(release, "uri"); strings.Contains(releaseURI, ":") {
 			parts := strings.Split(releaseURI, ":")
 			releaseID = parts[len(parts)-1]
 		}
 	}
 
-	var year interface{}
-	if yearVal, exists := dateInfo["year"]; exists {
-		year = yearVal
-	}
-
-	var totalTracks int
-	tracksInfo := getMap(release, "tracks")
-	if tracksInfo != nil {
-		totalTracks = int(getFloat64(tracksInfo, "totalCount"))
-	}
-
-	return map[string]interface{}{
-		"id":           releaseID,
-		"name":         getString(release, "name"),
-		"cover":        cover,
-		"date":         releaseDate,
-		"year":         year,
-		"total_tracks": totalTracks,
-		"type":         getString(release, "type"),
-	}
+	return apiDiscographyItem{
+		ID:          releaseID,
+		Name:        getString(release, "name"),
+		Cover:       cover,
+		Date:        releaseDate,
+		Year:        int(getFloat64(dateInfo, "year")),
+		TotalTracks: int(getFloat64(getMap(release, "tracks"), "totalCount")),
+		Type:        getString(release, "type"),
+	}, true
 }
 
-func extractDiscographyItems(itemsData map[string]interface{}) []map[string]interface{} {
-	items := []map[string]interface{}{}
-	dataItems := getSlice(itemsData, "items")
-	if dataItems != nil {
-		for _, item := range dataItems {
-			itemMap, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			releases := getMap(itemMap, "releases")
-			var release map[string]interface{}
-			if len(releases) > 0 {
-				releaseItems := getSlice(releases, "items")
-				if releaseItems != nil && len(releaseItems) > 0 {
-					if releaseMap, ok := releaseItems[0].(map[string]interface{}); ok {
-						release = releaseMap
-					}
+func extractDiscographyItems(itemsData map[string]interface{}) []apiDiscographyItem {
+	items := []apiDiscographyItem{}
+	for _, item := range getSlice(itemsData, "items") {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		releases := getMap(itemMap, "releases")
+		var release map[string]interface{}
+		if len(releases) > 0 {
+			if releaseItems := getSlice(releases, "items"); len(releaseItems) > 0 {
+				if releaseMap, ok := releaseItems[0].(map[string]interface{}); ok {
+					release = releaseMap
 				}
-			} else {
-				release = getMap(itemMap, "album")
 			}
+		} else {
+			release = getMap(itemMap, "album")
+		}
 
-			if len(release) > 0 {
-				extracted := extractRelease(release)
-				if extracted != nil {
-					items = append(items, extracted)
-				}
+		if len(release) > 0 {
+			if extracted, ok := extractRelease(release); ok {
+				items = append(items, extracted)
 			}
 		}
 	}
@@ -1344,133 +1325,76 @@ func stripHTMLTags(s string) string {
 	return re.ReplaceAllString(s, "")
 }
 
-func FilterArtist(data map[string]interface{}) map[string]interface{} {
-	dataMap := getMap(data, "data")
-	artistData := getMap(dataMap, "artistUnion")
+// FilterArtist builds the typed artist contract directly from the raw
+// artistUnion response (R2). The discography.all node is populated upstream by
+// fetchArtistDiscography from a separate query before this runs.
+func FilterArtist(data map[string]interface{}) apiArtistResponse {
+	artistData := getMap(getMap(data, "data"), "artistUnion")
 	if len(artistData) == 0 {
-		return make(map[string]interface{})
+		return apiArtistResponse{}
 	}
+
+	var result apiArtistResponse
 
 	profileRaw := getMap(artistData, "profile")
-	profile := make(map[string]interface{})
-	if len(profileRaw) > 0 {
-		if biography, exists := profileRaw["biography"]; exists {
-			biographyMap, ok := biography.(map[string]interface{})
-			if ok {
-				biographyText := getString(biographyMap, "text")
-				if biographyText != "" {
-					profile["biography"] = html.UnescapeString(stripHTMLTags(biographyText))
-				}
-			}
-		}
-		if _, exists := profileRaw["name"]; exists {
-			profile["name"] = getString(profileRaw, "name")
-		}
-		if _, exists := profileRaw["verified"]; exists {
-			profile["verified"] = getBool(profileRaw, "verified")
+	if biographyMap := getMap(profileRaw, "biography"); len(biographyMap) > 0 {
+		if biographyText := getString(biographyMap, "text"); biographyText != "" {
+			result.Profile.Biography = html.UnescapeString(stripHTMLTags(biographyText))
 		}
 	}
+	result.Profile.Name = getString(profileRaw, "name")
+	result.Profile.Verified = getBool(profileRaw, "verified")
+	result.Name = result.Profile.Name
 
-	headerImageData := getMap(artistData, "headerImage")
-	var headerImage interface{}
-	if len(headerImageData) > 0 {
-		headerData := getMap(headerImageData, "data")
-		if len(headerData) > 0 {
-			sources := getSlice(headerData, "sources")
-			if sources != nil && len(sources) > 0 {
-				if firstSource, ok := sources[0].(map[string]interface{}); ok {
-					headerImage = getString(firstSource, "url")
-				}
+	if headerData := getMap(getMap(artistData, "headerImage"), "data"); len(headerData) > 0 {
+		if sources := getSlice(headerData, "sources"); len(sources) > 0 {
+			if firstSource, ok := sources[0].(map[string]interface{}); ok {
+				result.Header = getString(firstSource, "url")
 			}
 		}
 	}
 
 	statsRaw := getMap(artistData, "stats")
-	stats := make(map[string]interface{})
-	if len(statsRaw) > 0 {
-		if _, exists := statsRaw["followers"]; exists {
-			stats["followers"] = getFloat64(statsRaw, "followers")
-		}
-		if _, exists := statsRaw["monthlyListeners"]; exists {
-			stats["listeners"] = getFloat64(statsRaw, "monthlyListeners")
-		}
-		if _, exists := statsRaw["worldRank"]; exists {
-			stats["rank"] = getFloat64(statsRaw, "worldRank")
-		}
-	}
+	result.Stats.Followers = int(getFloat64(statsRaw, "followers"))
+	result.Stats.Listeners = int(getFloat64(statsRaw, "monthlyListeners"))
+	result.Stats.Rank = int(getFloat64(statsRaw, "worldRank"))
 
-	discography := getMap(artistData, "discography")
-	discographyResult := make(map[string]interface{})
-
-	allData := getMap(discography, "all")
-	if len(allData) > 0 {
-		discographyResult["all"] = extractDiscographyItems(allData)
-		if totalCount, exists := allData["totalCount"]; exists {
-			var total float64
-			if tc, ok := totalCount.(float64); ok {
-				total = tc
-			} else if tc, ok := totalCount.(int); ok {
-				total = float64(tc)
-			} else if tc, ok := totalCount.(int64); ok {
-				total = float64(tc)
-			}
-			discographyResult["total"] = total
-		}
+	if allData := getMap(getMap(artistData, "discography"), "all"); len(allData) > 0 {
+		result.Discography.All = extractDiscographyItems(allData)
+		result.Discography.Total = int(getFloat64(allData, "totalCount"))
 	}
 
 	visualsData := getMap(artistData, "visuals")
-	galleryData := getMap(visualsData, "gallery")
-	gallery := []interface{}{}
-	if len(galleryData) > 0 {
-		galleryItems := getSlice(galleryData, "items")
-		if galleryItems != nil {
-			for _, item := range galleryItems {
-				itemMap, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				sources := getSlice(itemMap, "sources")
-				if sources != nil && len(sources) > 0 {
-					if firstSource, ok := sources[0].(map[string]interface{}); ok {
-						galleryURL := getString(firstSource, "url")
-						if galleryURL != "" {
-							gallery = append(gallery, galleryURL)
-						}
-					}
+	gallery := []string{}
+	for _, item := range getSlice(getMap(visualsData, "gallery"), "items") {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if sources := getSlice(itemMap, "sources"); len(sources) > 0 {
+			if firstSource, ok := sources[0].(map[string]interface{}); ok {
+				if galleryURL := getString(firstSource, "url"); galleryURL != "" {
+					gallery = append(gallery, galleryURL)
 				}
 			}
 		}
 	}
+	result.Gallery = gallery
 
-	avatarObj := extractCoverImage(getMap(visualsData, "avatarImage"))
-	var avatar interface{}
-	if avatarObj != nil {
-		if mediumURL, ok := avatarObj["medium"].(string); ok && mediumURL != "" {
-			avatar = mediumURL
-		} else if smallURL, ok := avatarObj["small"].(string); ok && smallURL != "" {
-			avatar = smallURL
+	if avatarObj := extractCoverImage(getMap(visualsData, "avatarImage")); avatarObj != nil {
+		if mediumURL := getString(avatarObj, "medium"); mediumURL != "" {
+			result.Avatar = mediumURL
+		} else if smallURL := getString(avatarObj, "small"); smallURL != "" {
+			result.Avatar = smallURL
 		}
 	}
 
-	artistURI := getString(artistData, "uri")
-	artistID := ""
-	if strings.Contains(artistURI, ":") {
+	if artistURI := getString(artistData, "uri"); strings.Contains(artistURI, ":") {
 		parts := strings.Split(artistURI, ":")
-		artistID = parts[len(parts)-1]
+		result.ID = parts[len(parts)-1]
 	}
 
-	filtered := map[string]interface{}{
-		"id":          artistID,
-		"name":        getString(profile, "name"),
-		"profile":     profile,
-		"avatar":      avatar,
-		"header":      headerImage,
-		"stats":       stats,
-		"gallery":     gallery,
-		"discography": discographyResult,
-	}
-
-	return filtered
+	return result
 }
 
 // FilterSearch builds the typed search contract directly from the raw searchV2
