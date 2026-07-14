@@ -287,35 +287,43 @@ type apiArtistResponse struct {
 	} `json:"discography"`
 }
 
+type apiSearchTrack struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Artists    string `json:"artists"`
+	Album      string `json:"album"`
+	Duration   string `json:"duration"`
+	Cover      string `json:"cover"`
+	IsExplicit bool   `json:"is_explicit"`
+}
+
+type apiSearchAlbum struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Artists string `json:"artists"`
+	Cover   string `json:"cover"`
+	Year    int    `json:"year"`
+}
+
+type apiSearchArtist struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Cover string `json:"cover"`
+}
+
+type apiSearchPlaylist struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Cover string `json:"cover"`
+	Owner string `json:"owner"`
+}
+
 type apiSearchResponse struct {
 	Results struct {
-		Tracks []struct {
-			ID         string `json:"id"`
-			Name       string `json:"name"`
-			Artists    string `json:"artists"`
-			Album      string `json:"album"`
-			Duration   string `json:"duration"`
-			Cover      string `json:"cover"`
-			IsExplicit bool   `json:"is_explicit"`
-		} `json:"tracks"`
-		Albums []struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Artists string `json:"artists"`
-			Cover   string `json:"cover"`
-			Year    int    `json:"year"`
-		} `json:"albums"`
-		Artists []struct {
-			ID    string `json:"id"`
-			Name  string `json:"name"`
-			Cover string `json:"cover"`
-		} `json:"artists"`
-		Playlists []struct {
-			ID    string `json:"id"`
-			Name  string `json:"name"`
-			Cover string `json:"cover"`
-			Owner string `json:"owner"`
-		} `json:"playlists"`
+		Tracks    []apiSearchTrack    `json:"tracks"`
+		Albums    []apiSearchAlbum    `json:"albums"`
+		Artists   []apiSearchArtist   `json:"artists"`
+		Playlists []apiSearchPlaylist `json:"playlists"`
 	} `json:"results"`
 	TotalResults struct {
 		Tracks    int `json:"tracks"`
@@ -1434,17 +1442,7 @@ func (c *SpotifyMetadataClient) Search(ctx context.Context, query string, limit 
 		return nil, fmt.Errorf("failed to query search: %w", err)
 	}
 
-	filteredData := FilterSearch(data)
-
-	jsonData, err := json.Marshal(filteredData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal filtered data: %w", err)
-	}
-
-	var apiResp apiSearchResponse
-	if err := json.Unmarshal(jsonData, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal to apiSearchResponse: %w", err)
-	}
+	apiResp := FilterSearch(data)
 
 	response := &SearchResponse{
 		Tracks:    make([]SearchResult, 0),
@@ -1551,17 +1549,7 @@ func (c *SpotifyMetadataClient) SearchByType(ctx context.Context, query string, 
 		return nil, fmt.Errorf("failed to query search: %w", err)
 	}
 
-	filteredData := FilterSearch(data)
-
-	jsonData, err := json.Marshal(filteredData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal filtered data: %w", err)
-	}
-
-	var apiResp apiSearchResponse
-	if err := json.Unmarshal(jsonData, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal to apiSearchResponse: %w", err)
-	}
+	apiResp := FilterSearch(data)
 
 	results := make([]SearchResult, 0)
 
