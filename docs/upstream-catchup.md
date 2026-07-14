@@ -287,6 +287,23 @@ Amazon peuvent attendre.
 `backend/meta/musicbrainz.go` et à la vraie boucle `retagIncompleteMetadata`/`retagOneTrack`
 (`api_admin.go:648+`) et `providerutil/genremeta.go`, pas juste au fichier musicbrainz isolé.
 
+**Réponse directe à la question posée dans le libellé de R10 ("le bon service de tag pour le genre") :
+non, upstream n'a pas changé de service.** Vérifié explicitement : ils utilisent toujours exclusivement
+MusicBrainz, avec exactement le même algorithme de sélection qu'avant ce diff (inchangé, donc pas
+touché par ce lot de commits) — `recording.Tags` (des tags folksonomie libres, pas une taxonomie de
+genre officielle), soit le tag au `Count` le plus élevé (`useSingleGenre`), soit les 5 premiers tags
+tels quels. Aucun filtrage des tags non-genre (ex. "seen live", "vinyl", "2020s" sont des tags
+MusicBrainz valides mais pas des genres) — ce n'est pas nouveau, ni corrigé, ni le sujet de ce diff.
+
+**Piste intéressante trouvée en cherchant, jamais exploitée même par upstream :**
+`spotify_metadata.go::ArtistInfoMetadata.Genres []string` — Spotify **fournit bien du genre**
+nativement (au niveau artiste, pas piste) dans les réponses de leur API interne. Mais **upstream ne
+l'extrait jamais** de la réponse GraphQL brute — le seul endroit où ce champ est renseigné dans tout
+leur code, c'est `Genres: []string{}` (un placeholder vide). Donc même eux n'ont pas creusé cette voie
+alternative — pas un renoncement après essai, juste jamais tenté. À garder en tête comme option
+propre (zéro appel réseau supplémentaire, la donnée arrive avec la réponse Spotify qu'on récupère déjà)
+si on veut vraiment explorer "un autre service", plutôt que de chercher du côté Discogs/Last.fm.
+
 **R10, nuancé après avoir tracé le vrai chemin d'appel — deux causes possibles, pas une seule.**
 
 Upstream a ajouté à `musicbrainz.go` : throttle à 1100ms entre requêtes (le rate-limit MusicBrainz
