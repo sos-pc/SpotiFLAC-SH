@@ -151,9 +151,27 @@ qualité) — donc pas juste un rejet, un vrai retry ciblé.
 **Vérifié : le fallback HI_RES→LOSSLESS existe déjà chez nous** (`backend/tidal/client.go:550,673`,
 `AllowFallback`) — pas un gap, upstream a la même logique.
 
-**Recommandation :** porter la validation mimeType-vs-qualité-demandée dans `DownloadFromManifest`,
-dans la continuité de S2 (même famille de bug : accepter silencieusement un flux qui ne correspond pas
-à ce qui a été demandé).
+**Correction après relecture complète de `DownloadByURLWithFallback` (passe de vérification du
+2026-07-15) : le retry-vers-le-miroir-suivant ne serait PAS automatique chez nous comme je l'avais dit.**
+Notre flux est **en deux phases séparées**, pas entrelacé comme la version upstream actuelle :
+1. `getDownloadURLRotated(apis, trackID, quality)` — tourne sur les miroirs Tidal pour trouver
+   **une réponse API valide** (vérifie juste que l'appel réussit, jamais le contenu réel du fichier).
+2. `downloader.DownloadFile(downloadURL, outputFilename)` — télécharge avec le **seul** miroir retenu
+   en phase 1. Si ça échoue ici (ligne 688-690), **l'erreur remonte directement, sans revenir en phase 1
+   avec un autre miroir**.
+
+Upstream a justement fusionné ces deux phases (`tryDownloadAcrossTidalAPIs`) pour que le rejet
+qualité déclenche un vrai changement de miroir. **Ajouter seulement la validation chez nous, sans
+restructurer, donnerait un résultat plus modeste** : le job échoue proprement avec un message clair
+au lieu de sauvegarder silencieusement le mauvais format — un vrai progrès, mais pas le retry
+automatique vers un autre miroir que la formulation initiale laissait entendre. Refaire le flux en
+une seule phase entrelacée est possible mais plus invasif — à trancher explicitement avant de coder,
+pas à supposer.
+
+**Recommandation, révisée :** deux options à présenter à l'utilisateur avant de coder — (a) ajouter
+juste la validation dans `DownloadFromManifest` (petit, sûr, échec propre au lieu de silencieux, pas de
+retry-miroir automatique) ou (b) fusionner `getDownloadURLRotated` + `DownloadFile` en une boucle
+entrelacée comme upstream (plus de travail, comportement complet). Ne pas décider ça seul.
 
 ### S6 — Client Qobuz
 
@@ -276,10 +294,34 @@ fait une refonte complète et différente**, pas juste ajouté un maillon :
 | Notre `checkQobuzAvailability` renvoie un simple booléen, recherche non-authentifiée (`app_id` en dur) | La leur renvoie **l'URL Qobuz réelle**, via une recherche authentifiée avec les identifiants scrapés dans `qobuz_api.go` (S6) | **Lié à S6** — pas la peine de le faire avant d'avoir tranché qobuz_api.go. |
 | Normalisation d'URL Amazon simple | Regex dédiées pour extraire l'ASIN (`trackAsin=`, `/albums/.../B...`, `/tracks/B...`) vers une forme canonique `music.amazon.com/tracks/{ASIN}?musicTerritory=US` | À vérifier si nos liens Amazon actuels posent un problème concret avant de le porter — pas de symptôme connu. |
 
-**Recommandation de séquencement pour le codage :** commencer par le point ISRC-direct (indépendant,
-autonome, plus proche de S8 déjà fait) en l'ajoutant comme **étage 0** (avant Deezer) de la chaîne dans
-`jobs_helpers.go::getStreamingURLs` — pas à la place des étages existants. Songstats et la normalisation
-Amazon peuvent attendre.
+**Carte complète des chemins ISRC chez nous, établie en repassant à la source (2026-07-15) — il y a en
+réalité 3 chemins distincts, pas une seule chaîne :**
+
+1. **Pipeline de téléchargement, couche primaire** — `jobs_worker.go:124` appelle
+   `jm.getStreamingURLs(job)` **avant** `backend.ExecuteDownload`. C'est la chaîne à 4 étages
+   documentée ci-dessus.
+2. **Pipeline de téléchargement, filet de sécurité** — `backend/downloader.go`, dans le goroutine
+   `resolveISRC` d'`ExecuteDownload` : si `req.ISRC` (déjà résolu par l'étape 1) est vide, un
+   **deuxième essai indépendant** tourne (Deezer par nom, puis Song.link API/HTML — seulement 2
+   étages, pas les 4 ; pas de tentative Apple Music ici). Ce n'est pas un système concurrent
+   incohérent comme je l'ai cru un instant en le découvrant — c'est un vrai filet de sécurité en
+   cascade, mais dupliqué (deux implémentations légèrement différentes du même besoin, jamais
+   partagées).
+3. **Pipeline genre/MusicBrainz (S10/R10), complètement séparé** — `providerutil/genremeta.go::
+   resolveISRCFromSpotifyURL` appelle **exclusivement** `songlink.GetISRC()` (le chemin à 2 maillons
+   d'origine : Song.link → Deezer, sans Apple Music ni HTML scraping). C'est le seul appelant vivant de
+   `GetISRC()` — confirmé par recherche exhaustive. C'est le maillon le plus faible des trois, et
+   c'est précisément lui qui alimente R10 (voir S10).
+
+**Recommandation de séquencement pour le codage, révisée :** l'ISRC-direct doit être ajouté à **au
+moins 2 endroits** pour avoir son plein effet, pas un seul comme je l'avais dit initialement :
+- Dans `jobs_helpers.go::getStreamingURLs` (étage 0, avant Deezer) pour le pipeline de téléchargement.
+- Dans `songlink.GetISRC()` lui-même (bénéficie automatiquement de son unique appelant,
+  `resolveISRCFromSpotifyURL`) pour le pipeline genre/R10 — voir S10.
+
+Vu la duplication trouvée au point 2, il y a aussi une question de fond à soulever (pas forcément à
+résoudre dans ce lot) : factoriser les 2-3 implémentations d'ISRC-resolution en une seule, plutôt que
+d'ajouter l'ISRC-direct séparément à chacune et les laisser diverger davantage.
 
 ### S10 — Enrichissement métadonnées ✅ lu
 
@@ -318,14 +360,19 @@ a bien un throttle **entre pistes** (`retagIncompleteMetadataThrottle = 1 * time
 si un téléchargement normal tourne en parallèle du batch de retag, les deux tapent MusicBrainz sans se
 coordonner, dépassant le rythme malgré le délai du batch.
 
-**Deuxième hypothèse (plus probable en tracant `retagOneTrack`) : l'ISRC ne se résout même pas jusqu'à
-MusicBrainz.** `retagOneTrack` → `providerutil.FetchGenreMetadataAsync` → `resolveISRCFromSpotifyURL`
-→ **`songlink.GetISRC`** (le même chemin fragile identifié en S9, Song.link documenté "heavily
-rate-limited"). Si cette résolution échoue, `resolvedISRC == ""` et **la fonction retourne un résultat
-vide silencieusement — musicbrainz.go n'est jamais appelé, aucune erreur distincte ne remonte.** Vu
-d'en haut, ça ressemble exactement à "sur-sélectionne et skip 99%" : plein de pistes "traitées" sans
-genre, sans qu'on puisse distinguer "MusicBrainz n'a pas de genre pour ce morceau" de "on n'a même pas
-pu obtenir l'ISRC".
+**Deuxième hypothèse (confirmée comme le seul chemin possible, pas juste "plus probable") : l'ISRC ne
+se résout même pas jusqu'à MusicBrainz.** `retagOneTrack` → `providerutil.FetchGenreMetadataAsync` →
+`resolveISRCFromSpotifyURL` → **`songlink.GetISRC`**. Vérifié par recherche exhaustive (passe du
+2026-07-15) : `songlink.GetISRC()` n'a **qu'un seul appelant vivant dans tout le repo**, c'est celui-ci
+— donc c'est bien LE chemin emprunté à chaque retag, pas une possibilité parmi d'autres. Et
+`GetISRC()` lui-même n'a que 2 maillons (Song.link → Deezer, sans Apple Music ni HTML scraping — les
+étages 3 et 4 de la chaîne à 4 niveaux du pipeline de téléchargement, voir S9, n'existent pas ici),
+donc c'est objectivement le chemin de résolution ISRC le plus fragile des trois qu'on a dans tout le
+repo. Si cette résolution échoue, `resolvedISRC == ""` et **la fonction retourne un résultat vide
+silencieusement — musicbrainz.go n'est jamais appelé, aucune erreur distincte ne remonte.** Vu d'en
+haut, ça ressemble exactement à "sur-sélectionne et skip 99%" : plein de pistes "traitées" sans genre,
+sans qu'on puisse distinguer "MusicBrainz n'a pas de genre pour ce morceau" de "on n'a même pas pu
+obtenir l'ISRC".
 
 **Recommandation : ne pas porter musicbrainz.go seul en pariant que c'est LA cause.** Deux pistes à
 considérer ensemble : (a) les améliorations MusicBrainz elles-mêmes (cache/dédup/erreur explicite sur
