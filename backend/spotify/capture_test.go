@@ -123,6 +123,24 @@ func TestCaptureFixtures(t *testing.T) {
 		dumpRaw(t, "raw_artist.json", artistData)
 	}
 
+	// ── artist discography (all) ──
+	// The overview above does NOT populate artistUnion.discography.all — that's
+	// a separate query merged in by fetchArtistDiscography before FilterArtist
+	// runs. Capturing it lets the golden test cover FilterArtist's
+	// discography/release extraction, which the overview alone leaves untested.
+	discographyPayload := map[string]interface{}{
+		"variables":     map[string]interface{}{"uri": fmt.Sprintf("spotify:artist:%s", artistID), "offset": 0, "limit": 50, "order": "DATE_DESC"},
+		"operationName": "queryArtistDiscographyAll",
+		"extensions": map[string]interface{}{
+			"persistedQuery": map[string]interface{}{"version": 1, "sha256Hash": "5e07d323febb57b4a56a42abbf781490e58764aa45feb6e3dc0591564fc56599"},
+		},
+	}
+	if discographyData, err := client.Query(discographyPayload); err != nil {
+		t.Logf("query artist discography failed (non-fatal): %v", err)
+	} else {
+		dumpRaw(t, "raw_artist_discography.json", discographyData)
+	}
+
 	// ── search ──
 	searchPayload := map[string]interface{}{
 		"variables": map[string]interface{}{
