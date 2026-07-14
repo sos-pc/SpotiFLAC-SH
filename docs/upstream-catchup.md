@@ -300,15 +300,30 @@ pourquoi eux l'ont enlevée avant de s'en inquiéter). `lyrics_reader.go` (nouve
 embarquées dans un fichier — utile en théorie, mais la moitié de ses fonctions publiques
 (`SelectLyricsFiles`/`SelectLyricsFolder`) sont des dialogues Wails desktop, pas applicables ici.
 
-### S11 — Lecture/écriture de tags
+### S11 — Lecture/écriture de tags ✅ lu
 
-**Fichiers :** `metadata.go` (549 lignes), `tagging.go` (nouveau, 449 lignes), `upc_tags.go`.
+**Fichiers :** `metadata.go` (572 lignes de diff), `tagging.go` (nouveau, 527 lignes), `upc_tags.go`
+(nouveau, 80 lignes, petit et autonome).
 
-**Sujet complètement absent du premier découpage** — `metadata.go` n'était assigné nulle part.
-`tagging.go` est construit autour d'une **nouvelle dépendance upstream, `go.senan.xyz/taglib`** (voir
-S14/go.mod) — a priori une migration en cours chez eux depuis le code par-format fait main de
-`metadata.go` vers une lib unifiée. Comparer les deux avant de porter l'un ou l'autre. Notre
-équivalent : `backend/meta/metadata.go` + `backend/meta/tag_write_lock.go`.
+**Confirmation : c'est une vraie migration d'architecture chez eux, pas un ajout.**
+`embedMetadataToMP3`/`embedMetadataToM4A` (code par-format fait main : `id3v2` pour MP3, écriture
+d'atomes custom pour M4A) ont été **supprimés** de `metadata.go`, remplacés par `tagging.go::TagFile`
+qui passe tout par `go.senan.xyz/taglib` — une seule lib pour tous les formats au lieu de 3+.
+
+**Point d'attention avant même d'évaluer l'intérêt : `go.senan.xyz/taglib` est un binding CGO vers la
+lib C++ TagLib** (à vérifier avec certitude, mais c'est la nature connue de ce module) — **potentiellement
+incompatible avec notre build `CGO_ENABLED=0`** (Dockerfile scratch, mentionné explicitement dans
+`.kiro/HANDOFF.md` comme contrainte). Si confirmé, ce n'est pas une question de "combien d'effort",
+c'est structurellement bloqué sans changer notre stratégie de build — **à vérifier en premier**, avant
+de considérer quoi que ce soit d'autre sur ce sujet.
+
+**`upc_tags.go`** : petit helper autonome de normalisation des clés de tag UPC (`UPC`, `BARCODE`,
+`TXXX:UPC`, atomes iTunes `----:com.apple.itunes:upc`, etc.) — indépendant de la question CGO, portable
+facilement si on décide un jour de supporter l'UPC (lié à la découverte UPC de S6/S9).
+
+**Recommandation : ne pas prioriser** — gros effort (changement de lib de tagging entière), gain
+incertain, et un vrai risque de blocage technique (CGO) à lever avant de considérer la question plus
+sérieusement. `upc_tags.go` seul est portable à part si besoin.
 
 ### S12 — Formatage noms/artistes
 
