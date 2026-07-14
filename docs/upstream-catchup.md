@@ -24,9 +24,9 @@
 | **S2** | Validation post-téléchargement | download_validation.go | Trouvaille concrète, prête à porter | **1** |
 | **S3** | Retry/cooldown réseau (429/503) | community_endpoints.go (`doCommunityRequest`) | Pattern identifié, à adapter | **1** |
 | **S4** | Déchiffrement DRM | mp4ff_decrypt.go | À part — décision utilisateur requise avant tout triage technique | — |
-| **S5** | Client Tidal | tidal.go, tidal_community.go | Pas encore lu en détail | 3 |
+| **S5** ✅ | Client Tidal | tidal.go, tidal_community.go | **lu en entier** — gap réel : pas de validation mimeType-vs-qualité (même famille que S2), fallback HI_RES→LOSSLESS déjà présent chez nous | 2 |
 | **S6** ✅ | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **lu en entier** — hypothèse concrète et vérifiable sur le 401 (`searchByISRC` utilise encore l'ancien app_id non signé), + gap de scoring indépendant (voir §S6) | **2** |
-| **S7** | Client Amazon | amazon.go | Pas encore lu en détail | 3 |
+| **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** ✅ | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **lu en entier** — notre vraie chaîne (`jobs_helpers.go`) a déjà 4 étages, plus robuste que prévu ; ISRC-direct reste le meilleur candidat de portage (voir §S9) | 3 (portage) |
 | **S10** | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | Lien direct avec R10 (voir §S10) | **2** |
@@ -97,10 +97,38 @@ réintroduire cette dépendance ; brancher plutôt sur notre système SSE/jobs e
 MP4 chiffré (clés par piste). Différent en nature des autres fichiers de ce rattrapage — question de
 conformité/ToS à trancher explicitement avant toute évaluation technique.
 
-### S5 — Client Tidal
+**Contexte ajouté après lecture de S7 :** ce n'est pas une feature indépendante — c'est le remplacement
+du déchiffrement Amazon Music qu'on a déjà (`ffmpeg -decryption_key`, une seule clé). Upstream y est
+passé parce que leur proxy communautaire renvoie maintenant plusieurs clés par fichier
+(`key_specs []string`) que `ffmpeg -decryption_key` ne peut pas exprimer. Voir §S7 pour le détail —
+ça ne change pas la nature de la décision à prendre, mais ça change l'enjeu : ce n'est pas hypothétique,
+c'est potentiellement déjà en train de casser des téléchargements Amazon chez nous si notre proxy a
+évolué pareil.
 
-**Fichiers :** `tidal.go` (+270/-343 depuis la baseline), `tidal_community.go`. Pas encore lu en
-détail. Notre équivalent : `backend/tidal/{client,params,auth,device}.go`.
+### S5 — Client Tidal ✅ lu
+
+**Fichiers :** `tidal.go` (946 lignes de diff), `tidal_community.go` (déjà couvert en S1). Comparé à
+`backend/tidal/client.go` (1030 lignes).
+
+**Beaucoup du diff est du bruit de signature** (ajout de `metadataSeparator`/`isrcOverride`/
+`spotifyComposer` partout, même motif que S6/S8 — pas urgent, déjà noté ailleurs).
+
+**Une vraie trouvaille, dans le même esprit que S2 mais pour la qualité plutôt que la durée :**
+`DownloadFromManifest` upstream vérifie maintenant le `mimeType` réellement livré contre la qualité
+demandée (`isLosslessRequested && !isActualLossless → abort "Aborting download"`) — **avant** d'écrire
+le fichier. On a le même parsing de `mimeType` chez nous (`backend/tidal/client.go:350,376`) mais on se
+contente de logger `"Downloading non-FLAC file"` en debug et de continuer : **rien n'empêche
+aujourd'hui de sauvegarder un flux qualité inférieure sous une extension/tag FLAC si Tidal en sert un
+silencieusement.** Chez upstream, ce rejet déclenche en plus le passage à l'API Tidal miroir suivante
+(`tryDownloadAcrossTidalAPIs` boucle sur plusieurs miroirs, réessaie tant qu'aucun ne renvoie la bonne
+qualité) — donc pas juste un rejet, un vrai retry ciblé.
+
+**Vérifié : le fallback HI_RES→LOSSLESS existe déjà chez nous** (`backend/tidal/client.go:550,673`,
+`AllowFallback`) — pas un gap, upstream a la même logique.
+
+**Recommandation :** porter la validation mimeType-vs-qualité-demandée dans `DownloadFromManifest`,
+dans la continuité de S2 (même famille de bug : accepter silencieusement un flux qui ne correspond pas
+à ce qui a été demandé).
 
 ### S6 — Client Qobuz
 
@@ -147,11 +175,29 @@ pas forcément tout le pipeline Qobuz.
 en prod est bien dans `searchByISRC` (pas juste dans `musicdl.me`) avant d'investir le temps de porter
 `qobuz_api.go`.
 
-### S7 — Client Amazon
+### S7 — Client Amazon ✅ lu
 
-**Fichier :** `amazon.go` (+170/-145). Pas encore lu en détail. Endpoint de base déjà identique aux
-deux côtés (`amazon.spotbye.qzz.io`, voir S1) donc probablement des ajustements plus fins à comparer,
-pas un changement d'infra.
+**Fichier :** `amazon.go` (517 lignes de diff). Comparé à `backend/amazon/client.go`.
+
+**Découverte qui relie S4 et S7 : `mp4ff_decrypt.go` n'est pas une feature à part, c'est le
+remplacement du mécanisme de déchiffrement Amazon Music.** Ancien code (encore ce qu'on a
+aujourd'hui, `backend/amazon/client.go:271-278`) : une **seule** clé de déchiffrement
+(`apiResp.DecryptionKey`), passée directement à `ffmpeg -decryption_key <clé> -i ... -c copy`. Nouveau
+code upstream : leur proxy communautaire renvoie maintenant `key_specs []string` (**plusieurs clés**,
+probablement une par segment/piste protégée), qu'`ffmpeg -decryption_key` ne sait exprimer qu'à clé
+unique — d'où le passage à `mp4ff` qui accepte une table de clés (`keysByKID map[string][]byte`).
+
+**Implication concrète pour la décision S4 :** ce n'est pas juste "voulons-nous ajouter du
+déchiffrement DRM", c'est potentiellement "notre déchiffrement Amazon actuel (clé unique) risque de ne
+plus suffire si leur service de contenu a évolué vers plusieurs clés par fichier" — mais je n'ai aucun
+moyen de vérifier si `amazon.spotbye.qzz.io` (notre proxy) a fait la même évolution que le proxy
+upstream sans accès aux logs de prod. À vérifier concrètement (un téléchargement Amazon échoue-t-il
+avec un message clé/déchiffrement ?) avant de trancher S4 uniquement sur des principes.
+
+**Reste du diff** : essentiellement du bruit de signature (mêmes paramètres `metadataSeparator`/
+`isrcOverride`/`spotifyComposer` que S5/S6/S8) et un renommage cosmétique
+(`DownloadFromAfkarXYZ` → `downloadFromCommunity`, on a déjà fait cette transition nous-mêmes). Rien
+d'autre à signaler.
 
 ### S8 — Client Spotify authentifié (spotfetch.go / spotify_metadata.go / spotify_totp.go) ✅ lu
 
