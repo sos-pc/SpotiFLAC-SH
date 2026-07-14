@@ -325,10 +325,25 @@ facilement si on décide un jour de supporter l'UPC (lié à la découverte UPC 
 incertain, et un vrai risque de blocage technique (CGO) à lever avant de considérer la question plus
 sérieusement. `upc_tags.go` seul est portable à part si besoin.
 
-### S12 — Formatage noms/artistes
+### S12 — Formatage noms/artistes ✅ lu
 
-**Fichiers :** `artist_format.go`, `filename.go`. Pas encore lu en détail. `artist_format.go`
-(`SplitArtistCredits`) est probablement lié à notre réglage `useFirstArtistOnly`.
+**Fichiers :** `artist_format.go` (nouveau, 90 lignes), `filename.go` (146 lignes de diff). Lus en
+entier.
+
+**`artist_format.go`** : découpe une chaîne d'artistes en valeurs de tag séparées (dédupliquées),
+séparateur configurable virgule/point-virgule. Différent de notre `useFirstArtistOnly` (qui ne garde
+que le premier artiste) — ça sert plutôt à écrire **plusieurs valeurs de tag artiste distinctes**
+(convention multi-valeur ID3/Vorbis) au lieu d'une chaîne jointe. Même thème que le `separator` non
+propagé jusqu'aux tags trouvé en S8 — pas un item séparé à traiter, un symptôme de plus du même écart.
+
+**`filename.go`** : nouveaux tokens de template (`{isrc}`, `{upc}`, `{category}`, `{creator}`,
+`{total_tracks}`, `{total_discs}`, `{artists}`) — mineur, extension du vocabulaire de nommage.
+
+**Découverte indépendante, plus intéressante que le fichier lui-même :**
+`ResolveOutputPathForDownload` — un mécanisme "retélécharger avec suffixe" (`_01`, `_02`, ...) au lieu
+d'écraser ou de sauter un fichier existant. **On n'a rien d'équivalent** (zéro occurrence dans tout le
+repo). C'est une vraie fonctionnalité produit, pas un bug — à soumettre à l'utilisateur comme option
+plutôt qu'à trancher ici.
 
 ### S13 — Utilitaires bas signal
 
