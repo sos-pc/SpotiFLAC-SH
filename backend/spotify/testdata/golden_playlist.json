@@ -1,0 +1,878 @@
+{
+  "id": "37i9dQZF1DXcBWIGoYBM5M",
+  "name": "Today’s Top Hits",
+  "description": "The hottest 50. Cover: Ella Langley",
+  "owner": {
+    "name": "Spotify",
+    "avatar": "https://i.scdn.co/image/ab6775700000ee8555c25988a6ac314394d3fbf5"
+  },
+  "cover": "https://i.scdn.co/image/ab67706f000000027c8caf9245f760bf0b5125c5",
+  "count": 50,
+  "followers": 34180789,
+  "tracks": [
+    {
+      "id": "65DbTqJKhbwqYbZ1Okr0rc",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0290958927fbba47a62c3e63f8",
+      "title": "Choosin' Texas",
+      "artist": "Ella Langley",
+      "artistIds": [
+        "6BRxQ8cD3eqnrVj6WKDok8"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Choosin' Texas",
+      "albumArtist": "Ella Langley",
+      "albumId": "4ggV0IaczfDFjVSwBM8yvi",
+      "duration": "3:52",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "0kosUz0jePvjiz4ctmR6wL",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0203cadf1b3fe324c1dc710ed4",
+      "title": "Dai Dai",
+      "artist": "Shakira, Burna Boy",
+      "artistIds": [
+        "0EmeFodog0BfCgMzAIvKQp",
+        "3wcj11K77LjEY1PkEazffa"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Dai Dai",
+      "albumArtist": "Shakira, Burna Boy",
+      "albumId": "2eeufspLkAubwTJfOGSrI8",
+      "duration": "3:43",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "20jbSiX29FDX4oQxBXyUEi",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02b622d42c30697e1e1414343c",
+      "title": "hate that i made you love me",
+      "artist": "Ariana Grande",
+      "artistIds": [
+        "66CXWjxzNUsdJxJ2JdwvnR"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "hate that i made you love me",
+      "albumArtist": "Ariana Grande",
+      "albumId": "1x159B5VzbDWAGBik5cr1z",
+      "duration": "3:17",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "4LfCY65LvojKjWEnU7fNN4",
+      "cover": "https://i.scdn.co/image/ab67616d00001e025cf234eeb7a2edf44bf64a46",
+      "title": "stupid song",
+      "artist": "Olivia Rodrigo",
+      "artistIds": [
+        "1McMsnEElThX1knmY4oliG"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "you seem pretty sad for a girl so in love",
+      "albumArtist": "Olivia Rodrigo",
+      "albumId": "3WZZF72ihlKPZBS4zSsNHl",
+      "duration": "3:29",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "0eAuGrXyGFYwur9ARUe7LJ",
+      "cover": "https://i.scdn.co/image/ab67616d00001e022c1f34ecc1929fb59908aad1",
+      "title": "Earrings",
+      "artist": "Malcolm Todd",
+      "artistIds": [
+        "7eKkW1zo5uzW8kUntiiBvz"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Sweet Boy",
+      "albumArtist": "Malcolm Todd",
+      "albumId": "2jX6yKrWw9bY7JAYHhhtqZ",
+      "duration": "2:31",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "5uPaqMMt59KGrdKIitDRqa",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02a35a1d4983e2b4fd0094f910",
+      "title": "I Knew It, I Knew You - From \"Toy Story 5\"",
+      "artist": "Taylor Swift",
+      "artistIds": [
+        "06HL4z0CvFAxyc27GXpf02"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "I Knew It, I Knew You (From \"Toy Story 5\")",
+      "albumArtist": "Taylor Swift",
+      "albumId": "3ZLIShtR6Fjs4nTWFpBUB6",
+      "duration": "2:58",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "4qW3BbQAwZsrnu8a3ZRdyT",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02d6c26d2ae723f7ab553d64cc",
+      "title": "Self Aware",
+      "artist": "Temper City",
+      "artistIds": [
+        "5mHUmlJWkcoOk1NbjfrXWz"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Self Aware",
+      "albumArtist": "Temper City",
+      "albumId": "7Cdqksm4yTfiq0EfKPa86M",
+      "duration": "3:00",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "7yNf9YjeO5JXUE3JEBgnYc",
+      "cover": "https://i.scdn.co/image/ab67616d00001e027b1b6f41c1645af9757d5616",
+      "title": "Babydoll",
+      "artist": "Dominic Fike",
+      "artistIds": [
+        "6USv9qhCn6zfxlBQIYJ9qs"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Don't Forget About Me, Demos",
+      "albumArtist": "Dominic Fike",
+      "albumId": "05jbNkYoEQdjVDHEHtg1gY",
+      "duration": "1:37",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "1qbmS6ep2hbBRaEZFpn7BX",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02e3d69e17dde129037a1f09e2",
+      "title": "Man I Need",
+      "artist": "Olivia Dean",
+      "artistIds": [
+        "00x1fYSGhdqScXBRpSj3DW"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Man I Need",
+      "albumArtist": "Olivia Dean",
+      "albumId": "0Bv6OJO0L5gcf20DMww54a",
+      "duration": "3:04",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "514joG57v4yKTsfQmz7stz",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02fe9d3ab9adb1d3b59835b81c",
+      "title": "Janice STFU",
+      "artist": "Drake",
+      "artistIds": [
+        "3TVXtAsR1Inumwj472S9r4"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "ICEMAN",
+      "albumArtist": "Drake",
+      "albumId": "0OAv7DCME2AV4q1KPO95HY",
+      "duration": "3:57",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "5yvVYFDUpbnjcnRBgjwTzM",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02c7c031ce9d06b131f8563676",
+      "title": "Dracula - JENNIE Remix",
+      "artist": "Tame Impala, JENNIE",
+      "artistIds": [
+        "5INjqkS1o8h1imAzPqGZBb",
+        "250b0Wlc5Vk0CoUsaCY84M"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Dracula (Remix)",
+      "albumArtist": "Tame Impala, JENNIE",
+      "albumId": "6KFq3hJB6JnNvDbEHRvPoK",
+      "duration": "3:29",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "5y2ijHECwFYWqcAHKTZgzD",
+      "cover": "https://i.scdn.co/image/ab67616d00001e023eb8dc748f7efb1470f74395",
+      "title": "Risk It All",
+      "artist": "Bruno Mars",
+      "artistIds": [
+        "0du5cEVh5yTK9QJze8zA0C"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "The Romantic",
+      "albumArtist": "Bruno Mars",
+      "albumId": "7vI4iTxDmgEN63liQHPEX1",
+      "duration": "3:24",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "2gYTC8DsplN3RNdpdBcCOQ",
+      "cover": "https://i.scdn.co/image/ab67616d00001e020901e50bfaff4351a29f462b",
+      "title": "Die On This Hill",
+      "artist": "SIENNA SPIRO",
+      "artistIds": [
+        "02gSuSAWEdWa5UOvqzjX6v"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Die On This Hill",
+      "albumArtist": "SIENNA SPIRO",
+      "albumId": "7GS4aKISJ2KgAm4aBhkzng",
+      "duration": "3:37",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "6gkbtMtioHgtyGjrMel6ei",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02c25b53f0a34aa1bb4f77cb3e",
+      "title": "drop dead",
+      "artist": "Olivia Rodrigo",
+      "artistIds": [
+        "1McMsnEElThX1knmY4oliG"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "drop dead",
+      "albumArtist": "Olivia Rodrigo",
+      "albumId": "4OMvPbXaYlbUm6TnwyXGct",
+      "duration": "3:44",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "6sGIMrtIzQjdzNndVxe397",
+      "cover": "https://i.scdn.co/image/ab67616d00001e029a336bfb6d40bbd90a507417",
+      "title": "So Easy (To Fall In Love)",
+      "artist": "Olivia Dean",
+      "artistIds": [
+        "00x1fYSGhdqScXBRpSj3DW"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "The Art of Loving",
+      "albumArtist": "Olivia Dean",
+      "albumId": "0l8zYqoUeBYg47Gmevq9HZ",
+      "duration": "2:49",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "79RJg6MqIJlBuedcMqB9F0",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0255615e9242bd96706c68a743",
+      "title": "My Body Isn't Ready",
+      "artist": "sombr",
+      "artistIds": [
+        "4G9NDjRyZFDlJKMRL8hx3S"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "My Body Isn't Ready",
+      "albumArtist": "sombr",
+      "albumId": "27fL8TMJUfW4XRXZqougTh",
+      "duration": "3:37",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "31TXxq8gfgYyrYClnYY48m",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02b034f9cdf12ae14c603daa99",
+      "title": "The Fate of Ophelia",
+      "artist": "Taylor Swift",
+      "artistIds": [
+        "06HL4z0CvFAxyc27GXpf02"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "The Life of a Showgirl",
+      "albumArtist": "Taylor Swift",
+      "albumId": "1W57oNaAkGObOQKBTxg4e9",
+      "duration": "3:46",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "1DwscornXpj8fmOmYVlqZt",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02684ecc5bc1b724d0106ad694",
+      "title": "Stateside + Zara Larsson",
+      "artist": "PinkPantheress, Zara Larsson",
+      "artistIds": [
+        "78rUTD7y6Cy67W1RVzYs7t",
+        "1Xylc3o4UrD53lo9CvFvVg"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Fancy Some More?",
+      "albumArtist": "PinkPantheress",
+      "albumId": "12Lig9oAX9nvpWHft5cHgF",
+      "duration": "3:04",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "55lijDD6OAjLFFUHU9tcDm",
+      "cover": "https://i.scdn.co/image/ab67616d00001e026ac3c7938191585c53c8180d",
+      "title": "WHERE IS MY HUSBAND!",
+      "artist": "RAYE",
+      "artistIds": [
+        "5KKpBU5eC2tJDzf0wmlRp2"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "WHERE IS MY HUSBAND!",
+      "albumArtist": "RAYE",
+      "albumId": "01sqwTOTrN9gaYQc1rr6Zw",
+      "duration": "3:17",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "5BZsQlgw21vDOAjoqkNgKb",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02d65c4773bc5061fd27facc5b",
+      "title": "DAISIES",
+      "artist": "Justin Bieber",
+      "artistIds": [
+        "1uNFoZAHBGtllmzznpCI3s"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "SWAG",
+      "albumArtist": "Justin Bieber",
+      "albumId": "5vD5M5VW62LL78Ko8x0CVZ",
+      "duration": "2:56",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "3sK8wGT43QFpWrvNQsrQya",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02bbd45c8d36e0e045ef640411",
+      "title": "DtMF",
+      "artist": "Bad Bunny",
+      "artistIds": [
+        "4q3ewBCX7sLwd24euuV69X"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "DeBÍ TiRAR MáS FOToS",
+      "albumArtist": "Bad Bunny",
+      "albumId": "5K79FLRUCSysQnVESLcTdb",
+      "duration": "3:57",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "0kl6Ozan3fuUdCl6TlB15v",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02b42ed7f52290f1583760a7e2",
+      "title": "Talk To You (ft. 54 Ultra)",
+      "artist": "ANOTR, 54 Ultra",
+      "artistIds": [
+        "4p5WgeiPSPpqPDs7T6OkWf",
+        "6X5L6rmyvrWWu60Gx6exiZ"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Talk To You (ft. 54 Ultra)",
+      "albumArtist": "ANOTR, 54 Ultra",
+      "albumId": "374Z5kI6lNCztQV7HItzUJ",
+      "duration": "3:11",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "3oTuTpF1F3A7rEC6RKsMRz",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02fecaa7826bb0cbe139a8cb83",
+      "title": "Raindance (feat. Tems)",
+      "artist": "Dave, Tems",
+      "artistIds": [
+        "6Ip8FS7vWT1uKkJSweANQK",
+        "687cZJR45JO7jhk1LHIbgq"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "The Boy Who Played the Harp",
+      "albumArtist": "Dave",
+      "albumId": "24f1GFXCkViGoRpmGqlSSl",
+      "duration": "3:39",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "3qhlB30KknSejmIvZZLjOD",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02fddfffec51b4580acae727c1",
+      "title": "End of Beginning",
+      "artist": "Djo",
+      "artistIds": [
+        "5p9HO3XC5P3BLxJs5Mtrhm"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "DECIDE",
+      "albumArtist": "Djo",
+      "albumId": "4JDXBZdRPId4devseaAOKH",
+      "duration": "2:39",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "7MZHqgTVTnN6xZGYAcEEAf",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02ae318205b51b71541a2df121",
+      "title": "Rein Me In (with Olivia Dean)",
+      "artist": "Sam Fender, Olivia Dean",
+      "artistIds": [
+        "6zlR5ttMfMNmwf2lecU9Cc",
+        "00x1fYSGhdqScXBRpSj3DW"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Rein Me In (with Olivia Dean)",
+      "albumArtist": "Sam Fender, Olivia Dean",
+      "albumId": "4utNKv9RDTzfIGok0tlOgl",
+      "duration": "5:39",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "36idurZmYRjJ56KQ8JD9bN",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02e6cb19b02e38d18246ac334f",
+      "title": "Boston",
+      "artist": "STELLA LEFTY",
+      "artistIds": [
+        "6hp2uD84OrQ3u3ukmTjLz2"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Boston",
+      "albumArtist": "STELLA LEFTY",
+      "albumId": "4YLIRb8DdBTXbgHiFLicH2",
+      "duration": "2:50",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "4EoJ151oQ5jY48z4RhSE96",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0279e480cbab8c7b86d277841a",
+      "title": "the cure",
+      "artist": "Olivia Rodrigo",
+      "artistIds": [
+        "1McMsnEElThX1knmY4oliG"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "the cure",
+      "albumArtist": "Olivia Rodrigo",
+      "albumId": "6zme2NwcaBxbn3mWOcMY8y",
+      "duration": "4:57",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "7gtG45ieyQzKtNKobfLd49",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0274959140f550b11049c18a38",
+      "title": "American Girls",
+      "artist": "Harry Styles",
+      "artistIds": [
+        "6KImCVD70vtIoJWnq6nGn3"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Kiss All The Time. Disco, Occasionally.",
+      "albumArtist": "Harry Styles",
+      "albumId": "69BqE1V8Bzb9GCyeP1fFeR",
+      "duration": "3:33",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "65aS53swxB9LUGbHDKdvvB",
+      "cover": "https://i.scdn.co/image/ab67616d00001e022a6c9aa7070279c1c3193338",
+      "title": "Look at My Life",
+      "artist": "Gracie Abrams",
+      "artistIds": [
+        "4tuJ0bMpJh08umKkEXKUI5"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Look at My Life",
+      "albumArtist": "Gracie Abrams",
+      "albumId": "7FTXtGd2zNyN3zZA3ntMZr",
+      "duration": "3:10",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "12bYYQaLqHliSXvRIYlq8G",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02e7623a0a60f330ee2b24d498",
+      "title": "I Just Might",
+      "artist": "Bruno Mars",
+      "artistIds": [
+        "0du5cEVh5yTK9QJze8zA0C"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "I Just Might",
+      "albumArtist": "Bruno Mars",
+      "albumId": "2YOfpbW6kCd2XHW2Ln2Uih",
+      "duration": "3:32",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "2LSmH4vxyRhkJ2pPqcmkXw",
+      "cover": "https://i.scdn.co/image/ab67616d00001e023adeba767abb79b86ed0449b",
+      "title": "NOBLE",
+      "artist": "F3miii",
+      "artistIds": [
+        "0gmx7cndNJbFM0DAO7fT0s"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "NOBLE",
+      "albumArtist": "F3miii",
+      "albumId": "0g2so560PUSwl895vWwaQK",
+      "duration": "3:05",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "7e4zDInS6tA2jwzphvs2Ay",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02450a730dd72f3bf49882ae9d",
+      "title": "Jamaican (Bam Bam)",
+      "artist": "HUGEL, SOLTO (FR)",
+      "artistIds": [
+        "5PlfkPxwCpRRWQJBxCa0By",
+        "0F3tUZeb9dLNEpxCpzEBQt"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Jamaican (Bam Bam)",
+      "albumArtist": "HUGEL, SOLTO (FR)",
+      "albumId": "5ZX3Zdp20YCGI4ruAfZlMj",
+      "duration": "2:36",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "37UCSVSqiPGdR1DijOFyYY",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0239905bfc6729b13ec7a7fead",
+      "title": "Midnight Sun",
+      "artist": "Zara Larsson",
+      "artistIds": [
+        "1Xylc3o4UrD53lo9CvFvVg"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Midnight Sun",
+      "albumArtist": "Zara Larsson",
+      "albumId": "014U2yqVgeCNqykPGzgyki",
+      "duration": "3:09",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "6fl4Gu0lJm5hc8FM5JzCZD",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0255886e2f0784a2b7b62b7fe7",
+      "title": "ICONIC BY MISTAKE",
+      "artist": "LE SSERAFIM, ILLIT, KATSEYE",
+      "artistIds": [
+        "4SpbR6yFEvexJuaBpgAU5p",
+        "36cgvBn0aadzOijnjjwqMN",
+        "3c0gDdb9lhnHGFtP4prQpn"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "ICONIC BY MISTAKE",
+      "albumArtist": "LE SSERAFIM, ILLIT, KATSEYE",
+      "albumId": "7yys068oxBNuFHNbF8HMam",
+      "duration": "2:57",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "5IMpnpD0tQVcqWlVIgtAtV",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02e74e15fe75e80ea69f38a680",
+      "title": "iloveitiloveitiloveit",
+      "artist": "Bella Kay",
+      "artistIds": [
+        "4Z8MrrKMBHMPa8d04Ivur8"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "iloveitiloveitiloveit",
+      "albumArtist": "Bella Kay",
+      "albumId": "6XxrC3tz3EuqoW5RMbYzaF",
+      "duration": "3:03",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "42UBPzRMh5yyz0EDPr6fr1",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02062c6573009fdebd43de443b",
+      "title": "Manchild",
+      "artist": "Sabrina Carpenter",
+      "artistIds": [
+        "74KM79TiuVKeVCqs8QtB0B"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Manchild",
+      "albumArtist": "Sabrina Carpenter",
+      "albumId": "3wRHV5fOeUcM5hvYzWZsic",
+      "duration": "3:33",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "4ZYlzwjjAJrflwWg4DJTlT",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0229803857f9f242ab9fdcfe40",
+      "title": "MORNING DEW (DONK)",
+      "artist": "Beyoncé",
+      "artistIds": [
+        "6vWDO969PvNqNYHIOW5v0m"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "MORNING DEW (DONK)",
+      "albumArtist": "Beyoncé",
+      "albumId": "5RfHUCfMuzunNhUZslZfjJ",
+      "duration": "4:03",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "5rfOARz6QO73wPATyMtQQZ",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0213823d6fa982add5b750bf15",
+      "title": "DANCE...",
+      "artist": "Slayyyter",
+      "artistIds": [
+        "4QM5QCHicznALtX885CnZC"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "DANCE...",
+      "albumArtist": "Slayyyter",
+      "albumId": "0aUf8eGa6qyxQT9OWZR09v",
+      "duration": "4:47",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "4WFgvKVfEhb3IUAFGrutTR",
+      "cover": "https://i.scdn.co/image/ab67616d00001e020e62daaea2c7b94053e1c142",
+      "title": "Love Me Not",
+      "artist": "Ravyn Lenae",
+      "artistIds": [
+        "5RTLRtXjbXI2lSXc6jxlAz"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Bird's Eye",
+      "albumArtist": "Ravyn Lenae",
+      "albumId": "1uE3dRPe3SrGdNhd1nWlSa",
+      "duration": "3:33",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "7tICCrK3CcyRFKza7yrR0z",
+      "cover": "https://i.scdn.co/image/ab67616d00001e029a8d41dca4c7d0ef23d76dd7",
+      "title": "Homewrecker",
+      "artist": "sombr",
+      "artistIds": [
+        "4G9NDjRyZFDlJKMRL8hx3S"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Homewrecker",
+      "albumArtist": "sombr",
+      "albumId": "5KzDGTJ3sGlfuwSryRB4p4",
+      "duration": "3:29",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "4W6yulge3h7FSy0zGFrNKs",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0242045f14bfed607393b91735",
+      "title": "Orbiter",
+      "artist": "Noah Kahan",
+      "artistIds": [
+        "2RQXRUsr4IW1f3mKyKsy4B"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "The Great Divide: The Last Of The Bugs",
+      "albumArtist": "Noah Kahan",
+      "albumId": "01HMeEWI4jOmTIDHGaGI1n",
+      "duration": "4:46",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "05CjWFAcAlY6O9po6Qwakk",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0244cfd85001629f8f476d2723",
+      "title": "Be Her",
+      "artist": "Ella Langley",
+      "artistIds": [
+        "6BRxQ8cD3eqnrVj6WKDok8"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Be Her",
+      "albumArtist": "Ella Langley",
+      "albumId": "0xY9ccawTTfHlwdVlkDT90",
+      "duration": "3:37",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "5ViLKrbyL3HD6wsq3AB9eI",
+      "cover": "https://i.scdn.co/image/ab67616d00001e023696096119ef08824cf85ede",
+      "title": "White Keys",
+      "artist": "Dominic Fike",
+      "artistIds": [
+        "6USv9qhCn6zfxlBQIYJ9qs"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "White Keys",
+      "albumArtist": "Dominic Fike",
+      "albumId": "0PRccyeXfXZBxi8dkIv17c",
+      "duration": "2:24",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "1CPZ5BxNNd0n0nF4Orb9JS",
+      "cover": "https://i.scdn.co/image/ab67616d00001e024dcb6c5df15cf74596ab25a4",
+      "title": "Golden",
+      "artist": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+      "artistIds": [
+        "2yNNYQBChuox9A5Ka93BIn",
+        "0RMJOzHDhAKY1o2j0W0vxY",
+        "0Wwji82sLA0Hcvtuak3omb",
+        "6U1dV7aL68N7Gb0Naq34V5",
+        "7mW7Tv7NvywKKXqafZo0Lc"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+      "albumArtist": "KPop Demon Hunters Cast, HUNTR/X, Saja Boys",
+      "albumId": "14JkAa6IiFaOh5s0nMyMU9",
+      "duration": "3:14",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "68lbSrXDORS51pmyjZv712",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02dfa17fad7f190c901603270e",
+      "title": "SWIM",
+      "artist": "BTS",
+      "artistIds": [
+        "3Nrfpe0tUJi4K4DXYWgMUX"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "ARIRANG",
+      "albumArtist": "BTS",
+      "albumId": "3ukkRHDHbN8tNRPKsGZR1h",
+      "duration": "2:39",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "2SaWT781xr3hHLdbVt5DB7",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02b7129146f87f5f22b8154bee",
+      "title": "Freakin’ Out",
+      "artist": "Dexter and The Moonrocks",
+      "artistIds": [
+        "72sOBVpZpUwHq7i0vb26lT"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "Freakin’ Out",
+      "albumArtist": "Dexter and The Moonrocks",
+      "albumId": "3hToTQIS84qGNxEhrZHiWf",
+      "duration": "3:37",
+      "is_explicit": false,
+      "disc_number": 1
+    },
+    {
+      "id": "3B4cjvGlPvyBLNG3AzEgkZ",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0225c28f3c9fbdbab1a88dd619",
+      "title": "E85",
+      "artist": "Don Toliver",
+      "artistIds": [
+        "4Gso3d4CscCijv0lmajZWs"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "OCTANE",
+      "albumArtist": "Don Toliver",
+      "albumId": "131x9G87mD0hP0hGZc9qYN",
+      "duration": "2:33",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "3cZajhyr8LmtPfHZ9296tj",
+      "cover": "https://i.scdn.co/image/ab67616d00001e02699b0363dda94e1f1e32eef5",
+      "title": "No Broke Boys",
+      "artist": "Disco Lines, Tinashe",
+      "artistIds": [
+        "5Kmr0b3ip8g9P2i0dLTC3Z",
+        "0NIIxcxNHmOoyBx03SfTCD"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "No Broke Boys",
+      "albumArtist": "Disco Lines, Tinashe",
+      "albumId": "520FALYwo6yPbp5kBchA8N",
+      "duration": "2:43",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "1tz7RZirwiuaJw2p0jbdHb",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0290af5246adcaa93acb721c17",
+      "title": "KOKO",
+      "artist": "Omar Courtz",
+      "artistIds": [
+        "3E12tRURRvPfHz0hAMCFYc"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "POR SI MAÑANA NO ESTOY",
+      "albumArtist": "Omar Courtz",
+      "albumId": "6A7uWpBb4nHbiBHWRlZi5f",
+      "duration": "3:15",
+      "is_explicit": true,
+      "disc_number": 1
+    },
+    {
+      "id": "2fCwv2ppU5nTRTckomIGsd",
+      "cover": "https://i.scdn.co/image/ab67616d00001e0224ace1518851b27e9983f739",
+      "title": "REDRED",
+      "artist": "CORTIS",
+      "artistIds": [
+        "1ebt9HnXdyYA6KgLXr1n4P"
+      ],
+      "plays": "",
+      "status": "",
+      "album": "REDRED",
+      "albumArtist": "CORTIS",
+      "albumId": "52J8GQoNp2vgDJ6992NjiM",
+      "duration": "2:43",
+      "is_explicit": false,
+      "disc_number": 1
+    }
+  ]
+}

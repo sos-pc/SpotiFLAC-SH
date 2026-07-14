@@ -1,0 +1,288 @@
+{
+  "results": {
+    "tracks": [
+      {
+        "id": "0DiWol3AO6WpXZgp0goxAV",
+        "name": "One More Time",
+        "artists": "Daft Punk",
+        "album": "Discovery",
+        "duration": "5:20",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731e81bff9807a9e629fce5ade",
+        "is_explicit": false
+      },
+      {
+        "id": "69kOkLUCkxIZYexIgSG8rq",
+        "name": "Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+        "artists": "Daft Punk, Pharrell Williams, Nile Rodgers",
+        "album": "Random Access Memories",
+        "duration": "6:09",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2739b9b36b0e22870b9f542d937",
+        "is_explicit": false
+      },
+      {
+        "id": "1pKYYY0dkg23sQQXi0Q5zN",
+        "name": "Around the World",
+        "artists": "Daft Punk",
+        "album": "Homework",
+        "duration": "7:09",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2738ac778cc7d88779f74d33311",
+        "is_explicit": false
+      },
+      {
+        "id": "2cGxRwrMyEAp8dEbuZaVv6",
+        "name": "Instant Crush (feat. Julian Casablancas)",
+        "artists": "Daft Punk, Julian Casablancas",
+        "album": "Random Access Memories",
+        "duration": "5:37",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2739b9b36b0e22870b9f542d937",
+        "is_explicit": false
+      },
+      {
+        "id": "5W3cjX2J3tjhG8zb6u0qHn",
+        "name": "Harder, Better, Faster, Stronger",
+        "artists": "Daft Punk",
+        "album": "Discovery",
+        "duration": "3:46",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731e81bff9807a9e629fce5ade",
+        "is_explicit": false
+      },
+      {
+        "id": "2LD2gT7gwAurzdQDQtILds",
+        "name": "Veridis Quo",
+        "artists": "Daft Punk",
+        "album": "Discovery",
+        "duration": "5:45",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731e81bff9807a9e629fce5ade",
+        "is_explicit": false
+      },
+      {
+        "id": "7MXVkk9YMctZqd1Srtv4MB",
+        "name": "Starboy",
+        "artists": "The Weeknd, Daft Punk",
+        "album": "Starboy",
+        "duration": "3:50",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2734718e2b124f79258be7bc452",
+        "is_explicit": true
+      },
+      {
+        "id": "2Foc5Q5nqNiosCNqttzHof",
+        "name": "Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]",
+        "artists": "Daft Punk, Pharrell Williams, Nile Rodgers",
+        "album": "Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]",
+        "duration": "4:07",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27319a88dd5c7118e87d7b1619e",
+        "is_explicit": false
+      },
+      {
+        "id": "7cMFjxhbXBpOlais7KMF3j",
+        "name": "Voyager",
+        "artists": "Daft Punk",
+        "album": "Discovery",
+        "duration": "3:47",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731e81bff9807a9e629fce5ade",
+        "is_explicit": false
+      },
+      {
+        "id": "1JrfsKUoc3wkdGQB38XvG6",
+        "name": "Prime Time of Your Life",
+        "artists": "Daft Punk",
+        "album": "Prime Time of Your Life",
+        "duration": "4:05",
+        "cover": "https://i.scdn.co/image/ab6742d3000052b78237b1b63d555fe91cfbe5d3",
+        "is_explicit": false
+      }
+    ],
+    "albums": [
+      {
+        "id": "4m2880jivSbbyEGAKfITCa",
+        "name": "Random Access Memories",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2739b9b36b0e22870b9f542d937",
+        "year": 2013
+      },
+      {
+        "id": "2noRn2Aes5aoNVsU6iWThc",
+        "name": "Discovery",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731e81bff9807a9e629fce5ade",
+        "year": 2001
+      },
+      {
+        "id": "5uRdvUR7xCnHmUW8n64n9y",
+        "name": "Homework",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2738ac778cc7d88779f74d33311",
+        "year": 1997
+      },
+      {
+        "id": "7u6zL7kqpgLPISZYXNTgYk",
+        "name": "Alive 2007",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273673288fb985e5c194536ae27",
+        "year": 2007
+      },
+      {
+        "id": "3AMXFnwHWXCvNr5NCCpLZI",
+        "name": "TRON: Legacy - The Complete Edition (Original Motion Picture Soundtrack)",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2738323143296ff7b2801e32789",
+        "year": 2010
+      },
+      {
+        "id": "2T7DdrOvsqOqU9bGTkjBYu",
+        "name": "Human After All",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2732ed719bad67261c7bf090c70",
+        "year": 2005
+      },
+      {
+        "id": "6JRaPcrT3cMBEmkgSqEPhI",
+        "name": "Homework (25th Anniversary Edition)",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27387aa91b6ba6b4fded7bf3293",
+        "year": 1997
+      },
+      {
+        "id": "2ePFIvZKMe8zefATp9ofFA",
+        "name": "Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]",
+        "artists": "Daft Punk, Pharrell Williams, Nile Rodgers",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27319a88dd5c7118e87d7b1619e",
+        "year": 2013
+      },
+      {
+        "id": "2bhYZTFBsnB3IXItHQBmUV",
+        "name": "Random Access Memories",
+        "artists": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2734d22198f946d9b32f25fc263",
+        "year": 2013
+      },
+      {
+        "id": "3S0xe0lkUMdi0H6qZcRrIr",
+        "name": "Grand Garçon",
+        "artists": "PLK",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27381e87c483fb4f5448e3b5539",
+        "year": 2026
+      }
+    ],
+    "artists": [
+      {
+        "id": "4tZwfgrHOc3mvqYlEYSvVi",
+        "name": "Daft Punk",
+        "cover": "https://i.scdn.co/image/ab6761610000e5ebd3aa7cc0e419b6c459b08e8e"
+      },
+      {
+        "id": "1Cs0zKBU1kc0i8ypK3B9ai",
+        "name": "David Guetta",
+        "cover": "https://i.scdn.co/image/ab6761610000e5ebf150017ca69c8793503c2d4f"
+      },
+      {
+        "id": "2RdwBSPQiwcmiDo9kixcl8",
+        "name": "Pharrell Williams",
+        "cover": "https://i.scdn.co/image/ab6761610000e5ebf0789cd783c20985ec3deb4e"
+      },
+      {
+        "id": "1gR0gsQYfi6joyO1dlp76N",
+        "name": "Justice",
+        "cover": "https://i.scdn.co/image/ab6761610000e5ebf140c161d9f9cc9afe85b6ed"
+      },
+      {
+        "id": "3DCWeG2J1fZeu0Oe6i5Q6m",
+        "name": "PLK",
+        "cover": "https://i.scdn.co/image/ab6761610000e5ebc0b860256b49e3f681d491eb"
+      },
+      {
+        "id": "3IW7ScrzXmPvZhB27hmfgy",
+        "name": "Jul",
+        "cover": "https://i.scdn.co/image/ab6761610000e5ebaa70253f73793a0ff061069e"
+      },
+      {
+        "id": "2UwqpfQtNuhBwviIC0f2ie",
+        "name": "Damso",
+        "cover": "https://i.scdn.co/image/ab6761610000e5eb301a9c599d85d89e7a90fed0"
+      },
+      {
+        "id": "0KmGt61xZfAPN7YHTiM9dj",
+        "name": "Daft Pink",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2735cecfcadfd535d8047d08de1"
+      },
+      {
+        "id": "1F83oTuCQlj9S1mUI9vmkm",
+        "name": "Daft Punk (Guy-Manuel de Homem-Christo",
+        "cover": ""
+      },
+      {
+        "id": "1BgSD3n9htfSAvgu1M5FQi",
+        "name": "Daft Poets Society",
+        "cover": "https://i.scdn.co/image/ab6761610000e5eb315c3bee1612a5a56c208eae"
+      }
+    ],
+    "playlists": [
+      {
+        "id": "2jTy5QwqWJ1ZUv2XeJPYbn",
+        "name": "Daft Punk Greatest Hits",
+        "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67706c0000da84bb071380835cf25eafa2f681",
+        "owner": "Red Franzen"
+      },
+      {
+        "id": "37i9dQZF1EIZvbvrhfHXQ5",
+        "name": "Daft Punk Mix",
+        "cover": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/artistmix/4tZwfgrHOc3mvqYlEYSvVi/en",
+        "owner": "Spotify"
+      },
+      {
+        "id": "37i9dQZF1E4ow1baELNnKm",
+        "name": "Daft Punk Radio",
+        "cover": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/radio/artist/4tZwfgrHOc3mvqYlEYSvVi/en",
+        "owner": "Spotify"
+      },
+      {
+        "id": "37i9dQZF1DZ06evO2CNgSk",
+        "name": "This Is Daft Punk",
+        "cover": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/thisisv3/4tZwfgrHOc3mvqYlEYSvVi/en",
+        "owner": "Spotify"
+      },
+      {
+        "id": "37i9dQZF1DX9cbNxuNYT3d",
+        "name": "La French Touch",
+        "cover": "https://i.scdn.co/image/ab67706f000000024381593a82554c7b005b1271",
+        "owner": "Spotify"
+      },
+      {
+        "id": "07wiXty9fAFd7pXUn3UNd1",
+        "name": "Techno à l'ancienne",
+        "cover": "https://mosaic.scdn.co/640/ab67616d00001e021fac67a8afb56f7a42d24dcdab67616d00001e0231d2697c15d28a86ebaa439dab67616d00001e02713f297a7bdc1d48971062b2ab67616d00001e0296855af9617b920b1a43f3eb",
+        "owner": "Co. 🦄"
+      },
+      {
+        "id": "2mLxEq9wmUuGoTWISPKMbI",
+        "name": "DAFT PUNK HITS🟡BEST OF",
+        "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67706c0000da844aaf12a0ef8ded6ba152ae42",
+        "owner": "🟢 ROCK PLAYLISTS 🟢"
+      },
+      {
+        "id": "1XVOl0BwfaL4QEKNcB5r0R",
+        "name": "Funk à l'ancienne!",
+        "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000da84536bf804e313e45b5b86eda6",
+        "owner": "FUNK 80S"
+      },
+      {
+        "id": "594tuOSzOCLZ1SfXQFpGZG",
+        "name": "Daft Punk Remixes",
+        "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67706c0000da84051ac0c39514e561732249f4",
+        "owner": "Daft Trax"
+      },
+      {
+        "id": "7d4YzAmg1Cwtkyw98B3Erc",
+        "name": "Disco Funk music  🕺 70  80  90 📻",
+        "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67706c0000da846f01663fa1f1cdbcf0e705bb",
+        "owner": "Enzo Pianzola Mr. Trend"
+      }
+    ]
+  },
+  "totalResults": {
+    "tracks": 10,
+    "albums": 10,
+    "artists": 10,
+    "playlists": 10
+  }
+}
