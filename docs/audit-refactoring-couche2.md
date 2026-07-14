@@ -19,7 +19,7 @@
 | ID | Zone | Smell | Impact | Effort | Priorité |
 |----|------|-------|--------|--------|----------|
 | **R1** | `frontend/…/SettingsPage.tsx` (2230 l.) | God component : 6 onglets inline, 26 `useState` | Élevé | Moyen-élevé | **1** |
-| **R2** | `backend/spotify/*.go` (`FilterTrack` 312 l., etc.) | Primitive obsession : traversée de `map[string]interface{}` | Élevé | Élevé | **2** |
+| **R2** ✅ | `backend/spotify/*.go` (`FilterTrack` 312 l., etc.) | Primitive obsession → **5 Filter* renvoient un type direct ; 5 ponts JSON supprimés ; décomposés ; golden sur vraies fixtures** | Élevé | Élevé | **fait** |
 | **R3** ✅ | `app_core.go` — struct `App` (50+ méthodes, 1183 l.) | God object (façade Wails vestigiale) → **découpé en 7 services de domaine ; `App` supprimé** | Moyen | Élevé (mécanique) | **fait** |
 | **R4** | `watcher.go` — `syncPlaylist` (252 l.), fichier 1783 l. | Méthode longue + fichier fourre-tout | Moyen | Moyen | 3 |
 | **R5** | `backend/downloader.go` dispatch providers | Pas d'interface `Provider` ; `switch` dupliqué ; entrées mal nommées | Moyen | Faible-moyen | 4 |
@@ -76,7 +76,29 @@ ce qui **révèle les coutures naturelles** : chaque groupe d'état ne sert qu'�
 
 ### R2 — `backend/spotify/{client,metadata}.go` : primitive obsession (⚠️ priorité 2)
 
-**Constat vérifié.** `client.go` (1854 l.) et `metadata.go` (1669 l.) manipulent presque tout via
+**✅ Fait (14/07) — approche affinée, validée sur vraies fixtures.** Les cinq `Filter*`
+(`FilterTrack`/`Album`/`Playlist`/`Artist`/`Search`) **construisent désormais directement leur type de
+sortie** (`apiTrackResponse`, etc.) au lieu de renvoyer un `map[string]interface{}` : les **5 ponts
+`json.Marshal → json.Unmarshal`** de `metadata.go` (une double représentation coûteuse et lossy) sont
+**supprimés**. Les grosses fonctions sont décomposées en helpers nommés (cascade artistes, parsing
+date, comptage disques, copyright, sections de recherche, pistes d'album/playlist…).
+
+**Découverte en lisant le code (a écarté la réécriture full-input-typing).** Le champ `artists` de
+l'album est lu **à la fois comme objet et comme string** (`getString(albumUnionData, "artists")` en
+fallback) — un champ Go ne peut pas être les deux sans `UnmarshalJSON` custom, et sur cette GraphQL
+non documentée, optionnelle et polymorphe, les helpers tolérants (`getMap`/`getString` → zéro-value
+sur mismatch) sont **le bon outil** : mal typer un champ ferait perdre des données silencieusement.
+Donc **le parsing d'entrée reste sur les helpers ; seule la sortie est typée** — ce qui supprime le
+vrai smell (double représentation + pont lossy) sans le risque.
+
+**Filet de sécurité.** Tests golden de caractérisation par type, gelés sur de **vraies réponses
+Spotify capturées** (`testdata/raw_*.json`, via `capture_test.go`), normalisés à travers le contrat
+`apiXxxResponse` donc invariants au changement de type de retour. Couverture complète y compris les
+deux branches jadis non couvertes : la discographie artiste (fusionnée depuis
+`queryArtistDiscographyAll`) et la branche `albumFetchData` de `FilterTrack`. Chaque fonction
+réécrite = un commit, golden + build/vet/`-race` verts. Aucun changement de comportement.
+
+**Constat initial (vérifié).** `client.go` (1854 l.) et `metadata.go` (1669 l.) manipulaient presque tout via
 `map[string]interface{}` + une famille de casts non typés :
 `getString`/`getMap`/`getSlice`/`getFloat64`/`getBool` (client.go:371-405). Les fonctions de
 transformation sont énormes :
@@ -260,11 +282,11 @@ navigateur) reste possible mais à gain modéré — laissé de côté.
     garantit l'exactitude). Extraire ensuite les phases de `syncPlaylist` en sous-méthodes nommées.
 
 ### Phase E — Optionnels (R8) · à différer
-11. **R3 fait (13/07)**, **R9 fait (14/07)** — voir leurs sections ci-dessus. **R2 en cours** (14/07,
-    réécriture typée validée sur vraies fixtures capturées). **R8 en réflexion** : le vrai sujet n'est
-    pas de typer le `map` (qui est correct pour un blob pass-through possédé par le frontend) mais
-    l'*ownership flou* des ~13 clés qui pilotent le backend — chantier plus large (scinder settings de
-    comportement backend typées vs. préférences UI opaques), à cadrer avant de coder.
+11. **R2 fait (14/07)**, **R3 fait (13/07)**, **R9 fait (14/07)** — voir leurs sections ci-dessus.
+    **R8 en réflexion** : le vrai sujet n'est pas de typer le `map` (qui est correct pour un blob
+    pass-through possédé par le frontend) mais l'*ownership flou* des ~13 clés qui pilotent le backend
+    — chantier plus large (scinder settings de comportement backend typées vs. préférences UI
+    opaques), à cadrer avant de coder.
 
 ---
 
