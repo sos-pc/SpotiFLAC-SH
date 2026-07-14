@@ -436,7 +436,58 @@ trouvée en le lisant en dernier :
 
 ---
 
-## 2. Où sont les choses
+## 2. Recoupement avec les changelogs de release (2026-07-15)
+
+L'utilisateur a fourni les notes de version publiques (v7.1.0 → v7.1.9) pour vérifier si le triage
+fichier-par-fichier avait raté des sujets — un changelog capture le niveau produit ("Lyrics Manager
+est un outil à part entière") qu'un diff de code seul peut sous-pondérer. 8 items identifiés comme non
+couverts par S1-S14, tous creusés avec la même rigueur (lecture directe du code, pas de suppositions).
+
+**2 vraies lacunes confirmées :**
+
+- **Gestionnaire de paroles ("Lyrics Manager", v7.1.8/v7.1.9).** Vérifié : `app.go` expose
+  `ReadEmbeddedLyrics`, `ExtractLyricsToLRC`, `ScanLyricsFolder`, `SaveLyrics` — un vrai outil batch
+  (scanner un dossier, lire/éditer/extraire les paroles déjà embarquées). Chez nous,
+  `backend/meta/lyrics.go` et la route `/api/v1/media/lyrics` ne font que **récupérer et embarquer**
+  des paroles (LRCLIB) — rien pour en lire/éditer/extraire depuis un fichier déjà tagué. Écart réel et
+  net. Portable via notre File Manager existant (parcours de dossier déjà là) plutôt que des dialogues
+  desktop.
+- **Formats WAV/AIFF/Opus dans le convertisseur audio (v7.1.8).** Vérifié : `backend/audio/ffmpeg.go`
+  (`allowedConvertOutputFormats`) **ne supporte que `mp3` et `m4a`**. Upstream ajoute WAV/AIFF (PCM
+  16/24-bit selon le sample format source, big/little-endian selon le conteneur) et Opus (`libopus`,
+  192k par défaut) — arguments ffmpeg exacts trouvés dans `backend/ffmpeg.go` upstream, portage direct
+  et à faible risque.
+
+**6 résolus après vérification — pas des lacunes :**
+
+- **"Implemented download rate limiting" (v7.1.8).** Cherché explicitement (rate/delay/throttle/
+  bandwidth dans tout `backend/`) — aucun mécanisme distinct trouvé. Very probablement la même chose
+  que "Added API cooldown information" de la même release, décrite deux fois différemment dans le
+  changelog — déjà couvert par S1/S3.
+- **"Automatic queue stopping when API enters cooldown" (v7.1.9).** `SetCommunityCooldown` /
+  `SetRateLimitCooldown` (`progress.go`) ne font qu'exposer un état — aucune boucle de queue backend
+  ne le consulte pour s'auto-arrêter. C'est un comportement **frontend** (leur UI desktop regarde cet
+  état et met en pause côté client). Pertinent seulement si/quand on porte S3 et qu'on veut le même
+  réflexe UX côté web — pas un item backend à part.
+- **192kHz (v7.1.0).** Aucune constante ni logique dédiée trouvée, même chez upstream. Cette entrée de
+  changelog date d'avant/pile notre baseline et décrit vraisemblablement une capacité déjà inhérente au
+  palier `HI_RES_LOSSLESS` qu'on a déjà, pas un palier séparé.
+- **Tidal "variants" (v7.1.5).** Aucune occurrence du terme dans le code. Chronologiquement collée à
+  "custom HiFi API instances" (v7.1.6) — vraisemblablement la même fonctionnalité que
+  `getConfiguredTidalAPIAttemptList`/`GetCustomTidalAPISetting`, déjà couverte en S5.
+- **Vérifier les fichiers existants par ISRC (v7.1.6).** Vérifié : `GetExistingFileCheckModeSetting` +
+  `buildExistingFileLookupIndex` scannent le filesystem à la demande pour matcher par ISRC plutôt que
+  par nom de fichier. On a déjà résolu ce problème autrement (et plus robustement) avec le catalogue
+  SQLite persistant (`checkCatalogDedup`, `library-rebuild`) — pas un gap, une architecture différente
+  pour le même besoin.
+- **Génération automatique de fichier de log (v7.1.9).** `App.CreateLogFile` exporte une liste de logs
+  en mémoire vers un `.txt` local, à la demande (bouton desktop). On a déjà mieux : un ring buffer
+  (`applog.go`) exposé via `GET /api/v1/admin/logs` et une page Debug Logs dédiée unifiant back+front.
+  Pas un gap.
+
+---
+
+## 3. Où sont les choses
 
 - `.github/upstream-map.txt` — classification mécanique fichier par fichier (MAPPED/IGNORE/non listé
   = UNMAPPED), lue par le workflow et `check-upstream.sh`. Source de vérité pour "où ça mappe".
