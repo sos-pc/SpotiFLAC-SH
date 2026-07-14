@@ -1,0 +1,2364 @@
+{
+  "data": {
+    "artistUnion": {
+      "__typename": "Artist",
+      "discography": {
+        "all": {
+          "items": [
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0202f0b93ecab5bad9a8224b40",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485102f0b93ecab5bad9a8224b40",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27302f0b93ecab5bad9a8224b40",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2026-06-15T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2026
+                    },
+                    "id": "2WlZ6L68eq4Wy7QUSI2ffK",
+                    "name": "50 (10th Anniversary Deluxe Edition)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "BolAOr_2QTiJ3F1s8Q_kVQ",
+                      "shareUrl": "https://open.spotify.com/album/2WlZ6L68eq4Wy7QUSI2ffK?si=BolAOr_2QTiJ3F1s8Q_kVQ"
+                    },
+                    "tracks": {
+                      "totalCount": 15
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:2WlZ6L68eq4Wy7QUSI2ffK"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02fe8a8d62b127592ff546d9c8",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851fe8a8d62b127592ff546d9c8",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273fe8a8d62b127592ff546d9c8",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2026-04-10T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2026
+                    },
+                    "id": "0xOvvd9BQwlhJTnKfgB2zz",
+                    "name": "Raindrops",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "mtpDP6S5R8eUKX6-MnIHgQ",
+                      "shareUrl": "https://open.spotify.com/album/0xOvvd9BQwlhJTnKfgB2zz?si=mtpDP6S5R8eUKX6-MnIHgQ"
+                    },
+                    "tracks": {
+                      "totalCount": 2
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:0xOvvd9BQwlhJTnKfgB2zz"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e028f59c9c01c3ce2aef9c29f56",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048518f59c9c01c3ce2aef9c29f56",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2738f59c9c01c3ce2aef9c29f56",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2026-02-06T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2026
+                    },
+                    "id": "5U0RVHlHR4ywoPiOxosTgv",
+                    "name": "Waiting On You",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "2Od8oYbFSX2yHXD092wueQ",
+                      "shareUrl": "https://open.spotify.com/album/5U0RVHlHR4ywoPiOxosTgv?si=2Od8oYbFSX2yHXD092wueQ"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:5U0RVHlHR4ywoPiOxosTgv"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e022714b6117dd415b230d97b61",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048512714b6117dd415b230d97b61",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2732714b6117dd415b230d97b61",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-10-24T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "0SLhHKNpL2ZjDgfVRtV6xw",
+                    "name": "Covers",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "bh3PNBYqRyeiwbr6HTAyMQ",
+                      "shareUrl": "https://open.spotify.com/album/0SLhHKNpL2ZjDgfVRtV6xw?si=bh3PNBYqRyeiwbr6HTAyMQ"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:0SLhHKNpL2ZjDgfVRtV6xw"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e027051d8bfadd7bf404bd8c715",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048517051d8bfadd7bf404bd8c715",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2737051d8bfadd7bf404bd8c715",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-09-19T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "2BLWIU0uwkoH48QxVkgnlz",
+                    "name": "Ballads",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "Yhl3Vd6hTUKgsgBOn1itgA",
+                      "shareUrl": "https://open.spotify.com/album/2BLWIU0uwkoH48QxVkgnlz?si=Yhl3Vd6hTUKgsgBOn1itgA"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:2BLWIU0uwkoH48QxVkgnlz"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02fe5c3f827c30bfc539f5b887",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851fe5c3f827c30bfc539f5b887",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273fe5c3f827c30bfc539f5b887",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-08-22T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "4nW7LrCrgW6WFWcDrofh4J",
+                    "name": "2010s",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "lbDOSn0yTIO8UjIhw7D6vg",
+                      "shareUrl": "https://open.spotify.com/album/4nW7LrCrgW6WFWcDrofh4J?si=lbDOSn0yTIO8UjIhw7D6vg"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:4nW7LrCrgW6WFWcDrofh4J"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02eb53f9df7bb011b7ab38c520",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851eb53f9df7bb011b7ab38c520",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273eb53f9df7bb011b7ab38c520",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-07-18T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "2kFKvhijhCt871rAF0K35Q",
+                    "name": "Summer",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "AcK66NtcRZWheTiS1DkrzQ",
+                      "shareUrl": "https://open.spotify.com/album/2kFKvhijhCt871rAF0K35Q?si=AcK66NtcRZWheTiS1DkrzQ"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:2kFKvhijhCt871rAF0K35Q"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e023f545ba320b6dfc02a51312f",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048513f545ba320b6dfc02a51312f",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2733f545ba320b6dfc02a51312f",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-06-20T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "4wmBgkLxaBcODBK6HGwswz",
+                    "name": "2000s",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "LO8pWndJSV2Vr1exK-8z2g",
+                      "shareUrl": "https://open.spotify.com/album/4wmBgkLxaBcODBK6HGwswz?si=LO8pWndJSV2Vr1exK-8z2g"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:4wmBgkLxaBcODBK6HGwswz"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02f974194f0c439fa290a7f04a",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851f974194f0c439fa290a7f04a",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273f974194f0c439fa290a7f04a",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-05-23T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "6BYnRYkpSlGQ1yyzs5UJnw",
+                    "name": "Chart Toppers",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "rcdYVhQURP-qAPLhCWv3kA",
+                      "shareUrl": "https://open.spotify.com/album/6BYnRYkpSlGQ1yyzs5UJnw?si=rcdYVhQURP-qAPLhCWv3kA"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:6BYnRYkpSlGQ1yyzs5UJnw"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e021c97f7bdd7cf3656ad749060",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048511c97f7bdd7cf3656ad749060",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2731c97f7bdd7cf3656ad749060",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-04-25T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "07T7MZqsoygw3vgPzPkPm1",
+                    "name": "1990s",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "hZ3fcOw_Qf2V7McKI1Ofgg",
+                      "shareUrl": "https://open.spotify.com/album/07T7MZqsoygw3vgPzPkPm1?si=hZ3fcOw_Qf2V7McKI1Ofgg"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:07T7MZqsoygw3vgPzPkPm1"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02e16197efed029b98674412ec",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851e16197efed029b98674412ec",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273e16197efed029b98674412ec",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2025-02-12T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2025
+                    },
+                    "id": "48yal8zdmnFMsSfRoNW88p",
+                    "name": "Love Songs",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "wtzIl3ClTpGiJ0ak9HSfpQ",
+                      "shareUrl": "https://open.spotify.com/album/48yal8zdmnFMsSfRoNW88p?si=wtzIl3ClTpGiJ0ak9HSfpQ"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:48yal8zdmnFMsSfRoNW88p"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02b65e876b47b88bb025fabcf9",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851b65e876b47b88bb025fabcf9",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273b65e876b47b88bb025fabcf9",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-10-11T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "6l6200EAxIfoYVp8cTNtMU",
+                    "name": "Never",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "Wk_yBgSWTCWjuJTR-PNQVQ",
+                      "shareUrl": "https://open.spotify.com/album/6l6200EAxIfoYVp8cTNtMU?si=Wk_yBgSWTCWjuJTR-PNQVQ"
+                    },
+                    "tracks": {
+                      "totalCount": 6
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:6l6200EAxIfoYVp8cTNtMU"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e029b6b16d986a7eebb6e877957",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048519b6b16d986a7eebb6e877957",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2739b6b16d986a7eebb6e877957",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-08-30T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "2bMMC4fA3rqBgiuMxduxmq",
+                    "name": "Free (Deluxe Edition - 2024 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "c_J9O7puTZOJtYD1G0-efw",
+                      "shareUrl": "https://open.spotify.com/album/2bMMC4fA3rqBgiuMxduxmq?si=c_J9O7puTZOJtYD1G0-efw"
+                    },
+                    "tracks": {
+                      "totalCount": 29
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:2bMMC4fA3rqBgiuMxduxmq"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e020c713d7a1f4c90fd1a29681e",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048510c713d7a1f4c90fd1a29681e",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2730c713d7a1f4c90fd1a29681e",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-08-30T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "5vIhE61ppC6YyGaM5S4yJD",
+                    "name": "Free (2024 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "y5cB5TaZS9-9CfiYI1D_hg",
+                      "shareUrl": "https://open.spotify.com/album/5vIhE61ppC6YyGaM5S4yJD?si=y5cB5TaZS9-9CfiYI1D_hg"
+                    },
+                    "tracks": {
+                      "totalCount": 11
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:5vIhE61ppC6YyGaM5S4yJD"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0297af056e083e07b0470dd36b",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485197af056e083e07b0470dd36b",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27397af056e083e07b0470dd36b",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-08-14T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "48UKH9xySuEV9sBrXjEbR2",
+                    "name": "Never Knew Love (2024 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "eOqd7_a3R3Wb445gwJ09cA",
+                      "shareUrl": "https://open.spotify.com/album/48UKH9xySuEV9sBrXjEbR2?si=eOqd7_a3R3Wb445gwJ09cA"
+                    },
+                    "tracks": {
+                      "totalCount": 3
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:48UKH9xySuEV9sBrXjEbR2"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0275d0f893463007799fc7823c",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485175d0f893463007799fc7823c",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27375d0f893463007799fc7823c",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-07-31T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "4VoumnGaZbUbuVGcqAhIq5",
+                    "name": "Move Right Out (2024 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "b-ZBVeaGQZKgSbSeQvfkvA",
+                      "shareUrl": "https://open.spotify.com/album/4VoumnGaZbUbuVGcqAhIq5?si=b-ZBVeaGQZKgSbSeQvfkvA"
+                    },
+                    "tracks": {
+                      "totalCount": 3
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:4VoumnGaZbUbuVGcqAhIq5"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02958d07b6e5006e26a65daaad",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851958d07b6e5006e26a65daaad",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273958d07b6e5006e26a65daaad",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-07-17T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "53WrnXUrXn3BFAHdQNJP8d",
+                    "name": "Cry for Help (2024 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "I8OkP9n6SPO7UP0KCN_OGA",
+                      "shareUrl": "https://open.spotify.com/album/53WrnXUrXn3BFAHdQNJP8d?si=I8OkP9n6SPO7UP0KCN_OGA"
+                    },
+                    "tracks": {
+                      "totalCount": 3
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:53WrnXUrXn3BFAHdQNJP8d"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02c9d9c711fcca487a67667f46",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851c9d9c711fcca487a67667f46",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273c9d9c711fcca487a67667f46",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2024-02-09T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2024
+                    },
+                    "id": "5L915EC89THOXLp2YFWUAM",
+                    "name": "Driving Me Crazy",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "T54Ao_vOT8uz5-k06s3uuA",
+                      "shareUrl": "https://open.spotify.com/album/5L915EC89THOXLp2YFWUAM?si=T54Ao_vOT8uz5-k06s3uuA"
+                    },
+                    "tracks": {
+                      "totalCount": 2
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:5L915EC89THOXLp2YFWUAM"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02563e0db0026cbcca831f5a2d",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851563e0db0026cbcca831f5a2d",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273563e0db0026cbcca831f5a2d",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-11-17T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "1MjxtgMIkFTQVNqfw172cB",
+                    "name": "Owner Of A Lonely Heart",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "JnIpWZCCTjaL7Q27J9r1AA",
+                      "shareUrl": "https://open.spotify.com/album/1MjxtgMIkFTQVNqfw172cB?si=JnIpWZCCTjaL7Q27J9r1AA"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:1MjxtgMIkFTQVNqfw172cB"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02261f374a604fecf8e629b8c9",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851261f374a604fecf8e629b8c9",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273261f374a604fecf8e629b8c9",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-10-13T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "5sDuophQhwHGXQwGzxJSsg",
+                    "name": "Are We There Yet?",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "DPs7wcTzTXewJL3AyJM95A",
+                      "shareUrl": "https://open.spotify.com/album/5sDuophQhwHGXQwGzxJSsg?si=DPs7wcTzTXewJL3AyJM95A"
+                    },
+                    "tracks": {
+                      "totalCount": 12
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:5sDuophQhwHGXQwGzxJSsg"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02acca435e8b149f9e588be961",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851acca435e8b149f9e588be961",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273acca435e8b149f9e588be961",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-08-22T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "34Mv3cOmwTooUJBj7GKQfd",
+                    "name": "Never Gonna Stop",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "5Yg-dG6ES7qhjqi6DkhsEQ",
+                      "shareUrl": "https://open.spotify.com/album/34Mv3cOmwTooUJBj7GKQfd?si=5Yg-dG6ES7qhjqi6DkhsEQ"
+                    },
+                    "tracks": {
+                      "totalCount": 2
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:34Mv3cOmwTooUJBj7GKQfd"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e024924328fccbb659dfe562c88",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048514924328fccbb659dfe562c88",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2734924328fccbb659dfe562c88",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-06-20T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "4jBhZEkPuih7TwMfuf9sQd",
+                    "name": "Dippin My Feet",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "7sdrQeRURJ-lGmSXKfZguQ",
+                      "shareUrl": "https://open.spotify.com/album/4jBhZEkPuih7TwMfuf9sQd?si=7sdrQeRURJ-lGmSXKfZguQ"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:4jBhZEkPuih7TwMfuf9sQd"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e023dae0a7179f31017b9652e96",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048513dae0a7179f31017b9652e96",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2733dae0a7179f31017b9652e96",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-04-28T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "19r35lqCQ4cPBYCAn43Gf4",
+                    "name": "Giving Up On Love EP",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "Ca_dz1-aTeO-6Ow_f5BnZA",
+                      "shareUrl": "https://open.spotify.com/album/19r35lqCQ4cPBYCAn43Gf4?si=Ca_dz1-aTeO-6Ow_f5BnZA"
+                    },
+                    "tracks": {
+                      "totalCount": 4
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:19r35lqCQ4cPBYCAn43Gf4"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02549d2f9397ede01481c5290f",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851549d2f9397ede01481c5290f",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273549d2f9397ede01481c5290f",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-04-14T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "1e0wPjUjvkj2QK71WrgxRA",
+                    "name": "Take Me to Your Heart EP",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "Ub0w9s3FROuNFW2GDuVA6Q",
+                      "shareUrl": "https://open.spotify.com/album/1e0wPjUjvkj2QK71WrgxRA?si=Ub0w9s3FROuNFW2GDuVA6Q"
+                    },
+                    "tracks": {
+                      "totalCount": 4
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:1e0wPjUjvkj2QK71WrgxRA"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e026e1d1c2f94266e040690e07c",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048516e1d1c2f94266e040690e07c",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2736e1d1c2f94266e040690e07c",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2023-03-29T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2023
+                    },
+                    "id": "3eFSq9TRORxNn0iOXTMsoJ",
+                    "name": "She Wants to Dance with Me EP",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "bl9Xw84CT9yX2Sxzmu6dkg",
+                      "shareUrl": "https://open.spotify.com/album/3eFSq9TRORxNn0iOXTMsoJ?si=bl9Xw84CT9yX2Sxzmu6dkg"
+                    },
+                    "tracks": {
+                      "totalCount": 4
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:3eFSq9TRORxNn0iOXTMsoJ"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e025c37a644a590fc82490f2028",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048515c37a644a590fc82490f2028",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2735c37a644a590fc82490f2028",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2022-07-27T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2022
+                    },
+                    "id": "58VYKotsIdQJVR6MrCZQSY",
+                    "name": "80s Party Anthems",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "_tYPq36rQTyQCSvxAd87Hw",
+                      "shareUrl": "https://open.spotify.com/album/58VYKotsIdQJVR6MrCZQSY?si=_tYPq36rQTyQCSvxAd87Hw"
+                    },
+                    "tracks": {
+                      "totalCount": 5
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:58VYKotsIdQJVR6MrCZQSY"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e023a67639779ccabd632e1a80e",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048513a67639779ccabd632e1a80e",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2733a67639779ccabd632e1a80e",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2022-05-20T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2022
+                    },
+                    "id": "4C4LvbYS0pxXLW5sGD9EK5",
+                    "name": "Whenever You Need Somebody (Deluxe Edition - 2022 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "atH9yJjmR8ihSoNp8O20qw",
+                      "shareUrl": "https://open.spotify.com/album/4C4LvbYS0pxXLW5sGD9EK5?si=atH9yJjmR8ihSoNp8O20qw"
+                    },
+                    "tracks": {
+                      "totalCount": 36
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:4C4LvbYS0pxXLW5sGD9EK5"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0209aa49c09963b309f092ea7b",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485109aa49c09963b309f092ea7b",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27309aa49c09963b309f092ea7b",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2022-04-13T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2022
+                    },
+                    "id": "14IIquzg5gTL3A3eeBF4pB",
+                    "name": "My Arms Keep Missing You EP",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "ZN4citudQemLzRa8e1d1ew",
+                      "shareUrl": "https://open.spotify.com/album/14IIquzg5gTL3A3eeBF4pB?si=ZN4citudQemLzRa8e1d1ew"
+                    },
+                    "tracks": {
+                      "totalCount": 4
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:14IIquzg5gTL3A3eeBF4pB"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02ab3b2a44c02d2ade87c99ea2",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851ab3b2a44c02d2ade87c99ea2",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273ab3b2a44c02d2ade87c99ea2",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2022-03-23T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2022
+                    },
+                    "id": "42yJH9n37rKQmbm4GXBBaT",
+                    "name": "Together Forever EP",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "DwSuWnvjRwmRrukdGmh7bw",
+                      "shareUrl": "https://open.spotify.com/album/42yJH9n37rKQmbm4GXBBaT?si=DwSuWnvjRwmRrukdGmh7bw"
+                    },
+                    "tracks": {
+                      "totalCount": 4
+                    },
+                    "type": "EP",
+                    "uri": "spotify:album:42yJH9n37rKQmbm4GXBBaT"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e024e6abd12d21db5329d300ec7",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048514e6abd12d21db5329d300ec7",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2734e6abd12d21db5329d300ec7",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2021-09-17T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2021
+                    },
+                    "id": "3IlvYMo0LBbDobGRIdnTpS",
+                    "name": "Wisp000",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "flAV8tu3Rea6r-ymqT2t9w",
+                      "shareUrl": "https://open.spotify.com/album/3IlvYMo0LBbDobGRIdnTpS?si=flAV8tu3Rea6r-ymqT2t9w"
+                    },
+                    "tracks": {
+                      "totalCount": 3
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:3IlvYMo0LBbDobGRIdnTpS"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e026c00d17e338be66ad5c6d0c8",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048516c00d17e338be66ad5c6d0c8",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2736c00d17e338be66ad5c6d0c8",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2021-04-07T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2021
+                    },
+                    "id": "02BXMZ8V204ypJfGhPHOyE",
+                    "name": "Unwanted (Official Song from the Podcast)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "nlStQGxISYqu955MSB_1Zg",
+                      "shareUrl": "https://open.spotify.com/album/02BXMZ8V204ypJfGhPHOyE?si=nlStQGxISYqu955MSB_1Zg"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:02BXMZ8V204ypJfGhPHOyE"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e022dc9546963b964bb140fd332",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048512dc9546963b964bb140fd332",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2732dc9546963b964bb140fd332",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2020-11-30T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2020
+                    },
+                    "id": "3xmr3tCMG8zeekVMJDlope",
+                    "name": "Love This Christmas",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "jQy66JLbQ0SBrC3VE7OcQA",
+                      "shareUrl": "https://open.spotify.com/album/3xmr3tCMG8zeekVMJDlope?si=jQy66JLbQ0SBrC3VE7OcQA"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:3xmr3tCMG8zeekVMJDlope"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02d27a195463bea1434e02db3e",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851d27a195463bea1434e02db3e",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273d27a195463bea1434e02db3e",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2020-09-22T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2020
+                    },
+                    "id": "500THvc4p6yKMgO5uQeGzC",
+                    "name": "Every One of Us",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "YHHZl-1lTm29f5geTgl9pA",
+                      "shareUrl": "https://open.spotify.com/album/500THvc4p6yKMgO5uQeGzC?si=YHHZl-1lTm29f5geTgl9pA"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:500THvc4p6yKMgO5uQeGzC"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0230ab9fb7301ef2b27d9ebd88",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485130ab9fb7301ef2b27d9ebd88",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27330ab9fb7301ef2b27d9ebd88",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2020-06-25T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2020
+                    },
+                    "id": "2elH7qCoNaXFKnbhC7hXNM",
+                    "name": "Everlong (Acoustic Version)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "VcIKIlZSSYawjUTyCKHhYg",
+                      "shareUrl": "https://open.spotify.com/album/2elH7qCoNaXFKnbhC7hXNM?si=VcIKIlZSSYawjUTyCKHhYg"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:2elH7qCoNaXFKnbhC7hXNM"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02ad292ed19701d9f5c8cf71b6",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851ad292ed19701d9f5c8cf71b6",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273ad292ed19701d9f5c8cf71b6",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2019-12-29T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2019
+                    },
+                    "id": "6CWdaSQN5rsdDkOrhFcZ0E",
+                    "name": "The Best of Me",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "GMy9n6xYQr2U3cXSRnzb6A",
+                      "shareUrl": "https://open.spotify.com/album/6CWdaSQN5rsdDkOrhFcZ0E?si=GMy9n6xYQr2U3cXSRnzb6A"
+                    },
+                    "tracks": {
+                      "totalCount": 31
+                    },
+                    "type": "COMPILATION",
+                    "uri": "spotify:album:6CWdaSQN5rsdDkOrhFcZ0E"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0216c0ed5eb538f35bc19eead4",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485116c0ed5eb538f35bc19eead4",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27316c0ed5eb538f35bc19eead4",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2019-12-29T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2019
+                    },
+                    "id": "6C55u1I4oqut6X97zIh8m4",
+                    "name": "The Best Of Me: Never Edition",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "3zqf9OfYQaCHYsGoFyG6jg",
+                      "shareUrl": "https://open.spotify.com/album/6C55u1I4oqut6X97zIh8m4?si=3zqf9OfYQaCHYsGoFyG6jg"
+                    },
+                    "tracks": {
+                      "totalCount": 38
+                    },
+                    "type": "COMPILATION",
+                    "uri": "spotify:album:6C55u1I4oqut6X97zIh8m4"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0262843c2ef31f1c2beb5c6311",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485162843c2ef31f1c2beb5c6311",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27362843c2ef31f1c2beb5c6311",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2019-10-04T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2019
+                    },
+                    "id": "2CxWtZzaTGywY1KTfRAWes",
+                    "name": "Cry for Help (Reimagined)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "AEhYkOM0S8mGH4ONJVuu3A",
+                      "shareUrl": "https://open.spotify.com/album/2CxWtZzaTGywY1KTfRAWes?si=AEhYkOM0S8mGH4ONJVuu3A"
+                    },
+                    "tracks": {
+                      "totalCount": 2
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:2CxWtZzaTGywY1KTfRAWes"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02d7cea9324e34161568df701f",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851d7cea9324e34161568df701f",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273d7cea9324e34161568df701f",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2019-09-12T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2019
+                    },
+                    "id": "3ji2OD2qvg9UG9Ujj6T7GE",
+                    "name": "Every One of Us",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "_Iv0fGANTu-H0_XCoPtJaA",
+                      "shareUrl": "https://open.spotify.com/album/3ji2OD2qvg9UG9Ujj6T7GE?si=_Iv0fGANTu-H0_XCoPtJaA"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:3ji2OD2qvg9UG9Ujj6T7GE"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e024608c1bf76bfb6085213b5c3",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048514608c1bf76bfb6085213b5c3",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2734608c1bf76bfb6085213b5c3",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2019-06-06T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2019
+                    },
+                    "id": "0Ml0ZaljaEC5lVhajlKiQV",
+                    "name": "Giant",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "vT9USbnFTxu5ixtuY5S0yQ",
+                      "shareUrl": "https://open.spotify.com/album/0Ml0ZaljaEC5lVhajlKiQV?si=vT9USbnFTxu5ixtuY5S0yQ"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:0Ml0ZaljaEC5lVhajlKiQV"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02d58bef0304629d942ca41241",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851d58bef0304629d942ca41241",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273d58bef0304629d942ca41241",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-11-09T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "4x2Qwgkqamb7nClJac7de0",
+                    "name": "She Makes Me (3 Wheel Mix)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "4LX9uzJXRaqBINJo6mFebw",
+                      "shareUrl": "https://open.spotify.com/album/4x2Qwgkqamb7nClJac7de0?si=4LX9uzJXRaqBINJo6mFebw"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:4x2Qwgkqamb7nClJac7de0"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02b3e92ef1ba911f3aa18cb79e",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851b3e92ef1ba911f3aa18cb79e",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273b3e92ef1ba911f3aa18cb79e",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-10-26T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "2lcLrhsaswOGmz0aJ4gfzC",
+                    "name": "Try (Orchestral Version)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "xILC2GCaQWiJnyE7wLn8wQ",
+                      "shareUrl": "https://open.spotify.com/album/2lcLrhsaswOGmz0aJ4gfzC?si=xILC2GCaQWiJnyE7wLn8wQ"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:2lcLrhsaswOGmz0aJ4gfzC"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e020c63b3f8201d1baf1a4adefd",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048510c63b3f8201d1baf1a4adefd",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2730c63b3f8201d1baf1a4adefd",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-08-24T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "27lLfUcXfHxREd5oMtwrEU",
+                    "name": "Try (Edit)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "GKsQSJesTHmj70NvUi4okA",
+                      "shareUrl": "https://open.spotify.com/album/27lLfUcXfHxREd5oMtwrEU?si=GKsQSJesTHmj70NvUi4okA"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:27lLfUcXfHxREd5oMtwrEU"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0208875bbad20b66383e469faf",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485108875bbad20b66383e469faf",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27308875bbad20b66383e469faf",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-07-13T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "7BL1FkTweUHVdzttB2ywLF",
+                    "name": "Beautiful Life",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "z_DRoydNSNOTw2mtOvOxyg",
+                      "shareUrl": "https://open.spotify.com/album/7BL1FkTweUHVdzttB2ywLF?si=z_DRoydNSNOTw2mtOvOxyg"
+                    },
+                    "tracks": {
+                      "totalCount": 12
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:7BL1FkTweUHVdzttB2ywLF"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0295ed3a5026ff0eb1fc1e1640",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485195ed3a5026ff0eb1fc1e1640",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27395ed3a5026ff0eb1fc1e1640",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-07-12T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "7CiSlyH4XuINPw9iZkFIv2",
+                    "name": "Beautiful Life (ENV Remixes)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "ulCmrrv5TKuJaEs0jyCcVQ",
+                      "shareUrl": "https://open.spotify.com/album/7CiSlyH4XuINPw9iZkFIv2?si=ulCmrrv5TKuJaEs0jyCcVQ"
+                    },
+                    "tracks": {
+                      "totalCount": 2
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:7CiSlyH4XuINPw9iZkFIv2"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e021f51a5d28f04b2adea6155d1",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048511f51a5d28f04b2adea6155d1",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2731f51a5d28f04b2adea6155d1",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-07-06T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "28W4f8AyLZRHbeFlDIhCQS",
+                    "name": "Empty Heart",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "FzvLcD5JTMCJEZJRmHzVcA",
+                      "shareUrl": "https://open.spotify.com/album/28W4f8AyLZRHbeFlDIhCQS?si=FzvLcD5JTMCJEZJRmHzVcA"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:28W4f8AyLZRHbeFlDIhCQS"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0293747bae2798190fe4754305",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485193747bae2798190fe4754305",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27393747bae2798190fe4754305",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2018-06-05T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2018
+                    },
+                    "id": "1OVV6J35VXZe8FUgRArLAn",
+                    "name": "Beautiful Life (Edit)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "cxxkpK4pRmWsIXJDcb6xLQ",
+                      "shareUrl": "https://open.spotify.com/album/1OVV6J35VXZe8FUgRArLAn?si=cxxkpK4pRmWsIXJDcb6xLQ"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:1OVV6J35VXZe8FUgRArLAn"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02f5e44c5a57731bcdc97a16cf",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851f5e44c5a57731bcdc97a16cf",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273f5e44c5a57731bcdc97a16cf",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2016-06-10T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2016
+                    },
+                    "id": "4f9CV4zRabJ0e5q8QEx0tv",
+                    "name": "50",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "mGQ-PBpATZyIM1KPgyutww",
+                      "shareUrl": "https://open.spotify.com/album/4f9CV4zRabJ0e5q8QEx0tv?si=mGQ-PBpATZyIM1KPgyutww"
+                    },
+                    "tracks": {
+                      "totalCount": 12
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:4f9CV4zRabJ0e5q8QEx0tv"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e027107545c194e06b6dabde173",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048517107545c194e06b6dabde173",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2737107545c194e06b6dabde173",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2016-05-13T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2016
+                    },
+                    "id": "4NrxrG8uDZyVAMQdlGYeso",
+                    "name": "Angels on My Side",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "fqKms73eRqyY_xeur2yE3w",
+                      "shareUrl": "https://open.spotify.com/album/4NrxrG8uDZyVAMQdlGYeso?si=fqKms73eRqyY_xeur2yE3w"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:4NrxrG8uDZyVAMQdlGYeso"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e026954778f045894bde8cb05e0",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048516954778f045894bde8cb05e0",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2736954778f045894bde8cb05e0",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2016-04-07T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2016
+                    },
+                    "id": "4DZjfJ2rVWmpXSFQYSB3Qc",
+                    "name": "Keep Singing",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "aEeJsQsTRpStPUGMpnC1Vg",
+                      "shareUrl": "https://open.spotify.com/album/4DZjfJ2rVWmpXSFQYSB3Qc?si=aEeJsQsTRpStPUGMpnC1Vg"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:4DZjfJ2rVWmpXSFQYSB3Qc"
+                  }
+                ]
+              }
+            },
+            {
+              "releases": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02d9c8ab81c4b63fa85d6b7720",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851d9c8ab81c4b63fa85d6b7720",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273d9c8ab81c4b63fa85d6b7720",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "isoString": "2012-10-22T00:00:00Z",
+                      "precision": "DAY",
+                      "year": 2012
+                    },
+                    "id": "0tvXcepEcLIIxwiFE6yu0I",
+                    "name": "Superman",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "UiThkISdRpW8HFoSfp0W2A",
+                      "shareUrl": "https://open.spotify.com/album/0tvXcepEcLIIxwiFE6yu0I?si=UiThkISdRpW8HFoSfp0W2A"
+                    },
+                    "tracks": {
+                      "totalCount": 1
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:0tvXcepEcLIIxwiFE6yu0I"
+                  }
+                ]
+              }
+            }
+          ],
+          "totalCount": 58
+        }
+      }
+    }
+  }
+}
