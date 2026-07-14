@@ -11,6 +11,7 @@ package spotify
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,9 +79,77 @@ func assertGolden(t *testing.T, golden string, got interface{}) {
 	}
 }
 
+// mergedArtistData mirrors fetchArtistDiscography (metadata.go): it merges the
+// separate queryArtistDiscographyAll response into the overview's
+// artistUnion.discography.all, which is what FilterArtist actually receives in
+// production. Without this the overview's discography is empty and FilterArtist's
+// discography/release extraction goes uncovered.
+func mergedArtistData(t *testing.T) map[string]interface{} {
+	overview := loadRawFixture(t, "raw_artist.json")
+	disco := loadRawFixture(t, "raw_artist_discography.json")
+	discoAll := getMap(getMap(getMap(disco, "data"), "artistUnion"), "discography")["all"]
+	au := getMap(getMap(overview, "data"), "artistUnion")
+	discography := getMap(au, "discography")
+	discography["all"] = discoAll
+	au["discography"] = discography
+	return overview
+}
+
+// trackAlbumFetchData mirrors fetchTrack (metadata.go): FilterAlbum on the
+// track's album, then reshape into the albumFetchData variadic that FilterTrack
+// uses for disc-number cross-referencing. Exercises FilterTrack's albumFetch
+// branch, which the bare track response leaves uncovered.
+func trackAlbumFetchData(t *testing.T) map[string]interface{} {
+	rawAlbum := loadRawFixture(t, "raw_album.json")
+	albumJSON, err := json.Marshal(FilterAlbum(rawAlbum))
+	if err != nil {
+		t.Fatalf("marshal filtered album: %v", err)
+	}
+	var albumResp apiAlbumResponse
+	if err := json.Unmarshal(albumJSON, &albumResp); err != nil {
+		t.Fatalf("unmarshal apiAlbumResponse: %v", err)
+	}
+	respJSON, _ := json.Marshal(albumResp)
+	var albumMap map[string]interface{}
+	if err := json.Unmarshal(respJSON, &albumMap); err != nil {
+		t.Fatalf("remarshal album map: %v", err)
+	}
+	tracksItems := []interface{}{}
+	if tl, ok := albumMap["tracks"].([]interface{}); ok {
+		for _, tr := range tl {
+			tm, ok := tr.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			tracksItems = append(tracksItems, map[string]interface{}{
+				"track": map[string]interface{}{
+					"discNumber": tm["disc_number"],
+					"id":         tm["id"],
+					"uri":        fmt.Sprintf("spotify:track:%s", tm["id"]),
+				},
+			})
+		}
+	}
+	return map[string]interface{}{
+		"data": map[string]interface{}{
+			"albumUnion": map[string]interface{}{
+				"discs":   map[string]interface{}{"totalCount": albumResp.Discs.TotalCount},
+				"tracks":  map[string]interface{}{"items": tracksItems, "totalCount": albumResp.Count},
+				"artists": albumResp.Artists,
+				"label":   albumResp.Label,
+			},
+		},
+	}
+}
+
 func TestFilterGoldenTrack(t *testing.T) {
 	raw := loadRawFixture(t, "raw_track.json")
 	assertGoldenVia[apiTrackResponse](t, "golden_track.json", FilterTrack(raw))
+}
+
+func TestFilterGoldenTrackWithAlbum(t *testing.T) {
+	raw := loadRawFixture(t, "raw_track.json")
+	assertGoldenVia[apiTrackResponse](t, "golden_track_albumfetch.json", FilterTrack(raw, trackAlbumFetchData(t)))
 }
 
 func TestFilterGoldenAlbum(t *testing.T) {
@@ -94,8 +163,7 @@ func TestFilterGoldenPlaylist(t *testing.T) {
 }
 
 func TestFilterGoldenArtist(t *testing.T) {
-	raw := loadRawFixture(t, "raw_artist.json")
-	assertGoldenVia[apiArtistResponse](t, "golden_artist.json", FilterArtist(raw))
+	assertGoldenVia[apiArtistResponse](t, "golden_artist.json", FilterArtist(mergedArtistData(t)))
 }
 
 func TestFilterGoldenSearch(t *testing.T) {

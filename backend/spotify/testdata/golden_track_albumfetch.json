@@ -1,0 +1,26 @@
+{
+  "id": "4PTG3Z6ehGkBFwjybzWkR8",
+  "name": "Never Gonna Give You Up",
+  "artists": "Rick Astley",
+  "duration": "3:33",
+  "track": 1,
+  "disc": 1,
+  "discs": 1,
+  "copyright": "1987 BMG Rights Management (UK) Limited",
+  "plays": "1151076782",
+  "album": {
+    "id": "6eUW0wxWtzkFdaEFsTJto6",
+    "name": "Whenever You Need Somebody",
+    "released": "1987-11-12",
+    "year": 1987,
+    "tracks": 10,
+    "artists": "Rick Astley",
+    "label": "BMG Rights Management (UK) Ltd."
+  },
+  "cover": {
+    "small": "https://i.scdn.co/image/ab67616d00001e0215ebbedaacef61af244262a8",
+    "medium": "https://i.scdn.co/image/ab67616d0000b27315ebbedaacef61af244262a8",
+    "large": "https://i.scdn.co/image/ab67616d000082c115ebbedaacef61af244262a8"
+  },
+  "is_explicit": false
+}

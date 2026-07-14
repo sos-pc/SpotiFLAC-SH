@@ -20,7 +20,458 @@
     "https://i.scdn.co/image/ab6761670000ecd47baf769d2a4dca5c34c59b2f"
   ],
   "discography": {
-    "all": null,
-    "total": 0
+    "all": [
+      {
+        "id": "2WlZ6L68eq4Wy7QUSI2ffK",
+        "name": "50 (10th Anniversary Deluxe Edition)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27302f0b93ecab5bad9a8224b40",
+        "date": "2026-06-15",
+        "year": 2026,
+        "total_tracks": 15,
+        "type": "ALBUM"
+      },
+      {
+        "id": "0xOvvd9BQwlhJTnKfgB2zz",
+        "name": "Raindrops",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273fe8a8d62b127592ff546d9c8",
+        "date": "2026-04-10",
+        "year": 2026,
+        "total_tracks": 2,
+        "type": "SINGLE"
+      },
+      {
+        "id": "5U0RVHlHR4ywoPiOxosTgv",
+        "name": "Waiting On You",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2738f59c9c01c3ce2aef9c29f56",
+        "date": "2026-02-06",
+        "year": 2026,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "0SLhHKNpL2ZjDgfVRtV6xw",
+        "name": "Covers",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2732714b6117dd415b230d97b61",
+        "date": "2025-10-24",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "2BLWIU0uwkoH48QxVkgnlz",
+        "name": "Ballads",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2737051d8bfadd7bf404bd8c715",
+        "date": "2025-09-19",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "4nW7LrCrgW6WFWcDrofh4J",
+        "name": "2010s",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273fe5c3f827c30bfc539f5b887",
+        "date": "2025-08-22",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "2kFKvhijhCt871rAF0K35Q",
+        "name": "Summer",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273eb53f9df7bb011b7ab38c520",
+        "date": "2025-07-18",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "4wmBgkLxaBcODBK6HGwswz",
+        "name": "2000s",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2733f545ba320b6dfc02a51312f",
+        "date": "2025-06-20",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "6BYnRYkpSlGQ1yyzs5UJnw",
+        "name": "Chart Toppers",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273f974194f0c439fa290a7f04a",
+        "date": "2025-05-23",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "07T7MZqsoygw3vgPzPkPm1",
+        "name": "1990s",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731c97f7bdd7cf3656ad749060",
+        "date": "2025-04-25",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "48yal8zdmnFMsSfRoNW88p",
+        "name": "Love Songs",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273e16197efed029b98674412ec",
+        "date": "2025-02-12",
+        "year": 2025,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "6l6200EAxIfoYVp8cTNtMU",
+        "name": "Never",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273b65e876b47b88bb025fabcf9",
+        "date": "2024-10-11",
+        "year": 2024,
+        "total_tracks": 6,
+        "type": "EP"
+      },
+      {
+        "id": "2bMMC4fA3rqBgiuMxduxmq",
+        "name": "Free (Deluxe Edition - 2024 Remaster)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2739b6b16d986a7eebb6e877957",
+        "date": "2024-08-30",
+        "year": 2024,
+        "total_tracks": 29,
+        "type": "ALBUM"
+      },
+      {
+        "id": "5vIhE61ppC6YyGaM5S4yJD",
+        "name": "Free (2024 Remaster)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2730c713d7a1f4c90fd1a29681e",
+        "date": "2024-08-30",
+        "year": 2024,
+        "total_tracks": 11,
+        "type": "ALBUM"
+      },
+      {
+        "id": "48UKH9xySuEV9sBrXjEbR2",
+        "name": "Never Knew Love (2024 Remaster)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27397af056e083e07b0470dd36b",
+        "date": "2024-08-14",
+        "year": 2024,
+        "total_tracks": 3,
+        "type": "SINGLE"
+      },
+      {
+        "id": "4VoumnGaZbUbuVGcqAhIq5",
+        "name": "Move Right Out (2024 Remaster)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27375d0f893463007799fc7823c",
+        "date": "2024-07-31",
+        "year": 2024,
+        "total_tracks": 3,
+        "type": "SINGLE"
+      },
+      {
+        "id": "53WrnXUrXn3BFAHdQNJP8d",
+        "name": "Cry for Help (2024 Remaster)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273958d07b6e5006e26a65daaad",
+        "date": "2024-07-17",
+        "year": 2024,
+        "total_tracks": 3,
+        "type": "SINGLE"
+      },
+      {
+        "id": "5L915EC89THOXLp2YFWUAM",
+        "name": "Driving Me Crazy",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273c9d9c711fcca487a67667f46",
+        "date": "2024-02-09",
+        "year": 2024,
+        "total_tracks": 2,
+        "type": "SINGLE"
+      },
+      {
+        "id": "1MjxtgMIkFTQVNqfw172cB",
+        "name": "Owner Of A Lonely Heart",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273563e0db0026cbcca831f5a2d",
+        "date": "2023-11-17",
+        "year": 2023,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "5sDuophQhwHGXQwGzxJSsg",
+        "name": "Are We There Yet?",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273261f374a604fecf8e629b8c9",
+        "date": "2023-10-13",
+        "year": 2023,
+        "total_tracks": 12,
+        "type": "ALBUM"
+      },
+      {
+        "id": "34Mv3cOmwTooUJBj7GKQfd",
+        "name": "Never Gonna Stop",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273acca435e8b149f9e588be961",
+        "date": "2023-08-22",
+        "year": 2023,
+        "total_tracks": 2,
+        "type": "SINGLE"
+      },
+      {
+        "id": "4jBhZEkPuih7TwMfuf9sQd",
+        "name": "Dippin My Feet",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2734924328fccbb659dfe562c88",
+        "date": "2023-06-20",
+        "year": 2023,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "19r35lqCQ4cPBYCAn43Gf4",
+        "name": "Giving Up On Love EP",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2733dae0a7179f31017b9652e96",
+        "date": "2023-04-28",
+        "year": 2023,
+        "total_tracks": 4,
+        "type": "EP"
+      },
+      {
+        "id": "1e0wPjUjvkj2QK71WrgxRA",
+        "name": "Take Me to Your Heart EP",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273549d2f9397ede01481c5290f",
+        "date": "2023-04-14",
+        "year": 2023,
+        "total_tracks": 4,
+        "type": "EP"
+      },
+      {
+        "id": "3eFSq9TRORxNn0iOXTMsoJ",
+        "name": "She Wants to Dance with Me EP",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2736e1d1c2f94266e040690e07c",
+        "date": "2023-03-29",
+        "year": 2023,
+        "total_tracks": 4,
+        "type": "EP"
+      },
+      {
+        "id": "58VYKotsIdQJVR6MrCZQSY",
+        "name": "80s Party Anthems",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2735c37a644a590fc82490f2028",
+        "date": "2022-07-27",
+        "year": 2022,
+        "total_tracks": 5,
+        "type": "EP"
+      },
+      {
+        "id": "4C4LvbYS0pxXLW5sGD9EK5",
+        "name": "Whenever You Need Somebody (Deluxe Edition - 2022 Remaster)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2733a67639779ccabd632e1a80e",
+        "date": "2022-05-20",
+        "year": 2022,
+        "total_tracks": 36,
+        "type": "ALBUM"
+      },
+      {
+        "id": "14IIquzg5gTL3A3eeBF4pB",
+        "name": "My Arms Keep Missing You EP",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27309aa49c09963b309f092ea7b",
+        "date": "2022-04-13",
+        "year": 2022,
+        "total_tracks": 4,
+        "type": "EP"
+      },
+      {
+        "id": "42yJH9n37rKQmbm4GXBBaT",
+        "name": "Together Forever EP",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273ab3b2a44c02d2ade87c99ea2",
+        "date": "2022-03-23",
+        "year": 2022,
+        "total_tracks": 4,
+        "type": "EP"
+      },
+      {
+        "id": "3IlvYMo0LBbDobGRIdnTpS",
+        "name": "Wisp000",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2734e6abd12d21db5329d300ec7",
+        "date": "2021-09-17",
+        "year": 2021,
+        "total_tracks": 3,
+        "type": "SINGLE"
+      },
+      {
+        "id": "02BXMZ8V204ypJfGhPHOyE",
+        "name": "Unwanted (Official Song from the Podcast)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2736c00d17e338be66ad5c6d0c8",
+        "date": "2021-04-07",
+        "year": 2021,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "3xmr3tCMG8zeekVMJDlope",
+        "name": "Love This Christmas",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2732dc9546963b964bb140fd332",
+        "date": "2020-11-30",
+        "year": 2020,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "500THvc4p6yKMgO5uQeGzC",
+        "name": "Every One of Us",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273d27a195463bea1434e02db3e",
+        "date": "2020-09-22",
+        "year": 2020,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "2elH7qCoNaXFKnbhC7hXNM",
+        "name": "Everlong (Acoustic Version)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27330ab9fb7301ef2b27d9ebd88",
+        "date": "2020-06-25",
+        "year": 2020,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "6CWdaSQN5rsdDkOrhFcZ0E",
+        "name": "The Best of Me",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273ad292ed19701d9f5c8cf71b6",
+        "date": "2019-12-29",
+        "year": 2019,
+        "total_tracks": 31,
+        "type": "COMPILATION"
+      },
+      {
+        "id": "6C55u1I4oqut6X97zIh8m4",
+        "name": "The Best Of Me: Never Edition",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27316c0ed5eb538f35bc19eead4",
+        "date": "2019-12-29",
+        "year": 2019,
+        "total_tracks": 38,
+        "type": "COMPILATION"
+      },
+      {
+        "id": "2CxWtZzaTGywY1KTfRAWes",
+        "name": "Cry for Help (Reimagined)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27362843c2ef31f1c2beb5c6311",
+        "date": "2019-10-04",
+        "year": 2019,
+        "total_tracks": 2,
+        "type": "SINGLE"
+      },
+      {
+        "id": "3ji2OD2qvg9UG9Ujj6T7GE",
+        "name": "Every One of Us",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273d7cea9324e34161568df701f",
+        "date": "2019-09-12",
+        "year": 2019,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "0Ml0ZaljaEC5lVhajlKiQV",
+        "name": "Giant",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2734608c1bf76bfb6085213b5c3",
+        "date": "2019-06-06",
+        "year": 2019,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "4x2Qwgkqamb7nClJac7de0",
+        "name": "She Makes Me (3 Wheel Mix)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273d58bef0304629d942ca41241",
+        "date": "2018-11-09",
+        "year": 2018,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "2lcLrhsaswOGmz0aJ4gfzC",
+        "name": "Try (Orchestral Version)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273b3e92ef1ba911f3aa18cb79e",
+        "date": "2018-10-26",
+        "year": 2018,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "27lLfUcXfHxREd5oMtwrEU",
+        "name": "Try (Edit)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2730c63b3f8201d1baf1a4adefd",
+        "date": "2018-08-24",
+        "year": 2018,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "7BL1FkTweUHVdzttB2ywLF",
+        "name": "Beautiful Life",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27308875bbad20b66383e469faf",
+        "date": "2018-07-13",
+        "year": 2018,
+        "total_tracks": 12,
+        "type": "ALBUM"
+      },
+      {
+        "id": "7CiSlyH4XuINPw9iZkFIv2",
+        "name": "Beautiful Life (ENV Remixes)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27395ed3a5026ff0eb1fc1e1640",
+        "date": "2018-07-12",
+        "year": 2018,
+        "total_tracks": 2,
+        "type": "SINGLE"
+      },
+      {
+        "id": "28W4f8AyLZRHbeFlDIhCQS",
+        "name": "Empty Heart",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2731f51a5d28f04b2adea6155d1",
+        "date": "2018-07-06",
+        "year": 2018,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "1OVV6J35VXZe8FUgRArLAn",
+        "name": "Beautiful Life (Edit)",
+        "cover": "https://i.scdn.co/image/ab67616d0000b27393747bae2798190fe4754305",
+        "date": "2018-06-05",
+        "year": 2018,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "4f9CV4zRabJ0e5q8QEx0tv",
+        "name": "50",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273f5e44c5a57731bcdc97a16cf",
+        "date": "2016-06-10",
+        "year": 2016,
+        "total_tracks": 12,
+        "type": "ALBUM"
+      },
+      {
+        "id": "4NrxrG8uDZyVAMQdlGYeso",
+        "name": "Angels on My Side",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2737107545c194e06b6dabde173",
+        "date": "2016-05-13",
+        "year": 2016,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "4DZjfJ2rVWmpXSFQYSB3Qc",
+        "name": "Keep Singing",
+        "cover": "https://i.scdn.co/image/ab67616d0000b2736954778f045894bde8cb05e0",
+        "date": "2016-04-07",
+        "year": 2016,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      },
+      {
+        "id": "0tvXcepEcLIIxwiFE6yu0I",
+        "name": "Superman",
+        "cover": "https://i.scdn.co/image/ab67616d0000b273d9c8ab81c4b63fa85d6b7720",
+        "date": "2012-10-22",
+        "year": 2012,
+        "total_tracks": 1,
+        "type": "SINGLE"
+      }
+    ],
+    "total": 58
   }
 }
