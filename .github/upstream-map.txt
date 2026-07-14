@@ -1,0 +1,48 @@
+# Upstream file classification for check-upstream.sh / upstream-check.yml
+#
+# Format: <upstream-path>|<STATUS>|<note>
+#   MAPPED — note is where the equivalent logic lives in this repo. The file
+#            is diffed (merge-base -> upstream/main); changes are reported
+#            with a pointer to our local path so review is fast.
+#   IGNORE — note is why. The file is never diffed or reported. Only use
+#            this for things genuinely inapplicable to a web server (Wails
+#            desktop UI plumbing) — never to silence something we just
+#            haven't looked at yet.
+#
+# Anything upstream lists under backend/*.go, app.go or main.go that is NOT
+# in this file is auto-classified UNMAPPED: reported as "needs manual
+# triage", never silently dropped. This is what catches genuinely new
+# upstream files (new provider, new feature) without us having to remember
+# to update this list proactively — the discovery is automatic, only the
+# classification of *known* files is manual.
+#
+# frontend/ is intentionally out of scope entirely: upstream is a Wails
+# desktop UI, ours is a from-scratch React web app (R1/R9 rewrote most of
+# it) — there is no meaningful file-level mapping to maintain there.
+
+amazon.go|MAPPED|backend/amazon/
+analysis.go|MAPPED|backend/audio/analysis.go
+config.go|MAPPED|backend/util/config.go
+cover.go|MAPPED|backend/meta/cover.go
+ffmpeg.go|MAPPED|backend/audio/ffmpeg.go
+ffmpeg_unix.go|IGNORE|Desktop build's local-ffmpeg path discovery; we always run in Docker with ffmpeg bundled at a fixed path (backend/util/ffmpegpath.go)
+ffmpeg_windows.go|IGNORE|Same as ffmpeg_unix.go — desktop-only path discovery, not applicable to our Docker-only deployment
+file_dialog.go|IGNORE|Wails native file picker — our intentional web equivalent is backend/file_dialog_web.go (stub by design)
+fileicon_darwin.go|IGNORE|Desktop-only file icon rendering, no web equivalent needed
+fileicon_stub.go|IGNORE|Desktop-only stub companion to fileicon_darwin.go
+filemanager.go|MAPPED|backend/filemanager.go
+filename.go|MAPPED|backend/util/filename.go
+folder.go|IGNORE|Wails native folder picker — our intentional web equivalent is backend/folder_web.go (stub by design)
+history.go|MAPPED|backend/history.go
+lyrics.go|MAPPED|backend/meta/lyrics.go
+main.go|IGNORE|Wails desktop bootstrap (window/tray/lifecycle) — our main.go is a from-scratch HTTP server entrypoint, nothing to compare
+metadata.go|MAPPED|backend/meta/metadata.go
+musicbrainz.go|MAPPED|backend/meta/musicbrainz.go
+progress.go|MAPPED|backend/util/progress.go
+qobuz.go|MAPPED|backend/qobuz/
+songlink.go|MAPPED|backend/songlink/
+spotfetch.go|MAPPED|backend/spotify/ (Filter* functions — compare against R2's typed output rewrite before porting anything)
+spotify_metadata.go|MAPPED|backend/spotify/metadata.go
+spotify_totp.go|MAPPED|backend/spotify/ (TOTP auth helpers)
+tidal.go|MAPPED|backend/tidal/
+app.go|IGNORE|Upstream's monolithic orchestrator; we deliberately decomposed the equivalent (App god-object) into Container services (R3, docs/audit-refactoring-couche2.md). A line-diff here is mostly noise — a genuinely new capability landing in app.go upstream will almost always also touch one of the tracked/unmapped provider files below, which is where it'll actually get flagged.

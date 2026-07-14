@@ -1,18 +1,32 @@
 #!/usr/bin/env bash
-# check-upstream.sh — Vérifie les changements upstream sur les fichiers trackés
+# check-upstream.sh — Surveille les changements upstream pertinents pour nous.
 # Usage: ./check-upstream.sh [--verbose]
 #
-# Placer à la racine de SpotiFLAC-web/
+# Placer à la racine du repo.
 # Setup requis : git remote add upstream https://github.com/spotbye/SpotiFLAC.git
+#
+# Contrairement à l'ancienne version, ce script :
+#   1. Découvre automatiquement TOUS les fichiers backend/*.go (+ app.go,
+#      main.go, go.mod) côté upstream, au lieu d'une liste figée — un
+#      nouveau fichier upstream ne peut plus passer inaperçu.
+#   2. Classe chaque fichier via .github/upstream-map.txt (MAPPED / IGNORE),
+#      tout le reste = UNMAPPED (triage manuel requis).
+#   3. Compare depuis .github/upstream-last-reviewed.txt, PAS depuis
+#      `git merge-base` — ce dernier n'avance jamais puisqu'on ne fait
+#      jamais de vrai merge, donc le diff resterait cumulatif à l'infini.
+#      Après un triage, avancer manuellement ce marqueur (voir le rappel en
+#      fin de script).
+#   4. Ne liste que ce qui a réellement changé — pas de bruit sur ce qui est
+#      stable.
 
 set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
 
 VERBOSE=false
 if [[ "${1:-}" == "--verbose" || "${1:-}" == "-v" ]]; then
     VERBOSE=true
 fi
 
-# ─── Couleurs ────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -20,60 +34,16 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CLASSIFICATION DES FICHIERS
-#
-# PURE UPSTREAM : existent dans upstream ET chez nous, peu ou pas modifiés.
-#   → checkout direct si pas de conflits
-#
-# NEW_UPSTREAM : existent dans upstream mais PAS chez nous localement.
-#   → contenu potentiellement intéressant à intégrer manuellement
-#
-# NEVER_TRACK : nos fichiers custom (n'existent pas dans upstream ou
-#   complètement réécrits). Jamais de sync.
-#
-# Fichiers NEVER_TRACK (pour mémoire, non checkés) :
-#   backend/deezer.go       → supprimé dans upstream, on le garde
-#   backend/downloader.go   → notre helper, n'existe pas upstream
-#   backend/uploader.go     → notre helper, n'existe pas upstream
-#   backend/spotify_metadata.go → notre réécriture de spotify.go/spotfetch.go
-#   auth.go, server.go, jobs.go, watcher.go, history.go → 100% custom
-#   frontend/src/           → 100% custom
-# ─────────────────────────────────────────────────────────────────────────────
+MAP_FILE=".github/upstream-map.txt"
+BASELINE_FILE=".github/upstream-last-reviewed.txt"
 
-TRACKED_FILES=(
-    "backend/tidal.go"
-    "backend/amazon.go"
-    "backend/qobuz.go"
-    "backend/metadata.go"
-    "backend/musicbrainz.go"
-    "backend/songlink.go"
-    "backend/cover.go"
-    "backend/lyrics.go"
-)
-
-# Fichiers qui existent dans upstream mais pas (ou différemment nommés) chez nous.
-# On vérifie s'ils ont changé dans upstream — intégration manuelle uniquement.
-NEW_UPSTREAM_FILES=(
-    "backend/spotfetch.go"   # upstream renommé depuis spotify.go — notre équivalent : backend/spotify_metadata.go
-)
-
-# Fichiers MIXED : base commune mais modifiés des deux côtés.
-MIXED_FILES=(
-    "app.go"
-    "go.mod"
-)
-
-# ─── Vérifications préliminaires ─────────────────────────────────────────────
 echo -e "${BOLD}╔══════════════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}║   SpotiFLAC — Upstream Sync Checker                 ║${RESET}"
+echo -e "${BOLD}║   SpotiFLAC — Upstream Watch                        ║${RESET}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════╝${RESET}"
 echo ""
 
 if ! git remote get-url upstream &>/dev/null; then
     echo -e "${RED}✗ Remote 'upstream' non configuré.${RESET}"
-    echo ""
-    echo "  Exécuter :"
     echo "  git remote add upstream https://github.com/spotbye/SpotiFLAC.git"
     exit 1
 fi
@@ -84,160 +54,125 @@ echo ""
 
 UPSTREAM_HEAD=$(git rev-parse upstream/main)
 UPSTREAM_DATE=$(git log -1 --format="%ci" upstream/main)
-UPSTREAM_MSG=$(git log -1 --format="%s" upstream/main)
-LOCAL_HEAD=$(git rev-parse HEAD)
+BASELINE=$(cat "$BASELINE_FILE")
 
-echo -e "  Upstream HEAD : ${YELLOW}${UPSTREAM_HEAD:0:8}${RESET} — ${UPSTREAM_DATE:0:10} — ${UPSTREAM_MSG}"
-echo -e "  Local HEAD    : ${YELLOW}${LOCAL_HEAD:0:8}${RESET}"
+echo -e "  Upstream HEAD : ${YELLOW}${UPSTREAM_HEAD:0:8}${RESET} — ${UPSTREAM_DATE:0:10}"
+echo -e "  Baseline      : ${YELLOW}${BASELINE:0:8}${RESET} (dernier triage — ${BASELINE_FILE})"
 echo ""
 
-COMMON_ANCESTOR=$(git merge-base HEAD upstream/main)
-COMMIT_COUNT=$(git rev-list --count "${COMMON_ANCESTOR}..upstream/main")
-
-if [[ "$COMMIT_COUNT" -eq 0 ]]; then
-    echo -e "${GREEN}✓ Aucun nouveau commit upstream depuis le dernier sync.${RESET}"
+if [[ "$UPSTREAM_HEAD" == "$BASELINE" ]]; then
+    echo -e "${GREEN}✓ Rien de nouveau depuis le dernier triage.${RESET}"
     exit 0
 fi
 
-echo -e "${YELLOW}! ${COMMIT_COUNT} nouveaux commits dans upstream/main depuis le dernier sync commun${RESET}"
+COMMIT_COUNT=$(git rev-list --count "${BASELINE}..upstream/main" 2>/dev/null || echo "?")
+echo -e "${YELLOW}! ${COMMIT_COUNT} commits upstream depuis le dernier triage${RESET}"
 echo ""
 
-echo -e "${BOLD}Commits upstream récents :${RESET}"
-git log "${COMMON_ANCESTOR}..upstream/main" --oneline | while read -r line; do
-    echo "  ${line}"
-done
-echo ""
-
-# ─── Analyse fichiers PURE UPSTREAM ──────────────────────────────────────────
-echo -e "${BOLD}══ Fichiers PURE UPSTREAM ══════════════════════════════${RESET}"
-echo -e "   (checkout direct si pas de conflits)"
-echo ""
-
-CHANGED_COUNT=0
-UNCHANGED_COUNT=0
-
-for FILE in "${TRACKED_FILES[@]}"; do
-    if ! git show "upstream/main:${FILE}" &>/dev/null 2>&1; then
-        echo -e "  ${YELLOW}⚠${RESET} ${FILE} — ${YELLOW}disparu de upstream${RESET} (supprimé ou renommé ?)"
-        continue
-    fi
-
-    DIFF_OUTPUT=$(git diff "${COMMON_ANCESTOR}" upstream/main -- "${FILE}" 2>/dev/null || true)
-
-    if [[ -z "$DIFF_OUTPUT" ]]; then
-        echo -e "  ${GREEN}✓${RESET} ${FILE}"
-        ((UNCHANGED_COUNT++)) || true
+# ─── Commits : séparer code vs docs-only ─────────────────────────────────────
+echo -e "${BOLD}Commits de code (hors README/docs) :${RESET}"
+CODE_COMMITS=0
+DOC_ONLY_COMMITS=0
+for SHA in $(git rev-list "${BASELINE}..upstream/main" --reverse); do
+    TOUCHED=$(git show --name-only --format="" "$SHA")
+    NON_DOC=$(echo "$TOUCHED" | grep -vE '^(README\.md|docs/|\.github/)' || true)
+    if [[ -n "$NON_DOC" ]]; then
+        MSG=$(git log -1 --format="%h %s" "$SHA")
+        echo "  $MSG"
+        ((CODE_COMMITS++)) || true
     else
-        LINES_ADDED=$(echo "$DIFF_OUTPUT" | grep -c '^+[^+]' || true)
-        LINES_REMOVED=$(echo "$DIFF_OUTPUT" | grep -c '^-[^-]' || true)
-        echo -e "  ${RED}✗${RESET} ${FILE} — ${RED}+${LINES_ADDED} / -${LINES_REMOVED} lignes upstream${RESET}"
-        ((CHANGED_COUNT++)) || true
-
-        if $VERBOSE; then
-            echo ""
-            echo "$DIFF_OUTPUT" | head -80 | sed 's/^/      /'
-            echo "      [...]"
-            echo ""
-        fi
+        ((DOC_ONLY_COMMITS++)) || true
     fi
 done
-
+[[ "$CODE_COMMITS" -eq 0 ]] && echo "  (aucun)"
 echo ""
-echo -e "  ${GREEN}✓ Synchronisés : ${UNCHANGED_COUNT}${RESET}  |  ${RED}✗ À mettre à jour : ${CHANGED_COUNT}${RESET}"
-echo ""
-
-# ─── Analyse fichiers NEW UPSTREAM (pas d'équivalent direct local) ───────────
-echo -e "${BOLD}══ Nouveaux fichiers upstream (intégration manuelle) ═══${RESET}"
-echo -e "   (existent upstream mais pas localement sous ce nom)"
+echo -e "  ${CODE_COMMITS} commits de code, ${DOC_ONLY_COMMITS} commits README/docs-only (masqués)"
 echo ""
 
-for FILE in "${NEW_UPSTREAM_FILES[@]}"; do
-    if ! git show "upstream/main:${FILE}" &>/dev/null 2>&1; then
-        echo -e "  ${YELLOW}?${RESET} ${FILE} — non trouvé dans upstream non plus (supprimé ?)"
+if [[ "$CODE_COMMITS" -eq 0 ]]; then
+    echo -e "${GREEN}✓ Tous les commits depuis le dernier triage sont README/docs-only. Rien à trianger.${RESET}"
+    echo ""
+    echo -e "  Avancer quand même le marqueur pour ne pas les revoir la prochaine fois :"
+    echo -e "  ${CYAN}echo ${UPSTREAM_HEAD} > ${BASELINE_FILE}${RESET}"
+    exit 0
+fi
+
+# ─── Charger la classification ───────────────────────────────────────────────
+declare -A MAP_STATUS
+declare -A MAP_NOTE
+while IFS='|' read -r path status note; do
+    [[ -z "$path" || "$path" == \#* ]] && continue
+    MAP_STATUS["$path"]="$status"
+    MAP_NOTE["$path"]="$note"
+done < "$MAP_FILE"
+
+# ─── Découverte auto des fichiers upstream ───────────────────────────────────
+UPSTREAM_FILES=$(git ls-tree -r --name-only upstream/main -- backend/ 2>/dev/null | grep '\.go$' || true)
+UPSTREAM_FILES="${UPSTREAM_FILES}
+$(git ls-tree upstream/main -- app.go main.go 2>/dev/null | awk '{print $4}')"
+
+MAPPED_CHANGED=""
+UNMAPPED_CHANGED=""
+IGNORED_COUNT=0
+MAPPED_UNCHANGED_COUNT=0
+
+while IFS= read -r FULLPATH; do
+    [[ -z "$FULLPATH" ]] && continue
+    KEY="$FULLPATH"
+    [[ "$FULLPATH" == backend/* ]] && KEY="${FULLPATH#backend/}"
+
+    STATUS="${MAP_STATUS[$KEY]:-UNMAPPED}"
+    NOTE="${MAP_NOTE[$KEY]:-needs manual triage — not yet classified in $MAP_FILE}"
+
+    if [[ "$STATUS" == "IGNORE" ]]; then
+        ((IGNORED_COUNT++)) || true
         continue
     fi
 
-    # Récupère la date du dernier commit upstream qui a touché ce fichier
-    LAST_CHANGED=$(git log upstream/main --oneline -1 -- "${FILE}" 2>/dev/null || true)
-
-    # Taille du fichier upstream
-    LINE_COUNT=$(git show "upstream/main:${FILE}" 2>/dev/null | wc -l || echo "?")
-
-    echo -e "  ${CYAN}~${RESET} ${FILE} — ${LINE_COUNT} lignes upstream"
-    if [[ -n "$LAST_CHANGED" ]]; then
-        echo -e "      Dernier commit : ${LAST_CHANGED}"
+    DIFF_OUTPUT=$(git diff "${BASELINE}" upstream/main -- "$FULLPATH" 2>/dev/null || true)
+    if [[ -z "$DIFF_OUTPUT" ]]; then
+        [[ "$STATUS" == "MAPPED" ]] && ((MAPPED_UNCHANGED_COUNT++)) || true
+        continue
     fi
 
-    # Afficher les notes associées si définies
-    case "$FILE" in
-        "backend/spotfetch.go")
-            echo -e "      ${YELLOW}Note :${RESET} Renommé depuis spotify.go. Notre équivalent : backend/spotify_metadata.go"
-            echo -e "      Contient : SpotifyClient TOTP, Filter{Track,Album,Playlist,Artist,Search}"
-            echo -e "      Action   : comparer les fonctions Filter* avec notre spotify_metadata.go"
-            ;;
-    esac
-    echo ""
+    ADDED=$(echo "$DIFF_OUTPUT" | grep -c '^+[^+]' || true)
+    REMOVED=$(echo "$DIFF_OUTPUT" | grep -c '^-[^-]' || true)
+    LINE="  ${FULLPATH} (+${ADDED}/-${REMOVED}) → ${NOTE}"
+
+    if [[ "$STATUS" == "MAPPED" ]]; then
+        MAPPED_CHANGED="${MAPPED_CHANGED}${LINE}\n"
+    else
+        UNMAPPED_CHANGED="${UNMAPPED_CHANGED}${LINE}\n"
+    fi
 
     if $VERBOSE; then
-        echo -e "      ${CYAN}--- Contenu upstream/${FILE} (50 premières lignes) ---${RESET}"
-        git show "upstream/main:${FILE}" 2>/dev/null | head -50 | sed 's/^/      /'
-        echo "      [...]"
+        echo -e "${CYAN}--- $FULLPATH ---${RESET}"
+        echo "$DIFF_OUTPUT" | head -60
+        echo "  [...]"
         echo ""
     fi
-done
+done <<< "$UPSTREAM_FILES"
 
-# ─── Analyse fichiers MIXED ───────────────────────────────────────────────────
-echo -e "${BOLD}══ Fichiers MIXED (inspection manuelle requise) ════════${RESET}"
+echo -e "${BOLD}══ Fichiers MAPPED modifiés (on sait où regarder) ══════${RESET}"
+[[ -n "$MAPPED_CHANGED" ]] && echo -e "$MAPPED_CHANGED" || echo "  (aucun)"
 echo ""
 
-for FILE in "${MIXED_FILES[@]}"; do
-    if ! git show "upstream/main:${FILE}" &>/dev/null 2>&1; then
-        echo -e "  ${YELLOW}?${RESET} ${FILE} — non trouvé dans upstream"
-        continue
-    fi
-
-    DIFF_OUTPUT=$(git diff "${COMMON_ANCESTOR}" upstream/main -- "${FILE}" 2>/dev/null || true)
-
-    if [[ -z "$DIFF_OUTPUT" ]]; then
-        echo -e "  ${GREEN}✓${RESET} ${FILE} — identique"
-    else
-        LINES_ADDED=$(echo "$DIFF_OUTPUT" | grep -c '^+[^+]' || true)
-        LINES_REMOVED=$(echo "$DIFF_OUTPUT" | grep -c '^-[^-]' || true)
-        echo -e "  ${YELLOW}~${RESET} ${FILE} — ${YELLOW}+${LINES_ADDED} / -${LINES_REMOVED} lignes upstream (merger manuellement)${RESET}"
-
-        if $VERBOSE; then
-            echo ""
-            echo "$DIFF_OUTPUT" | head -80 | sed 's/^/      /'
-            echo "      [...]"
-            echo ""
-        fi
-    fi
-done
-
+echo -e "${BOLD}══ Fichiers UNMAPPED modifiés (triage manuel requis) ═══${RESET}"
+[[ -n "$UNMAPPED_CHANGED" ]] && echo -e "$UNMAPPED_CHANGED" || echo "  (aucun)"
 echo ""
 
-# ─── Commandes utiles ─────────────────────────────────────────────────────────
-if [[ "$CHANGED_COUNT" -gt 0 ]]; then
-    echo -e "${BOLD}══ Commandes pour intégrer les changements ════════════${RESET}"
-    echo ""
-    echo "  # Voir le diff détaillé d'un fichier (depuis le merge-base) :"
-    echo "  git diff \$(git merge-base HEAD upstream/main) upstream/main -- backend/tidal.go | less"
-    echo ""
-    echo "  # Copier un fichier pure upstream directement (si aucun conflit) :"
-    echo "  git checkout upstream/main -- backend/tidal.go"
-    echo "  git commit -m 'chore: sync backend/tidal.go from upstream'"
-    echo ""
-    echo "  # Voir le contenu d'un fichier upstream sans l'appliquer :"
-    echo "  git show upstream/main:backend/spotfetch.go | less"
+echo -e "  ${GREEN}${MAPPED_UNCHANGED_COUNT} fichiers mappés inchangés${RESET}  |  ${CYAN}${IGNORED_COUNT} fichiers ignorés (desktop-only)${RESET}"
+echo ""
+
+# ─── go.mod : dérive des dépendances ─────────────────────────────────────────
+GOMOD_DIFF=$(git diff "${BASELINE}" upstream/main -- go.mod 2>/dev/null || true)
+if [[ -n "$GOMOD_DIFF" ]]; then
+    echo -e "${BOLD}══ go.mod — dépendances upstream modifiées ═════════════${RESET}"
+    echo "$GOMOD_DIFF" | grep -E '^[+-][^+-]' | head -20
     echo ""
 fi
 
-echo -e "${BOLD}══ Résumé ════════════════════════════════════════════${RESET}"
-echo ""
-if [[ "$CHANGED_COUNT" -eq 0 ]]; then
-    echo -e "  ${GREEN}Fichiers pure upstream : tous à jour.${RESET}"
-else
-    echo -e "  ${RED}${CHANGED_COUNT} fichier(s) pure upstream à mettre à jour.${RESET}"
-    echo -e "  Lance ${CYAN}--verbose${RESET} pour voir les diffs inline."
-fi
+echo -e "${BOLD}══ Une fois trianger ═══════════════════════════════════${RESET}"
+echo "  echo ${UPSTREAM_HEAD} > ${BASELINE_FILE}"
+echo "  git add ${BASELINE_FILE} && git commit -m 'chore(upstream): mark ${UPSTREAM_HEAD:0:8} as reviewed'"
 echo ""
