@@ -1,0 +1,968 @@
+{
+  "data": {
+    "albumUnion": {
+      "__typename": "Album",
+      "artists": {
+        "items": [
+          {
+            "id": "0gxyHStUsqpMadRV0Di1Qt",
+            "profile": {
+              "name": "Rick Astley"
+            },
+            "sharingInfo": {
+              "shareUrl": "https://open.spotify.com/artist/0gxyHStUsqpMadRV0Di1Qt?si=Jgn_sVLDQKaU7k8SIi7GKg"
+            },
+            "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+            "visuals": {
+              "avatarImage": {
+                "sources": [
+                  {
+                    "height": 640,
+                    "url": "https://i.scdn.co/image/ab6761610000e5ebe834a63a0cfa3c0f57a9a434",
+                    "width": 640
+                  },
+                  {
+                    "height": 160,
+                    "url": "https://i.scdn.co/image/ab6761610000f178e834a63a0cfa3c0f57a9a434",
+                    "width": 160
+                  },
+                  {
+                    "height": 320,
+                    "url": "https://i.scdn.co/image/ab67616100005174e834a63a0cfa3c0f57a9a434",
+                    "width": 320
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "totalCount": 1
+      },
+      "copyright": {
+        "items": [
+          {
+            "text": "1987 BMG Rights Management (UK) Limited",
+            "type": "C"
+          },
+          {
+            "text": "1987 BMG Rights Management (UK) Limited",
+            "type": "P"
+          }
+        ],
+        "totalCount": 2
+      },
+      "courtesyLine": "",
+      "coverArt": {
+        "extractedColors": {
+          "colorDark": {
+            "hex": "#1080A0"
+          },
+          "colorLight": {
+            "hex": "#1080A0"
+          },
+          "colorRaw": {
+            "hex": "#1080A0"
+          }
+        },
+        "sources": [
+          {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e0215ebbedaacef61af244262a8",
+            "width": 300
+          },
+          {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d0000485115ebbedaacef61af244262a8",
+            "width": 64
+          },
+          {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b27315ebbedaacef61af244262a8",
+            "width": 640
+          }
+        ]
+      },
+      "date": {
+        "isoString": "1987-11-12T00:00:00Z",
+        "precision": "DAY"
+      },
+      "discs": {
+        "items": [
+          {
+            "number": 1,
+            "tracks": {
+              "totalCount": 10
+            }
+          }
+        ],
+        "totalCount": 1
+      },
+      "isPreRelease": false,
+      "label": "BMG Rights Management (UK) Ltd.",
+      "moreAlbumsByArtist": {
+        "items": [
+          {
+            "discography": {
+              "popularReleasesAlbums": {
+                "items": [
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0215ebbedaacef61af244262a8",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485115ebbedaacef61af244262a8",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27315ebbedaacef61af244262a8",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 1987
+                    },
+                    "id": "6eUW0wxWtzkFdaEFsTJto6",
+                    "name": "Whenever You Need Somebody",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "g2oMa3e1TxOicw_w3mPqag",
+                      "shareUrl": "https://open.spotify.com/album/6eUW0wxWtzkFdaEFsTJto6?si=g2oMa3e1TxOicw_w3mPqag"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:6eUW0wxWtzkFdaEFsTJto6"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e022d65996f4648365980d7ae17",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048512d65996f4648365980d7ae17",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2732d65996f4648365980d7ae17",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 1988
+                    },
+                    "id": "7nmRmH6biwwlsS48u1HRgx",
+                    "name": "Hold Me in Your Arms (Deluxe Edition - 2023 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "BoTiS3M9TmKg34buyD7KvQ",
+                      "shareUrl": "https://open.spotify.com/album/7nmRmH6biwwlsS48u1HRgx?si=BoTiS3M9TmKg34buyD7KvQ"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:7nmRmH6biwwlsS48u1HRgx"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e023a67639779ccabd632e1a80e",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048513a67639779ccabd632e1a80e",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2733a67639779ccabd632e1a80e",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 2022
+                    },
+                    "id": "4C4LvbYS0pxXLW5sGD9EK5",
+                    "name": "Whenever You Need Somebody (Deluxe Edition - 2022 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "75H6N8stTcadQ8jg_AFd5g",
+                      "shareUrl": "https://open.spotify.com/album/4C4LvbYS0pxXLW5sGD9EK5?si=75H6N8stTcadQ8jg_AFd5g"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:4C4LvbYS0pxXLW5sGD9EK5"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0282b713e07b4bfbcd6a51b8a4",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485182b713e07b4bfbcd6a51b8a4",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27382b713e07b4bfbcd6a51b8a4",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 1991
+                    },
+                    "id": "2paz2mFnKrWxGH4ME0b8nG",
+                    "name": "Free",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "lNAO-NKhQqC0DO07JNCIcw",
+                      "shareUrl": "https://open.spotify.com/album/2paz2mFnKrWxGH4ME0b8nG?si=lNAO-NKhQqC0DO07JNCIcw"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:2paz2mFnKrWxGH4ME0b8nG"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e029b6b16d986a7eebb6e877957",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048519b6b16d986a7eebb6e877957",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2739b6b16d986a7eebb6e877957",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 2024
+                    },
+                    "id": "2bMMC4fA3rqBgiuMxduxmq",
+                    "name": "Free (Deluxe Edition - 2024 Remaster)",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "2xZfVUWxTZ260Ci4ZMRiHw",
+                      "shareUrl": "https://open.spotify.com/album/2bMMC4fA3rqBgiuMxduxmq?si=2xZfVUWxTZ260Ci4ZMRiHw"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:2bMMC4fA3rqBgiuMxduxmq"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02f5e44c5a57731bcdc97a16cf",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851f5e44c5a57731bcdc97a16cf",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273f5e44c5a57731bcdc97a16cf",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 2016
+                    },
+                    "id": "4f9CV4zRabJ0e5q8QEx0tv",
+                    "name": "50",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "_zK5Y6RmTQSvPAbNgCXfDQ",
+                      "shareUrl": "https://open.spotify.com/album/4f9CV4zRabJ0e5q8QEx0tv?si=_zK5Y6RmTQSvPAbNgCXfDQ"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:4f9CV4zRabJ0e5q8QEx0tv"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02261f374a604fecf8e629b8c9",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851261f374a604fecf8e629b8c9",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273261f374a604fecf8e629b8c9",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 2023
+                    },
+                    "id": "5sDuophQhwHGXQwGzxJSsg",
+                    "name": "Are We There Yet?",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "VwsB7vjjSWKt0CulbGYIhA",
+                      "shareUrl": "https://open.spotify.com/album/5sDuophQhwHGXQwGzxJSsg?si=VwsB7vjjSWKt0CulbGYIhA"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:5sDuophQhwHGXQwGzxJSsg"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e02b48428d8b85043aa3bacd6b9",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d00004851b48428d8b85043aa3bacd6b9",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b273b48428d8b85043aa3bacd6b9",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 1988
+                    },
+                    "id": "7jFoulkN5p0nHAZ1gyAPHs",
+                    "name": "Hold Me in Your Arms",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "hXD4boFHQEqMbTOG_NJuDg",
+                      "shareUrl": "https://open.spotify.com/album/7jFoulkN5p0nHAZ1gyAPHs?si=hXD4boFHQEqMbTOG_NJuDg"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:7jFoulkN5p0nHAZ1gyAPHs"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e028f59c9c01c3ce2aef9c29f56",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d000048518f59c9c01c3ce2aef9c29f56",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b2738f59c9c01c3ce2aef9c29f56",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 2026
+                    },
+                    "id": "5U0RVHlHR4ywoPiOxosTgv",
+                    "name": "Waiting On You",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "dFxqiXE1RciY3qQrZQMWLA",
+                      "shareUrl": "https://open.spotify.com/album/5U0RVHlHR4ywoPiOxosTgv?si=dFxqiXE1RciY3qQrZQMWLA"
+                    },
+                    "type": "SINGLE",
+                    "uri": "spotify:album:5U0RVHlHR4ywoPiOxosTgv"
+                  },
+                  {
+                    "coverArt": {
+                      "sources": [
+                        {
+                          "height": 300,
+                          "url": "https://i.scdn.co/image/ab67616d00001e0208875bbad20b66383e469faf",
+                          "width": 300
+                        },
+                        {
+                          "height": 64,
+                          "url": "https://i.scdn.co/image/ab67616d0000485108875bbad20b66383e469faf",
+                          "width": 64
+                        },
+                        {
+                          "height": 640,
+                          "url": "https://i.scdn.co/image/ab67616d0000b27308875bbad20b66383e469faf",
+                          "width": 640
+                        }
+                      ]
+                    },
+                    "date": {
+                      "year": 2018
+                    },
+                    "id": "7BL1FkTweUHVdzttB2ywLF",
+                    "name": "Beautiful Life",
+                    "playability": {
+                      "playable": true,
+                      "reason": "PLAYABLE"
+                    },
+                    "sharingInfo": {
+                      "shareId": "eOXnIZSVS9qZWstxKAIO1A",
+                      "shareUrl": "https://open.spotify.com/album/7BL1FkTweUHVdzttB2ywLF?si=eOXnIZSVS9qZWstxKAIO1A"
+                    },
+                    "type": "ALBUM",
+                    "uri": "spotify:album:7BL1FkTweUHVdzttB2ywLF"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "name": "Whenever You Need Somebody",
+      "playability": {
+        "playable": true,
+        "reason": "PLAYABLE"
+      },
+      "preReleaseEndDateTime": null,
+      "releases": {
+        "items": [],
+        "totalCount": 0
+      },
+      "saved": false,
+      "sharingInfo": {
+        "shareId": "A5JyskvZRNCEHdhm7gmneA",
+        "shareUrl": "https://open.spotify.com/album/6eUW0wxWtzkFdaEFsTJto6?si=A5JyskvZRNCEHdhm7gmneA"
+      },
+      "tracksV2": {
+        "items": [
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 1
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 213573
+              },
+              "name": "Never Gonna Give You Up",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "1151076782",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 1,
+              "uri": "spotify:track:4PTG3Z6ehGkBFwjybzWkR8"
+            },
+            "uid": "c20d5b537f76644036e8"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 1
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 233666
+              },
+              "name": "Whenever You Need Somebody",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "23764288",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 2,
+              "uri": "spotify:track:3X4r1d2VDYjgPYjAEjbEM7"
+            },
+            "uid": "4455e32339f013edc1e6"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 1
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 205533
+              },
+              "name": "Together Forever",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "207570371",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 3,
+              "uri": "spotify:track:00isIFJWVpXIQ8HkGICSQp"
+            },
+            "uid": "3894e1344c388f33db92"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 1
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 220826
+              },
+              "name": "It Would Take a Strong Strong Man",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "8398703",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 4,
+              "uri": "spotify:track:29K9hk3LXfbg12O2tH355c"
+            },
+            "uid": "87cd81cebe5cb62cd2f7"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 0
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 260160
+              },
+              "name": "The Love Has Gone",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "2466055",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 5,
+              "uri": "spotify:track:7DljnkkhQ9fiByyuOKZVgZ"
+            },
+            "uid": "d3aa928bd301cad847ff"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 0
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 249240
+              },
+              "name": "Don't Say Goodbye",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "6235261",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 6,
+              "uri": "spotify:track:7EyrWqVQ3bAYGWPOFG6HMZ"
+            },
+            "uid": "5c272c5b5ea31fd05c6b"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 0
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 232893
+              },
+              "name": "Slipping Away",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "1949010",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 7,
+              "uri": "spotify:track:2vT7vbzj0IpWSn7u1893Cr"
+            },
+            "uid": "e0488c355545b1ecfd37"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 0
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 192800
+              },
+              "name": "No More Looking for Love",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "1529164",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 8,
+              "uri": "spotify:track:7KzUl0WI3PPorUqwxg0tlD"
+            },
+            "uid": "86046458f5a418332cec"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 0
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 222533
+              },
+              "name": "You Move Me",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "1612944",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 9,
+              "uri": "spotify:track:2H8A6GdlmOcG3iahhOmZNZ"
+            },
+            "uid": "a74df5d2f0f3544bd1ed"
+          },
+          {
+            "track": {
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Rick Astley"
+                    },
+                    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt"
+                  }
+                ]
+              },
+              "associationsV3": {
+                "videoAssociations": {
+                  "totalCount": 1
+                }
+              },
+              "contentRating": {
+                "label": "NONE"
+              },
+              "discNumber": 1,
+              "duration": {
+                "totalMilliseconds": 183026
+              },
+              "name": "When I Fall in Love",
+              "playability": {
+                "playable": true
+              },
+              "playcount": "4658757",
+              "relinkingInformation": null,
+              "saved": false,
+              "trackNumber": 10,
+              "uri": "spotify:track:7bQ3PzSOamBuf77yAfbSUc"
+            },
+            "uid": "61f69a8c33e993536201"
+          }
+        ],
+        "totalCount": 10
+      },
+      "type": "ALBUM",
+      "uri": "spotify:album:6eUW0wxWtzkFdaEFsTJto6",
+      "visualIdentity": {
+        "squareCoverImage": {
+          "__typename": "VisualIdentityImage",
+          "extractedColorSet": {
+            "encoreBaseSetTextColor": {
+              "alpha": 255,
+              "blue": 232,
+              "green": 198,
+              "red": 104
+            },
+            "highContrast": {
+              "backgroundBase": {
+                "alpha": 255,
+                "blue": 119,
+                "green": 89,
+                "red": 0
+              },
+              "backgroundTintedBase": {
+                "alpha": 255,
+                "blue": 81,
+                "green": 53,
+                "red": 0
+              },
+              "textBase": {
+                "alpha": 255,
+                "blue": 255,
+                "green": 255,
+                "red": 255
+              },
+              "textBrightAccent": {
+                "alpha": 255,
+                "blue": 255,
+                "green": 255,
+                "red": 255
+              },
+              "textSubdued": {
+                "alpha": 255,
+                "blue": 251,
+                "green": 217,
+                "red": 125
+              }
+            },
+            "higherContrast": {
+              "backgroundBase": {
+                "alpha": 255,
+                "blue": 84,
+                "green": 55,
+                "red": 0
+              },
+              "backgroundTintedBase": {
+                "alpha": 255,
+                "blue": 121,
+                "green": 90,
+                "red": 42
+              },
+              "textBase": {
+                "alpha": 255,
+                "blue": 255,
+                "green": 255,
+                "red": 255
+              },
+              "textBrightAccent": {
+                "alpha": 255,
+                "blue": 96,
+                "green": 215,
+                "red": 30
+              },
+              "textSubdued": {
+                "alpha": 255,
+                "blue": 251,
+                "green": 217,
+                "red": 125
+              }
+            },
+            "minContrast": {
+              "backgroundBase": {
+                "alpha": 255,
+                "blue": 160,
+                "green": 128,
+                "red": 16
+              },
+              "backgroundTintedBase": {
+                "alpha": 255,
+                "blue": 129,
+                "green": 98,
+                "red": 0
+              },
+              "textBase": {
+                "alpha": 255,
+                "blue": 255,
+                "green": 255,
+                "red": 255
+              },
+              "textBrightAccent": {
+                "alpha": 255,
+                "blue": 255,
+                "green": 255,
+                "red": 255
+              },
+              "textSubdued": {
+                "alpha": 255,
+                "blue": 255,
+                "green": 255,
+                "red": 255
+              }
+            }
+          }
+        }
+      },
+      "watchFeedEntrypoint": null
+    }
+  }
+}
