@@ -25,7 +25,7 @@
 | **R5** | `backend/downloader.go` dispatch providers | Pas d'interface `Provider` ; `switch` dupliqué ; entrées mal nommées | Moyen | Faible-moyen | 4 |
 | **R6** | `backend/{tidal,qobuz,amazon,deezer}` `DownloadFile` | Boilerplate requête HTTP dupliqué 4× | Faible | Faible | 4 |
 | **R7** | `watcher.go` — `DownloadPath`-or-default ×5 | Petite duplication | Faible | Très faible | 5 |
-| **R8** | `app_core.go` — `SaveSettings`/`LoadSettings` `map[string]interface{}` | Réglages stringly-typed côté Go | Faible | Moyen (risque de drift) | 5 (optionnel) |
+| **R8** ✅ | Résolution des réglages backend (`libraryRoot`, `ApplySettingsFallbacks`, `watcher.go`×4…) | Incohérence per-user/global vécue (bug réel) → **`DownloadSettings` (vue typée) + résolveur unique `EffectiveDownloadSettings`** | Faible | Faible-moyen | **fait** |
 | **R9** ✅ | `frontend/…/useDownload.ts` (849 l.) | Gros hook → **moteur de fallback (359 l.) extrait dans `lib/downloadFallback.ts` ; hook 849→489 l.** | Faible | Faible | **fait** |
 | **R10** | retag `incomplete-metadata` (terrain) | Non-convergent : sur-sélection sur `genre` (99 % skip) | Moyen | Faible | **voir §6** |
 | **R11** | Dépendances (ffmpeg/Go/front) | ffmpeg & front déjà à jour ; Dependabot **actif** (11 PR ouvertes non triées, dont sqlite/bbolt/x/text) | Faible-moyen | Faible | **voir §7** |
@@ -41,7 +41,8 @@ contenu (découpage mécanique, pas de logique modifiée). R2 est le plus payant
 plus risqué (le parsing Spotify est du code chaud, peu testé) — à faire **incrémentalement, une
 fonction `Filter*` à la fois, avec des tests de caractérisation posés AVANT**. R5-R7 sont des quick
 wins DRY à faible risque, bons à grouper. **R3 a finalement été fait** (maintenabilité long terme —
-voir sa section) ; R8 reste optionnel et peut être différé indéfiniment sans coût.
+voir sa section) ; **R8 aussi**, une fois recadré sur le vrai problème (incohérence de résolution,
+pas le typage du blob — voir sa section).
 
 ---
 
@@ -217,13 +218,31 @@ if outputDir == "" { outputDir = util.GetDefaultMusicPath() }
 apparaît aux lignes **340, 394, 525, 1259, 1500** (Q8 avait supprimé le chemin codé en dur
 `/home/nonroot/Music`, mais pas centralisé ce fallback).
 
-### R8 — Réglages `map[string]interface{}` côté Go (optionnel)
+### R8 — Réglages `map[string]interface{}` côté Go
 
-`App.SaveSettings`/`LoadSettings` (app_core.go:1061,1087) travaillent en `map[string]interface{}`
-alors que le front a un type `Settings` complet (`frontend/src/lib/settings.ts`, 412 l.). Le contrat
-réel des réglages n'est typé que d'un côté. **Attention** : introduire un struct Go typé crée un
-risque de **drift** avec le type TS s'ils ne sont pas générés depuis une source unique → à ne faire
-que si on met en place une génération de types partagée. Sinon, laisser tel quel.
+**✅ Fait (14/07) — recadré après discussion.** Le vrai problème n'était pas le typage du blob (qui
+reste, à raison, un `map[string]interface{}` pass-through possédé par le frontend — le typer en
+entier aurait fait perdre silencieusement toute clé UI inconnue à chaque round-trip), mais une
+**incohérence de résolution vécue en prod** découverte en auditant les points de lecture : la route
+`GET/PUT /api/v1/settings` résout correctement per-user-puis-global, mais **4 autres points de
+lecture** (`libraryRoot` — la racine de confinement de **tous** les chemins fichiers/downloads,
+`ApplySettingsFallbacks`, et les 2 lectures de `spotFetchAPIUrl`) lisaient le fichier `config.json`
+**global uniquement**, ignorant silencieusement les réglages qu'un utilisateur Jellyfin authentifié
+avait pourtant correctement sauvegardés. `watcher.go`, lui, avait la bonne logique mais **dupliquée
+4×** inline.
+
+**Solution retenue** : `DownloadSettings`, une **vue typée en lecture** sur les ~15 clés que le
+backend interprète réellement (downloadPath, qualités, embed*, M3U8, spotFetchAPIUrl…) — le stockage
+reste un `map` inchangé, seule la lecture est unifiée. Un résolveur unique,
+`EffectiveDownloadSettings(auth, userID)`, remplace les 4 blocs dupliqués de `watcher.go` et corrige
+les 4 points cassés. `libraryRoot()` est scindé en variante globale (conservée pour le scan de
+maintenance admin-wide de `api_admin.go`) et `libraryRootFor(r)` (par-requête, honore le
+`downloadPath` propre à l'utilisateur authentifié). Bonus : `TidalQuality`/`QobuzQuality` sont
+normalisées via les fonctions tolérantes déjà existantes (`backend.TidalQualityFor`/`QobuzQualityFor`)
+au lieu de compter sur un appelant plus tardif pour le faire. Tests : `ParseDownloadSettings`
+(clés manquantes, types invalides, normalisation) + un test de non-régression qui prouve que les
+réglages par-utilisateur l'emportent désormais sur le global. Build/vet/`-race` verts, aucun
+changement de format de stockage ni de contrat frontend.
 
 ### R9 — `useDownload.ts` : gros hook (déjà en partie découpé)
 
@@ -281,12 +300,10 @@ navigateur) reste possible mais à gain modéré — laissé de côté.
     `watcher_parsing.go`. Aucun changement de logique — juste déplacer des fonctions (le compilateur
     garantit l'exactitude). Extraire ensuite les phases de `syncPlaylist` en sous-méthodes nommées.
 
-### Phase E — Optionnels (R8) · à différer
-11. **R2 fait (14/07)**, **R3 fait (13/07)**, **R9 fait (14/07)** — voir leurs sections ci-dessus.
-    **R8 en réflexion** : le vrai sujet n'est pas de typer le `map` (qui est correct pour un blob
-    pass-through possédé par le frontend) mais l'*ownership flou* des ~13 clés qui pilotent le backend
-    — chantier plus large (scinder settings de comportement backend typées vs. préférences UI
-    opaques), à cadrer avant de coder.
+### Phase E — Bilan
+11. **R2, R3, R8, R9 tous faits** (13-14/07) — voir leurs sections respectives. L'audit de refactoring
+    est clos : il ne reste plus d'item ouvert dans ce document (R10/R11/R12 sont des constats terrain,
+    pas des refactors — voir §6/§7).
 
 ---
 
