@@ -26,7 +26,7 @@
 | **R6** | `backend/{tidal,qobuz,amazon,deezer}` `DownloadFile` | Boilerplate requête HTTP dupliqué 4× | Faible | Faible | 4 |
 | **R7** | `watcher.go` — `DownloadPath`-or-default ×5 | Petite duplication | Faible | Très faible | 5 |
 | **R8** | `app_core.go` — `SaveSettings`/`LoadSettings` `map[string]interface{}` | Réglages stringly-typed côté Go | Faible | Moyen (risque de drift) | 5 (optionnel) |
-| **R9** | `frontend/…/useDownload.ts` (849 l.) | Gros hook (déjà partiellement découpé) | Faible | Faible | 5 |
+| **R9** ✅ | `frontend/…/useDownload.ts` (849 l.) | Gros hook → **moteur de fallback (359 l.) extrait dans `lib/downloadFallback.ts` ; hook 849→489 l.** | Faible | Faible | **fait** |
 | **R10** | retag `incomplete-metadata` (terrain) | Non-convergent : sur-sélection sur `genre` (99 % skip) | Moyen | Faible | **voir §6** |
 | **R11** | Dépendances (ffmpeg/Go/front) | ffmpeg & front déjà à jour ; Dependabot **actif** (11 PR ouvertes non triées, dont sqlite/bbolt/x/text) | Faible-moyen | Faible | **voir §7** |
 | **R12** | Résolution/proxy tierce (terrain) | Songlink (401 + 429) & proxies Tidal en échec en prod = I1/I2 en direct ; M3U8 `/all` OK à 2546/2547 | Externe | — | **voir §6** |
@@ -205,10 +205,19 @@ que si on met en place une génération de types partagée. Sinon, laisser tel q
 
 ### R9 — `useDownload.ts` : gros hook (déjà en partie découpé)
 
-849 lignes, ~10 `useState` + refs. **Bon point** : trois helpers purs sont déjà extraits **au-dessus**
-du hook (`buildExistenceCheckRequests`, `enqueueTracksBatch`, `maybeCreateM3U8`). Reste que le corps
-du hook mêle le mode « download navigateur » (via SSE) et le mode « download serveur ». Découpage
-possible d'un sous-hook `useBrowserDownloadMode`, mais gain modéré → basse priorité.
+**✅ Fait (14/07).** Le vrai poids du hook était `downloadWithAutoFallback` (**359 lignes**, le moteur
+de fallback providers). Constat clé en le lisant : cette fonction **ne touchait aucun state/ref** du
+hook — elle ne fermait que sur `region`. Elle est donc extraite telle quelle dans un module dédié
+`frontend/src/lib/downloadFallback.ts`, en remplaçant au passage sa signature à **18 arguments
+positionnels** par un objet `AutoFallbackParams`. Le corps est **byte-identique** (prouvé par diff
+normalisé : seule différence, un appel `fetchSpotifyMetadata(...)` reflowé sur une ligne par le
+formateur). `useDownload.ts` passe de **849 à 489 lignes** ; build + `tsc -b` + eslint verts. Commit :
+voir ci-dessous.
+
+**Constat initial (vérifié).** 849 lignes, ~10 `useState` + refs. **Bon point** : trois helpers purs
+étaient déjà extraits **au-dessus** du hook (`buildExistenceCheckRequests`, `enqueueTracksBatch`,
+`maybeCreateM3U8`). Le sous-découpage restant (un sous-hook `useBrowserDownloadMode` pour le mode SSE
+navigateur) reste possible mais à gain modéré — laissé de côté.
 
 ---
 
@@ -250,9 +259,12 @@ possible d'un sous-hook `useBrowserDownloadMode`, mais gain modéré → basse p
     `watcher_parsing.go`. Aucun changement de logique — juste déplacer des fonctions (le compilateur
     garantit l'exactitude). Extraire ensuite les phases de `syncPlaylist` en sous-méthodes nommées.
 
-### Phase E — Optionnels (R8, R9) · à différer
-11. **R3 fait (13/07)** — voir la section R3 ci-dessus. R8/R9 ne sont **pas** planifiés tant qu'un
-    besoin concret ne les rend pas rentables.
+### Phase E — Optionnels (R8) · à différer
+11. **R3 fait (13/07)**, **R9 fait (14/07)** — voir leurs sections ci-dessus. **R2 en cours** (14/07,
+    réécriture typée validée sur vraies fixtures capturées). **R8 en réflexion** : le vrai sujet n'est
+    pas de typer le `map` (qui est correct pour un blob pass-through possédé par le frontend) mais
+    l'*ownership flou* des ~13 clés qui pilotent le backend — chantier plus large (scinder settings de
+    comportement backend typées vs. préférences UI opaques), à cadrer avant de coder.
 
 ---
 
