@@ -874,24 +874,25 @@ func FilterTrack(data map[string]interface{}, albumFetchData ...map[string]inter
 	return filtered
 }
 
-func FilterAlbum(data map[string]interface{}) map[string]interface{} {
-	dataMap := getMap(data, "data")
-	albumData := getMap(dataMap, "albumUnion")
+// FilterAlbum builds the typed album contract directly from the raw albumUnion
+// response (R2). Input is still navigated with the tolerant getMap/getString
+// helpers — the raw Spotify GraphQL is optional-heavy and has polymorphic
+// fields — but the output is the typed apiAlbumResponse, so there is no longer
+// a lossy map->json->struct bridge in metadata.go.
+func FilterAlbum(data map[string]interface{}) apiAlbumResponse {
+	albumData := getMap(getMap(data, "data"), "albumUnion")
 	if len(albumData) == 0 {
-		return make(map[string]interface{})
+		return apiAlbumResponse{}
 	}
 
-	artists := extractArtists(getMap(albumData, "artists"))
-	artistNames := []string{}
-	for _, artist := range artists {
+	albumArtists := extractArtists(getMap(albumData, "artists"))
+	artistNames := make([]string, 0, len(albumArtists))
+	for _, artist := range albumArtists {
 		artistNames = append(artistNames, getString(artist, "name"))
 	}
-	albumArtistsString := strings.Join(artistNames, ", ")
 
-	coverObj := extractCoverImage(getMap(albumData, "coverArt"))
-	var cover interface{}
-	if coverObj != nil {
-
+	cover := ""
+	if coverObj := extractCoverImage(getMap(albumData, "coverArt")); coverObj != nil {
 		cover = getString(coverObj, "small")
 		if cover == "" {
 			cover = getString(coverObj, "medium")
@@ -901,118 +902,94 @@ func FilterAlbum(data map[string]interface{}) map[string]interface{} {
 		}
 	}
 
-	tracks := []map[string]interface{}{}
-	tracksData := getMap(albumData, "tracksV2")
-	trackItems := getSlice(tracksData, "items")
-	if trackItems != nil {
-		for _, item := range trackItems {
-			itemMap, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			track := getMap(itemMap, "track")
-			if len(track) == 0 {
-				continue
-			}
-
-			artistsData := getMap(track, "artists")
-			trackArtists := extractArtists(artistsData)
-			trackDurationMs := getFloat64(getMap(track, "duration"), "totalMilliseconds")
-			durationObj := extractDuration(trackDurationMs)
-			durationString := getString(durationObj, "formatted")
-
-			trackArtistNames := []string{}
-			artistIDs := []string{}
-
-			artistItems := getSlice(artistsData, "items")
-			if artistItems != nil {
-				for _, artistItem := range artistItems {
-					artistItemMap, ok := artistItem.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					artistURI := getString(artistItemMap, "uri")
-					if artistURI != "" && strings.Contains(artistURI, ":") {
-						parts := strings.Split(artistURI, ":")
-						if len(parts) > 0 {
-							artistID := parts[len(parts)-1]
-							if artistID != "" {
-								artistIDs = append(artistIDs, artistID)
-							}
-						}
-					}
-				}
-			}
-
-			for _, artist := range trackArtists {
-				trackArtistNames = append(trackArtistNames, getString(artist, "name"))
-			}
-			trackArtistsString := strings.Join(trackArtistNames, ", ")
-
-			trackURI := getString(track, "uri")
-			trackID := ""
-			if strings.Contains(trackURI, ":") {
-				parts := strings.Split(trackURI, ":")
-				trackID = parts[len(parts)-1]
-			}
-
-			contentRating := getMap(track, "contentRating")
-			isExplicit := getString(contentRating, "label") == "EXPLICIT"
-
-			discNumber := int(getFloat64(track, "discNumber"))
-			if discNumber == 0 {
-				discNumber = 1
-			}
-
-			trackInfo := map[string]interface{}{
-				"id":          trackID,
-				"name":        getString(track, "name"),
-				"artists":     trackArtistsString,
-				"artistIds":   artistIDs,
-				"duration":    durationString,
-				"plays":       getString(track, "playcount"),
-				"is_explicit": isExplicit,
-				"disc_number": discNumber,
-			}
-			tracks = append(tracks, trackInfo)
+	tracks := []apiAlbumTrack{}
+	for _, item := range getSlice(getMap(albumData, "tracksV2"), "items") {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
 		}
+		track := getMap(itemMap, "track")
+		if len(track) == 0 {
+			continue
+		}
+		tracks = append(tracks, buildAlbumTrack(track))
 	}
 
-	dateInfo := getMap(albumData, "date")
-	releaseDate := getString(dateInfo, "isoString")
+	releaseDate := getString(getMap(albumData, "date"), "isoString")
 	if releaseDate != "" && strings.Contains(releaseDate, "T") {
-		parts := strings.Split(releaseDate, "T")
-		releaseDate = parts[0]
+		releaseDate = strings.Split(releaseDate, "T")[0]
 	}
 
-	albumURI := getString(albumData, "uri")
 	albumID := ""
-	if strings.Contains(albumURI, ":") {
+	if albumURI := getString(albumData, "uri"); strings.Contains(albumURI, ":") {
 		parts := strings.Split(albumURI, ":")
 		albumID = parts[len(parts)-1]
 	}
 
 	totalDiscs := 1
-	discsData := getMap(albumData, "discs")
-	if len(discsData) > 0 {
+	if discsData := getMap(albumData, "discs"); len(discsData) > 0 {
 		totalDiscs = int(getFloat64(discsData, "totalCount"))
 	}
 
-	filtered := map[string]interface{}{
-		"id":          albumID,
-		"name":        getString(albumData, "name"),
-		"artists":     albumArtistsString,
-		"cover":       cover,
-		"releaseDate": releaseDate,
-		"count":       len(tracks),
-		"tracks":      tracks,
-		"discs": map[string]interface{}{
-			"totalCount": totalDiscs,
-		},
-		"label": getString(albumData, "label"),
+	result := apiAlbumResponse{
+		ID:          albumID,
+		Name:        getString(albumData, "name"),
+		Artists:     strings.Join(artistNames, ", "),
+		Cover:       cover,
+		ReleaseDate: releaseDate,
+		Count:       len(tracks),
+		Label:       getString(albumData, "label"),
+		Tracks:      tracks,
+	}
+	result.Discs.TotalCount = totalDiscs
+	return result
+}
+
+// buildAlbumTrack maps one raw albumUnion.tracksV2 track node to apiAlbumTrack.
+func buildAlbumTrack(track map[string]interface{}) apiAlbumTrack {
+	artistsData := getMap(track, "artists")
+
+	trackArtistNames := []string{}
+	for _, artist := range extractArtists(artistsData) {
+		trackArtistNames = append(trackArtistNames, getString(artist, "name"))
 	}
 
-	return filtered
+	artistIDs := []string{}
+	for _, artistItem := range getSlice(artistsData, "items") {
+		artistItemMap, ok := artistItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		artistURI := getString(artistItemMap, "uri")
+		if artistURI != "" && strings.Contains(artistURI, ":") {
+			parts := strings.Split(artistURI, ":")
+			if artistID := parts[len(parts)-1]; artistID != "" {
+				artistIDs = append(artistIDs, artistID)
+			}
+		}
+	}
+
+	trackID := ""
+	if trackURI := getString(track, "uri"); strings.Contains(trackURI, ":") {
+		parts := strings.Split(trackURI, ":")
+		trackID = parts[len(parts)-1]
+	}
+
+	discNumber := int(getFloat64(track, "discNumber"))
+	if discNumber == 0 {
+		discNumber = 1
+	}
+
+	return apiAlbumTrack{
+		ID:         trackID,
+		Name:       getString(track, "name"),
+		Artists:    strings.Join(trackArtistNames, ", "),
+		ArtistIds:  artistIDs,
+		Duration:   getString(extractDuration(getFloat64(getMap(track, "duration"), "totalMilliseconds")), "formatted"),
+		Plays:      getString(track, "playcount"),
+		IsExplicit: getString(getMap(track, "contentRating"), "label") == "EXPLICIT",
+		DiscNumber: discNumber,
+	}
 }
 
 func FilterPlaylist(data map[string]interface{}) map[string]interface{} {

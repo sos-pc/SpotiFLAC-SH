@@ -204,6 +204,17 @@ type apiTrackResponse struct {
 	IsExplicit bool `json:"is_explicit"`
 }
 
+type apiAlbumTrack struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Artists    string   `json:"artists"`
+	ArtistIds  []string `json:"artistIds"`
+	Duration   string   `json:"duration"`
+	Plays      string   `json:"plays"`
+	IsExplicit bool     `json:"is_explicit"`
+	DiscNumber int      `json:"disc_number"`
+}
+
 type apiAlbumResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -215,16 +226,7 @@ type apiAlbumResponse struct {
 	Discs       struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"discs"`
-	Tracks []struct {
-		ID         string   `json:"id"`
-		Name       string   `json:"name"`
-		Artists    string   `json:"artists"`
-		ArtistIds  []string `json:"artistIds"`
-		Duration   string   `json:"duration"`
-		Plays      string   `json:"plays"`
-		IsExplicit bool     `json:"is_explicit"`
-		DiscNumber int      `json:"disc_number"`
-	} `json:"tracks"`
+	Tracks []apiAlbumTrack `json:"tracks"`
 }
 
 type apiPlaylistResponse struct {
@@ -582,18 +584,7 @@ func (c *SpotifyMetadataClient) fetchAlbumWithClient(ctx context.Context, client
 		tracksV2["totalCount"] = len(allItems)
 	}
 
-	filteredData := FilterAlbum(data)
-
-	jsonData, err := json.Marshal(filteredData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal filtered data: %w", err)
-	}
-
-	var result apiAlbumResponse
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal to apiAlbumResponse: %w", err)
-	}
-
+	result := FilterAlbum(data)
 	return &result, nil
 }
 
