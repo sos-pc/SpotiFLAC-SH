@@ -28,19 +28,20 @@
 | **S6** | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | Piste sérieuse trouvée (voir §S6) | **2** |
 | **S7** | Client Amazon | amazon.go | Pas encore lu en détail | 3 |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
-| **S9** | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | `isrc_*` déplacés ici après lecture — 3e voie ISRC indépendante trouvée, bon candidat (voir §S9). songlink/link_resolver/songstats pas encore lus | **2** |
+| **S9** ✅ | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **lu en entier** — notre vraie chaîne (`jobs_helpers.go`) a déjà 4 étages, plus robuste que prévu ; ISRC-direct reste le meilleur candidat de portage (voir §S9) | 3 (portage) |
 | **S10** | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | Lien direct avec R10 (voir §S10) | **2** |
 | **S11** | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | Sujet retrouvé, lié à une nouvelle dépendance (voir §S11) | 4 |
 | **S12** | Formatage noms/artistes | artist_format.go, filename.go | Pas encore lu en détail | 4 |
 | **S13** | Utilitaires bas signal | config, progress, filemanager, history, analysis, ffmpeg, resample, recent_fetches | Balayage rapide seulement | 5 |
 | **S14** | go.mod | dépendances upstream | Diff déjà vu, pas encore creusé | 5 |
 
-**Recommandation de séquencement.** S2 et S3 sont des gains rapides déjà cernés. S6, S9 et S10 sont
-prioritaires parce qu'ils touchent des problèmes déjà ouverts chez nous (bug Qobuz 401 parké, seul
-maillon de résolution ISRC = Song.link+Deezer tous deux documentés fragiles, R10 sur-sélection genre
-déférée). S4 est hors séquence — c'est une question de fond, pas un item technique à prioriser
-normalement. S8 est fait (lu en entier) mais son portage réel (cache token, retry TOTP, regex) reste
-une tâche à part, priorité basse — aucun des trois n'est urgent.
+**Recommandation de séquencement.** S2 et S3 sont des gains rapides déjà cernés. S6 et S10 restent
+prioritaires (bug Qobuz 401 parké, R10 sur-sélection genre déférée). S9 relu en entier : notre chaîne
+de fallback (`jobs_helpers.go`, 4 étages) est plus solide qu'estimé au premier passage — le seul ajout
+vraiment justifié est l'ISRC-direct (indépendant, coût faible, s'appuie sur S8), pas une refonte
+complète. S4 est hors séquence — question de fond, pas un item technique à prioriser normalement. S8 et
+S9 sont lus ; leur portage réel (cache token Spotify, retry TOTP, étage ISRC-direct) reste à faire,
+priorité modérée, aucun n'est urgent.
 
 ---
 
@@ -144,36 +145,35 @@ l'album, `ArtistIds`) — mineur, pas d'ISRC exposé ici (confirmé par grep sur
 | `(?s)` ajouté à la regex de `stripHTMLTags` | **Candidat au portage, trivial** | Sans ce flag, `.` ne matche pas les retours à la ligne dans une bio/description HTML multi-lignes — un vrai bug de troncature. Un caractère à changer si on a l'équivalent. |
 | Paramètre `separator string` ajouté à tous les `Filter*` (remplace `", "` en dur) | **Écart réel, priorité basse** | Chez nous, `backend/spotify/client.go` a aussi `", "` en dur dans tous les `Filter*`. On a bien un séparateur configurable (`GetSeparator()` dans `backend/util/filename.go`) mais il n'atteint que le nommage de fichier, pas la construction du champ `Artists` par Spotify. Pas confirmé si ça a un impact utilisateur visible (le tag final passe peut-être par un autre re-join) — à vérifier avant de trancher, pas urgent. |
 
-### S9 — Résolution de liens + ISRC cross-provider (songlink.go + link_resolver.go + songstats.go + isrc_cache.go + isrc_finder.go + isrc_helper.go)
+### S9 — Résolution de liens + ISRC cross-provider ✅ lu
 
-**Fichiers :** `songlink.go`, `link_resolver.go`, `songstats.go`, et (déplacés depuis S8 après lecture)
-`isrc_cache.go`, `isrc_finder.go`, `isrc_helper.go`.
+**Fichiers :** `songlink.go` (840 lignes de diff), `link_resolver.go`, `songstats.go`, `isrc_cache.go`,
+`isrc_finder.go`, `isrc_helper.go`. Triangé le 2026-07-15, diffs lus en entier.
 
-**Trouvaille la plus solide de S8/S9 : une troisième voie de résolution ISRC, indépendante de
-Song.link et Deezer.**
+**Correction importante après lecture du vrai chemin d'exécution.** Une première passe sur le seul
+package `backend/songlink/` avait laissé penser qu'on n'a qu'une chaîne à 2 maillons sans fallback
+automatique. En fait la vraie chaîne de production vit dans **`jobs_helpers.go::getStreamingURLs`**
+(pas dans `songlink/` lui-même) et a **4 étages** :
+1. Recherche Deezer par nom (pas de rate-limit) — `GetDeezerSearchFallback`
+2. API officielle Song.link (rate-limitée, `songLinkSem`) — `GetAllURLsFromSpotify`
+3. Scraping via iTunes + song.link `/i/{appleMusicID}` — `ScrapeSongLinkViaAppleMusic`
+4. Scraping direct `song.link/s/{spotifyID}` (`__NEXT_DATA__`) — `ScrapeSongLinkHTML`
 
-Aujourd'hui, `backend/songlink/client.go::GetISRC` n'a qu'une seule stratégie : scraper Song.link pour
-trouver un lien Deezer, puis appeler l'API publique Deezer pour son ISRC. **Les deux maillons de cette
-chaîne sont documentés comme fragiles** (`docs/EXTERNAL_APIS.md` : Song.link "*Heavily rate-limited
-(HTTP 429)*", Deezer "*Used as ISRC fallback when Song.link is rate-limited*") — et il n'y a rien
-au-delà de ces deux maillons. Si Song.link est limité ET que le morceau n'est pas sur Deezer (ou pas
-avec un ISRC correspondant), on n'a aucun moyen d'obtenir l'ISRC.
+C'est plus robuste que ce que la doc `EXTERNAL_APIS.md` seule laisse penser. Cela dit, **upstream a
+fait une refonte complète et différente**, pas juste ajouté un maillon :
 
-`isrc_finder.go` upstream ajoute un **troisième chemin totalement indépendant** : obtenir un token
-anonyme "web-player" via le même TOTP qu'on utilise déjà (`requestSpotifyAnonymousAccessToken`,
-endpoint `open.spotify.com/api/token`), puis interroger directement le microservice de métadonnées
-interne de Spotify (`spclient.wg.spotify.com/metadata/4/{track|album}/{gid}`) qui renvoie l'ISRC/UPC
-dans son tableau `external_id` — sans dépendre ni de Song.link ni de Deezer. `isrc_cache.go` (BoltDB)
-évite de refaire l'appel pour un morceau déjà résolu.
+| Différence avec notre chaîne à 4 étages | Ce qu'upstream fait | Verdict |
+|---|---|---|
+| Pas de résolution ISRC indépendante des URLs de streaming | `isrc_finder.go` : ISRC obtenu **en premier**, directement depuis le microservice interne Spotify (`spclient.wg.spotify.com/metadata/4/...`) via le même token TOTP anonyme qu'on a déjà (voir S8) — avant même d'essayer Song.link/Deezer/Songstats | **Bon candidat.** Indépendant de tout ce qu'on a déjà ; coût faible (TOTP déjà identique, juste l'appel HTTP + conversion d'ID base62→hex à ajouter). Cache BoltDB inclus (`isrc_cache.go`). |
+| Pas de Songstats du tout | `songstats.go` : source alternative (scrape `songstats.com/{ISRC}`, JSON-LD `sameAs`) à Song.link, activable/priorisable via réglage utilisateur (`orderedLinkResolvers`) | **Candidat, priorité moyenne.** Vraie source indépendante de plus, mais nécessite d'abord l'ISRC (dépend du point précédent) et représente plus de code neuf à maintenir qu'un simple appel. |
+| Notre `ScrapeSongLinkHTML` récupère l'ISRC seulement via Deezer en second temps | Leur scraper lit l'ISRC **directement** dans `pageData.entityData.isrc` du blob `__NEXT_DATA__` de song.link, sans repasser par Deezer | **Petit gain si le champ existe vraiment** — à vérifier sur une vraie page song.link avant de coder (le site a pu changer sa structure entre nos deux implémentations). |
+| Notre `checkQobuzAvailability` renvoie un simple booléen, recherche non-authentifiée (`app_id` en dur) | La leur renvoie **l'URL Qobuz réelle**, via une recherche authentifiée avec les identifiants scrapés dans `qobuz_api.go` (S6) | **Lié à S6** — pas la peine de le faire avant d'avoir tranché qobuz_api.go. |
+| Normalisation d'URL Amazon simple | Regex dédiées pour extraire l'ASIN (`trackAsin=`, `/albums/.../B...`, `/tracks/B...`) vers une forme canonique `music.amazon.com/tracks/{ASIN}?musicTerritory=US` | À vérifier si nos liens Amazon actuels posent un problème concret avant de le porter — pas de symptôme connu. |
 
-**Coût d'implémentation faible** : le TOTP est déjà chez nous à l'identique (voir S8), donc il ne
-manque que l'appel au microservice de métadonnées et la conversion d'ID Spotify vers leur format GID
-interne (base62 → hex, `spotifyEntityIDToGID` — mécanique, pas de dépendance externe).
-
-**Recommandation : bon candidat de portage**, à greffer comme fallback supplémentaire dans
-`backend/songlink/client.go::GetISRC` (après Song.link+Deezer, pas à la place). Reste à lire
-`songlink.go`/`link_resolver.go`/`songstats.go` eux-mêmes avant de coder quoi que ce soit — pas encore
-fait.
+**Recommandation de séquencement pour le codage :** commencer par le point ISRC-direct (indépendant,
+autonome, plus proche de S8 déjà fait) en l'ajoutant comme **étage 0** (avant Deezer) de la chaîne dans
+`jobs_helpers.go::getStreamingURLs` — pas à la place des étages existants. Songstats et la normalisation
+Amazon peuvent attendre.
 
 ### S10 — Enrichissement métadonnées
 
