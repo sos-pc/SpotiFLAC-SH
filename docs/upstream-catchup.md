@@ -30,18 +30,43 @@
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** ✅ | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **lu en entier** — notre vraie chaîne (`jobs_helpers.go`) a déjà 4 étages, plus robuste que prévu ; ISRC-direct reste le meilleur candidat de portage (voir §S9) | 3 (portage) |
 | **S10** ✅ | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | **lu en entier** — R10 a probablement 2 causes (MusicBrainz + résolution ISRC en amont via Song.link, lié à S9), pas une seule (voir §S10) | **2** |
-| **S11** | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | Sujet retrouvé, lié à une nouvelle dépendance (voir §S11) | 4 |
+| **S11** ✅ | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | **lu en entier** — vraie migration de lib de tagging, blocage CGO initialement soupçonné infirmé après lecture de S14 | 4 |
 | **S12** | Formatage noms/artistes | artist_format.go, filename.go | Pas encore lu en détail | 4 |
 | **S13** ✅ | Utilitaires bas signal | config, progress, filemanager, history, analysis, ffmpeg, resample, recent_fetches | **balayé** — signal effectivement faible confirmé, rien à porter sauf resample.go (feature, pas bug, à soumettre si intéressant) | 5 |
-| **S14** | go.mod | dépendances upstream | Diff déjà vu, pas encore creusé | 5 |
+| **S14** ✅ | go.mod | dépendances upstream | **lu en entier** — rien de nouveau au-delà de S4/S11, a permis de corriger S11 (pas de blocage CGO probable) | 5 |
 
-**Recommandation de séquencement.** S2 et S3 sont des gains rapides déjà cernés. S6 et S10 restent
-prioritaires (bug Qobuz 401 parké, R10 sur-sélection genre déférée). S9 relu en entier : notre chaîne
-de fallback (`jobs_helpers.go`, 4 étages) est plus solide qu'estimé au premier passage — le seul ajout
-vraiment justifié est l'ISRC-direct (indépendant, coût faible, s'appuie sur S8), pas une refonte
-complète. S4 est hors séquence — question de fond, pas un item technique à prioriser normalement. S8 et
-S9 sont lus ; leur portage réel (cache token Spotify, retry TOTP, étage ISRC-direct) reste à faire,
-priorité modérée, aucun n'est urgent.
+**Les 14 sujets sont maintenant lus (2026-07-15).** Bilan pour la prochaine étape (implémentation) :
+
+**À implémenter, par ordre de valeur/risque :**
+1. **S2 — validation durée post-téléchargement.** Petit, autonome, corrige un vrai trou (preview Tidal
+   30s non détecté).
+2. **S5 — validation mimeType-vs-qualité sur Tidal.** Même famille que S2, découvert en le lisant.
+3. **S9 — étage ISRC-direct** (avant Deezer dans `jobs_helpers.go`, pas à la place). Indépendant,
+   coût faible, sert aussi de brique pour S10.
+4. **S10 — probablement 2 correctifs, pas 1** : améliorations MusicBrainz (cache/dédup/erreur
+   explicite) + brancher `resolveISRCFromSpotifyURL` sur l'ISRC-direct de S9. Instrumenter avant de
+   choisir lequel compte le plus.
+5. **S6 — porter `qobuz_api.go`** (recherche signée) *après* avoir confirmé que `searchByISRC` est
+   bien le point de défaillance réel du bug 401, pas juste `musicdl.me`.
+6. **S3 — retry/cooldown 429/503** adapté à nos clients providers (aucun n'en a aujourd'hui).
+
+**Décision utilisateur requise avant tout code, pas un item technique :**
+- **S4 — déchiffrement DRM (mp4ff).** Enjeu concret trouvé en S7 (notre déchiffrement Amazon à clé
+  unique peut déjà être insuffisant si leur proxy a évolué vers plusieurs clés) — mais reste une
+  question de fond à trancher avec l'utilisateur, pas un simple portage.
+
+**Fonctionnalités produit à proposer, pas des bugs :**
+- **S12 — retélécharger avec suffixe** (`_01`, `_02`...) au lieu d'écraser/sauter.
+- **S13 — resampling FLAC** (`resample.go`), à confirmer si distinct de notre "audio converter" actuel.
+
+**Pas prioritaire / gros effort pour gain incertain :**
+- **S11 — migration vers `go.senan.xyz/taglib`** (remplacerait 3+ libs de tagging). Le blocage CGO
+  initialement soupçonné est probablement infirmé (voir S14, présence de `wazero`), mais ça reste un
+  gros changement d'architecture pour un bénéfice pas clairement établi.
+- **S8 — cache token Spotify + retry TOTP.** Petits, sûrs, mais pas urgents.
+
+Rien d'autre n'a été identifié comme actionnable dans S1 (déjà fait) ni S14 (pur diff de dépendances,
+tout est déjà rattaché à un autre sujet).
 
 ---
 
@@ -310,20 +335,22 @@ embarquées dans un fichier — utile en théorie, mais la moitié de ses foncti
 d'atomes custom pour M4A) ont été **supprimés** de `metadata.go`, remplacés par `tagging.go::TagFile`
 qui passe tout par `go.senan.xyz/taglib` — une seule lib pour tous les formats au lieu de 3+.
 
-**Point d'attention avant même d'évaluer l'intérêt : `go.senan.xyz/taglib` est un binding CGO vers la
-lib C++ TagLib** (à vérifier avec certitude, mais c'est la nature connue de ce module) — **potentiellement
-incompatible avec notre build `CGO_ENABLED=0`** (Dockerfile scratch, mentionné explicitement dans
-`.kiro/HANDOFF.md` comme contrainte). Si confirmé, ce n'est pas une question de "combien d'effort",
-c'est structurellement bloqué sans changer notre stratégie de build — **à vérifier en premier**, avant
-de considérer quoi que ce soit d'autre sur ce sujet.
+**Correction après avoir lu `go.mod` (S14) : la question CGO que j'avais soulevée ici est probablement
+sans objet.** J'avais supposé `go.senan.xyz/taglib` = binding CGO vers la lib C++ TagLib, ce qui aurait
+bloqué structurellement notre build `CGO_ENABLED=0`. Mais `go.mod` upstream ajoute aussi
+`github.com/tetratelabs/wazero` (un runtime WASM en Go pur) comme nouvelle dépendance indirecte — signe
+que `taglib` est vraisemblablement une compilation WASM de TagLib exécutée via wazero, **pas** un
+binding CGO natif. Si confirmé (pas vérifié avec certitude, juste déduit du graphe de dépendances), ça
+lève le blocage que j'avais signalé — reste un gros changement d'architecture (remplacer 3+ libs par
+une seule), mais plus un blocage de build.
 
 **`upc_tags.go`** : petit helper autonome de normalisation des clés de tag UPC (`UPC`, `BARCODE`,
-`TXXX:UPC`, atomes iTunes `----:com.apple.itunes:upc`, etc.) — indépendant de la question CGO, portable
-facilement si on décide un jour de supporter l'UPC (lié à la découverte UPC de S6/S9).
+`TXXX:UPC`, atomes iTunes `----:com.apple.itunes:upc`, etc.) — portable facilement si on décide un jour
+de supporter l'UPC (lié à la découverte UPC de S6/S9).
 
-**Recommandation : ne pas prioriser** — gros effort (changement de lib de tagging entière), gain
-incertain, et un vrai risque de blocage technique (CGO) à lever avant de considérer la question plus
-sérieusement. `upc_tags.go` seul est portable à part si besoin.
+**Recommandation : toujours pas prioritaire dans l'immédiat** (gros effort, gain incertain), mais moins
+bloqué qu'initialement estimé — à vérifier concrètement (essayer de builder avec `CGO_ENABLED=0`) si le
+sujet revient sur la table. `upc_tags.go` seul est portable à part si besoin.
 
 ### S12 — Formatage noms/artistes ✅ lu
 
@@ -372,12 +399,23 @@ confirme que le signal est bien faible sur ce lot, comme prévu au découpage in
 
 **Rien de ce lot ne justifie une lecture ligne à ligne supplémentaire.**
 
-### S14 — go.mod
+### S14 — go.mod ✅ lu
 
-Diff déjà vu : `+github.com/Eyevinn/mp4ff v0.52.0` (S4), `+go.senan.xyz/taglib v0.11.1` (S11),
-Wails v2.11.0→v2.12.0 (n/a), `-github.com/mewkiz/flac v1.0.13` — upstream a retiré cette dépendance
-qu'on utilise encore nous-mêmes ; probablement remplacée par `taglib`, à confirmer avant de
-s'inquiéter.
+Diff complet lu. Rien de nouveau au-delà de ce qui est déjà couvert ailleurs, mais une correction utile
+trouvée en le lisant en dernier :
+
+- `+github.com/Eyevinn/mp4ff v0.52.0` — lié à S4, déjà couvert.
+- `+go.senan.xyz/taglib v0.11.1` + `+github.com/tetratelabs/wazero v1.10.1` (indirect) — lié à S11.
+  **La présence de `wazero` (runtime WASM Go pur) a permis de corriger le point CGO soulevé en S11** —
+  voir la mise à jour de cette section.
+- `-github.com/mewkiz/flac v1.0.13` (+ ses deps transitives `mewkiz/pkg`, `mewpkg/term`,
+  `icza/bitio`) — l'ancienne lib de lecture FLAC d'upstream, retirée parce que `taglib` (S11) la
+  remplace. **On utilise encore `mewkiz/flac` nous-mêmes** (`go.mod` actuel) — cohérent avec le fait
+  qu'on n'a pas fait la même migration, pas un signe de dérive à corriger isolément.
+- `wailsapp/wails/v2 v2.11.0→v2.12.0`, `+golang.org/x/image`, `+git.sr.ht/~jackmordaunt/go-toast/v2`
+  et le reste des indirects Wails — tous sans objet, écosystème desktop qu'on n'a pas.
+
+**Rien à agir spécifiquement sur ce sujet au-delà de S4/S11 déjà traités.**
 
 ---
 
