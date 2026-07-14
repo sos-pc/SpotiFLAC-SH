@@ -237,24 +237,26 @@ type apiPlaylistResponse struct {
 		Name   string `json:"name"`
 		Avatar string `json:"avatar"`
 	} `json:"owner"`
-	Cover     string `json:"cover"`
-	Count     int    `json:"count"`
-	Followers int    `json:"followers"`
-	Tracks    []struct {
-		ID          string   `json:"id"`
-		Cover       string   `json:"cover"`
-		Title       string   `json:"title"`
-		Artist      string   `json:"artist"`
-		ArtistIds   []string `json:"artistIds"`
-		Plays       string   `json:"plays"`
-		Status      string   `json:"status"`
-		Album       string   `json:"album"`
-		AlbumArtist string   `json:"albumArtist"`
-		AlbumID     string   `json:"albumId"`
-		Duration    string   `json:"duration"`
-		IsExplicit  bool     `json:"is_explicit"`
-		DiscNumber  int      `json:"disc_number"`
-	} `json:"tracks"`
+	Cover     string             `json:"cover"`
+	Count     int                `json:"count"`
+	Followers int                `json:"followers"`
+	Tracks    []apiPlaylistTrack `json:"tracks"`
+}
+
+type apiPlaylistTrack struct {
+	ID          string   `json:"id"`
+	Cover       string   `json:"cover"`
+	Title       string   `json:"title"`
+	Artist      string   `json:"artist"`
+	ArtistIds   []string `json:"artistIds"`
+	Plays       string   `json:"plays"`
+	Status      string   `json:"status"`
+	Album       string   `json:"album"`
+	AlbumArtist string   `json:"albumArtist"`
+	AlbumID     string   `json:"albumId"`
+	Duration    string   `json:"duration"`
+	IsExplicit  bool     `json:"is_explicit"`
+	DiscNumber  int      `json:"disc_number"`
 }
 
 type apiArtistResponse struct {
@@ -665,18 +667,7 @@ func (c *SpotifyMetadataClient) fetchPlaylist(ctx context.Context, playlistID st
 		content["totalCount"] = len(allItems)
 	}
 
-	filteredData := FilterPlaylist(data)
-
-	jsonData, err := json.Marshal(filteredData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal filtered data: %w", err)
-	}
-
-	var result apiPlaylistResponse
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal to apiPlaylistResponse: %w", err)
-	}
-
+	result := FilterPlaylist(data)
 	return &result, nil
 }
 
