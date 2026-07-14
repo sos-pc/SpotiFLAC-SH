@@ -29,7 +29,7 @@
 | **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** ✅ | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **lu en entier** — notre vraie chaîne (`jobs_helpers.go`) a déjà 4 étages, plus robuste que prévu ; ISRC-direct reste le meilleur candidat de portage (voir §S9) | 3 (portage) |
-| **S10** | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | Lien direct avec R10 (voir §S10) | **2** |
+| **S10** ✅ | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | **lu en entier** — R10 a probablement 2 causes (MusicBrainz + résolution ISRC en amont via Song.link, lié à S9), pas une seule (voir §S10) | **2** |
 | **S11** | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | Sujet retrouvé, lié à une nouvelle dépendance (voir §S11) | 4 |
 | **S12** | Formatage noms/artistes | artist_format.go, filename.go | Pas encore lu en détail | 4 |
 | **S13** | Utilitaires bas signal | config, progress, filemanager, history, analysis, ffmpeg, resample, recent_fetches | Balayage rapide seulement | 5 |
@@ -256,18 +256,49 @@ autonome, plus proche de S8 déjà fait) en l'ajoutant comme **étage 0** (avant
 `jobs_helpers.go::getStreamingURLs` — pas à la place des étages existants. Songstats et la normalisation
 Amazon peuvent attendre.
 
-### S10 — Enrichissement métadonnées
+### S10 — Enrichissement métadonnées ✅ lu
 
-**Fichiers :** `musicbrainz.go`, `cover.go`, `lyrics.go`, `lyrics_reader.go` (nouveau, 302 lignes).
+**Fichiers :** `musicbrainz.go`, `cover.go`, `lyrics.go`, `lyrics_reader.go` (nouveau). Comparé à
+`backend/meta/musicbrainz.go` et à la vraie boucle `retagIncompleteMetadata`/`retagOneTrack`
+(`api_admin.go:648+`) et `providerutil/genremeta.go`, pas juste au fichier musicbrainz isolé.
 
-**`musicbrainz.go` contient la logique de throttling/dédup/genre-fetch — probablement la réponse à
-R10** (`retag-incomplete-metadata` sur-sélectionne sur le genre et skip ~99% des candidats, déféré
-explicitement par l'utilisateur : *"on verra ça plus tard quand on fera une analyse de l'upstream, on
-cherchera le moyen d'utiliser le bon service de tag pour le genre"* — `docs/audit-refactoring-couche2.md`
-§6). **C'est ce moment.** Ne pas le perdre de vue en traitant ce sujet.
+**R10, nuancé après avoir tracé le vrai chemin d'appel — deux causes possibles, pas une seule.**
 
-`cover.go` est plus large que son nom : couvre aussi avatars/headers/galerie d'images de profil, pas
-seulement les pochettes de morceau.
+Upstream a ajouté à `musicbrainz.go` : throttle à 1100ms entre requêtes (le rate-limit MusicBrainz
+documenté est ~1 req/s), backoff dédié sur 503, dédup des appels concurrents pour la même ISRC, cache
+mémoire, et retourne maintenant une vraie erreur si aucun genre n'est trouvé (au lieu d'un succès
+silencieux vide).
+
+**Première hypothèse (MusicBrainz lui-même) : partiellement déjà couverte.** `retagIncompleteMetadata`
+a bien un throttle **entre pistes** (`retagIncompleteMetadataThrottle = 1 * time.Second`,
+`api_admin.go:600`) — proche du rythme upstream, pas absent comme je le pensais avant de vérifier. Mais
+`backend/meta/musicbrainz.go` lui-même n'a aucun throttle propre, aucun cache, et aucune dédup —
+si un téléchargement normal tourne en parallèle du batch de retag, les deux tapent MusicBrainz sans se
+coordonner, dépassant le rythme malgré le délai du batch.
+
+**Deuxième hypothèse (plus probable en tracant `retagOneTrack`) : l'ISRC ne se résout même pas jusqu'à
+MusicBrainz.** `retagOneTrack` → `providerutil.FetchGenreMetadataAsync` → `resolveISRCFromSpotifyURL`
+→ **`songlink.GetISRC`** (le même chemin fragile identifié en S9, Song.link documenté "heavily
+rate-limited"). Si cette résolution échoue, `resolvedISRC == ""` et **la fonction retourne un résultat
+vide silencieusement — musicbrainz.go n'est jamais appelé, aucune erreur distincte ne remonte.** Vu
+d'en haut, ça ressemble exactement à "sur-sélectionne et skip 99%" : plein de pistes "traitées" sans
+genre, sans qu'on puisse distinguer "MusicBrainz n'a pas de genre pour ce morceau" de "on n'a même pas
+pu obtenir l'ISRC".
+
+**Recommandation : ne pas porter musicbrainz.go seul en pariant que c'est LA cause.** Deux pistes à
+considérer ensemble : (a) les améliorations MusicBrainz elles-mêmes (cache/dédup/erreur explicite sur
+genre vide — utiles indépendamment), et (b) brancher `resolveISRCFromSpotifyURL` sur le chemin
+ISRC-direct de S9 plutôt que sur Song.link seul, ce qui pourrait avoir plus d'impact sur le taux de
+succès réel que le throttling MusicBrainz. Idéalement instrumenter `retagOneTrack` pour distinguer les
+deux causes d'échec avant de choisir où investir.
+
+**`cover.go` / `lyrics.go` / `lyrics_reader.go` : signal plus faible.** `cover.go` couvre plus que les
+pochettes de morceau (avatars/headers/galerie) mais surtout du bruit de signature + du code
+macOS-spécifique (`ApplyMacOSFLACFileIcon`, non applicable). `lyrics.go` a perdu
+`FetchLyricsFromSpotifyAPI` (source de lyrics Spotify retirée côté upstream, à vérifier si on l'a et
+pourquoi eux l'ont enlevée avant de s'en inquiéter). `lyrics_reader.go` (nouveau) lit les lyrics déjà
+embarquées dans un fichier — utile en théorie, mais la moitié de ses fonctions publiques
+(`SelectLyricsFiles`/`SelectLyricsFolder`) sont des dialogues Wails desktop, pas applicables ici.
 
 ### S11 — Lecture/écriture de tags
 
