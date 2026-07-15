@@ -1,12 +1,30 @@
 package spotify
 
 // Fixture-capture harness for the R2 typed rewrite. NOT a normal test: it hits
-// the live Spotify GraphQL and is skipped unless SPOTIFY_CAPTURE=1, so CI never
-// runs it. It dumps the RAW Query() responses (the input to Filter*) into
-// testdata/ so the equivalence tests can freeze current behavior against real
-// data instead of hand-built guesses.
+// the live Spotify GraphQL and is skipped unless SPOTIFY_CAPTURE=1, so CI and a
+// plain `go test` never run it. It dumps the RAW Query() responses (the input to
+// Filter*) into testdata/ so the golden tests can freeze current behavior against
+// real data instead of hand-built guesses.
 //
-//   SPOTIFY_CAPTURE=1 go test ./backend/spotify/ -run TestCaptureFixtures -v
+//	SPOTIFY_CAPTURE=1 go test ./backend/spotify/ -run TestCaptureFixtures -v
+//
+// Capturing REPLACES the golden tests' input. The goldens in testdata/ pin the
+// output produced from the PREVIOUS capture, so the moment you overwrite the raw
+// fixtures they no longer describe them. Always follow a capture with:
+//
+//	UPDATE_GOLDEN=1 go test ./backend/spotify/ -run TestFilterGolden
+//
+// and commit raw_*.json and golden_*.json together — they are a matched pair and
+// nothing enforces that coupling for you. Skipping the second step is exactly how
+// the two desync: it has already happened once, leaving three goldens failing
+// against re-captured fixtures nobody had regenerated them for.
+//
+// The subjects below are deliberately real, and some are volatile: "Today's Top
+// Hits" is re-programmed weekly and the search ranking moves, so captures months
+// apart WILL legitimately change the goldens' payload — regenerate and read the
+// diff. Pure capture noise (image-CDN shard rotation, live follower/listener
+// counters) is absorbed by the goldens' normalizers and should produce no diff at
+// all; see volatileNormalizers in filter_golden_test.go.
 
 import (
 	"encoding/json"

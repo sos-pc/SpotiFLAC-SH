@@ -1,13 +1,42 @@
 package spotify
 
-// Characterization (golden) tests for the map-based Filter* functions, pinned
-// against the real captured Spotify responses in testdata/ (see
-// capture_test.go). These freeze the CURRENT output of each Filter* so the
-// planned typed rewrite (R2) can be proven behavior-preserving: rewrite, then
-// re-run — any drift from the golden fails the test.
+// Characterization (golden) tests for the map-based Filter* functions. They
+// freeze the CURRENT output of each Filter* so the planned typed rewrite (R2)
+// can be proven behavior-preserving: rewrite, re-run, any drift fails.
 //
-// Regenerate goldens after an intentional change with:
-//   UPDATE_GOLDEN=1 go test ./backend/spotify/ -run TestFilterGolden
+// These tests are hermetic — they never touch Spotify. BOTH sides are frozen
+// files committed to testdata/:
+//
+//	raw_*.json ──> Filter*() ──> output ─┐
+//	                                     ├─ compared byte-for-byte
+//	golden_*.json ───────────────────────┘
+//
+// Holding the input constant is the entire point: it isolates one variable —
+// did OUR code change behavior? Spotify can reshuffle Today's Top Hits or
+// rewrite its API tomorrow and these tests still pass, because they read a
+// snapshot from disk, not the network (loadRawFixture is an os.ReadFile). Live
+// Spotify enters only via the capture harness in capture_test.go, which is
+// opt-in and never runs in CI.
+//
+// ── How to use these tests ─────────────────────────────────────────────────
+//
+// Running them: nothing special. They are offline and deterministic.
+//
+//	go test ./backend/spotify/ -run TestFilterGolden
+//
+// You changed Filter* on purpose and a golden now fails: that is the test doing
+// its job. Read the diff, confirm the new output is what you intended, then
+// re-pin the baseline:
+//
+//	UPDATE_GOLDEN=1 go test ./backend/spotify/ -run TestFilterGolden
+//
+// You re-captured the fixtures (SPOTIFY_CAPTURE=1): you changed the INPUT, so
+// the frozen expectation no longer describes it. Regenerate the goldens in the
+// same breath and commit raw_*.json and golden_*.json together — they are a
+// matched pair and nothing enforces that coupling for you. Incidental capture
+// noise is absorbed automatically (see volatileNormalizers below); real payload
+// drift, such as a different tracklist for Today's Top Hits a week later, will
+// and should fail loudly.
 
 import (
 	"encoding/json"
