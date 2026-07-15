@@ -349,7 +349,43 @@ Vu la duplication trouvée au point 2, il y a aussi une question de fond à soul
 résoudre dans ce lot) : factoriser les 2-3 implémentations d'ISRC-resolution en une seule, plutôt que
 d'ajouter l'ISRC-direct séparément à chacune et les laisser diverger davantage.
 
-### S10 — Enrichissement métadonnées ✅ lu
+### S10 — Enrichissement métadonnées ✅ lu · 🟢 chaîne de genre implémentée (2026-07-15)
+
+> **Implémenté le 2026-07-15 — chaîne multi-sources, et ce n'est PAS un portage.**
+> S10 a établi que l'upstream n'a aucune réponse (toujours MusicBrainz seul, même algo de tags
+> folksonomie). La chaîne ci-dessous est donc **notre propre conception**, née de mesures directes :
+> - `backend/meta/genre.go` — la chaîne **Apple → Deezer → MusicBrainz**, **tous ancrés sur l'ISRC**
+>   (aucun match par nom). `formatGenreNames` unifie le rendu (Title Case, cap 5, `util.Separator`).
+> - `backend/meta/genre_apple.go` — token JWT soulevé du bundle du web player Apple (même motif que
+>   `qobuz_api.go` upstream), caché, **re-soulevé sur 401** (durée de vie mesurée : **35 jours**).
+> - `backend/meta/genre_deezer.go` — ISRC → album → genres, sans auth.
+> - `api_status.go` — `pingAppleMusic` dans `coreServices` : sonde **l'étage Apple seul** de bout en
+>   bout (d'où `ResolveGenreFrom`), sinon le check virerait au vert grâce à Deezer alors qu'Apple est
+>   mort.
+> - `FetchMusicBrainzMetadata` **supprimée** (devenue injoignable ; son formatage vit dans
+>   `formatGenreNames`).
+>
+> **Mesures qui ont guidé la conception (toutes vérifiées, pas supposées) :**
+> - API **publique** Spotify : **inutilisable** avec notre token anonyme — quota nul, backoff
+>   escaladant 14s→29s→58s. Exigerait une app enregistrée.
+> - iTunes **par ISRC** : **0/8** (le paramètre `isrc` est silencieusement ignoré).
+> - **Apple par ISRC** : répond sur tous les vrais ISRC testés ; **40 requêtes concurrentes à ~850
+>   req/s sans un seul 429**.
+> - **Deezer par ISRC** : 8/8, mais genre d'**album** (grossier).
+> - Les ISRC doivent venir de **Spotify** (S9) : 5/5 sur Apple, contre 2/3 avec ceux de Deezer.
+>
+> **Correction de ce document :** j'y avais noté « Spotify fournit du genre nativement au niveau
+> artiste » comme piste prometteuse. **C'est faux pour l'API qu'on utilise** — les réponses réelles
+> capturées contiennent **zéro** champ genre (track, album, artist). Le `Genres []string` de notre
+> struct est vestigial (il calque l'API *publique*). Déduction depuis la struct au lieu de vérifier
+> la réponse.
+>
+> **Ce que ça ne corrige PAS — R10 reste ouvert.** La chaîne améliore la **couverture** ; elle ne
+> corrige pas la **non-convergence**. La clause `genre = ''` (`backend/db/tracks.go:190-193`)
+> re-sélectionnera éternellement toute piste dont aucune source ne connaît le genre. C'est un
+> correctif séparé (retirer `genre` de la clause, ou `last_retag_at`), et c'est **le vrai R10**.
+
+### S10 — analyse d'origine ✅ lu
 
 **Fichiers :** `musicbrainz.go`, `cover.go`, `lyrics.go`, `lyrics_reader.go` (nouveau). Comparé à
 `backend/meta/musicbrainz.go` et à la vraie boucle `retagIncompleteMetadata`/`retagOneTrack`
