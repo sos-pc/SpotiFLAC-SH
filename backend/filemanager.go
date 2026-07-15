@@ -21,6 +21,15 @@ type FileInfo struct {
 	Children []FileInfo `json:"children,omitempty"`
 }
 
+// AudioMetadata is what the File Manager shows for a file (GET
+// /api/v1/files/metadata).
+//
+// Genre and ISRC are read here as well as in meta.ReadFullTrackTags, which the
+// retag pass uses. The duplication predates this field: the two readers exist
+// for different callers (one browses arbitrary paths, one backfills catalogued
+// tracks) and they had drifted, so the File Manager could not show the two tags
+// most likely to be missing — which is precisely what you want to look at after
+// a retag.
 type AudioMetadata struct {
 	Title       string `json:"title"`
 	Artist      string `json:"artist"`
@@ -29,6 +38,8 @@ type AudioMetadata struct {
 	TrackNumber int    `json:"track_number"`
 	DiscNumber  int    `json:"disc_number"`
 	Year        string `json:"year"`
+	Genre       string `json:"genre"`
+	ISRC        string `json:"isrc"`
 }
 
 type RenamePreview struct {
@@ -174,6 +185,10 @@ func readFlacMetadata(filePath string) (*AudioMetadata, error) {
 					}
 				case "DATE", "YEAR":
 					metadata.Year = value
+				case "GENRE":
+					metadata.Genre = value
+				case "ISRC":
+					metadata.ISRC = value
 				}
 			}
 		}
@@ -194,11 +209,19 @@ func readMp3Metadata(filePath string) (*AudioMetadata, error) {
 		Artist: tag.Artist(),
 		Album:  tag.Album(),
 		Year:   tag.Year(),
+		Genre:  tag.Genre(),
 	}
 
 	if frames := tag.GetFrames("TPE2"); len(frames) > 0 {
 		if textFrame, ok := frames[0].(id3v2.TextFrame); ok {
 			metadata.AlbumArtist = textFrame.Text
+		}
+	}
+
+	// TSRC is ID3v2's ISRC frame.
+	if frames := tag.GetFrames("TSRC"); len(frames) > 0 {
+		if textFrame, ok := frames[0].(id3v2.TextFrame); ok {
+			metadata.ISRC = textFrame.Text
 		}
 	}
 
@@ -255,6 +278,10 @@ func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
 			if metadata.Year == "" || len(value) > len(metadata.Year) {
 				metadata.Year = value
 			}
+		case "genre":
+			metadata.Genre = value
+		case "isrc", "tsrc":
+			metadata.ISRC = value
 		}
 	}
 
