@@ -287,7 +287,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o spotiflac .
 ```
 
 ```bash
-# Or with Docker (multi-stage: bun → go → static ffmpeg fetch → scratch runtime)
+# Or with Docker (multi-stage: bun → go → ffmpeg fetch → scratch runtime)
 docker build -t spotiflac:local .
 ```
 

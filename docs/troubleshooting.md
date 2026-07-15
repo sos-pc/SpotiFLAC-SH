@@ -114,10 +114,18 @@ If you see broken paths:
 
 ### "ffmpeg not found" error
 
-In Docker deployments this should never happen — a statically-linked FFmpeg/FFprobe build is fetched and verified against a checksum in the Dockerfile's build stage, then copied straight into the (shell-less) runtime image at `/usr/local/bin/ffmpeg` / `/usr/local/bin/ffprobe`.
+> ⚠️ **Known bug in Docker deployments since 2026-07-12 — this section used to say it "should never
+> happen". It does.** The bundled FFmpeg/FFprobe binaries are present in the image but cannot
+> execute in the `scratch` runtime: they are dynamically linked (against glibc/libstdc++, verified
+> on the pinned asset) and `scratch` ships no ELF loader. `exec` then fails with
+> `no such file or directory` **naming a file that exists** — that error reports the missing
+> *interpreter*, not the missing binary. Diagnosis, blast radius and fix options:
+> [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md).
+
+The intent (not currently achieved — see above): an FFmpeg/FFprobe build is fetched and verified against a checksum in the Dockerfile's build stage, then copied straight into the (shell-less) runtime image at `/usr/local/bin/ffmpeg` / `/usr/local/bin/ffprobe`.
 
 - If running from source on bare metal: install FFmpeg system-wide (`apt install ffmpeg`, `brew install ffmpeg`, etc.). The web build does not bundle a fallback installer; the Wails desktop build did, but those code paths are unused here.
-- Verify SpotiFLAC sees it: `GET /api/v1/system/ffmpeg` returns `{"installed": true, "ffprobe_installed": true, "ffmpeg_path": "/usr/local/bin/ffmpeg"}`.
+- Verify SpotiFLAC sees it: `GET /api/v1/system/ffmpeg` should return `{"installed": true, "ffprobe_installed": true, …}`. **If either flag is `false` on a Docker deployment, you are hitting the bug above** — the flags are computed by actually running `ffmpeg -version` / `ffprobe -version` (`backend/audio/ffmpeg.go`), so they go `false` exactly when the binaries can't exec.
 
 ### FFmpeg decryption fails (Amazon Music)
 

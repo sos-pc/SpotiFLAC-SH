@@ -39,7 +39,10 @@
 
 **À implémenter, par ordre de valeur/risque :**
 1. **S2 — validation durée post-téléchargement.** Petit, autonome, corrige un vrai trou (preview Tidal
-   30s non détecté).
+   30s non détecté). ⚠️ **Bloqué : à faire APRÈS la régression ffmpeg**
+   (voir [`ffmpeg-runtime-regression.md`](ffmpeg-runtime-regression.md)). `GetAudioDuration` passe par
+   un parsing natif pour le FLAC mais par **ffprobe pour tout le reste** — or ffprobe ne s'exécute pas
+   dans l'image `scratch` actuelle. La validation serait donc silencieusement inopérante hors FLAC.
 2. **S5 — validation mimeType-vs-qualité sur Tidal.** Même famille que S2, découvert en le lisant.
 3. ~~**S9 — étage ISRC-direct**~~ ✅ **fait le 2026-07-15** (voir §S9). Câblé aux 2 pipelines ; sert de
    brique pour S10 (reste à instrumenter R10 pour mesurer l'effet réel).
