@@ -608,6 +608,42 @@ type retagIncompleteMetadataResult struct {
 	GenreUnknown  int            `json:"genre_unknown"`             // asked, nobody had a genre
 	GenreFailed   int            `json:"genre_failed"`              // every source errored
 	GenreAlready  int            `json:"genre_already"`             // already tagged, nothing to do
+
+	// Why each track was SELECTED — which empty field tripped the clause
+	// (backend/db/tracks.go). The genre chain fills genre, but a track can be
+	// re-selected forever on a DIFFERENT empty field one that no source
+	// supplies (e.g. copyright), which no amount of genre work touches. The
+	// first run measured genre coverage; this measures what actually keeps the
+	// set from converging, so the fix targets the real blocker instead of a
+	// guessed one. A track missing several fields increments several counters
+	// — this is "how often is each field the/a reason", not a partition.
+	SelectedByField map[string]int `json:"selected_by_field,omitempty"`
+}
+
+// countSelectionReason records which clause fields were empty on a selected
+// track. Mirrors the WHERE in GetTracksNeedingRetag exactly; if that clause
+// changes, this must change with it.
+func (r *retagIncompleteMetadataResult) countSelectionReason(t db.Track) {
+	if r.SelectedByField == nil {
+		r.SelectedByField = make(map[string]int)
+	}
+	bump := func(name string, empty bool) {
+		if empty {
+			r.SelectedByField[name]++
+		}
+	}
+	bump("isrc", t.ISRC == "")
+	bump("name", t.Name == "")
+	bump("artist_name", t.ArtistName == "")
+	bump("track_number", t.TrackNumber == 0)
+	bump("disc_number", t.DiscNumber == 0)
+	bump("duration_ms", t.DurationMs == 0)
+	bump("genre", t.Genre == "")
+	bump("release_date", t.ReleaseDate == "")
+	bump("album_name", t.AlbumName == "")
+	bump("album_artist", t.AlbumArtist == "")
+	bump("cover_url", t.CoverURL == "")
+	bump("copyright", t.Copyright == "")
 }
 
 // countGenre files one track's genre outcome into the right bucket. Kept next
@@ -696,6 +732,10 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 			break
 		}
 		result.Scanned++
+		// Recorded from the pre-retag row: this is the state that tripped the
+		// selection clause, which is the question here (why was it picked),
+		// not what it looks like afterwards.
+		result.countSelectionReason(t.Track)
 		if time.Since(lastLog) >= scanProgressLogInterval {
 			slog.Info("[Retag] incomplete-metadata: still working", "processed", i, "total", len(tracks),
 				"filled", result.Filled, "skipped", result.Skipped, "failed", result.Failed)
@@ -741,6 +781,11 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 		"no_isrc", result.GenreNoISRC,
 		"all_sources_failed", result.GenreFailed,
 		"not_asked", result.GenreAlready)
+	// Which empty field selected each track — the counter that says whether
+	// dropping genre from the clause would actually help, or whether another
+	// field (that no source fills) keeps the set from converging.
+	slog.Info("[Retag] incomplete-metadata selection reasons",
+		"by_field", result.SelectedByField)
 	return result
 }
 
@@ -775,20 +820,31 @@ func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, g
 	}
 	jt := spotifyTracks[0]
 
-	// Same lookup used at real download time (see
-	// providerutil.FetchGenreMetadataAsync): resolve the ISRC from the track
-	// URL, then walk the genre chain (Apple -> Deezer -> MusicBrainz) with it.
-	// useSingleGenre=true: a maintenance pass has no per-user setting to
-	// consult, so it defaults to the simpler single-genre form.
+	// This lookup does double duty (see providerutil.FetchGenreMetadataAsync):
+	// it resolves the ISRC from the track URL AND walks the genre chain
+	// (Apple -> Deezer -> MusicBrainz) with it. useSingleGenre=true: a
+	// maintenance pass has no per-user setting to consult, so it defaults to
+	// the simpler single-genre form.
+	//
+	// Skip it entirely when the catalog already holds both, and reuse those
+	// values to backfill the file if its tags are missing them. Measured: a
+	// second pass re-resolved 211 genres/ISRCs it already had, every run, for
+	// tracks selected on some OTHER empty field — pure repeated network cost.
+	// Because it is skipped, diag stays asked=false, counted as "already".
 	trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", t.SpotifyID)
 	var freshISRC, freshGenre string
-	select {
-	case mb := <-providerutil.FetchGenreMetadataAsync("", trackURL, jt.TrackName, jt.ArtistName, jt.AlbumName, true, true):
-		freshISRC = mb.ISRC
-		freshGenre = mb.Metadata.Genre
-		diag = genreDiag{asked: true, source: mb.Source, outcome: mb.Outcome}
-	case <-ctx.Done():
-		return false, diag, ctx.Err()
+	if t.ISRC != "" && t.Genre != "" {
+		freshISRC = t.ISRC
+		freshGenre = t.Genre
+	} else {
+		select {
+		case mb := <-providerutil.FetchGenreMetadataAsync("", trackURL, jt.TrackName, jt.ArtistName, jt.AlbumName, true, true):
+			freshISRC = mb.ISRC
+			freshGenre = mb.Metadata.Genre
+			diag = genreDiag{asked: true, source: mb.Source, outcome: mb.Outcome}
+		case <-ctx.Done():
+			return false, diag, ctx.Err()
+		}
 	}
 
 	fresh := meta.FullTrackTags{

@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 )
 
@@ -76,5 +77,39 @@ func TestCountGenre_NilMapIsSafe(t *testing.T) {
 	r.countGenre(genreDiag{asked: true, source: "apple", outcome: meta.GenreFound})
 	if r.GenreBySource["apple"] != 1 {
 		t.Error("counting into a nil map must not panic or lose the count")
+	}
+}
+
+// The selection-reason counter is what turned "just drop genre from the clause"
+// (the audit's guess) into a measured decision: a track re-selected on an empty
+// copyright, with genre already present, proves dropping genre would not help
+// it. Pin that a track counts once per empty field it actually has.
+func TestCountSelectionReason_CountsEveryEmptyField(t *testing.T) {
+	var r retagIncompleteMetadataResult
+
+	// Complete except copyright: the clause's blind spot — nothing the pass
+	// fetches supplies it, so this track comes back every run.
+	r.countSelectionReason(db.Track{
+		ISRC: "X", Name: "n", ArtistName: "a", TrackNumber: 1, DiscNumber: 1,
+		DurationMs: 1000, Genre: "Rock", ReleaseDate: "2020", AlbumName: "al",
+		AlbumArtist: "aa", CoverURL: "u", Copyright: "",
+	})
+	if r.SelectedByField["copyright"] != 1 {
+		t.Fatalf("copyright = %d, want 1", r.SelectedByField["copyright"])
+	}
+	for _, f := range []string{"genre", "isrc", "name", "album_name"} {
+		if r.SelectedByField[f] != 0 {
+			t.Errorf("%s = %d, want 0 (it was present)", f, r.SelectedByField[f])
+		}
+	}
+
+	// A track missing several fields bumps several counters — this is "how
+	// often is each field a reason", not a one-bucket-per-track partition.
+	r.countSelectionReason(db.Track{Genre: "", Copyright: "", DurationMs: 0,
+		ISRC: "X", Name: "n", ArtistName: "a", TrackNumber: 1, DiscNumber: 1,
+		ReleaseDate: "2020", AlbumName: "al", AlbumArtist: "aa", CoverURL: "u"})
+	if r.SelectedByField["copyright"] != 2 || r.SelectedByField["genre"] != 1 || r.SelectedByField["duration_ms"] != 1 {
+		t.Errorf("got copyright=%d genre=%d duration_ms=%d, want 2/1/1",
+			r.SelectedByField["copyright"], r.SelectedByField["genre"], r.SelectedByField["duration_ms"])
 	}
 }
