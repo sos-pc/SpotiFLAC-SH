@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -68,6 +71,74 @@ func invalidateStatusCache() {
 // Health check helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ServiceStatus.Error is rendered by the UI in a one-line, truncating field
+// (ApisTab.tsx), and it is read by someone asking "why is this service red?"
+// — not by someone reading a stack trace. So these two helpers translate the
+// two things that actually go wrong (we couldn't reach it / it answered with
+// a code) into a short sentence whose MEANING comes first and whose technical
+// detail comes second, where truncation can eat it harmlessly.
+//
+// The bar to clear is the Tidal PREVIEW message below: it says what happened,
+// why, and where to go fix it.
+
+// describeRequestError explains a transport-level failure. Raw Go errors leak
+// here otherwise, e.g. `Get "https://x": dial tcp: lookup x: no such host`,
+// which buries the one useful word ("host") in noise.
+func describeRequestError(err error) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "Host not found — check the URL"
+	}
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return "HTTPS certificate rejected — check the URL"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "No response — timed out"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "No response — timed out"
+	}
+	// Matched on text rather than errno on purpose: Windows reports socket
+	// failures with Winsock wording AND its own numbering, so
+	// errors.Is(err, syscall.ECONNREFUSED) is false there even for a plain
+	// refused connection (verified — it silently fell through to the generic
+	// message). Each case therefore lists the POSIX phrasing and the Windows
+	// one.
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "connection refused"), // POSIX
+		strings.Contains(msg, "actively refused"): // Windows (WSAECONNREFUSED)
+		return "Connection refused — service may be stopped"
+	case strings.Contains(msg, "connection reset"), // POSIX
+		strings.Contains(msg, "forcibly closed"): // Windows (WSAECONNRESET)
+		return "Connection dropped by the server"
+	case strings.Contains(msg, "no route to host"),
+		strings.Contains(msg, "network is unreachable"), // POSIX
+		strings.Contains(msg, "unreachable network"):    // Windows (WSAENETUNREACH)
+		return "Network unreachable — check your connection"
+	}
+	return "Could not reach the server"
+}
+
+// describeHTTPStatus explains a response code in terms of what it means for
+// this service, rather than restating the number on its own ("HTTP 401" tells
+// a user nothing they can act on). 429 is deliberately absent: callers surface
+// it as Status "ratelimited", which the UI already colours and labels.
+func describeHTTPStatus(code int) string {
+	switch {
+	case code == http.StatusUnauthorized, code == http.StatusForbidden:
+		return fmt.Sprintf("Access denied (HTTP %d) — credentials rejected", code)
+	case code == http.StatusNotFound:
+		return "Not found (HTTP 404) — check the URL"
+	case code >= 500:
+		return fmt.Sprintf("Service is failing (HTTP %d) — try again later", code)
+	default:
+		return fmt.Sprintf("Unexpected reply (HTTP %d)", code)
+	}
+}
+
 // statusFromCode maps an HTTP status code to a service status string.
 //   - 429       → "ratelimited"
 //   - 4xx       → "ok"  (server is reachable; root URL may not exist for API-only services)
@@ -109,7 +180,7 @@ func pingURL(name, url string) ServiceStatus {
 		defer cancel2()
 		resp2, elapsed2, err2 := doRequest(ctx2, http.MethodGet, url)
 		if err2 != nil {
-			return ServiceStatus{Name: name, URL: url, Status: "down", Error: err2.Error(), CheckedAt: time.Now().Unix()}
+			return ServiceStatus{Name: name, URL: url, Status: "down", Error: describeRequestError(err2), CheckedAt: time.Now().Unix()}
 		}
 		resp2.Body.Close()
 		status := statusFromCode(resp2.StatusCode)
@@ -140,7 +211,7 @@ func pingSpotFetch(name, baseURL string) ServiceStatus {
 
 	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
 	}
 	defer resp.Body.Close()
 
@@ -150,22 +221,22 @@ func pingSpotFetch(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "failed to read response", CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "Reply was cut off mid-transfer", CheckedAt: time.Now().Unix()}
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "invalid JSON response", CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "Reply was not valid JSON — service may have changed", CheckedAt: time.Now().Unix()}
 	}
 
 	trackName, _ := result["name"].(string)
 	if trackName == "" {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: "missing track name in response", CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: "Answered, but sent no track data — service is broken", CheckedAt: time.Now().Unix()}
 	}
 
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
@@ -184,7 +255,7 @@ func pingDeezerProxy(name, baseURL string) ServiceStatus {
 
 	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
 	}
 	defer resp.Body.Close()
 
@@ -195,13 +266,13 @@ func pingDeezerProxy(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode >= 500:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode != http.StatusOK:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
@@ -230,7 +301,7 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 
 	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
 	}
 	defer resp.Body.Close()
 
@@ -241,19 +312,19 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode >= 500:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode != http.StatusOK:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	if err != nil || len(body) < 2 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "empty or unreadable response", CheckedAt: time.Now().Unix()}
+			Error: "Empty reply — service answered with nothing", CheckedAt: time.Now().Unix()}
 	}
 
 	// Try v2 format: {"version":"2.x","data":{"assetPresentation":"FULL"|"PREVIEW",...}}
@@ -270,7 +341,7 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 				return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 			}
 			return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-				Error: "FULL presentation but no manifest", CheckedAt: time.Now().Unix()}
+				Error: "Offers full tracks but sent no audio link — proxy is broken", CheckedAt: time.Now().Unix()}
 		case "PREVIEW":
 			return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency,
 				Error: "PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)", CheckedAt: time.Now().Unix()}
@@ -290,7 +361,7 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 	}
 
 	return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-		Error: "unexpected response format", CheckedAt: time.Now().Unix()}
+		Error: "Unrecognized reply — proxy may be incompatible", CheckedAt: time.Now().Unix()}
 }
 
 // pingQobuzProxy performs a real track-endpoint request to validate a
@@ -306,7 +377,7 @@ func pingQobuzProxy(name, baseURL string) ServiceStatus {
 
 	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
 	}
 	defer resp.Body.Close()
 
@@ -317,24 +388,24 @@ func pingQobuzProxy(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode >= 500:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	case resp.StatusCode != http.StatusOK:
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if err != nil || len(body) < 2 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "empty or unreadable response", CheckedAt: time.Now().Unix()}
+			Error: "Empty reply — service answered with nothing", CheckedAt: time.Now().Unix()}
 	}
 	var result map[string]interface{}
 	if json.Unmarshal(body, &result) != nil || len(result) == 0 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "non-JSON or empty JSON response", CheckedAt: time.Now().Unix()}
+			Error: "Reply was not valid JSON — proxy may be incompatible", CheckedAt: time.Now().Unix()}
 	}
 
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
@@ -349,7 +420,7 @@ func pingQobuzMusicDL(name, baseURL string) ServiceStatus {
 
 	resp, elapsed, err := doRequest(ctx, http.MethodGet, baseURL)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
 	}
 	defer resp.Body.Close()
 
@@ -360,7 +431,7 @@ func pingQobuzMusicDL(name, baseURL string) ServiceStatus {
 	}
 	if resp.StatusCode >= 500 {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 	// 404 "Cannot GET" from Express = server up, POST-only endpoint (expected)
 	// Any 2xx/3xx/4xx = server is alive
@@ -386,7 +457,7 @@ func pingDeezer(name, baseURL string) ServiceStatus {
 
 	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: err.Error(), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
 	}
 	defer resp.Body.Close()
 
@@ -396,17 +467,17 @@ func pingDeezer(name, baseURL string) ServiceStatus {
 		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: fmt.Sprintf("HTTP %d", resp.StatusCode), CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "failed to read response", CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "Reply was cut off mid-transfer", CheckedAt: time.Now().Unix()}
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "invalid JSON response", CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "Reply was not valid JSON — service may have changed", CheckedAt: time.Now().Unix()}
 	}
 
 	// Deezer wraps errors as {"error": {"type": "...", "message": "...", "code": N}}
@@ -421,7 +492,7 @@ func pingDeezer(name, baseURL string) ServiceStatus {
 	}
 
 	if result["id"] == nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: "missing track id in response", CheckedAt: time.Now().Unix()}
+		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: "Answered, but sent no track data — service is broken", CheckedAt: time.Now().Unix()}
 	}
 
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
