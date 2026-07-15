@@ -29,7 +29,7 @@
 | **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** 🟢 | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **ISRC-direct implémenté (2026-07-15)** — câblé aux 2 pipelines (téléchargement + genre/R10), build+vet verts ; songstats/UPC/court-circuit Qobuz reportés (voir §S9) | fait (v1) |
-| **S10** ✅ | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | **lu en entier** — R10 a probablement 2 causes (MusicBrainz + résolution ISRC en amont via Song.link, lié à S9), pas une seule (voir §S10) | **2** |
+| **S10** 🟢 | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | **R10 résolu et vérifié en prod (2026-07-15)** — chaîne de genre Apple→Deezer→MusicBrainz + fix bug copyright (`joinAlbumCopyright` excluait `P` sans repli) ; retag mesuré en prod : 234→25 pistes, stable sur 2 runs (voir §S10) | fait |
 | **S11** ✅ | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | **lu en entier** — vraie migration de lib de tagging, blocage CGO initialement soupçonné infirmé après lecture de S14 | 4 |
 | **S12** | Formatage noms/artistes | artist_format.go, filename.go | Pas encore lu en détail | 4 |
 | **S13** ✅ | Utilitaires bas signal | config, progress, filemanager, history, analysis, ffmpeg, resample, recent_fetches | **balayé** — signal effectivement faible confirmé, rien à porter sauf resample.go (feature, pas bug, à soumettre si intéressant) | 5 |
@@ -43,9 +43,11 @@
 2. **S5 — validation mimeType-vs-qualité sur Tidal.** Même famille que S2, découvert en le lisant.
 3. ~~**S9 — étage ISRC-direct**~~ ✅ **fait le 2026-07-15** (voir §S9). Câblé aux 2 pipelines ; sert de
    brique pour S10 (reste à instrumenter R10 pour mesurer l'effet réel).
-4. **S10 — probablement 2 correctifs, pas 1** : améliorations MusicBrainz (cache/dédup/erreur
-   explicite) + brancher `resolveISRCFromSpotifyURL` sur l'ISRC-direct de S9. Instrumenter avant de
-   choisir lequel compte le plus.
+4. ~~**S10 — 2 correctifs**~~ ✅ **fait le 2026-07-15** (voir §S10). Chaîne de genre multi-sources +
+   fix du bug copyright — mesuré en prod : le retag converge de 234 à 25 pistes (les 25 restantes
+   sont un vrai « aucune source ne connaît », retentées à chaque run sans jamais bloquer). Il reste 2
+   pistes bloquées sur `copyright` malgré le fix (probablement un album sans aucune entrée
+   copyright chez Spotify, ni C ni P — hypothèse non vérifiée) : signal trop faible pour agir dessus.
 5. **S6 — porter `qobuz_api.go`** (recherche signée) *après* avoir confirmé que `searchByISRC` est
    bien le point de défaillance réel du bug 401, pas juste `musicdl.me`.
 6. **S3 — retry/cooldown 429/503** adapté à nos clients providers (aucun n'en a aujourd'hui).
