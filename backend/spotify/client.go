@@ -717,9 +717,22 @@ func resolveTrackArtistNames(trackData map[string]interface{}) []string {
 	return names
 }
 
-// joinAlbumCopyright joins the album's non-"P" copyright texts (comma-separated).
+// joinAlbumCopyright joins the album's copyright texts (comma-separated),
+// preferring "C" (copyright) entries and falling back to "P" (phonogram
+// right) entries when no "C" entry exists.
+//
+// Verified on a real release (Karma To Burn — "19", Alamo Records/Sony):
+// Spotify returned exactly one entry, type "P", no "C" at all. The previous
+// version of this function unconditionally dropped every "P" entry, so an
+// album with only a phonogram notice — common for smaller/independent
+// releases, where a distributor lists "℗ 2019 Label" and nothing else —
+// silently produced an empty Copyright, even though Spotify had supplied the
+// data. That emptiness then fed straight into the retag pass's selection
+// clause (t.copyright = ''), which is why it was the single largest cause of
+// tracks never converging: measured on a real library, it accounted for 212
+// of 234 tracks stuck re-selecting on every pass, against 24 for genre.
 func joinAlbumCopyright(albumData map[string]interface{}) string {
-	texts := []string{}
+	var preferred, phonogram []string
 	copyrightData := getMap(albumData, "copyright")
 	if len(copyrightData) > 0 {
 		for _, item := range getSlice(copyrightData, "items") {
@@ -727,12 +740,21 @@ func joinAlbumCopyright(albumData map[string]interface{}) string {
 			if !ok {
 				continue
 			}
-			if getString(itemMap, "type") != "P" {
-				texts = append(texts, getString(itemMap, "text"))
+			text := getString(itemMap, "text")
+			if text == "" {
+				continue
+			}
+			if getString(itemMap, "type") == "P" {
+				phonogram = append(phonogram, text)
+			} else {
+				preferred = append(preferred, text)
 			}
 		}
 	}
-	return strings.Join(texts, ", ")
+	if len(preferred) > 0 {
+		return strings.Join(preferred, ", ")
+	}
+	return strings.Join(phonogram, ", ")
 }
 
 // maxDiscAcrossAlbumTracks returns the highest disc number seen in the album's
