@@ -14,8 +14,45 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
+
+// Values that differ between two captures of the same entity without any
+// change in Filter* behavior: Spotify round-robins image URLs across CDN
+// shards (image-cdn-ak / image-cdn-fa serve the byte-identical asset path),
+// and follower/listener counts are live meters that tick between captures.
+// Pinning them would make every re-capture (SPOTIFY_CAPTURE=1, see
+// capture_test.go) fail the goldens for reasons that have nothing to do with
+// the code under test.
+//
+// This absorbs incidental capture noise only — NOT drift in the payload
+// itself. Re-capturing "Today's Top Hits" a week later changes its tracklist,
+// and no normalization can (or should) hide that: the tracklist IS the output
+// being characterized. Regenerate with UPDATE_GOLDEN=1 after such a capture.
+//
+// Trade-off: normalizing a counter to -1 means the golden no longer proves the
+// count is extracted with the right VALUE, only into the right field — a
+// hypothetical "followers always returns 0" bug would slip through here.
+// Deliberate: these goldens exist to prove the R2 typed rewrite preserves
+// behavior, and a live meter's value is environment, not behavior.
+var volatileNormalizers = []struct {
+	re   *regexp.Regexp
+	repl string
+}{
+	{regexp.MustCompile(`image-cdn-[a-z0-9]+\.spotifycdn\.com`), "image-cdn-NORMALIZED.spotifycdn.com"},
+	{regexp.MustCompile(`"(followers|listeners)": \d+`), `"${1}": -1`},
+}
+
+// normalizeVolatile rewrites capture-time-dependent values to fixed sentinels.
+// Applied to both sides of every golden comparison, and to what UPDATE_GOLDEN=1
+// writes, so goldens on disk are already canonical.
+func normalizeVolatile(b []byte) []byte {
+	for _, n := range volatileNormalizers {
+		b = n.re.ReplaceAll(b, []byte(n.repl))
+	}
+	return b
+}
 
 func loadRawFixture(t *testing.T, name string) map[string]interface{} {
 	t.Helper()
@@ -57,6 +94,7 @@ func assertGolden(t *testing.T, golden string, got interface{}) {
 	if err != nil {
 		t.Fatalf("marshal got: %v", err)
 	}
+	gotJSON = normalizeVolatile(gotJSON)
 	path := filepath.Join("testdata", golden)
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(path, append(gotJSON, '\n'), 0644); err != nil {
@@ -74,6 +112,9 @@ func assertGolden(t *testing.T, golden string, got interface{}) {
 	if len(wantTrim) > 0 && wantTrim[len(wantTrim)-1] == '\n' {
 		wantTrim = wantTrim[:len(wantTrim)-1]
 	}
+	// Normalized on write, but normalize on read too so a golden generated
+	// before this existed still compares cleanly.
+	wantTrim = normalizeVolatile(wantTrim)
 	if string(gotJSON) != string(wantTrim) {
 		t.Errorf("output drifted from golden %s.\n--- got ---\n%s", golden, gotJSON)
 	}

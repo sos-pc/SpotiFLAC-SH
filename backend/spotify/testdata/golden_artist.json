@@ -7,10 +7,10 @@
     "verified": true
   },
   "avatar": "https://i.scdn.co/image/ab6761610000e5ebe834a63a0cfa3c0f57a9a434",
-  "header": "https://image-cdn-ak.spotifycdn.com/image/ab676186000010160e1cf434b132cc40ff70512a",
+  "header": "https://image-cdn-NORMALIZED.spotifycdn.com/image/ab676186000010160e1cf434b132cc40ff70512a",
   "stats": {
-    "followers": 1581348,
-    "listeners": 8075603,
+    "followers": -1,
+    "listeners": -1,
     "rank": 0
   },
   "gallery": [

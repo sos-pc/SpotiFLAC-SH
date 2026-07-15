@@ -1,0 +1,6 @@
+# Spotify golden/raw test fixtures are byte-compared against LF-generated JSON
+# (see backend/spotify/filter_golden_test.go: assertGolden compares the on-disk
+# golden to json.MarshalIndent output, which is always LF). Force LF on checkout
+# on every platform so the comparison doesn't break under core.autocrlf=true
+# (the failure mode observed on Windows worktrees).
+backend/spotify/testdata/** text eol=lf
