@@ -591,6 +591,47 @@ type retagIncompleteMetadataResult struct {
 	Skipped   int      `json:"skipped"` // fresh metadata had nothing new to offer
 	Failed    int      `json:"failed"`
 	FailedIDs []string `json:"failed_ids,omitempty"`
+
+	// Genre diagnostics. This pass selects a track when ANY of twelve fields
+	// is empty, genre among them — and genre is the one field an external
+	// service may simply not have. A run reports scanned=2556 filled=17,
+	// re-selects the same 2534 next time, and never converges (R10).
+	//
+	// "Skipped" alone cannot say why, and the three causes below call for
+	// three different fixes: an unresolved ISRC is our bug, a failing source
+	// is our bug, but a genre nobody has is a fact about the world — no
+	// widening of the source chain will ever fill it, and only dropping genre
+	// from the selection clause (or remembering we tried) makes the set
+	// shrink. These counters are what tells them apart.
+	GenreBySource map[string]int `json:"genre_by_source,omitempty"` // tier -> tracks it filled
+	GenreNoISRC   int            `json:"genre_no_isrc"`             // never asked: no ISRC resolved
+	GenreUnknown  int            `json:"genre_unknown"`             // asked, nobody had a genre
+	GenreFailed   int            `json:"genre_failed"`              // every source errored
+	GenreAlready  int            `json:"genre_already"`             // already tagged, nothing to do
+}
+
+// countGenre files one track's genre outcome into the right bucket. Kept next
+// to the counters it feeds so the two cannot drift apart.
+func (r *retagIncompleteMetadataResult) countGenre(d genreDiag) {
+	if !d.asked {
+		// The chain was never reached (the track failed earlier, or already
+		// had a genre) — not evidence about genre coverage either way.
+		r.GenreAlready++
+		return
+	}
+	switch d.outcome {
+	case meta.GenreFound:
+		if r.GenreBySource == nil {
+			r.GenreBySource = make(map[string]int)
+		}
+		r.GenreBySource[d.source]++
+	case meta.GenreNoISRC:
+		r.GenreNoISRC++
+	case meta.GenreFailed:
+		r.GenreFailed++
+	default: // meta.GenreUnknown
+		r.GenreUnknown++
+	}
 }
 
 // retagIncompleteMetadataThrottle paces the external Spotify/Deezer/
@@ -662,7 +703,7 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 		}
 
 		trackCtx, cancel := context.WithTimeout(ctx, retagIncompleteMetadataPerTrackTimeout)
-		filled, err := s.retagOneTrack(trackCtx, t)
+		filled, diag, err := s.retagOneTrack(trackCtx, t)
 		cancel()
 		switch {
 		case err != nil:
@@ -675,6 +716,12 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 			result.Skipped++
 		}
 
+		// Counted regardless of whether the track was filled: a genre can be
+		// found while every other field was already complete, and a genre can
+		// be missing on a track filled from Spotify alone. Genre coverage and
+		// "did we write anything" are different questions.
+		result.countGenre(diag)
+
 		if i < len(tracks)-1 && ctx.Err() == nil {
 			select {
 			case <-ctx.Done():
@@ -685,31 +732,52 @@ func (s *Server) retagIncompleteMetadata(ctx context.Context, tracks []db.TrackF
 
 	slog.Info("[Retag] incomplete-metadata done",
 		"scanned", result.Scanned, "filled", result.Filled, "skipped", result.Skipped, "failed", result.Failed)
+	// Logged apart from the line above because it answers a different
+	// question: not "did the pass work" but "why does genre stay empty" — the
+	// one that decides whether R10 needs the selection clause changed.
+	slog.Info("[Retag] incomplete-metadata genre breakdown",
+		"by_source", result.GenreBySource,
+		"nobody_knows", result.GenreUnknown,
+		"no_isrc", result.GenreNoISRC,
+		"all_sources_failed", result.GenreFailed,
+		"not_asked", result.GenreAlready)
 	return result
+}
+
+// genreDiag records what the genre chain did for one track, so the pass's
+// summary can separate outcomes that all look like "skipped" from outside.
+// Zero value means the track already had a genre and we never asked.
+type genreDiag struct {
+	asked   bool
+	source  string
+	outcome meta.GenreOutcome
 }
 
 // retagOneTrack re-fetches t's Spotify/ISRC/genre metadata and fills in
 // whatever the file's tags and the catalog row are currently missing.
-// Returns whether anything was actually written.
-func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, error) {
+// Returns whether anything was actually written, plus what the genre chain
+// did (see genreDiag — the pass counts these to explain R10).
+func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, genreDiag, error) {
+	var diag genreDiag
+
 	if _, statErr := os.Stat(t.FilePath); statErr != nil {
-		return false, fmt.Errorf("file no longer on disk: %w", statErr)
+		return false, diag, fmt.Errorf("file no longer on disk: %w", statErr)
 	}
 	current := meta.ReadFullTrackTags(t.FilePath)
 
 	data, err := spotify.GetFilteredSpotifyData(ctx, "spotify:track:"+t.SpotifyID, false, 0)
 	if err != nil {
-		return false, fmt.Errorf("fetch spotify metadata: %w", err)
+		return false, diag, fmt.Errorf("fetch spotify metadata: %w", err)
 	}
 	spotifyTracks := extractTracksFromMetadata(data)
 	if len(spotifyTracks) == 0 {
-		return false, fmt.Errorf("spotify returned no metadata for this track (removed or region-locked?)")
+		return false, diag, fmt.Errorf("spotify returned no metadata for this track (removed or region-locked?)")
 	}
 	jt := spotifyTracks[0]
 
-	// Same ISRC->MusicBrainz lookup used at real download time (see
-	// providerutil.FetchGenreMetadataAsync) — resolves ISRC via Songlink
-	// from the track URL, then genre from MusicBrainz using that ISRC.
+	// Same lookup used at real download time (see
+	// providerutil.FetchGenreMetadataAsync): resolve the ISRC from the track
+	// URL, then walk the genre chain (Apple -> Deezer -> MusicBrainz) with it.
 	// useSingleGenre=true: a maintenance pass has no per-user setting to
 	// consult, so it defaults to the simpler single-genre form.
 	trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", t.SpotifyID)
@@ -718,8 +786,9 @@ func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, e
 	case mb := <-providerutil.FetchGenreMetadataAsync("", trackURL, jt.TrackName, jt.ArtistName, jt.AlbumName, true, true):
 		freshISRC = mb.ISRC
 		freshGenre = mb.Metadata.Genre
+		diag = genreDiag{asked: true, source: mb.Source, outcome: mb.Outcome}
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return false, diag, ctx.Err()
 	}
 
 	fresh := meta.FullTrackTags{
@@ -755,12 +824,12 @@ func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, e
 		catalogTrack.Genre = freshGenre
 	}
 	if err := db.UpsertTrack(ctx, s.ctr.Catalog, &catalogTrack); err != nil {
-		return false, fmt.Errorf("upsert track: %w", err)
+		return false, diag, fmt.Errorf("upsert track: %w", err)
 	}
 
 	written, err := meta.WriteMissingTags(t.FilePath, current, fresh)
 	if err != nil {
-		return written, fmt.Errorf("write tags: %w", err)
+		return written, diag, fmt.Errorf("write tags: %w", err)
 	}
-	return written, nil
+	return written, diag, nil
 }

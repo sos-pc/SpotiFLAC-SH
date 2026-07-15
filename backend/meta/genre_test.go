@@ -26,12 +26,9 @@ func TestResolveGenre_PrefersTheEarlierTier(t *testing.T) {
 		src("apple", []string{"Dance"}, nil),
 		src("deezer", []string{"Electro"}, nil),
 	)
-	genre, source, err := ResolveGenre("GBDUW0000053", true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if genre != "Dance" || source != "apple" {
-		t.Errorf("got (%q, %q), want (Dance, apple) — a later tier overtook an earlier one", genre, source)
+	got := ResolveGenre("GBDUW0000053", true)
+	if got.Genre != "Dance" || got.Source != "apple" || got.Outcome != GenreFound {
+		t.Errorf("got %+v, want Dance/apple/found — a later tier overtook an earlier one", got)
 	}
 }
 
@@ -40,12 +37,9 @@ func TestResolveGenre_FallsThroughOnError(t *testing.T) {
 		src("apple", nil, errors.New("bundle changed")),
 		src("deezer", []string{"Electro"}, nil),
 	)
-	genre, source, err := ResolveGenre("GBDUW0000053", true)
-	if err != nil {
-		t.Fatalf("a broken tier must not surface as an error, got: %v", err)
-	}
-	if genre != "Electro" || source != "deezer" {
-		t.Errorf("got (%q, %q), want (Electro, deezer)", genre, source)
+	got := ResolveGenre("GBDUW0000053", true)
+	if got.Genre != "Electro" || got.Source != "deezer" || got.Outcome != GenreFound {
+		t.Errorf("got %+v, want Electro/deezer/found", got)
 	}
 }
 
@@ -56,29 +50,42 @@ func TestResolveGenre_FallsThroughOnEmpty(t *testing.T) {
 		src("deezer", []string{}, nil),
 		src("musicbrainz", []string{"Trip Hop"}, nil),
 	)
-	genre, source, err := ResolveGenre("GBDUW0000053", true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if genre != "Trip Hop" || source != "musicbrainz" {
-		t.Errorf("got (%q, %q), want (Trip Hop, musicbrainz)", genre, source)
+	got := ResolveGenre("GBDUW0000053", true)
+	if got.Genre != "Trip Hop" || got.Source != "musicbrainz" || got.Outcome != GenreFound {
+		t.Errorf("got %+v, want Trip Hop/musicbrainz/found", got)
 	}
 }
 
-func TestResolveGenre_NoSourceKnowsIsNotAnError(t *testing.T) {
-	// Genre is best-effort: nobody knowing the track is a normal outcome, and
-	// the download must never see it as a failure.
+// The distinction the whole instrumentation exists for: every source answering
+// "I don't know" is a fact about the world, and every source being down is our
+// bug. They must not report the same outcome.
+func TestResolveGenre_NobodyKnowsIsNotEverybodyBroken(t *testing.T) {
+	swapChain(t,
+		src("apple", nil, nil),
+		src("deezer", []string{}, nil),
+	)
+	if got := ResolveGenre("GBDUW0000053", true); got.Outcome != GenreUnknown {
+		t.Errorf("all sources answered and none knew: got %q, want %q", got.Outcome, GenreUnknown)
+	}
+
+	swapChain(t,
+		src("apple", nil, errors.New("down")),
+		src("deezer", nil, errors.New("down")),
+	)
+	if got := ResolveGenre("GBDUW0000053", true); got.Outcome != GenreFailed {
+		t.Errorf("every source errored: got %q, want %q", got.Outcome, GenreFailed)
+	}
+}
+
+func TestResolveGenre_OneAnswerMakesItUnknownNotFailed(t *testing.T) {
+	// Mixed: apple broke, deezer genuinely had nothing. Someone did answer,
+	// so this is "nobody knows", not "we are broken".
 	swapChain(t,
 		src("apple", nil, errors.New("down")),
 		src("deezer", nil, nil),
-		src("musicbrainz", nil, errors.New("down")),
 	)
-	genre, source, err := ResolveGenre("GBDUW0000053", true)
-	if err != nil {
-		t.Fatalf("want no error, got %v", err)
-	}
-	if genre != "" || source != "" {
-		t.Errorf("got (%q, %q), want empty", genre, source)
+	if got := ResolveGenre("GBDUW0000053", true); got.Outcome != GenreUnknown {
+		t.Errorf("got %q, want %q", got.Outcome, GenreUnknown)
 	}
 }
 
@@ -87,8 +94,9 @@ func TestResolveGenre_EmptyISRCSkipsTheNetwork(t *testing.T) {
 		t.Fatal("no ISRC: the chain must not call any source")
 		return nil, nil
 	}})
-	if genre, _, err := ResolveGenre("   ", true); genre != "" || err != nil {
-		t.Errorf("got (%q, %v), want empty", genre, err)
+	got := ResolveGenre("   ", true)
+	if got.Genre != "" || got.Outcome != GenreNoISRC {
+		t.Errorf("got %+v, want empty/no_isrc", got)
 	}
 }
 

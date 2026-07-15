@@ -1,7 +1,6 @@
 package providerutil
 
 import (
-	"log/slog"
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
@@ -11,10 +10,16 @@ import (
 
 // MBResult is the outcome of an async genre-metadata lookup: the ISRC that
 // was used (resolved from spotifyURL if one wasn't already known) and
-// whatever MusicBrainz metadata (genre, in particular) was found for it.
+// whatever genre metadata was found for it.
+//
+// Source and Outcome exist so a caller counting results can tell apart the
+// several different things that all look like "no genre" from the outside —
+// see meta.GenreOutcome. The retag pass (R10) is the one that needs it.
 type MBResult struct {
 	ISRC     string
 	Metadata meta.Metadata
+	Source   string // genre tier that answered; "" if none did
+	Outcome  meta.GenreOutcome
 }
 
 // FetchGenreMetadataAsync starts (in a panic-safe goroutine) resolving
@@ -49,21 +54,16 @@ func FetchGenreMetadataAsync(isrc, spotifyURL, trackTitle, artistName, albumTitl
 		if resolvedISRC == "" {
 			resolvedISRC = resolveISRCFromSpotifyURL(spotifyURL)
 		}
-		res := MBResult{ISRC: resolvedISRC}
+		res := MBResult{ISRC: resolvedISRC, Outcome: meta.GenreNoISRC}
 		if resolvedISRC != "" {
 			// Apple -> Deezer -> MusicBrainz, every tier matched on the ISRC.
 			// See meta/genre.go for why that order. MusicBrainz alone used to
 			// answer here, and it knows a genre for only a minority of tracks
 			// — the reason the retag pass fills so few (R10).
-			genre, source, err := meta.ResolveGenre(resolvedISRC, useSingleGenre)
-			if err != nil {
-				slog.Warn("[Genre] Genre resolution failed", "isrc", resolvedISRC, "err", err)
-			} else if genre != "" {
-				res.Metadata.Genre = genre
-				slog.Debug("[Genre] Resolved", "source", source, "genre", genre)
-			} else {
-				slog.Debug("[Genre] No source had a genre", "isrc", resolvedISRC)
-			}
+			got := meta.ResolveGenre(resolvedISRC, useSingleGenre)
+			res.Metadata.Genre = got.Genre
+			res.Source = got.Source
+			res.Outcome = got.Outcome
 		}
 		ch <- res
 	}, func() { ch <- MBResult{} })

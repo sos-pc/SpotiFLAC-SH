@@ -32,6 +32,29 @@ import (
 // source comes up dry.
 const maxGenres = 5
 
+// GenreOutcome says WHY the chain returned what it did. Without it, every
+// unsuccessful lookup looks identical from the outside — and they are not:
+// "no source has a genre for this recording" is a fact about the world that no
+// amount of fixing will change, while "every source errored" is a bug. The
+// retag pass counts these separately (see R10): it fills ~17 of 2556 tracks
+// and re-selects the rest forever, and which fix that calls for depends
+// entirely on this split.
+type GenreOutcome string
+
+const (
+	GenreFound   GenreOutcome = "found"
+	GenreUnknown GenreOutcome = "unknown" // at least one tier answered; none knew
+	GenreFailed  GenreOutcome = "failed"  // every tier errored — our problem
+	GenreNoISRC  GenreOutcome = "no_isrc" // nothing to ask with
+)
+
+// GenreResult is what the chain did, not just what it found.
+type GenreResult struct {
+	Genre   string
+	Source  string // tier that answered; "" unless Outcome is GenreFound
+	Outcome GenreOutcome
+}
+
 type genreSource struct {
 	name  string
 	fetch func(isrc string) ([]string, error)
@@ -44,17 +67,19 @@ var genreChain = []genreSource{
 	{"musicbrainz", musicBrainzGenreNames},
 }
 
-// ResolveGenre walks the chain and returns the first genre found, plus the
-// name of the source that supplied it (for logs and for telling "nobody knows
-// this track" apart from "our best source is broken").
-//
-// Returns ("", "", nil) when no source has a genre — a normal outcome, not a
-// failure.
-func ResolveGenre(isrc string, useSingleGenre bool) (string, string, error) {
+// ResolveGenre walks the chain and reports the first genre found — and, when
+// it finds none, whether that is because nobody knows the track or because
+// our sources were down. No error return: genre is best-effort, the caller
+// never fails over it, and Outcome already carries everything worth acting on.
+func ResolveGenre(isrc string, useSingleGenre bool) GenreResult {
 	isrc = strings.ToUpper(strings.TrimSpace(isrc))
 	if isrc == "" {
-		return "", "", nil
+		return GenreResult{Outcome: GenreNoISRC}
 	}
+
+	// Whether ANY tier gave us a real answer. That is the line between "the
+	// world has no genre for this" and "we are broken".
+	answered := false
 
 	for _, src := range genreChain {
 		names, err := src.fetch(isrc)
@@ -65,14 +90,19 @@ func ResolveGenre(isrc string, useSingleGenre bool) (string, string, error) {
 			slog.Debug("[Genre] source failed", "source", src.name, "isrc", isrc, "err", err)
 			continue
 		}
+		answered = true
 		if genre := formatGenreNames(names, useSingleGenre); genre != "" {
 			slog.Debug("[Genre] resolved", "source", src.name, "isrc", isrc, "genre", genre)
-			return genre, src.name, nil
+			return GenreResult{Genre: genre, Source: src.name, Outcome: GenreFound}
 		}
 	}
 
+	if !answered {
+		slog.Debug("[Genre] every source failed", "isrc", isrc)
+		return GenreResult{Outcome: GenreFailed}
+	}
 	slog.Debug("[Genre] no source had a genre", "isrc", isrc)
-	return "", "", nil
+	return GenreResult{Outcome: GenreUnknown}
 }
 
 // ResolveGenreFrom runs one named tier on its own. Health checks need this:
