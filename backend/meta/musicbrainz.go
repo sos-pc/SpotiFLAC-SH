@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 var AppVersion = "Unknown"
@@ -55,17 +53,10 @@ type MusicBrainzRecordingResponse struct {
 	} `json:"recordings"`
 }
 
-func FetchMusicBrainzMetadata(isrc, title, artist, album string, useSingleGenre bool, embedGenre bool) (Metadata, error) {
-	var meta Metadata
-
-	if !embedGenre {
-		return meta, nil
-	}
-
-	if isrc == "" {
-		return meta, fmt.Errorf("no ISRC provided")
-	}
-
+// queryMusicBrainzByISRC performs the recording lookup. Factored out of
+// FetchMusicBrainzMetadata so musicBrainzGenreNames (the chain's last tier,
+// see genre.go) can reuse it without duplicating the retry logic.
+func queryMusicBrainzByISRC(isrc string) (*MusicBrainzRecordingResponse, error) {
 	client := util.NewHTTPClient(10 * time.Second)
 
 	query := fmt.Sprintf("isrc:%s", isrc)
@@ -73,7 +64,7 @@ func FetchMusicBrainzMetadata(isrc, title, artist, album string, useSingleGenre 
 
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
-		return meta, err
+		return nil, err
 	}
 
 	req.Header.Set("User-Agent", fmt.Sprintf("SpotiFLAC/%s ( support@exyezed.cc )", AppVersion))
@@ -97,57 +88,59 @@ func FetchMusicBrainzMetadata(isrc, title, artist, album string, useSingleGenre 
 	}
 
 	if lastErr != nil {
-		return meta, lastErr
+		return nil, lastErr
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return meta, fmt.Errorf("MusicBrainz API returned status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("MusicBrainz API returned status: %d", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 
 	var mbResp MusicBrainzRecordingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&mbResp); err != nil {
-		return meta, err
+		return nil, err
 	}
-
-	if len(mbResp.Recordings) == 0 {
-		return meta, fmt.Errorf("no recordings found for ISRC: %s", isrc)
-	}
-
-	recording := mbResp.Recordings[0]
-
-	var genres []string
-	caser := cases.Title(language.English)
-
-	if useSingleGenre {
-
-		maxCount := -1
-		var bestTag string
-
-		for _, tag := range recording.Tags {
-			if tag.Count > maxCount {
-				maxCount = tag.Count
-				bestTag = tag.Name
-			}
-		}
-
-		if bestTag != "" {
-			meta.Genre = caser.String(bestTag)
-		}
-	} else {
-		for _, tag := range recording.Tags {
-
-			genres = append(genres, caser.String(tag.Name))
-		}
-		if len(genres) > 0 {
-
-			if len(genres) > 5 {
-				genres = genres[:5]
-			}
-			meta.Genre = strings.Join(genres, util.Separator)
-		}
-	}
-
-	return meta, nil
+	return &mbResp, nil
 }
+
+// musicBrainzGenreNames is the chain's last tier (see genre.go). It returns
+// the recording's tags ordered by how many people applied them, so the most
+// agreed-upon genre comes first.
+//
+// These are free-form folksonomy tags, not a genre taxonomy: "seen live",
+// "vinyl" and "2020s" are all legitimate MusicBrainz tags and all useless as
+// genres. Nothing filters them, here or upstream — which is part of why this
+// source sits last.
+func musicBrainzGenreNames(isrc string) ([]string, error) {
+	mbResp, err := queryMusicBrainzByISRC(isrc)
+	if err != nil {
+		return nil, err
+	}
+	if len(mbResp.Recordings) == 0 {
+		return nil, nil
+	}
+
+	tags := mbResp.Recordings[0].Tags
+	sorted := make([]struct {
+		Count int    `json:"count"`
+		Name  string `json:"name"`
+	}, len(tags))
+	copy(sorted, tags)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Count > sorted[j].Count })
+
+	names := make([]string, 0, len(sorted))
+	for _, t := range sorted {
+		if t.Name != "" {
+			names = append(names, t.Name)
+		}
+	}
+	return names, nil
+}
+
+// FetchMusicBrainzMetadata used to live here and was this file's only export
+// beyond the response type. It became unreachable when the genre chain
+// (genre.go) took over: MusicBrainz is now one tier among three, reached
+// through musicBrainzGenreNames, and the Title-Case / cap / join formatting it
+// used to do itself is now formatGenreNames' job, shared by every source so
+// they all render identically.

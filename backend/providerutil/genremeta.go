@@ -51,12 +51,18 @@ func FetchGenreMetadataAsync(isrc, spotifyURL, trackTitle, artistName, albumTitl
 		}
 		res := MBResult{ISRC: resolvedISRC}
 		if resolvedISRC != "" {
-			slog.Debug("[Genre] Fetching MusicBrainz metadata")
-			if fetchedMeta, err := meta.FetchMusicBrainzMetadata(resolvedISRC, trackTitle, artistName, albumTitle, useSingleGenre, embedGenre); err == nil {
-				res.Metadata = fetchedMeta
-				slog.Debug("[Genre] MusicBrainz metadata fetched")
+			// Apple -> Deezer -> MusicBrainz, every tier matched on the ISRC.
+			// See meta/genre.go for why that order. MusicBrainz alone used to
+			// answer here, and it knows a genre for only a minority of tracks
+			// — the reason the retag pass fills so few (R10).
+			genre, source, err := meta.ResolveGenre(resolvedISRC, useSingleGenre)
+			if err != nil {
+				slog.Warn("[Genre] Genre resolution failed", "isrc", resolvedISRC, "err", err)
+			} else if genre != "" {
+				res.Metadata.Genre = genre
+				slog.Debug("[Genre] Resolved", "source", source, "genre", genre)
 			} else {
-				slog.Warn("[Genre] Failed to fetch MusicBrainz metadata", "err", err)
+				slog.Debug("[Genre] No source had a genre", "isrc", resolvedISRC)
 			}
 		}
 		ch <- res

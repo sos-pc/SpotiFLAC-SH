@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -498,6 +499,49 @@ func pingDeezer(name, baseURL string) ServiceStatus {
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 }
 
+// pingAppleMusic validates the genre chain's top tier end to end: lift the web
+// player token, then resolve a known ISRC and check a genre comes back.
+//
+// Worth checking rather than trusting, because this source has a failure mode
+// the others don't: the token is scraped out of Apple's web player bundle, so
+// if Apple restructures it, the source silently stops answering — forever, and
+// with no error anyone would notice, since the chain just quietly falls through
+// to Deezer's coarser album genres. This check is what turns that into a red
+// dot next to the others.
+func pingAppleMusic(name, _ string) ServiceStatus {
+	const testISRC = "GBDUW0000053" // Daft Punk — One More Time
+	const displayURL = "https://api.music.apple.com"
+
+	start := time.Now()
+	genre, _, err := meta.ResolveGenreFrom("apple", testISRC)
+	latency := int(time.Since(start).Milliseconds())
+
+	switch {
+	case err != nil:
+		return ServiceStatus{Name: name, URL: displayURL, Status: "down", LatencyMs: latency,
+			Error: describeAppleGenreError(err), CheckedAt: time.Now().Unix()}
+	case genre == "":
+		// Token worked and Apple answered, it just has nothing for this ISRC —
+		// which for a track this famous means something is off.
+		return ServiceStatus{Name: name, URL: displayURL, Status: "down", LatencyMs: latency,
+			Error: "Answered, but sent no genre for a known track", CheckedAt: time.Now().Unix()}
+	}
+	return ServiceStatus{Name: name, URL: displayURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
+}
+
+// describeAppleGenreError keeps this source's one distinctive failure legible:
+// "we can no longer find the token" is a code problem needing a human, not a
+// network blip, and it should not read like one.
+func describeAppleGenreError(err error) string {
+	if strings.Contains(err.Error(), "no token in web player bundle") {
+		return "Apple changed its web player — token lift needs fixing"
+	}
+	if strings.Contains(err.Error(), "HTTP 429") {
+		return "Rate limited by Apple (HTTP 429)"
+	}
+	return describeRequestError(err)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Services to check
 // ─────────────────────────────────────────────────────────────────────────────
@@ -511,6 +555,8 @@ type serviceEntry struct {
 var coreServices = []serviceEntry{
 	{"SongLink", "https://api.song.link", nil},
 	{"Deezer", "https://api.deezer.com", pingDeezer},
+	// The genre chain's tiers, in the order it tries them (see meta/genre.go).
+	{"Apple Music · genre", "https://api.music.apple.com", pingAppleMusic},
 	{"MusicBrainz", "https://musicbrainz.org", nil},
 	{"LRCLib", "https://lrclib.net", nil},
 	{"Tidal API", "https://api.tidal.com", nil},
