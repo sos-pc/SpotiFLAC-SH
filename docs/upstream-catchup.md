@@ -28,7 +28,7 @@
 | **S6** ✅ | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **lu en entier** — hypothèse concrète et vérifiable sur le 401 (`searchByISRC` utilise encore l'ancien app_id non signé), + gap de scoring indépendant (voir §S6) | **2** |
 | **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
-| **S9** ✅ | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **lu en entier** — notre vraie chaîne (`jobs_helpers.go`) a déjà 4 étages, plus robuste que prévu ; ISRC-direct reste le meilleur candidat de portage (voir §S9) | 3 (portage) |
+| **S9** 🟢 | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **ISRC-direct implémenté (2026-07-15)** — câblé aux 2 pipelines (téléchargement + genre/R10), build+vet verts ; songstats/UPC/court-circuit Qobuz reportés (voir §S9) | fait (v1) |
 | **S10** ✅ | Enrichissement métadonnées | musicbrainz.go, cover.go, lyrics.go, lyrics_reader.go | **lu en entier** — R10 a probablement 2 causes (MusicBrainz + résolution ISRC en amont via Song.link, lié à S9), pas une seule (voir §S10) | **2** |
 | **S11** ✅ | Lecture/écriture de tags | metadata.go, tagging.go, upc_tags.go | **lu en entier** — vraie migration de lib de tagging, blocage CGO initialement soupçonné infirmé après lecture de S14 | 4 |
 | **S12** | Formatage noms/artistes | artist_format.go, filename.go | Pas encore lu en détail | 4 |
@@ -41,8 +41,8 @@
 1. **S2 — validation durée post-téléchargement.** Petit, autonome, corrige un vrai trou (preview Tidal
    30s non détecté).
 2. **S5 — validation mimeType-vs-qualité sur Tidal.** Même famille que S2, découvert en le lisant.
-3. **S9 — étage ISRC-direct** (avant Deezer dans `jobs_helpers.go`, pas à la place). Indépendant,
-   coût faible, sert aussi de brique pour S10.
+3. ~~**S9 — étage ISRC-direct**~~ ✅ **fait le 2026-07-15** (voir §S9). Câblé aux 2 pipelines ; sert de
+   brique pour S10 (reste à instrumenter R10 pour mesurer l'effet réel).
 4. **S10 — probablement 2 correctifs, pas 1** : améliorations MusicBrainz (cache/dédup/erreur
    explicite) + brancher `resolveISRCFromSpotifyURL` sur l'ISRC-direct de S9. Instrumenter avant de
    choisir lequel compte le plus.
@@ -269,7 +269,33 @@ l'album, `ArtistIds`) — mineur, pas d'ISRC exposé ici (confirmé par grep sur
 | `(?s)` ajouté à la regex de `stripHTMLTags` | **Candidat au portage, trivial** | Sans ce flag, `.` ne matche pas les retours à la ligne dans une bio/description HTML multi-lignes — un vrai bug de troncature. Un caractère à changer si on a l'équivalent. |
 | Paramètre `separator string` ajouté à tous les `Filter*` (remplace `", "` en dur) | **Écart réel, priorité basse** | Chez nous, `backend/spotify/client.go` a aussi `", "` en dur dans tous les `Filter*`. On a bien un séparateur configurable (`GetSeparator()` dans `backend/util/filename.go`) mais il n'atteint que le nommage de fichier, pas la construction du champ `Artists` par Spotify. Pas confirmé si ça a un impact utilisateur visible (le tag final passe peut-être par un autre re-join) — à vérifier avant de trancher, pas urgent. |
 
-### S9 — Résolution de liens + ISRC cross-provider ✅ lu
+### S9 — Résolution de liens + ISRC cross-provider ✅ lu · 🟢 ISRC-direct implémenté (2026-07-15)
+
+> **Implémenté le 2026-07-15 — étage ISRC-direct.** Résolution de l'ISRC directement depuis le
+> catalogue interne Spotify (`spclient.wg.spotify.com/metadata/4/track/{gid}`), via le **même token
+> TOTP anonyme** que `SpotifyClient.Query()` (réutilisé, pas redupliqué). Câblé aux **2 points prévus** :
+> - `backend/spotify/identifiers.go` (nouveau) : `SpotifyClient.GetTrackISRC(id)` — conversion base62→hex
+>   du GID, GET metadata, parse+validation de forme de l'`external_id[isrc]`. Fonctions pures
+>   (`spotifyIDToGID`, `parseTrackISRC`, `looksLikeISRC`) testées unitairement (`identifiers_test.go`,
+>   16 sous-tests verts, sans réseau).
+> - `backend/songlink/isrc_cache.go` (nouveau) : cache ISRC dans le **BoltDB partagé** (bucket
+>   `SpotifyTrackISRC`, câblé dans `main.go` via `InitISRCCacheDBShared`) — no-op si non initialisé.
+> - `backend/songlink/client.go` : `GetISRCDirect` (cache → Spotify → cache) réutilise un
+>   `*spotify.SpotifyClient` **partagé et paresseux** porté par le `SongLinkClient` (1 handshake TOTP par
+>   instance, pas par piste). `GetISRC` essaie le direct **en premier** puis retombe sur la chaîne
+>   Song.link→Deezer → **bénéficie automatiquement au pipeline genre/R10** (son unique appelant
+>   `resolveISRCFromSpotifyURL`, voir S10).
+> - `jobs_helpers.go` : `getStreamingURLs` enrichit/override le champ `isrc` du résultat de la chaîne
+>   avec l'ISRC-direct (plus autoritaire car sans matching par nom ; peut aussi **rattraper un échec
+>   total** de la chaîne Deezer/Song.link).
+>
+> **Décisions actées (v1) :** ISRC seul (UPC différé — rien ne le consomme encore, lié à S6/S11) ;
+> placement additif/override, **pas** de court-circuit de la chaîne pour Qobuz (optimisation de latence
+> reportée). `go build ./...` + `go vet ./...` verts sur tout le module.
+>
+> **Reste ouvert (hors de ce lot) :** (a) brancher explicitement `resolveISRCFromSpotifyURL` +
+> instrumenter R10 pour mesurer l'effet réel (voir S10) ; (b) factoriser les 3 implémentations
+> d'ISRC-resolution en une seule au lieu de les laisser diverger (dette notée au point 2 ci-dessous).
 
 **Fichiers :** `songlink.go` (840 lignes de diff), `link_resolver.go`, `songstats.go`, `isrc_cache.go`,
 `isrc_finder.go`, `isrc_helper.go`. Triangé le 2026-07-15, diffs lus en entier.

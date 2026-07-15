@@ -26,7 +26,9 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 // getStreamingURLs resolves Tidal/Amazon/ISRC URLs for a job.
-// Priority: Deezer (no rate-limit) → Songlink → HTML scraping fallbacks.
+// Priority: ISRC-direct (Spotify's own catalog record) enriches whatever the
+// URL chain below finds → Deezer (no rate-limit) → Songlink → HTML scraping
+// fallbacks.
 // FIX #2 — respects cancellation context while waiting on the semaphore.
 func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	s := job.Settings
@@ -34,6 +36,46 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	if s.Service == "deezer" {
 		return nil
 	}
+
+	result := jm.getStreamingURLsViaFallbackChain(job)
+
+	// ISRC-direct is name-match-free (reads Spotify's own catalog record for
+	// this exact track), so it's more trustworthy than whatever the chain
+	// above found via Deezer/Song.link name search — it overrides rather
+	// than just fills a gap. Tidal/Amazon URLs from the chain are kept as-is.
+	if directISRC := jm.resolveISRCDirect(job); directISRC != "" {
+		if result == nil {
+			result = make(map[string]string)
+		}
+		result["isrc"] = directISRC
+	}
+
+	return result
+}
+
+// resolveISRCDirect resolves job.SpotifyID's ISRC straight from Spotify's
+// metadata, independent of the Deezer/Song.link URL chain. Cached (see
+// songlink.GetISRCDirect), so repeat downloads/retags of the same track
+// don't pay for a fresh lookup.
+func (jm *JobManager) resolveISRCDirect(job *Job) string {
+	if job.SpotifyID == "" {
+		return ""
+	}
+
+	isrc, err := jm.songLinkClient.GetISRCDirect(job.SpotifyID)
+	if err != nil {
+		slog.Debug("[Jobs] ISRC-direct failed", "track", job.TrackName, "err", err)
+		return ""
+	}
+	return isrc
+}
+
+// getStreamingURLsViaFallbackChain is getStreamingURLs' pre-existing
+// Deezer/Song.link URL resolution, factored out so getStreamingURLs can
+// enrich its result with the ISRC-direct lookup above without duplicating
+// this logic.
+func (jm *JobManager) getStreamingURLsViaFallbackChain(job *Job) map[string]string {
+	s := job.Settings
 
 	// Amazon URLs only come from Songlink.
 	if s.Service == "amazon" {

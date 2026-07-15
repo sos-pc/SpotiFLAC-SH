@@ -13,6 +13,7 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
@@ -67,6 +68,11 @@ func main() {
 	// ── History buckets (partagés dans jobs.db) ───────────────────────────
 	if err := backend.InitHistoryDBShared(db); err != nil {
 		slog.Warn("[Main] failed to init history buckets", "err", err)
+	}
+
+	// ── ISRC cache bucket (partagé dans jobs.db) ──────────────────────────
+	if err := songlink.InitISRCCacheDBShared(db); err != nil {
+		slog.Warn("[Main] failed to init ISRC cache bucket", "err", err)
 	}
 
 	// ── Job manager (workers + cleanup) ───────────────────────────────────

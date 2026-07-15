@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -21,6 +22,11 @@ type SongLinkClient struct {
 	apiCallCount     int
 	apiCallResetTime time.Time
 	rateLimitedUntil time.Time
+	// spotifyClient is lazily created on first ISRC-direct lookup and reused
+	// across all subsequent ones (see getSpotifyClient) so we pay the TOTP
+	// token handshake once per SongLinkClient instead of once per track. The
+	// client caches and auto-refreshes its own token internally.
+	spotifyClient *spotify.SpotifyClient
 }
 
 // isRateLimited must be called with s.mu held.
@@ -495,12 +501,61 @@ func getDeezerISRC(deezerURL string) (string, error) {
 	return deezerTrack.ISRC, nil
 }
 
+// GetISRC resolves the ISRC for a Spotify track. Tries the direct,
+// authoritative path first (Spotify's own catalog record, see
+// GetISRCDirect) before falling back to the Song.link → Deezer name-match
+// chain, which can mismatch on the wrong edition/remaster of a track.
 func (s *SongLinkClient) GetISRC(spotifyID string) (string, error) {
+	if isrc, err := s.GetISRCDirect(spotifyID); err == nil && isrc != "" {
+		return isrc, nil
+	}
+
 	deezerURL, err := s.GetDeezerURLFromSpotify(spotifyID)
 	if err != nil {
 		return "", err
 	}
 	return getDeezerISRC(deezerURL)
+}
+
+// GetISRCDirect resolves a Spotify track's ISRC straight from Spotify's own
+// metadata (via the anonymous session token already used for Song.link
+// lookups elsewhere in this package), bypassing the cross-provider name
+// matching that GetDeezerURLFromSpotify/getDeezerISRC rely on. Cached in the
+// shared ISRC cache (see isrc_cache.go) to avoid re-resolving the same track
+// on every retag/redownload.
+func (s *SongLinkClient) GetISRCDirect(spotifyTrackID string) (string, error) {
+	spotifyTrackID = strings.TrimSpace(spotifyTrackID)
+	if spotifyTrackID == "" {
+		return "", fmt.Errorf("spotify track ID is required")
+	}
+
+	if cached, err := GetCachedISRC(spotifyTrackID); err == nil && cached != "" {
+		return cached, nil
+	}
+
+	isrc, err := s.getSpotifyClient().GetTrackISRC(spotifyTrackID)
+	if err != nil {
+		return "", err
+	}
+
+	if err := PutCachedISRC(spotifyTrackID, isrc); err != nil {
+		slog.Debug("[Songlink] failed to cache direct ISRC", "err", err)
+	}
+
+	return isrc, nil
+}
+
+// getSpotifyClient returns the shared, lazily-initialized Spotify client used
+// for ISRC-direct lookups. Guarded by s.mu (a quick nil-check + assignment);
+// the returned client does its own token locking internally, so callers must
+// invoke it outside any network round-trip.
+func (s *SongLinkClient) getSpotifyClient() *spotify.SpotifyClient {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.spotifyClient == nil {
+		s.spotifyClient = spotify.NewSpotifyClient()
+	}
+	return s.spotifyClient
 }
 
 // GetDeezerSearchFallback â€” fallback quand Songlink est rate-limited
