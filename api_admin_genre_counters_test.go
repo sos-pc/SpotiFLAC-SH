@@ -5,7 +5,29 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
+
+// genreIsMissing backs both the selection counter below and retagOneTrack's
+// skip-guard — util.UnknownGenre must count as missing in both, or a track we
+// once gave up on would silently stop being retried forever, the opposite of
+// what it is meant to mean (see util.UnknownGenre's doc comment).
+func TestGenreIsMissing(t *testing.T) {
+	tests := []struct {
+		genre string
+		want  bool
+	}{
+		{"", true},
+		{util.UnknownGenre, true},
+		{"Rock", false},
+		{"Dance, House", false},
+	}
+	for _, tt := range tests {
+		if got := genreIsMissing(tt.genre); got != tt.want {
+			t.Errorf("genreIsMissing(%q) = %v, want %v", tt.genre, got, tt.want)
+		}
+	}
+}
 
 // These counters are the whole point of the instrumentation: they are what
 // turns "skipped=2534" into a decision about R10. If they miscount, the
@@ -111,5 +133,15 @@ func TestCountSelectionReason_CountsEveryEmptyField(t *testing.T) {
 	if r.SelectedByField["copyright"] != 2 || r.SelectedByField["genre"] != 1 || r.SelectedByField["duration_ms"] != 1 {
 		t.Errorf("got copyright=%d genre=%d duration_ms=%d, want 2/1/1",
 			r.SelectedByField["copyright"], r.SelectedByField["genre"], r.SelectedByField["duration_ms"])
+	}
+
+	// A track marked with the sentinel must count as a genre reason too — it
+	// is exactly as "missing" as blank for retry purposes (see genreIsMissing).
+	r.countSelectionReason(db.Track{Genre: util.UnknownGenre,
+		ISRC: "X", Name: "n", ArtistName: "a", TrackNumber: 1, DiscNumber: 1,
+		DurationMs: 1000, ReleaseDate: "2020", AlbumName: "al", AlbumArtist: "aa",
+		CoverURL: "u", Copyright: "c"})
+	if r.SelectedByField["genre"] != 2 {
+		t.Errorf("genre = %d, want 2 (was 1, this track bumps it once more) — the sentinel-tagged track must count as a genre reason too", r.SelectedByField["genre"])
 	}
 }

@@ -61,7 +61,7 @@ func FetchGenreMetadataAsync(isrc, spotifyURL, trackTitle, artistName, albumTitl
 			// answer here, and it knows a genre for only a minority of tracks
 			// — the reason the retag pass fills so few (R10).
 			got := meta.ResolveGenre(resolvedISRC, useSingleGenre)
-			res.Metadata.Genre = got.Genre
+			res.Metadata.Genre = genreForWriting(got)
 			res.Source = got.Source
 			res.Outcome = got.Outcome
 		}
@@ -69,6 +69,23 @@ func FetchGenreMetadataAsync(isrc, spotifyURL, trackTitle, artistName, albumTitl
 	}, func() { ch <- MBResult{} })
 
 	return ch
+}
+
+// genreForWriting turns a chain result into the genre string that should
+// actually be written to the file/catalog. GenreUnknown becomes the explicit
+// util.UnknownGenre sentinel (every source answered; none knew this
+// recording — a fact worth recording, not a blank to leave hanging).
+//
+// GenreNoISRC and GenreFailed stay blank on purpose: those are OUR problems
+// (an unresolved ISRC, a broken source), not a fact about the world, and the
+// selection clause already re-picks a blank genre on the very next pass — no
+// sentinel needed there, and writing one would hide a real bug behind a
+// value that reads as "we checked and there's nothing".
+func genreForWriting(got meta.GenreResult) string {
+	if got.Outcome == meta.GenreUnknown {
+		return util.UnknownGenre
+	}
+	return got.Genre
 }
 
 // resolveISRCFromSpotifyURL extracts the Spotify track ID from a Spotify

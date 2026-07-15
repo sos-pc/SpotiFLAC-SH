@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 func completeTrack(spotifyID string) *Track {
@@ -123,6 +125,34 @@ func TestGetTracksNeedingRetagIgnoresFilesNotPresent(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("got %d track(s), want 0 (file is not status=present): %+v", len(got), got)
+	}
+}
+
+// TestGetTracksNeedingRetagStillSelectsUnknownGenreSentinel confirms a track
+// tagged util.UnknownGenre (every genre source was asked and none knew this
+// recording — see backend/providerutil.genreForWriting) is still selected for
+// retry, exactly like a blank genre. This value is not a permanent
+// give-up flag: a source's catalog can gain the data later, so the pass must
+// keep re-attempting it — same reasoning as never blacklisting a download
+// that failed. A regression here would silently freeze every "unknown
+// genre" track out of all future retries.
+func TestGetTracksNeedingRetagStillSelectsUnknownGenreSentinel(t *testing.T) {
+	ctx := context.Background()
+	database := openTestCatalog(t)
+
+	track := completeTrack("spotify:track:genreunknown")
+	track.Genre = util.UnknownGenre
+	if err := UpsertTrack(ctx, database, track); err != nil {
+		t.Fatalf("UpsertTrack: %v", err)
+	}
+	presentLibraryFile(t, ctx, database, track.SpotifyID, "/music/Artist/Unknown.flac")
+
+	got, err := GetTracksNeedingRetag(ctx, database)
+	if err != nil {
+		t.Fatalf("GetTracksNeedingRetag: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 — a track marked %q must still be retried, not treated as complete", len(got), util.UnknownGenre)
 	}
 }
 

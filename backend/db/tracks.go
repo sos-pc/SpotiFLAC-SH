@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 // Track represents the Spotify identity of a track. It carries everything
@@ -179,6 +181,12 @@ type TrackForRetag struct {
 // genre, release_date, album_name, album_artist, cover_url, copyright.
 // spotify_id, explicit, album_id, first_seen_at and last_seen_at are
 // deliberately not checked — see the pass's own doc comment for why.
+//
+// A genre of util.UnknownGenre counts as missing here, same as blank: it
+// means every source was asked and none knew this recording at the time, not
+// that the question is settled — a source's catalog can gain the data later,
+// so this must keep being re-attempted like everything else rather than
+// treated as resolved. See retagOneTrack's matching skip-guard.
 func GetTracksNeedingRetag(ctx context.Context, q Querier) ([]TrackForRetag, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT t.spotify_id, t.isrc, t.name, t.artist_name, COALESCE(t.album_id, ''),
@@ -189,10 +197,10 @@ func GetTracksNeedingRetag(ctx context.Context, q Querier) ([]TrackForRetag, err
 		JOIN library_files lf ON lf.spotify_id = t.spotify_id AND lf.status = 'present'
 		WHERE t.isrc = '' OR t.name = '' OR t.artist_name = ''
 		   OR t.track_number = 0 OR t.disc_number = 0 OR t.duration_ms = 0
-		   OR t.genre = '' OR t.release_date = '' OR t.album_name = ''
+		   OR t.genre = '' OR t.genre = ? OR t.release_date = '' OR t.album_name = ''
 		   OR t.album_artist = '' OR t.cover_url = '' OR t.copyright = ''
 		ORDER BY t.last_seen_at ASC
-	`)
+	`, util.UnknownGenre)
 	if err != nil {
 		return nil, fmt.Errorf("query tracks needing retag: %w", err)
 	}

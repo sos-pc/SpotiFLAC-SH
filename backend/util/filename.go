@@ -12,6 +12,19 @@ import (
 // Separator joins multi-valued fields (artists, genres, …) in filenames and tags.
 const Separator = ", "
 
+// UnknownGenre is written when every genre source (Apple/Deezer/MusicBrainz —
+// see backend/meta/genre.go) answered and none had a genre for a recording.
+// This is a real, distinct value — not blank — for two reasons: a blank genre
+// reads as "not processed yet" rather than "genuinely unclassified", so a
+// library view can group these into a real "Unknown Genre" collection instead
+// of leaving them looking broken; and unlike a download that fails and is
+// never retried, a source's catalog can gain the data later (a label backfills
+// it, Apple ingests the release), so this value must never be treated as
+// resolved for retry purposes — see GetTracksNeedingRetag's selection clause
+// and retagOneTrack's skip-guard, both of which must keep re-attempting a
+// track tagged with this value exactly as if it were still blank.
+const UnknownGenre = "Unknown Genre"
+
 func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position, discNumber int, useAlbumTrackNumber bool) string {
 
 	safeTitle := SanitizeFilename(trackName)

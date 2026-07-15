@@ -620,6 +620,17 @@ type retagIncompleteMetadataResult struct {
 	SelectedByField map[string]int `json:"selected_by_field,omitempty"`
 }
 
+// genreIsMissing reports whether t.Genre should be treated as absent for
+// selection/retry purposes. util.UnknownGenre counts as missing exactly like
+// "": it records that every source was asked and none knew this recording,
+// not that the field is settled — a source's catalog can gain the data
+// later, so it must keep being re-attempted (see GetTracksNeedingRetag's
+// matching SQL condition and retagOneTrack's skip-guard, both of which must
+// stay in sync with this).
+func genreIsMissing(genre string) bool {
+	return genre == "" || genre == util.UnknownGenre
+}
+
 // countSelectionReason records which clause fields were empty on a selected
 // track. Mirrors the WHERE in GetTracksNeedingRetag exactly; if that clause
 // changes, this must change with it.
@@ -638,7 +649,7 @@ func (r *retagIncompleteMetadataResult) countSelectionReason(t db.Track) {
 	bump("track_number", t.TrackNumber == 0)
 	bump("disc_number", t.DiscNumber == 0)
 	bump("duration_ms", t.DurationMs == 0)
-	bump("genre", t.Genre == "")
+	bump("genre", genreIsMissing(t.Genre))
 	bump("release_date", t.ReleaseDate == "")
 	bump("album_name", t.AlbumName == "")
 	bump("album_artist", t.AlbumArtist == "")
@@ -826,14 +837,19 @@ func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, g
 	// maintenance pass has no per-user setting to consult, so it defaults to
 	// the simpler single-genre form.
 	//
-	// Skip it entirely when the catalog already holds both, and reuse those
-	// values to backfill the file if its tags are missing them. Measured: a
-	// second pass re-resolved 211 genres/ISRCs it already had, every run, for
-	// tracks selected on some OTHER empty field — pure repeated network cost.
-	// Because it is skipped, diag stays asked=false, counted as "already".
+	// Skip it entirely when the catalog already holds both an ISRC and a
+	// real genre, and reuse those values to backfill the file if its tags
+	// are missing them. Measured: a second pass re-resolved 211 genres/ISRCs
+	// it already had, every run, for tracks selected on some OTHER empty
+	// field — pure repeated network cost. Because it is skipped, diag stays
+	// asked=false, counted as "already".
+	//
+	// util.UnknownGenre does NOT count as "already holds a real genre" —
+	// see genreIsMissing — so a track we previously gave up on still gets
+	// retried here every pass, exactly like a track with a blank genre.
 	trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", t.SpotifyID)
 	var freshISRC, freshGenre string
-	if t.ISRC != "" && t.Genre != "" {
+	if t.ISRC != "" && !genreIsMissing(t.Genre) {
 		freshISRC = t.ISRC
 		freshGenre = t.Genre
 	} else {
