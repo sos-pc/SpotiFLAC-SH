@@ -25,7 +25,7 @@
 | **S3** | Retry/cooldown réseau (429/503) | community_endpoints.go (`doCommunityRequest`) | Pattern identifié, à adapter | **1** |
 | **S4** | Déchiffrement DRM | mp4ff_decrypt.go | À part — décision utilisateur requise avant tout triage technique | — |
 | **S5** ✅ | Client Tidal | tidal.go, tidal_community.go | **lu en entier** — gap réel : pas de validation mimeType-vs-qualité (même famille que S2), fallback HI_RES→LOSSLESS déjà présent chez nous | 2 |
-| **S6** ✅ | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **lu en entier** — hypothèse concrète et vérifiable sur le 401 (`searchByISRC` utilise encore l'ancien app_id non signé), + gap de scoring indépendant (voir §S6) | **2** |
+| **S6** 🟢 | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **hypothèse confirmée en direct (2026-07-15)** — `searchByISRC` échoue à 401 (reproduit), le fix signé fonctionne (reproduit) ; plan de portage prêt, pas encore codé (voir §S6) | **1** (prêt) |
 | **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** 🟢 | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **ISRC-direct implémenté (2026-07-15)** — câblé aux 2 pipelines (téléchargement + genre/R10), build+vet verts ; songstats/UPC/court-circuit Qobuz reportés (voir §S9) | fait (v1) |
@@ -48,8 +48,9 @@
    sont un vrai « aucune source ne connaît », retentées à chaque run sans jamais bloquer). Il reste 2
    pistes bloquées sur `copyright` malgré le fix (probablement un album sans aucune entrée
    copyright chez Spotify, ni C ni P — hypothèse non vérifiée) : signal trop faible pour agir dessus.
-5. **S6 — porter `qobuz_api.go`** (recherche signée) *après* avoir confirmé que `searchByISRC` est
-   bien le point de défaillance réel du bug 401, pas juste `musicdl.me`.
+5. **S6 — porter `qobuz_api.go`** (recherche signée). **Confirmation prod faite le 2026-07-15**
+   (voir §S6) : `searchByISRC` échoue bien à 401 avec l'ancien app_id, le fix signé marche, plan prêt
+   — prochain candidat sérieux dès qu'on reprend l'implémentation.
 6. **S3 — retry/cooldown 429/503** adapté à nos clients providers (aucun n'en a aujourd'hui).
 
 **Décision utilisateur requise avant tout code, pas un item technique :**
@@ -175,7 +176,39 @@ juste la validation dans `DownloadFromManifest` (petit, sûr, échec propre au l
 retry-miroir automatique) ou (b) fusionner `getDownloadURLRotated` + `DownloadFile` en une boucle
 entrelacée comme upstream (plus de travail, comportement complet). Ne pas décider ça seul.
 
-### S6 — Client Qobuz
+### S6 — Client Qobuz 🟢 hypothèse confirmée en direct, plan prêt (2026-07-15)
+
+> **Vérifié en direct le 2026-07-15 (pas juste lu dans le diff) — les deux moitiés de l'hypothèse
+> sont maintenant des faits, pas des suppositions :**
+>
+> - Notre `searchByISRC` actuel (`app_id=798273057`, requête non signée), **rejoué mot pour mot
+>   contre l'API Qobuz réelle** sur 3 ISRC différents (Daft Punk, Kendrick Lamar, Rick Astley) →
+>   **HTTP 401** à chaque fois (`"User authentication is required"`). Confirmé que c'est bien un
+>   problème d'auth et pas de format de requête (un `app_id` vide donne 500, pas 401).
+> - Le mécanisme exact d'upstream (relu à la source via `git show upstream/main:backend/qobuz_api.go`,
+>   le diff original n'était plus dans le scratchpad après compaction) — scraper
+>   `open.qobuz.com/track/1` → bundle JS → regex `app_id:"(\d{9})",app_secret:"([a-f0-9]{32})"` →
+>   signer chaque requête (MD5 de `path_normalisé + params_triés(hors app_id/request_ts/request_sig)
+>   + timestamp + secret`) — **reproduit en direct, même code de signature, mêmes 3 ISRC → HTTP 200,
+>   résultats réels.**
+> - **Trouvaille en bonus qui change le calibrage du portage :** la paire d'identifiants publics
+>   codée en dur dans `qobuz_api.go` comme repli (`app_id=712109809`,
+>   `app_secret=589be88e4538daea11f509d29e4a23b1`) **fonctionne aussi aujourd'hui, sans aucun
+>   scraping**. Donc le scraping n'est pas nécessaire pour réparer le bug *maintenant* — mais sans
+>   lui, on recasse dès que Qobuz fait tourner cette paire publique (upstream l'a bien fait une fois,
+>   c'est le sens même de ce diff).
+>
+> **Plan de portage (pas encore codé, prêt à démarrer sur feu vert) :**
+> - Dans le périmètre : remplacer l'appel non signé de `searchByISRC`
+>   (`backend/qobuz/client.go:182-199`) par un appel signé ; scraping avec repli sur la paire codée en
+>   dur si le scraping échoue ; cache **en mémoire** (mutex + variable process, pas de fichier disque
+>   comme upstream — même motif que le token Apple de S9, `genre_apple.go`) ; refresh auto sur 400/401.
+> - Hors périmètre pour ce lot : le scoring des résultats (`scoreQobuzSearchCandidate`) — gap réel
+>   mais indépendant, `Items[0]` marche pour l'instant ; `GetDownloadURL` ne change pas (n'utilise pas
+>   l'API signée non plus chez upstream).
+> - `QobuzTrack`/`QobuzSearchResponse` (déjà présents) — inchangés, la réponse signée a la même forme.
+> - Risque faible : un seul point d'appel, dégradation propre (repli sur la paire codée en dur qui
+>   marche aujourd'hui), pas de changement de structure de données en aval.
 
 **Fichiers :** `qobuz.go` (+350/-125), `qobuz_api.go` (+343/-0, nouveau), `qobuz_community.go`.
 
