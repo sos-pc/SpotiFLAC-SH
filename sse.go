@@ -92,6 +92,32 @@ func sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, eventType string,
 	flusher.Flush()
 }
 
+// sendSSEComment écrit une ligne de commentaire SSE et flush. Un commentaire
+// (préfixe ":") est le no-op du protocole : les clients l'ignorent totalement,
+// donc rien n'atteint onmessage ni aucun handler d'event — c'est exactement ce
+// qu'il faut pour un keepalive, qui ne doit rien signifier côté application.
+func sendSSEComment(w http.ResponseWriter, flusher http.Flusher, text string) {
+	fmt.Fprintf(w, ": %s\n\n", text)
+	flusher.Flush()
+}
+
+// sseHeartbeatInterval est la période d'émission du keepalive sur un flux
+// inactif.
+//
+// Sans lui, ce flux n'écrit rien tant qu'aucun job ne tourne, et tout reverse
+// proxy finit par couper la connexion amont restée muette : nginx le fait à
+// proxy_read_timeout, soit 240s dans le proxy.conf par défaut de SWAG. Le
+// navigateur reconnecte alors tout seul (EventSource le fait nativement), le
+// handler renvoie le snapshot complet des jobs sur 48h, et le cycle recommence
+// — toutes les 4 minutes, indéfiniment, à ne rien faire.
+//
+// 30s laisse une marge large sous les 240s de nginx, et reste sous les seuils
+// plus courts qu'on croise ailleurs (Cloudflare coupe vers 100s). Le coût est
+// négligeable : quelques octets par client et par minute.
+//
+// Variable et non constante pour que les tests puissent la réduire.
+var sseHeartbeatInterval = 30 * time.Second
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Handler SSE — GET /api/v1/jobs/stream
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,8 +173,15 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 	// Signal de connexion établie
 	sendSSEEvent(w, flusher, "connected", map[string]string{"status": "ok"})
 
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
 		select {
+		case <-heartbeat.C:
+			// Garde la connexion vivante à travers le reverse proxy quand aucun
+			// job ne produit d'événement — voir sseHeartbeatInterval.
+			sendSSEComment(w, flusher, "keepalive")
 		case event, ok := <-ch:
 			if !ok {
 				return

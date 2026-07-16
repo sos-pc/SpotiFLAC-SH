@@ -59,6 +59,55 @@ func TestV1JobsStreamInitialSnapshotScopedToUser(t *testing.T) {
 	}
 }
 
+// TestV1JobsStreamSendsHeartbeatWhileIdle covers the keepalive: with no job
+// producing events, the handler must still write something periodically, or a
+// reverse proxy closes the silent upstream (nginx does it at
+// proxy_read_timeout — 240s in SWAG's default proxy.conf) and every idle
+// client reconnects on a loop, re-sending the whole 48h snapshot each time.
+//
+// The keepalive must be an SSE *comment*: clients ignore those entirely, so it
+// cannot reach an event handler and be mistaken for a job update.
+func TestV1JobsStreamSendsHeartbeatWhileIdle(t *testing.T) {
+	orig := sseHeartbeatInterval
+	sseHeartbeatInterval = 10 * time.Millisecond
+	defer func() { sseHeartbeatInterval = orig }()
+
+	jm := newTestJobManager(t, false)
+	s := &Server{ctr: &Container{Jobs: jm}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	claims := &JWTClaims{UserID: "user-a", IsAdmin: false}
+	ctx = context.WithValue(ctx, contextKeyUser, claims)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/stream", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		s.v1JobsStream(w, r)
+		close(done)
+	}()
+
+	// Long enough for several ticks, with nothing ever published to the hub —
+	// the idle case the heartbeat exists for.
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("v1JobsStream did not return after context cancellation")
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, ": keepalive") {
+		t.Errorf("idle stream sent no heartbeat; a proxy would cut it. body=%q", body)
+	}
+	// A comment line, not an event: "event: keepalive" would surface client-side.
+	if strings.Contains(body, "event: keepalive") {
+		t.Error("heartbeat must be an SSE comment, not an event clients can handle")
+	}
+}
+
 // TestV1JobsStreamInitialSnapshotAdminSeesEveryone verifies the admin
 // bypass on the read side, mirroring the same bypass already covered for
 // deletion in TestClearCompletedJobsAdminClearsEveryone.
