@@ -155,11 +155,17 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE='${{ fromJSON(steps.meta.outputs.json).tags[0] }}'
-          # A volume, because the runtime image has no shell: each `docker run`
-          # is one binary, and this is how a file survives between them.
-          docker volume create ff-smoke >/dev/null
-          ff()  { docker run --rm -v ff-smoke:/scratch --entrypoint /usr/local/bin/ffmpeg  "$IMAGE" "$@"; }
-          ffp() { docker run --rm -v ff-smoke:/scratch --entrypoint /usr/local/bin/ffprobe "$IMAGE" "$@"; }
+          # A shared directory, because the runtime image has no shell: each
+          # `docker run` is one binary, and this is how a file survives between
+          # them. A host bind mount rather than a named volume: Docker creates a
+          # named volume root-owned when its mount point doesn't pre-exist in the
+          # image, and this container runs as uid 1000 — which is exactly how the
+          # first version of this step failed, with ffmpeg reporting "Permission
+          # denied" on its output.
+          SMOKE="$RUNNER_TEMP/ff-smoke"
+          mkdir -p "$SMOKE" && chmod 777 "$SMOKE"
+          ff()  { docker run --rm -v "$SMOKE:/scratch" --entrypoint /usr/local/bin/ffmpeg  "$IMAGE" "$@"; }
+          ffp() { docker run --rm -v "$SMOKE:/scratch" --entrypoint /usr/local/bin/ffprobe "$IMAGE" "$@"; }
 
           # 1. exec + dynamic loader + libc startup — the whole failure mode of
           #    the scratch regression, which a successful COPY never proved.
@@ -179,9 +185,8 @@ jobs:
           ff -nostdin -protocol_whitelist file -y -i /scratch/src.flac -vn -c:a flac /scratch/out.flac
           # exactly backend/util/ffprobetags.go's shape
           ffp -protocol_whitelist file -v quiet -print_format json -show_format -show_streams /scratch/out.flac
+          test -s "$SMOKE/out.flac" || { echo "conversion produced nothing"; exit 1; }
           echo "::endgroup::"
-
-          docker volume rm ff-smoke >/dev/null
 
       # Pinned to a commit SHA, not a tag: in March 2026 aquasecurity/trivy-action
       # was compromised via a stolen credential that force-pushed 75 of its 76
