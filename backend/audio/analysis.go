@@ -192,13 +192,15 @@ func GetMetadataWithFFprobe(filePath string) (*AnalysisResult, error) {
 		res.FileSize = info.Size()
 	}
 
-	args := []string{
+	// Hardened: filePath is any library or freshly-uploaded file. See
+	// util.FFprobeHardeningArgs.
+	args := append(util.FFprobeHardeningArgs(),
 		"-v", "error",
 		"-select_streams", "a:0",
 		"-show_entries", "stream=sample_rate,channels,bits_per_raw_sample,bits_per_sample,duration,bit_rate",
 		"-of", "default=noprint_wrappers=0",
 		filePath,
-	}
+	)
 	cmd := exec.Command(ffprobePath, args...)
 	setHideWindow(cmd)
 	output, err := cmd.CombinedOutput()

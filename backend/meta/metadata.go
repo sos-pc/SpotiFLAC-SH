@@ -491,7 +491,9 @@ func embedLyricsToM4A(filepath string, lyrics string) error {
 		}
 	}()
 
-	cmd := exec.Command(ffmpegPath,
+	// Hardened: filepath is an existing library file being rewritten in place.
+	// See util.FFmpegHardeningArgs.
+	args := append(util.FFmpegHardeningArgs(),
 		"-i", filepath,
 		"-map", "0",
 		"-map_metadata", "0",
@@ -502,6 +504,7 @@ func embedLyricsToM4A(filepath string, lyrics string) error {
 		"-y",
 		tmpOutputFile,
 	)
+	cmd := exec.Command(ffmpegPath, args...)
 
 
 	output, err := cmd.CombinedOutput()
@@ -602,12 +605,14 @@ func getDurationWithFFprobe(filepath string) (float64, error) {
 		return 0, fmt.Errorf("invalid ffprobe executable: %w", err)
 	}
 
-	cmd := exec.Command(ffprobePath,
+	// Hardened: filepath is any library file. See util.FFprobeHardeningArgs.
+	args := append(util.FFprobeHardeningArgs(),
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
 		filepath,
 	)
+	cmd := exec.Command(ffprobePath, args...)
 
 
 	output, err := cmd.Output()
@@ -901,12 +906,17 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 		return fmt.Errorf("invalid ffmpeg executable: %w", err)
 	}
 
-	args := []string{
+	// Hardened: filePath is an existing library file. See
+	// util.FFmpegHardeningArgs.
+	args := append(util.FFmpegHardeningArgs(),
 		"-i", filePath,
 		"-y",
-	}
+	)
 
 	if coverPath != "" && util.FileExists(coverPath) {
+		// The whitelist above only covers input 0 — per-file options apply to
+		// the input they precede, so the cover needs its own.
+		args = append(args, util.FFmpegInputHardeningArgs()...)
 		args = append(args, "-i", coverPath)
 		args = append(args, "-map", "0:a", "-map", "1", "-c:a", "copy", "-c:v", "copy", "-disposition:v:0", "attached_pic")
 	} else {

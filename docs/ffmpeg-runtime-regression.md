@@ -1,10 +1,11 @@
 # Régression — ffmpeg/ffprobe inexécutables dans l'image `scratch`
 
-> **🔍 Constat — diagnostiqué, prouvé, et corrigé le 2026-07-15 (option (a), voir §4bis).**
+> **✅ Clos — diagnostiqué, corrigé le 2026-07-15, et vérifié en production le 2026-07-16 (§4ter).**
 > Découvert en investiguant tout autre chose (le 401 Qobuz de S6). Régression introduite le
-> 2026-07-12, en production trois jours. **Le correctif attend un déploiement pour être confirmé en
-> prod** — la CI le vérifie désormais à chaque build. Lire §4bis pour ce que le durcissement ne
-> protège pas. Index : [README.md](README.md).
+> 2026-07-12, en production trois jours. Le correctif est confirmé **par exécution réelle en prod**,
+> pas par déduction ; la CI le revérifie à chaque build. Durcissement ffmpeg **complet** depuis le
+> 2026-07-16 (§4ter). Lire §4bis pour ce que le durcissement ne protège **pas** — c'est toujours
+> valable. Index : [README.md](README.md).
 
 ## 1. Le symptôme
 
@@ -129,7 +130,7 @@ type.
 |---|---|---|
 | `FROM scratch` → `gcr.io/distroless/cc-debian12@sha256:7ee09f…` | `Dockerfile` | ffmpeg/ffprobe démarrent enfin. Base **vérifiée** en listant ses 18 couches : les 8 `DT_NEEDED` mesurées y sont, y compris `/lib64/ld-linux-x86-64.so.2` (le `PT_INTERP` exact) et `libgcc_s.so.1` — que `distroless/base` **n'a pas**. |
 | Smoke test | `.github/workflows/docker.yml` | Exécute réellement les binaires + **l'argv exact de production** sur un vrai fichier. C'est le garde-fou qui manquait : un `COPY` réussi ne prouve rien. |
-| `-protocol_whitelist file` + `-nostdin` | `backend/util/ffmpeg_hardening.go`, appliqué à `tidal/client.go` et `util/ffprobetags.go` | Coupe la jambe réseau : un fichier forgé ne peut plus faire ouvrir d'URL à ffmpeg (SSRF / exfiltration via `dref` mp4 ou entrées de playlist). |
+| `-protocol_whitelist file` + `-nostdin` | `backend/util/ffmpeg_hardening.go`, appliqué à **tous** les points d'appel (voir le tableau §4ter) | Coupe la jambe réseau : un fichier forgé ne peut plus faire ouvrir d'URL à ffmpeg (SSRF / exfiltration via `dref` mp4 ou entrées de playlist). |
 
 ### Les limites, explicitement
 
@@ -141,12 +142,8 @@ sur des octets **choisis par des proxies tiers**.
 distroless. La base décide seulement s'il *démarre*. Aujourd'hui la surface était nulle — parce que
 rien ne s'exécutait. « Sécurisé par la panne » n'est pas une stratégie.
 
-**Durcissement partiel, assumé.** Seuls 2 des ~8 points d'appel portent les flags : le chemin de
-téléchargement Tidal (entrée la moins fiable) et la lecture de tags (toute la bibliothèque). **Non
-couverts** : `audio/analysis.go`, `audio/ffmpeg.go` (ConvertAudio), `meta/metadata.go`,
-`amazon/client.go`. Raison : ils n'ont pas pu être testés sur un vrai fichier ici, et casser une
-conversion coûterait plus que le gain marginal. À étendre **une fois le smoke test vert** — il
-prouvera que les flags passent.
+**Le durcissement est désormais complet** (2026-07-16) — voir §4ter pour l'inventaire et la façon
+dont la couverture partielle initiale a failli devenir permanente.
 
 **Le rayon de souffle d'une RCE reste entier**, et il est plus large qu'il n'y paraît :
 
@@ -163,6 +160,67 @@ sérieux.** Ne pas confondre les deux.
 
 **Le seul levier qui réduirait la probabilité** est de se méfier de ce que ffmpeg avale, donc des
 proxies communautaires — voir [`third-party-layer-status.md`](third-party-layer-status.md).
+
+## 4ter. Couverture complète du durcissement (2026-07-16)
+
+Le smoke test vert a levé la seule raison de la couverture partielle (« on ne sait pas si les flags
+passent »). Inventaire **exhaustif** des `exec.Command` sur ffmpeg/ffprobe, chacun vérifié en lisant
+son argv avant modification :
+
+| Point d'appel | Binaire | Entrée | État |
+|---|---|---|---|
+| `tidal/client.go:495` | ffmpeg | octets d'un proxy | durci (2026-07-15) |
+| `util/ffprobetags.go:32` | ffprobe | toute la bibliothèque | durci (2026-07-15) |
+| `amazon/client.go` (probe) | ffprobe | **octets d'un proxy** | durci (2026-07-16) |
+| `amazon/client.go` (déchiffrement) | ffmpeg | **octets d'un proxy** | durci (2026-07-16) |
+| `audio/ffmpeg.go` (ConvertAudio) | ffmpeg | bibliothèque / upload | durci (2026-07-16) |
+| `audio/analysis.go` | ffprobe | bibliothèque / upload | durci (2026-07-16) |
+| `meta/metadata.go` (embedMetadataToM4A) | ffmpeg | bibliothèque **+ pochette** | durci (2026-07-16) |
+| `meta/metadata.go` (embedLyricsToM4A) | ffmpeg | bibliothèque | durci (2026-07-16) |
+| `meta/metadata.go` (getDuration) | ffprobe | bibliothèque | durci (2026-07-16) |
+| `meta/spotify_index.go:612` | ffmpeg | bibliothèque | durci (2026-07-16) |
+| `audio/ffmpeg.go:39,55` | les deux | *aucune* (`-version`) | sans objet — pas de fichier parsé |
+
+### Ce que l'exercice a révélé
+
+**`amazon/client.go` était le trou le plus sérieux, et il était invisible dans le classement
+initial.** Il fait tourner ffmpeg sur des octets livrés par un proxy communautaire — le modèle de
+menace *exact* de `tidal/client.go`, que §4bis désignait comme « l'entrée la moins fiable de toute
+l'app » et durcissait en priorité. Il a été rangé parmi les « non couverts, gain marginal » parce
+que la liste avait été triée à vue, sans lire les argv. La leçon est la même que celle du `FROM
+scratch` : **une propriété affirmée sans mesure est une propriété fausse**, et ici elle a failli
+figer une lacune sous une justification rassurante.
+
+**Deux vérifications ont évité de casser la prod** — chacune aurait produit une panne silencieuse
+du même genre que la régression d'origine :
+
+- `amazon` : le déchiffrement CENC passe par `-decryption_key`, une **option du démuxeur `mov`**, et
+  non par le protocole `crypto:`. Restreindre les protocoles à `file` ne l'affecte donc pas. Si
+  l'inverse avait été vrai, tout téléchargement Amazon aurait cassé.
+- `embedMetadataToM4A` : **deux entrées** (audio + pochette). `-protocol_whitelist` est une option
+  *par fichier* — celle placée avant le premier `-i` ne couvre pas le second. La pochette provient de
+  `cover_url`, fourni par l'appelant : si ffmpeg sonde ces octets comme une playlist plutôt qu'une
+  image, ses entrées sont des URL. D'où `util.FFmpegInputHardeningArgs()`, appliqué avant le second
+  `-i`.
+
+### Vérifié en production (2026-07-16, après redéploiement)
+
+Pas par déduction — par exécution réelle sur `spotiflac.redstack.fr` :
+
+| Preuve | Résultat |
+|---|---|
+| `GET /api/v1/system/ffmpeg` | `installed:true`, `ffprobe_installed:true`. **Probant** : la fonction fait un vrai `exec.Command(path, "-version")`, pas un `os.Stat` — c'est exactement ce qui échouait sur `scratch`. |
+| `GET /api/v1/system/info` | `"os":"Distroless (amd64)"` — la nouvelle base tourne bien. |
+| `GET /api/v1/files/metadata` | ffprobe **durci** renvoie de vraies balises (titre/artiste/genre/ISRC) sur un FLAC réel. |
+| `POST /api/v1/audio/convert` | encodage ffmpeg réel FLAC → MP3 320k `success:true`. |
+| Téléchargement complet | `INFO [Jobs] Done` + fichier tagué genre et ISRC. |
+
+### Ce que ça ne change pas
+
+Rien à §4bis : le durcissement **ne réduit toujours pas** la probabilité d'une RCE, et le rayon de
+souffle (`jwt_secret`, `refresh_token`, bibliothèque) reste entier. La couverture est maintenant
+uniforme, c'est tout — un attaquant n'a plus de point d'appel « oublié » à viser, mais les points
+d'appel durcis restent des décodeurs média qui parsent des octets hostiles.
 
 ### Durcissement conteneur — non fait, car c'est le déploiement, pas le code
 

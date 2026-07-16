@@ -42,3 +42,16 @@ func FFmpegHardeningArgs() []string {
 func FFprobeHardeningArgs() []string {
 	return []string{"-protocol_whitelist", "file"}
 }
+
+// FFmpegInputHardeningArgs are prepended before every -i *after the first*.
+//
+// -protocol_whitelist is a per-file option: it applies only to the input it
+// precedes, so the FFmpegHardeningArgs at the front of the command do not cover
+// a second input. This matters for cover art (embedMetadataToM4A), which is
+// fetched from a caller-supplied cover_url: if ffmpeg probes those bytes as a
+// playlist rather than an image, the playlist entries are URLs it would happily
+// open. -nostdin is deliberately absent — it is global, already set once, and
+// not a per-file option.
+func FFmpegInputHardeningArgs() []string {
+	return []string{"-protocol_whitelist", "file"}
+}

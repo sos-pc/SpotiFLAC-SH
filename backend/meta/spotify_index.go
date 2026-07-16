@@ -609,7 +609,9 @@ func writeSpotifyIDToM4A(path, spotifyID string) error {
 		}
 	}()
 
-	cmd := exec.Command(ffmpegPath,
+	// Hardened: path is an existing library file being rewritten in place. See
+	// util.FFmpegHardeningArgs.
+	args := append(util.FFmpegHardeningArgs(),
 		"-i", path,
 		"-map", "0",
 		"-codec", "copy",
@@ -618,6 +620,7 @@ func writeSpotifyIDToM4A(path, spotifyID string) error {
 		"-y",
 		tmpOut,
 	)
+	cmd := exec.Command(ffmpegPath, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg retag: %s - %w", string(output), err)
 	}

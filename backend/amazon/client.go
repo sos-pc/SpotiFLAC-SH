@@ -234,13 +234,17 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		ffprobePath, err := util.GetFFprobePath()
 		var codec string
 		if err == nil {
-			cmdProbe := exec.Command(ffprobePath,
+			// Hardened: filePath is the still-encrypted payload a community
+			// proxy just handed us — same trust level as the Tidal path. See
+			// util.FFprobeHardeningArgs.
+			probeArgs := append(util.FFprobeHardeningArgs(),
 				"-v", "quiet",
 				"-select_streams", "a:0",
 				"-show_entries", "stream=codec_name",
 				"-of", "default=noprint_wrappers=1:nokey=1",
 				filePath,
 			)
+			cmdProbe := exec.Command(ffprobePath, probeArgs...)
 			codecOutput, _ := cmdProbe.Output()
 			codec = strings.TrimSpace(string(codecOutput))
 			slog.Debug("[Amazon] Detected codec", "codec", codec)
@@ -270,13 +274,18 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 
 		key := strings.TrimSpace(apiResp.DecryptionKey)
 
-		cmd := exec.Command(ffmpegPath,
+		// Hardened: same untrusted payload as the probe above, now going through
+		// the mov demuxer (CENC decryption happens inside it — -decryption_key
+		// is a demuxer option, not the crypto: protocol, so restricting
+		// protocols to `file` does not affect it). See util.FFmpegHardeningArgs.
+		decryptArgs := append(util.FFmpegHardeningArgs(),
 			"-decryption_key", key,
 			"-i", filePath,
 			"-c", "copy",
 			"-y",
 			decryptedPath,
 		)
+		cmd := exec.Command(ffmpegPath, decryptArgs...)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {

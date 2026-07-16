@@ -499,10 +499,13 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 
 			inputMetadata.Lyrics = lyrics
 
-			args := []string{
+			// Hardened: inputFile is any file in the library or the upload
+			// staging dir — including bytes a proxy chose. See
+			// util.FFmpegHardeningArgs.
+			args := append(util.FFmpegHardeningArgs(),
 				"-i", inputFile,
 				"-y",
-			}
+			)
 
 			switch req.OutputFormat {
 			case "mp3":
