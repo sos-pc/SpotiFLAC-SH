@@ -488,7 +488,11 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		return fmt.Errorf("invalid ffmpeg executable: %w", err)
 	}
 
-	cmd := exec.Command(ffmpegPath, "-y", "-i", tempPath, "-vn", "-c:a", "flac", outputPath)
+	// Hardened: tempPath holds bytes a community proxy chose for us — this is
+	// the least trusted input ffmpeg gets anywhere in the app. See
+	// util.FFmpegHardeningArgs.
+	args := append(util.FFmpegHardeningArgs(), "-y", "-i", tempPath, "-vn", "-c:a", "flac", outputPath)
+	cmd := exec.Command(ffmpegPath, args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

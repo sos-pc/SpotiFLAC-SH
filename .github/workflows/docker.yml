@@ -138,6 +138,51 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The check whose absence let ffmpeg ship broken for three days.
+      #
+      # Building the image proves nothing about ffmpeg: COPY succeeds as long as
+      # the file exists, and nothing in this workflow ever ran it. So the switch
+      # to a `scratch` runtime shipped binaries that were present, executable,
+      # and unable to start (dynamically linked, no ELF loader) — green CI, dead
+      # feature, discovered only by reading production logs days later. See
+      # docs/ffmpeg-runtime-regression.md.
+      #
+      # `-version` is enough: it exercises exec + the dynamic loader + libc
+      # startup, which is the entire failure mode. Run through `docker run` on
+      # the pushed image rather than a RUN layer, because the runtime image has
+      # no shell — the binary is invoked directly as the entrypoint.
+      - name: Smoke-test that ffmpeg/ffprobe actually run
+        run: |
+          set -euo pipefail
+          IMAGE='${{ fromJSON(steps.meta.outputs.json).tags[0] }}'
+          # A volume, because the runtime image has no shell: each `docker run`
+          # is one binary, and this is how a file survives between them.
+          docker volume create ff-smoke >/dev/null
+          ff()  { docker run --rm -v ff-smoke:/scratch --entrypoint /usr/local/bin/ffmpeg  "$IMAGE" "$@"; }
+          ffp() { docker run --rm -v ff-smoke:/scratch --entrypoint /usr/local/bin/ffprobe "$IMAGE" "$@"; }
+
+          # 1. exec + dynamic loader + libc startup — the whole failure mode of
+          #    the scratch regression, which a successful COPY never proved.
+          echo "::group::ffmpeg/ffprobe -version"
+          ff  -version
+          ffp -version
+          echo "::endgroup::"
+
+          # 2. The flags in backend/util/ffmpeg_hardening.go are only correct if
+          #    both binaries accept them. -nostdin especially is ffmpeg-only:
+          #    passed to ffprobe it would exit non-zero and silently break every
+          #    tag read. Assert the real production argv on a real file instead
+          #    of trusting the reasoning that chose them.
+          echo "::group::hardened argv, real file"
+          ff -f lavfi -i "sine=frequency=440:duration=1" -c:a flac -y /scratch/src.flac
+          # exactly backend/tidal/client.go's shape
+          ff -nostdin -protocol_whitelist file -y -i /scratch/src.flac -vn -c:a flac /scratch/out.flac
+          # exactly backend/util/ffprobetags.go's shape
+          ffp -protocol_whitelist file -v quiet -print_format json -show_format -show_streams /scratch/out.flac
+          echo "::endgroup::"
+
+          docker volume rm ff-smoke >/dev/null
+
       # Pinned to a commit SHA, not a tag: in March 2026 aquasecurity/trivy-action
       # was compromised via a stolen credential that force-pushed 75 of its 76
       # version tags (including floating majors like v0.28) to malicious commits
@@ -145,12 +190,22 @@ jobs:
       # confirmed unaffected — https://github.com/aquasecurity/trivy-action/releases/tag/v0.35.0)
       # can't be silently moved to point somewhere else the way a tag can.
       #
-      # Blocking: after replacing apt-installed ffmpeg with a static build and
-      # switching the runtime stage to `scratch` (no OS, no package database),
-      # a real scan against this image found 0 CRITICAL/HIGH vulnerabilities —
-      # down from 6+6 on debian:bookworm-slim and 51+9 on debian:trixie-slim
-      # when ffmpeg was still `apt-get install`ed. Only the Go binary itself
-      # is left to scan (gobinary), already clean.
+      # Blocking. History, and what the numbers actually meant: replacing
+      # apt-installed ffmpeg with a BtbN build took a real scan from 51+9
+      # CRITICAL/HIGH (debian:trixie-slim) and 6+6 (bookworm-slim) down to 0 on
+      # `scratch`. That 0 was never as strong as it looked — Trivy enumerates OS
+      # packages and language binaries (gobinary), so the ~115MB of codec
+      # libraries BtbN bakes into the ffmpeg executable are invisible to it. The
+      # risky code didn't leave; it stopped being enumerable. (The genuine win is
+      # real though: BtbN tracks ffmpeg master, where Debian ships a years-old
+      # branch.)
+      #
+      # The runtime is now distroless/cc (see the Dockerfile — `scratch` could
+      # not execute those binaries at all), so glibc/libgcc CVEs are reportable
+      # again and this gate may start failing on them. That is the trade being
+      # made deliberately: the exploitable surface here is ffmpeg parsing
+      # third-party bytes, which is identical on either base — only the report
+      # changes. See docs/ffmpeg-runtime-regression.md §4.
       - name: Scan pushed image for vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:

@@ -1,8 +1,10 @@
 # Régression — ffmpeg/ffprobe inexécutables dans l'image `scratch`
 
-> **Statut : diagnostiqué et prouvé, correctif non appliqué — décision requise (§4).**
-> Découvert le 2026-07-15 en investiguant tout autre chose (le 401 Qobuz de S6). Régression
-> introduite le 2026-07-12, en production depuis.
+> **🔍 Constat — diagnostiqué, prouvé, et corrigé le 2026-07-15 (option (a), voir §4bis).**
+> Découvert en investiguant tout autre chose (le 401 Qobuz de S6). Régression introduite le
+> 2026-07-12, en production trois jours. **Le correctif attend un déploiement pour être confirmé en
+> prod** — la CI le vérifie désormais à chaque build. Lire §4bis pour ce que le durcissement ne
+> protège pas. Index : [README.md](README.md).
 
 ## 1. Le symptôme
 
@@ -118,6 +120,62 @@ quelques paquets OS de base contre des fonctions qui marchent.
 **Quelle que soit l'option retenue : ajouter un `RUN ffmpeg -version` (ou équivalent) sur l'image
 finale en CI.** C'est ce qui manquait, et c'est ce qui empêchera la prochaine régression du même
 type.
+
+## 4bis. Ce qui a été fait (2026-07-15) — et ce que ça ne protège pas
+
+**Option (a) retenue et implémentée.**
+
+| Changement | Où | Effet |
+|---|---|---|
+| `FROM scratch` → `gcr.io/distroless/cc-debian12@sha256:7ee09f…` | `Dockerfile` | ffmpeg/ffprobe démarrent enfin. Base **vérifiée** en listant ses 18 couches : les 8 `DT_NEEDED` mesurées y sont, y compris `/lib64/ld-linux-x86-64.so.2` (le `PT_INTERP` exact) et `libgcc_s.so.1` — que `distroless/base` **n'a pas**. |
+| Smoke test | `.github/workflows/docker.yml` | Exécute réellement les binaires + **l'argv exact de production** sur un vrai fichier. C'est le garde-fou qui manquait : un `COPY` réussi ne prouve rien. |
+| `-protocol_whitelist file` + `-nostdin` | `backend/util/ffmpeg_hardening.go`, appliqué à `tidal/client.go` et `util/ffprobetags.go` | Coupe la jambe réseau : un fichier forgé ne peut plus faire ouvrir d'URL à ffmpeg (SSRF / exfiltration via `dref` mp4 ou entrées de playlist). |
+
+### Les limites, explicitement
+
+**Le durcissement ne réduit pas la probabilité d'une RCE dans ffmpeg.** Il retire deux facilités
+bon marché ; il ne rend pas le décodeur sûr. La surface reste : démuxeur mov/mp4, décodeurs AAC/FLAC,
+sur des octets **choisis par des proxies tiers**.
+
+**Le choix de l'image de base n'y change rien.** Même binaire, mêmes codecs, sur `scratch` comme sur
+distroless. La base décide seulement s'il *démarre*. Aujourd'hui la surface était nulle — parce que
+rien ne s'exécutait. « Sécurisé par la panne » n'est pas une stratégie.
+
+**Durcissement partiel, assumé.** Seuls 2 des ~8 points d'appel portent les flags : le chemin de
+téléchargement Tidal (entrée la moins fiable) et la lecture de tags (toute la bibliothèque). **Non
+couverts** : `audio/analysis.go`, `audio/ffmpeg.go` (ConvertAudio), `meta/metadata.go`,
+`amazon/client.go`. Raison : ils n'ont pas pu être testés sur un vrai fichier ici, et casser une
+conversion coûterait plus que le gain marginal. À étendre **une fois le smoke test vert** — il
+prouvera que les flags passent.
+
+**Le rayon de souffle d'une RCE reste entier**, et il est plus large qu'il n'y paraît :
+
+| Atteint | Pourquoi c'est sérieux |
+|---|---|
+| `configDir/jwt_secret` | **forge de JWT admin indéfiniment** ; persiste dans le volume nommé, donc **survit au correctif et au redéploiement**. Le mettre en variable d'env ne protège pas (`/proc/self/environ`). |
+| `tidal_token.json` | contient le **`refresh_token`** → accès **durable** au compte, pas un jeton éphémère |
+| bibliothèque (bind mount, écriture) | milliers de fichiers, suppression/chiffrement possibles |
+| multi-utilisateur | watchlists et historiques de tous les comptes |
+
+**Probabilité vs impact.** Exploiter ceci demande un 0-day ciblé contre un ffmpeg de 4 jours
+(master `N-125519`, 2026-07-11), livré par un proxy compromis. **Peu probable — mais l'impact est
+sérieux.** Ne pas confondre les deux.
+
+**Le seul levier qui réduirait la probabilité** est de se méfier de ce que ffmpeg avale, donc des
+proxies communautaires — voir [`third-party-layer-status.md`](third-party-layer-status.md).
+
+### Durcissement conteneur — non fait, car c'est le déploiement, pas le code
+
+Le compose de référence s'arrête à `user: "1000:1000"`. Ces trois blocs réduiraient ce qu'une RCE
+*permet ensuite* (pas sa probabilité), sans coût : le binaire est non-root et n'a besoin d'aucune
+capability (port 6890 > 1024).
+
+```yaml
+security_opt: [ "no-new-privileges:true" ]
+cap_drop: [ ALL ]
+read_only: true          # les volumes Music/.SpotiFLAC restent inscriptibles
+tmpfs: [ /tmp ]
+```
 
 ## 5. Documentation à corriger une fois l'option choisie
 

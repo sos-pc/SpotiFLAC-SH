@@ -23,7 +23,7 @@ fausse à l'écriture ; deux ont pourri, une n'avait jamais été vérifiée.
 | Doc | Type | Statut | Vérifié | Pour quoi |
 |---|---|---|---|---|
 | [third-party-layer-status.md](third-party-layer-status.md) | 🌍 | ⚠️ **périssable** | **2026-07-15**, sondes live | L'état réel des services tiers. **Commencer ici** avant tout travail touchant un provider. |
-| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🔴 **ouvert** — décision requise | 2026-07-15, ELF parsé | ffmpeg/ffprobe ne s'exécutent pas dans l'image. Diagnostic prouvé, 3 options. |
+| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟡 **corrigé, à déployer** | 2026-07-15, ELF parsé + couches de l'image listées | ffmpeg/ffprobe ne démarraient pas (`scratch` sans loader ELF). Corrigé via distroless/cc + smoke test CI. **§4bis : ce que le durcissement ne protège pas.** |
 | [upstream-catchup.md](upstream-catchup.md) | 🔍 | 🟡 en cours (S1–S16) | 2026-07-15 | Rattrapage de l'upstream. Le tableau §0 porte le statut par sujet. |
 | [audit-refactoring-couche2.md](audit-refactoring-couche2.md) | 🔍 | 🟢 clos (R1–R12) | 07-13 · **§R12 corrigé le 07-15** | Audit couche 2. ⚠️ R12 contenait une attribution fausse — voir l'encadré. |
 | [api-redesign-plan.md](api-redesign-plan.md) | 🧭 | ⏸️ non commencé | 2026-07-15 | Cohérence read/manage/admin + accès DB. Décisions ouvertes en §3. |

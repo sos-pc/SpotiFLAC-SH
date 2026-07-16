@@ -20,13 +20,16 @@ func ReadFFprobeTags(filePath string) (map[string]string, error) {
 		return nil, fmt.Errorf("invalid ffprobe executable: %w", err)
 	}
 
-	cmd := exec.Command(ffprobePath,
+	// Hardened: filePath is any file in the user's library — including whatever
+	// a download just wrote there. See FFprobeHardeningArgs.
+	args := append(FFprobeHardeningArgs(),
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
 		filePath,
 	)
+	cmd := exec.Command(ffprobePath, args...)
 
 	output, err := cmd.Output()
 	if err != nil {

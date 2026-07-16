@@ -46,8 +46,19 @@ RUN go mod tidy && \
 # packaging scripts) — a Trivy scan found 60 CRITICAL/HIGH CVEs across those
 # packages on trixie (12 on bookworm), almost none of them in code this app,
 # a headless audio-only service, ever executes (no GPU accel, no SSH, no XML).
-# A statically-linked ffmpeg build has no runtime library dependencies of its
-# own to carry those CVEs.
+# BtbN's non-`-shared` build bundles those codec libraries into the executable
+# instead, so none of them are separately installed packages carrying CVEs.
+#
+# "Static" only in that sense, and the distinction is not academic: this comment
+# used to claim the build had "no runtime library dependencies of its own",
+# which was never verified and turned out false — the executables still link
+# glibc and libgcc dynamically. Stage 4 was then moved to `FROM scratch` on the
+# strength of that claim and every ffmpeg call broke for three days. Measured
+# reality (PT_INTERP + DT_NEEDED parsed from this exact asset):
+#
+#   /lib64/ld-linux-x86-64.so.2 + libm libdl librt libpthread libmvec libc libgcc_s
+#
+# See docs/ffmpeg-runtime-regression.md.
 #
 # Pinned to a specific dated release tag AND a specific versioned asset
 # filename (BtbN/FFmpeg-Builds cuts a dated release most days, each carrying
@@ -96,26 +107,40 @@ RUN mkdir -p /rootfs/home/nonroot/Music /rootfs/home/nonroot/.SpotiFLAC /rootfs/
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 4 — Runtime
 #
-# FROM scratch, not a Debian base: the Go binary is CGO_ENABLED=0 (statically
-# linked, no glibc dependency) and ffmpeg/ffprobe above are static builds —
-# nothing in this image actually needs a Linux distro, a package manager, or
-# a shell. The only non-negotiable OS-level artifact a Go program still needs
-# for outbound TLS is a CA certificate bundle, copied in as a plain data file
-# from the ffmpeg-static stage (which already installed ca-certificates to
-# fetch ffmpeg over HTTPS) — everything else that a Debian base would have
-# provided (bash, coreutils, apt, tzdata) is unused: no code shells out
-# anymore (see backend/util/system.go), and grep across the codebase found
-# no timezone-database lookups (time.LoadLocation). Result: zero OS packages
-# in the final image, so a vulnerability scanner has zero OS-level CVE
-# surface left to report — only our own Go binary and the ffmpeg binary,
-# both already scanned clean.
+# distroless/cc, not scratch — and not a full Debian base either.
+#
+# This image was FROM scratch until 2026-07-15, on the stated reasoning that
+# "ffmpeg is a static binary, so nothing here needs a Linux distro". That was
+# wrong, and it silently broke every ffmpeg/ffprobe call for three days: BtbN's
+# builds are static only in the sense that they bundle their own codec
+# libraries — the executables themselves are still dynamically linked. Measured
+# on the exact asset pinned above (PT_INTERP + DT_NEEDED parsed, not guessed):
+#
+#   PT_INTERP : /lib64/ld-linux-x86-64.so.2
+#   DT_NEEDED : libm.so.6, libdl.so.2, librt.so.1, libpthread.so.0,
+#               libmvec.so.1, libc.so.6, ld-linux-x86-64.so.2, libgcc_s.so.1
+#
+# `scratch` ships no ELF loader, so exec() failed with ENOENT — naming a file
+# that exists, because the missing thing is the *interpreter*, not the binary.
+# See docs/ffmpeg-runtime-regression.md.
+#
+# distroless/cc is glibc + libgcc — exactly that list and nothing more (verified
+# by listing the image's own layers; distroless/base is NOT enough, it has no
+# libgcc_s). It keeps what actually mattered about scratch: no shell, no package
+# manager, no apt database. What it gives up is the absolute claim "zero OS
+# packages, therefore zero CVEs for a scanner to report" — which was always
+# partly an artifact anyway: Trivy enumerates OS packages and language binaries,
+# so the ~115MB of codec libraries baked into ffmpeg were never visible to it.
+# The 51+9 -> 0 drop measured scanner blindness as much as it measured safety.
+# The real attack surface (a media decoder parsing bytes chosen by third-party
+# proxies) is identical either way — the base image only decides whether it runs.
 #
 # Docker/Kubernetes always inject /etc/resolv.conf, /etc/hosts and
 # /etc/hostname into a running container regardless of what the image itself
 # contains, so DNS resolution works here even though the image ships none of
 # those files.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM scratch
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df
 
 COPY --from=ffmpeg-static /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=ffmpeg-static --chown=1000:1000 /rootfs/home /home
@@ -128,15 +153,16 @@ COPY --from=ffmpeg-static /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 USER 1000:1000
 WORKDIR /home/nonroot
 
-# scratch has no /etc/passwd, so the container runtime can't look up a home
-# directory for numeric UID 1000 the way it could when the previous
-# debian-based image's `useradd -m` gave USER an /etc/passwd entry to
-# resolve — it falls back to HOME=/, which broke every os.UserHomeDir()
-# caller (config dir, default music path, ffmpeg path, Tidal auth token
-# storage) into resolving paths under / instead of /home/nonroot, where
-# these mounted volumes and the skeleton dirs above actually live. Setting
-# HOME explicitly restores the same resolution the debian image gave for
-# free.
+# Still required on distroless. It does ship an /etc/passwd, but only for root
+# and its own `nonroot` user (uid 65532) — numeric UID 1000 has no entry to
+# resolve, exactly as on scratch. Without this, HOME falls back to /, which
+# breaks every os.UserHomeDir() caller (config dir, default music path, ffmpeg
+# path, Tidal token storage) into resolving paths under / instead of
+# /home/nonroot, where the mounted volumes and the skeleton dirs above live.
+#
+# (Staying on 1000:1000 rather than switching to distroless's 65532 on purpose:
+# it is the uid documented for the bind-mounted music directory, and changing it
+# would silently break every existing deployment's file ownership.)
 ENV HOME=/home/nonroot
 
 EXPOSE 6890
