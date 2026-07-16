@@ -30,7 +30,11 @@ func makeResp(status int, body string) *http.Response {
 
 // fakeInitTransport répond aux sous-requêtes d'Initialize() avec des données valides.
 // Utilisé pour simuler un re-auth réussi après 401.
-func fakeInitTransport(queryResp func() *http.Response) roundTripperFunc {
+//
+// queryResp reçoit la requête : un vrai serveur décide d'un 401 en regardant le
+// token présenté, pas en comptant les appels — et un test qui veut modéliser ça
+// a besoin de l'en-tête Authorization (voir TestQueryConcurrentAccessIsRaceFree).
+func fakeInitTransport(queryResp func(*http.Request) *http.Response) roundTripperFunc {
 	// HTML de session avec clientVersion encodé en base64
 	cfgJSON := `{"clientVersion":"1.2.3.456"}`
 	cfgB64 := base64.StdEncoding.EncodeToString([]byte(cfgJSON))
@@ -64,7 +68,7 @@ func fakeInitTransport(queryResp func() *http.Response) roundTripperFunc {
 			return makeResp(200, string(clientTokenBody)), nil
 
 		case host == "api-partner.spotify.com":
-			return queryResp(), nil
+			return queryResp(req), nil
 		}
 
 		return makeResp(500, "unexpected URL: "+req.URL.String()), nil
@@ -105,7 +109,7 @@ func TestQuery401ThenSuccess(t *testing.T) {
 	var queryCallCount int32
 	successBody, _ := json.Marshal(map[string]interface{}{"data": "after-refresh"})
 
-	queryResp := func() *http.Response {
+	queryResp := func(_ *http.Request) *http.Response {
 		n := atomic.AddInt32(&queryCallCount, 1)
 		if n == 1 {
 			return makeResp(401, "Unauthorized")
@@ -147,7 +151,7 @@ func TestQueryPermanentError(t *testing.T) {
 func TestQueryExhausted401(t *testing.T) {
 	// Toutes les tentatives retournent 401 → "failed after N attempts".
 	var queryCallCount int32
-	queryResp := func() *http.Response {
+	queryResp := func(_ *http.Request) *http.Response {
 		atomic.AddInt32(&queryCallCount, 1)
 		return makeResp(401, "Unauthorized")
 	}
@@ -178,14 +182,25 @@ func TestQueryExhausted401(t *testing.T) {
 // hard crash from the map write) is what actually proves the fix, a plain
 // `go test` run without -race would not reliably catch it.
 func TestQueryConcurrentAccessIsRaceFree(t *testing.T) {
-	var queryCallCount int32
 	successBody, _ := json.Marshal(map[string]interface{}{"data": "ok"})
 
-	// Roughly every third call returns 401, forcing concurrent goroutines
-	// to race on resetting/reinitializing the shared client's tokens.
-	queryResp := func() *http.Response {
-		n := atomic.AddInt32(&queryCallCount, 1)
-		if n%3 == 0 {
+	// 401 for the stale pre-seeded token, 200 for anything else: every
+	// goroutine starts out rejected, so they all pile into the token
+	// reset/reinitialize path at once — which is the race this test exists to
+	// catch — and once any one of them re-auths, the shared client holds
+	// "fresh-access-token" (see fakeInitTransport) and everyone proceeds.
+	//
+	// This used to return 401 on every third call, counted with a shared
+	// atomic. That made failure a matter of interleaving luck: a goroutine
+	// whose three attempts happened to land on multiples of three drew three
+	// 401s in a row and exhausted Query's retry budget, failing the test for a
+	// reason that had nothing to do with any race. Measured at ~3.5% (7
+	// failures in 200 runs) — it went red in CI on an unrelated commit.
+	//
+	// Keying on the token is also what a real server does: a 401 means *this
+	// credential* is stale, not "every third request fails".
+	queryResp := func(req *http.Request) *http.Response {
+		if req.Header.Get("Authorization") == "Bearer pre-filled-access" {
 			return makeResp(401, "Unauthorized")
 		}
 		return makeResp(200, string(successBody))
@@ -222,7 +237,7 @@ func TestQuery429RespectsRetryAfter(t *testing.T) {
 	successBody, _ := json.Marshal(map[string]interface{}{"data": "after-ratelimit"})
 
 	// Utilise Retry-After: 1 pour un sleep minimal (1s au lieu du backoff 10/30/60s).
-	queryResp := func() *http.Response {
+	queryResp := func(_ *http.Request) *http.Response {
 		n := atomic.AddInt32(&queryCallCount, 1)
 		if n == 1 {
 			resp := makeResp(429, "Too Many Requests")
