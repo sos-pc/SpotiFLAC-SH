@@ -107,11 +107,23 @@ Add working self-hosted instances via **Settings → APIs → Proxy Configuratio
 
 ### Amazon Music (fallback 2)
 
-Amazon tracks are delivered as encrypted `.m4a` files and decrypted via FFmpeg with `-decryption_key`.
+> 🔴 **Dead since at least 2026-07-15: `amazon.spotbye.qzz.io` no longer resolves.** Not a
+> transient outage — the parent domain `spotbye.qzz.io` still resolves (Cloudflare), the `amazon.`
+> subdomain was **removed**. Amazon is currently a dead branch of the download chain: there is no
+> endpoint left to reach, so nothing below this line works. Upstream moved its proxy URLs into
+> AES-GCM-encrypted config (`community_endpoints.go`, see `upstream-catchup.md` §S1) — recovering an
+> Amazon source starts with finding the current endpoint, not with the DRM question (§S4). See
+> [third-party-layer-status.md](third-party-layer-status.md).
 
-- **`https://amazon.spotbye.qzz.io`** — Community stream proxy (spotbye). Requires `X-Debug-Key` header (AES-256-GCM derived). The `/status` endpoint is used for health checks (a `401` response confirms the server is up and rejecting unauthenticated requests).
+Amazon tracks are delivered as encrypted `.m4a` files and decrypted via FFmpeg with `-decryption_key`.
+(FFmpeg itself is also currently unable to execute in the Docker image — see
+[ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) — so this path is doubly broken.)
+
+- **`https://amazon.spotbye.qzz.io`** — Community stream proxy (spotbye). Requires `X-Debug-Key` header (AES-256-GCM derived). The `/status` endpoint was used for health checks (a `401` response confirmed the server was up and rejecting unauthenticated requests). **The host no longer resolves, so the check now reports `Host not found`.**
 
 > Domain updated May 2026 from `https://amzn.afkarxyz.fun` → `https://amazon.spotbye.qzz.io`.
+> That second host is now gone too — the pattern is that these community endpoints rotate and are
+> not announced.
 
 ### Deezer (fallback 3)
 

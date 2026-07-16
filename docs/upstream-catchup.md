@@ -86,9 +86,28 @@ tout est déjà rattaché à un autre sujet).
 
 - `community_apikey.go` / `community_endpoints.go` contiennent une clé API et des URLs de proxy
   communautaires **chiffrées en AES-GCM avec la clé de déchiffrement dérivable d'un literal dans le
-  même fichier** — trivialement déchiffrable mais délibérément obscurci. **Décision : jamais déchiffré
-  ni réutilisé**, service privé de l'upstream. Deux items exploitables en ont été extraits sans
-  toucher aux secrets : S2 (validation durée) et S3 (pattern retry/cooldown).
+  même fichier** — trivialement déchiffrable mais délibérément obscurci. Deux items exploitables en
+  ont été extraits sans toucher aux secrets : S2 (validation durée) et S3 (pattern retry/cooldown).
+
+  > **Position révisée le 2026-07-15 (décision utilisateur).** La version initiale de ce document
+  > tranchait : « jamais déchiffré ni réutilisé, service privé de l'upstream ». **Ce n'est plus la
+  > position du projet** — le déchiffrement des endpoints communautaires n'est pas exclu.
+  >
+  > Ce qui a changé, factuellement : `amazon.spotbye.qzz.io` — l'endpoint Amazon que **nous codons
+  > déjà en dur depuis toujours**, hérité de l'upstream avant qu'il ne chiffre sa config — **ne
+  > résout plus** (voir [`third-party-layer-status.md`](third-party-layer-status.md)). On utilise
+  > donc déjà cette infrastructure ; la question n'est pas « commencer à s'en servir » mais « suivre
+  > un endpoint qui a bougé ».
+  >
+  > **Distinction à garder en tête, parce qu'elle est réelle.** Les identifiants Qobuz et Apple
+  > qu'on exploite déjà (§S6, §S10) sont ceux du **lecteur web public du service lui-même**,
+  > embarqués dans leur propre site, utilisés comme un client normal accède au service. Les secrets
+  > communautaires sont d'une autre nature : c'est **l'infrastructure privée de spotbye**, qu'il
+  > héberge et paie, et qu'il a délibérément obfusquée — l'intention est explicite. Ce n'est pas un
+  > verrou de sécurité (la clé est dans le même fichier), c'est un panneau.
+  >
+  > Ce document consigne la décision, pas un jugement. À rouvrir si l'usage devait dépasser le
+  > remplacement d'un endpoint déjà utilisé (ex. : consommer massivement leur quota).
 - `http_headers.go` / `provider_endpoints.go` : déjà équivalents chez nous
   (`backend/providerutil/useragent.go`, endpoint Amazon `amazon.spotbye.qzz.io` déjà identique).
 - `download_cancel.go` : système d'annulation globale "stop all downloads", conçu pour une appli
@@ -121,6 +140,20 @@ se porte pas (câblé à leurs URLs chiffrées, voir S1) mais le pattern est ind
 réintroduire cette dépendance ; brancher plutôt sur notre système SSE/jobs existant.
 
 ### S4 — Déchiffrement DRM (mp4ff_decrypt.go)
+
+> ⚠️ **La question est sans objet en l'état (constat du 2026-07-15).** `amazon.spotbye.qzz.io` — notre
+> seule source Amazon — **ne résout plus** : le sous-domaine a été supprimé (le domaine parent vit
+> toujours). Il n'y a plus d'endpoint dont déchiffrer quoi que ce soit, et FFmpeg lui-même ne
+> s'exécute pas dans l'image actuelle ([`ffmpeg-runtime-regression.md`](ffmpeg-runtime-regression.md)),
+> donc le déchiffrement actuel à clé unique est cassé de toute façon.
+>
+> **Ordre logique révisé :** (1) retrouver l'endpoint Amazon courant — l'upstream l'a déplacé dans sa
+> config chiffrée, et le déchiffrement de celle-ci **n'est plus exclu** (voir §S1, position révisée) ;
+> (2) réparer FFmpeg ; (3) **alors seulement** se demander si le multi-clés mp4ff est nécessaire —
+> question qui ne peut être tranchée qu'en observant ce que le nouvel endpoint renvoie réellement.
+>
+> Voir [`third-party-layer-status.md`](third-party-layer-status.md) pour le contexte : Amazon n'est
+> pas un incident isolé, toute la couche tierce s'érode.
 
 **Statut : en attente d'une décision utilisateur, volontairement pas trianger techniquement.**
 

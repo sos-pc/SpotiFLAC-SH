@@ -550,9 +550,31 @@ conversion async 202+SSE tient sous charge réelle prolongée.
 
 ### R12 — Couche de résolution/proxy tierce dégradée en prod (I1/I2 en direct)
 
+> ⚠️ **Correction du 2026-07-15 — l'attribution du 401 ci-dessous est fausse.** Le `grep` annoncé
+> comme exhaustif ne l'était pas : **`backend/qobuz/client.go:198` produit la chaîne strictement
+> identique** (`fmt.Errorf("API returned status %d", ...)`) et a été manqué. Vérifié en direct
+> depuis :
+> - **song.link/odesli renvoie HTTP 200**, sans auth (2 pistes testées) — l'énigme que ce finding
+>   soulevait lui-même (« song.link ne requiert normalement pas d'auth ») n'en était pas une.
+> - **Qobuz `searchByISRC` renvoie 401 systématiquement** (3 ISRC réels), avec l'ancien `app_id`
+>   non signé que l'upstream a abandonné (voir `upstream-catchup.md` §S6).
+> - Et `jobs_helpers.go:285-288` **bascule sur Qobuz quand Tidal échoue** — ce que ce run observait
+>   précisément (« tous les proxies Tidal en échec simultané »).
+>
+> Scénario cohérent : Tidal tombe → bascule massive vers Qobuz → flot de 401 → attribué à Songlink.
+> **Ce qui reste non prouvé** : que les 401 de *ce run passé* étaient bien Qobuz (les logs de la
+> fenêtre sont partis ; `download_attempts.error` les a gardés en base mais aucune API ne les
+> expose — cf. `api-redesign-plan.md`). Faisceau d'indices solide, pas une preuve.
+>
+> **Cause racine, indépendante de l'attribution :** deux packages émettent le **même message nu**,
+> ce qui rend l'origine indécidable depuis les logs. Un message d'erreur non attribuable est un bug
+> de diagnosticabilité — celui-ci a coûté une conclusion fausse dans cet audit. À préfixer par
+> service (même travail que celui fait sur `api_status.go`, mais côté logs).
+
 **Observé** pendant le téléchargement du playlist `/all` (2547 pistes), sources vérifiées par `grep`
 de chaque message :
-- `API returned status 401` (nu) → **Songlink** (song.link/odesli, `backend/songlink/client.go:181/290/427`).
+- `API returned status 401` (nu) → **Songlink** (song.link/odesli, `backend/songlink/client.go:181/290/427`)
+  — ❌ **attribution erronée, voir l'encadré ci-dessus**.
 - `Songlink Rate limited, skipping calls for 5 minutes` (429) → coupe-circuit 5 min
   (`songlink/client.go:46`) qui casse **en cascade** les pistes suivantes nécessitant une résolution
   ISRC (`songlink rate limited, skipping call`).
