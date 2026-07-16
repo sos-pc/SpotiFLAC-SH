@@ -22,10 +22,10 @@
 |---|-------|------|
 | 1 | **DoS login** — compteur de rate-limit partagé par tous | ✅ corrigé + vérifié |
 | 2 | **Port 6890 ouvert sur le LAN** — contournait TLS et nginx | ✅ fermé + vérifié |
-| 3 | Durcissement conteneur (`cap_drop`, `no-new-privileges`, `read_only`) | ✅ appliqué |
+| 3 | Durcissement conteneur (`cap_drop`, `no-new-privileges`, `read_only`) | ✅ appliqué + **vérifié** (upload réel sous `read_only`, §5.1) |
 | 4 | **`mem_limit` rejeté par le noyau** | 🔴 **ouvert** |
-| 5 | Upload cassé derrière tout reverse proxy (bug applicatif) | ✅ corrigé (`8486c45`), **non retesté en prod** |
-| 6 | Flux SSE coupé toutes les 4 min (bug applicatif) | ✅ corrigé (`dcfa668`) |
+| 5 | Upload cassé derrière tout reverse proxy (bug applicatif) | ✅ corrigé (`8486c45`) + **vérifié en prod** |
+| 6 | Flux SSE coupé toutes les 4 min (bug applicatif) | ✅ corrigé (`dcfa668`) + **vérifié en prod** (30,0 s mesurés) |
 | 7 | Test instable + CI sans `-race` | 🟡 instabilité corrigée (`1a9dedc`), **`-race` : décision ouverte** |
 
 ---
@@ -238,12 +238,23 @@ contrôlée est une propriété fausse**, y compris quand l'instrument est en ca
 
 | # | Tâche | Pourquoi ça compte | Bloqué par |
 |---|-------|--------------------|------------|
-| 1 | **Retester l'upload en prod** | `read_only: true` + `/tmp` sur disque n'ont **jamais** été réellement testés : les deux essais ont été rejetés à l'authentification (session expirée, puis le bug §5.1) et **n'ont jamais atteint le disque**. `/tmp` est bien en `1000:1000` (vérifié), mais ça reste une déduction. | redéploiement de `8486c45` |
-| 2 | **Vérifier le heartbeat SSE en prod** | Testé unitairement, pas en conditions réelles. Sonde : se connecter au flux via `httpx[http2]`, attendre 35 s, voir passer `: keepalive`. | redéploiement de `dcfa668` |
-| 3 | **`mem_limit`** (§4) | protection absente qu'on croit avoir | diagnostic `/proc/cgroups` |
-| 4 | **`-race` en CI** | Le test `TestQueryConcurrentAccessIsRaceFree` **documente** qu'il doit tourner avec `-race` (« a plain `go test` run without -race would not reliably catch it »), et la CI lance `go test ./... -v` **sans**. Le test ne fait donc pas le travail qu'il annonce. | **décision** : activer `-race` peut révéler d'autres races et ralentir la CI ; non vérifiable en local (pas de gcc) |
-| 5 | **Révoquer la clé API admin utilisée pendant l'audit** | elle a été exposée en clair dans la conversation de travail ; une clé admin ne se périme pas toute seule (voir `authentication.md`) | — |
-| 6 | Rotation du mot de passe Jellyfin de l'opérateur | exposé en clair dans un copier-coller de console navigateur — le champ mot de passe rend sa valeur dans l'attribut `value`, ce que les captures de console embarquent sans qu'on y pense | — |
+| 1 | **`mem_limit`** (§4) | protection absente qu'on croit avoir | diagnostic `/proc/cgroups` |
+| 2 | **`-race` en CI** | Le test `TestQueryConcurrentAccessIsRaceFree` **documente** qu'il doit tourner avec `-race` (« a plain `go test` run without -race would not reliably catch it »), et la CI lance `go test ./... -v` **sans**. Le test ne fait donc pas le travail qu'il annonce. | **décision** : activer `-race` peut révéler d'autres races et ralentir la CI ; non vérifiable en local (pas de gcc) |
+| 3 | **Révoquer la clé API admin utilisée pendant l'audit** | elle a été exposée en clair dans la conversation de travail ; une clé admin ne se périme pas toute seule (voir `authentication.md`) | — |
+| 4 | Rotation du mot de passe Jellyfin de l'opérateur | exposé en clair dans un copier-coller de console navigateur — le champ mot de passe rend sa valeur dans l'attribut `value`, ce que les captures de console embarquent sans qu'on y pense | — |
+
+### Clos par mesure le 2026-07-16 (après redéploiement)
+
+| Tâche | Comment on l'a su |
+|-------|-------------------|
+| **Upload sous `read_only`** | Un vrai fichier a été téléversé puis analysé : `/tmp/spotiflac_upload_<rand>_<nom>.flac`, 48 kHz / 24 bits / 46,9 Mo. Le chemin **prouve** que le bind mount disque monté sur `/tmp` est écrit par l'app en uid 1000 sous `read_only: true`. Ferme d'un coup trois inconnues : le correctif d'auth (`8486c45`), le montage, et `analysis.go` (ffprobe durci) sur un fichier de staging. |
+| **Heartbeat SSE** | Sonde `httpx[http2]` sur `/api/v1/jobs/stream` à travers nginx : `: keepalive` reçu à 31,1 s puis 61,1 s → **intervalle mesuré 30,0 s**, très en-dessous des `proxy_read_timeout 240`. |
+
+⚠️ **À ne pas confondre avec une panne** : `GET /api/v1/files/metadata?path=/tmp/spotiflac_upload_…`
+renvoie `path ... is outside the configured library root`. **C'est correct.** `/files/metadata` passe
+par `cleanLibraryPath` (confiné à la bibliothèque) alors que `/audio/analyze` passe par
+`cleanUploadOrLibraryPath`, qui autorise en plus le staging d'upload. Distinction délibérée : c'est
+le confinement de chemin qui fait son travail, pas un bug.
 
 **Piège latent à ne pas réarmer** : `isLocalIP()` renvoie `true` pour un accès direct sans
 `X-Forwarded-For`. Si `DISABLE_AUTH_ON_LAN` repassait un jour à `true` **et** qu'un port était
