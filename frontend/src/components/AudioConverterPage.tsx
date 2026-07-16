@@ -5,7 +5,7 @@ import { ToggleGroup, ToggleGroupItem, } from "@/components/ui/toggle-group";
 import { Upload, X, CheckCircle2, AlertCircle, Trash2, FileMusic, WandSparkles, } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { FileBrowser } from "@/components/FileBrowser";
-import { ConvertAudio, ListAudioFilesInDir } from "@/lib/rpc";
+import { ConvertAudio, ListAudioFilesInDir, UploadFile } from "@/lib/rpc";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface AudioFile {
     path: string;
@@ -231,11 +231,8 @@ export function AudioConverterPage() {
         const uploadedPaths: string[] = [];
         const knownMeta = new Map<string, { size: number; name: string }>();
         for (const file of items) {
-            const formData = new FormData();
-            formData.append("file", file);
             try {
-                const res = await fetch("/api/upload", { method: "POST", body: formData });
-                const data = await res.json();
+                const data = await UploadFile(file);
                 if (data.path) {
                     uploadedPaths.push(data.path);
                     knownMeta.set(data.path, { size: file.size, name: file.name });

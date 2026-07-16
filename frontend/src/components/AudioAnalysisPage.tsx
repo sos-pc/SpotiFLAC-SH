@@ -4,6 +4,7 @@ import { Upload, ArrowLeft, Trash2 } from "lucide-react";
 import { AudioAnalysis } from "@/components/AudioAnalysis";
 import { SpectrumVisualization } from "@/components/SpectrumVisualization";
 import { useAudioAnalysis } from "@/hooks/useAudioAnalysis";
+import { UploadFile } from "@/lib/rpc";
 interface AudioAnalysisPageProps {
     onBack?: () => void;
 }
@@ -12,11 +13,8 @@ export function AudioAnalysisPage({ onBack }: AudioAnalysisPageProps) {
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadAndAnalyze = useCallback(async (file: File) => {
-        const formData = new FormData();
-        formData.append("file", file);
         try {
-            const res = await fetch("/api/upload", { method: "POST", body: formData });
-            const data = await res.json();
+            const data = await UploadFile(file);
             if (data.path) await analyzeFile(data.path);
         } catch (err) {
             console.error("Upload failed:", err);

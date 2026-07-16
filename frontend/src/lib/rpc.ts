@@ -76,6 +76,43 @@ async function rest<T>(
   return res.json();
 }
 
+// /api/upload lives outside /api/v1 (see server.go's registerRoutes), so it
+// can't go through rest() — but it sits behind the same RequireAuth and needs
+// the same Authorization header. Both callers used to fetch() it bare, with no
+// header at all, which meant a permanent 401 for anyone not covered by the LAN
+// bypass — i.e. every request arriving through a reverse proxy, since
+// X-Forwarded-For disables that bypass.
+//
+// Deliberately no Content-Type: the browser must set multipart/form-data itself
+// to add the boundary. Only the Authorization header is ours to add.
+export async function UploadFile(file: File): Promise<{ path?: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    headers: authHeaders(),
+    body: formData,
+  });
+  // Mirrors rest()'s handling: a 401 body is valid JSON, so callers doing
+  // res.json() saw `path: undefined` and silently did nothing rather than
+  // surfacing an expired session.
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent("auth:expired"));
+    throw new Error("Session expired");
+  }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      msg = j.error || msg;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 // ─── Spotify ──────────────────────────────────────────────────────────────────
 
 export const GetSpotifyMetadata = (req: {
