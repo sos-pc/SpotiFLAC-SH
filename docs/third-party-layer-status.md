@@ -1,5 +1,10 @@
 # État des lieux — la couche de services tiers (2026-07-15)
 
+> **🌍 Observation — vérifié le 2026-07-15** (sondes live : DNS, `/api/v1/apis/status` en prod,
+> requêtes directes aux API). **C'est le document le plus périssable du repo** : il décrit des
+> services tiers qui meurent sans prévenir — c'est tout son sujet. **Re-tester avant de citer.**
+> Index : [README.md](README.md).
+
 > **Ce document existe parce que R12 s'est trompé de temporalité.** L'audit couche 2
 > ([`audit-refactoring-couche2.md`](audit-refactoring-couche2.md) §R12) a constaté le 13/07 une
 > « couche de résolution/proxy tierce **dégradée sur la fenêtre observée** » et conclu à un incident

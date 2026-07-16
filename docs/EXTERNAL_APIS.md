@@ -1,4 +1,10 @@
-# External APIs & Dependencies
+# External APIs
+
+> **🌍 Observation — partiellement périmé.** Ce document décrit des services tiers, qui meurent sans
+> prévenir : la section Amazon a été corrigée le 2026-07-15 (le proxy ne résout plus), **le reste n'a
+> pas été re-vérifié depuis**. Pour l'état réel et daté de chaque service, voir
+> [third-party-layer-status.md](third-party-layer-status.md) — et re-tester avant de citer quoi que ce
+> soit d'ici comme un fait. Index : [README.md](README.md). & Dependencies
 
 SpotiFLAC relies on a layered ecosystem of official public APIs, undocumented endpoints, and community-hosted proxies to achieve "zero-account" FLAC downloading.
 
