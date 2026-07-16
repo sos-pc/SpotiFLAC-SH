@@ -205,7 +205,7 @@ du même genre que la régression d'origine :
 
 ### Vérifié en production (2026-07-16, après redéploiement)
 
-Pas par déduction — par exécution réelle sur `spotiflac.redstack.fr` :
+Pas par déduction — par exécution réelle contre une instance déployée :
 
 | Preuve | Résultat |
 |---|---|

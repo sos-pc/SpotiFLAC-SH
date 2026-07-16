@@ -23,7 +23,8 @@ fausse à l'écriture ; deux ont pourri, une n'avait jamais été vérifiée.
 | Doc | Type | Statut | Vérifié | Pour quoi |
 |---|---|---|---|---|
 | [third-party-layer-status.md](third-party-layer-status.md) | 🌍 | ⚠️ **périssable** | **2026-07-15**, sondes live | L'état réel des services tiers. **Commencer ici** avant tout travail touchant un provider. |
-| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟡 **corrigé, à déployer** | 2026-07-15, ELF parsé + couches de l'image listées | ffmpeg/ffprobe ne démarraient pas (`scratch` sans loader ELF). Corrigé via distroless/cc + smoke test CI. **§4bis : ce que le durcissement ne protège pas.** |
+| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟢 **clos** | **2026-07-16, exécution réelle en prod** (+ ELF parsé, couches listées) | ffmpeg/ffprobe ne démarraient pas (`scratch` sans loader ELF). Corrigé via distroless/cc + smoke test CI ; durcissement **complet** (9 sites) vérifié en prod, chemin Tidal compris. **§4bis : ce que le durcissement ne protège pas — toujours valable.** |
+| [deployment-hardening.md](deployment-hardening.md) | 🔍 | 🟡 **3 corrigés, 1 ouvert** | **2026-07-16**, sondes HTTP/2 + tests de ports + lecture du code | Compose, SWAG/nginx, conteneur. DoS login (compteur partagé) et port LAN ouvert **corrigés et vérifiés** ; `mem_limit` rejeté par le noyau **ouvert**. A fait surgir 2 bugs applicatifs dormants (upload, SSE). **§7 : les tâches ouvertes.** |
 | [upstream-catchup.md](upstream-catchup.md) | 🔍 | 🟡 en cours (S1–S16) | 2026-07-15 | Rattrapage de l'upstream. Le tableau §0 porte le statut par sujet. |
 | [audit-refactoring-couche2.md](audit-refactoring-couche2.md) | 🔍 | 🟢 clos (R1–R12) | 07-13 · **§R12 corrigé le 07-15** | Audit couche 2. ⚠️ R12 contenait une attribution fausse — voir l'encadré. |
 | [api-redesign-plan.md](api-redesign-plan.md) | 🧭 | ⏸️ non commencé | 2026-07-15 | Cohérence read/manage/admin + accès DB. Décisions ouvertes en §3. |

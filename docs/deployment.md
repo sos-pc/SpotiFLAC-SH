@@ -1,5 +1,13 @@
 # Deployment
 
+> **⚠️ Ce document décrit le déploiement *minimal viable*, pas un déploiement durci.**
+> Le compose d'exemple ci-dessous publie un port et ne définit ni `TRUST_PROXY_HEADERS`, ni
+> `cap_drop`, ni `read_only`. Derrière un reverse proxy, ces choix ont des **conséquences réelles et
+> mesurées** — dont un déni de service trivial sur le login, et un `/api/upload` qui ne peut pas
+> fonctionner. Lire **[deployment-hardening.md](deployment-hardening.md)** avant de mettre en ligne :
+> il porte la configuration vérifiée en production, l'ordre dans lequel appliquer les changements
+> (il compte), et ce qui reste ouvert.
+
 ## Requirements
 
 - Docker + Docker Compose
@@ -130,8 +138,8 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 The download queue uses **Server-Sent Events** (`GET /api/v1/jobs/stream`) and the artist-discography search uses another SSE endpoint (`GET /api/v1/search/stream`). Both are long-lived. Your reverse proxy must:
 
-1. Disable response buffering for these endpoints.
-2. Either disable the read timeout or set it long enough that idle keep-alives won't drop (the Go server emits an event the moment something happens — there is no heartbeat).
+1. Disable response buffering for these endpoints. The server sets `X-Accel-Buffering: no`, which nginx honours on its own — verified against a real SWAG deployment whose `proxy.conf` leaves `proxy_buffers` at its default.
+2. Read timeout: `/api/v1/jobs/stream` emits a `: keepalive` SSE comment every 30s while idle (see `sseHeartbeatInterval` in `sse.go`), so any `proxy_read_timeout` comfortably above 30s is fine — SWAG's default of 240s works untouched. **Before 2026-07-16 there was no heartbeat**, and an idle stream was cut every 240s, silently reconnecting and re-sending the whole 48h job snapshot each time; see [deployment-hardening.md §5.2](deployment-hardening.md). `/api/v1/search/stream` has no heartbeat by design — it streams its results and ends.
 
 The Go server itself is configured for indefinite long requests:
 
