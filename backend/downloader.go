@@ -318,15 +318,13 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	// Amazon parameters: includes PlaylistName/PlaylistOwner (used for filename
 	// generation) but no AllowFallback (Amazon has no quality fallback yet).
 	amazonParams := func() amazon.DownloadParams {
-		// Amazon's own URL (set for the `auto` chain by buildDownloadRequest).
-		// Fall back to ServiceURL for the frontend's direct Amazon download,
-		// which still sends the URL there.
-		amazonURL := req.AmazonURL
-		if amazonURL == "" {
-			amazonURL = req.ServiceURL
-		}
+		// Amazon's own URL only. NOT ServiceURL: in the auto loop that holds
+		// Tidal's URL (ensureTidalServiceURL), and feeding it to Amazon made it
+		// try to parse an ASIN out of a tidal.com link ("failed to extract ASIN
+		// from URL: https://tidal.com/track/…"). When there's no Amazon URL,
+		// runService falls back to DownloadBySpotifyID instead.
 		return amazon.DownloadParams{
-			URL:                  amazonURL,
+			URL:                  req.AmazonURL,
 			SpotifyTrackID:       req.SpotifyID,
 			OutputDir:            req.OutputDir,
 			Quality:              req.AudioFormat,
@@ -408,7 +406,9 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		case "amazon":
 			dl := amazon.NewAmazonDownloader()
 			dl.SpeedCallback = req.SpeedCallback
-			if req.ServiceURL != "" {
+			// Gate on Amazon's own URL, not ServiceURL (which is Tidal's in the
+			// auto loop) — otherwise a Tidal URL gets sent to DownloadByURL.
+			if req.AmazonURL != "" {
 				return dl.DownloadByURL(amazonParams())
 			}
 			return dl.DownloadBySpotifyID(amazonParams())
