@@ -49,12 +49,23 @@ type WatchedPlaylist struct {
 	UserID        string      `json:"user_id,omitempty"`
 }
 
-// EffectiveDownloadPath returns this watchlist's configured output directory,
-// falling back to the default music directory when none is set. Centralizes a
-// fallback that was previously duplicated at every scan/M3U8 call site (R7).
-func (pl *WatchedPlaylist) EffectiveDownloadPath() string {
-	if pl.Settings.DownloadPath != "" {
-		return pl.Settings.DownloadPath
+// watchlistJobSettings returns the JobSettings a watchlist's downloads run with.
+// Watchlists now follow the user's GLOBAL server settings, not the per-watchlist
+// WatchedPlaylist.Settings copy — that copy is legacy and was never exposed in
+// the UI, so keeping it as a separate source of truth only created drift (the
+// M3U8 CreateM3u8File check already read global settings while the path came
+// from the copy). Service too follows the global downloader. See
+// docs/settings-source-of-truth.md.
+func (w *Watcher) watchlistJobSettings(pl *WatchedPlaylist) JobSettings {
+	s := EffectiveDownloadSettings(w.auth, pl.UserID)
+	return serverJobSettings(s, s.Downloader)
+}
+
+// watchlistOutputRoot is the base download directory for a watchlist's M3U8 and
+// scan operations — the user's global download path (default music dir if unset).
+func (w *Watcher) watchlistOutputRoot(pl *WatchedPlaylist) string {
+	if p := EffectiveDownloadSettings(w.auth, pl.UserID).DownloadPath; p != "" {
+		return p
 	}
 	return util.GetDefaultMusicPath()
 }
@@ -103,7 +114,9 @@ func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
 		if err != nil || pl == nil {
 			return JobSettings{}, false
 		}
-		return pl.Settings, true
+		// Global settings, not pl.Settings — watchlists follow the user's
+		// current global settings (see watchlistJobSettings).
+		return w.watchlistJobSettings(pl), true
 	}
 	// Vérifier l'intégrité des M3U8 au démarrage (recovery après crash/redémarrage)
 	util.SafeGo("watcher.startupM3U8Integrity", func() {
@@ -287,7 +300,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	if len(newTracks) > 0 {
 		result, err := w.jm.EnqueueBatch(EnqueueBatchRequest{
 			Tracks:      newTracks,
-			Settings:    pl.Settings,
+			Settings:    w.watchlistJobSettings(&pl),
 			WatchlistID: pl.ID,
 			UserID:      pl.UserID,
 		})
@@ -418,7 +431,7 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 				if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
 					if err := os.Remove(job.FilePath); err == nil {
 						slog.Info("[Watcher] Deleted file", "path", job.FilePath)
-						outputRoot := pl.EffectiveDownloadPath()
+						outputRoot := w.watchlistOutputRoot(pl)
 						removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
 						// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
 						job.FilePath = ""
@@ -448,7 +461,7 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 	if !EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
 		return
 	}
-	outputDir := pl.EffectiveDownloadPath()
+	outputDir := w.watchlistOutputRoot(pl)
 	oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
 	if err := os.Remove(oldM3u8Path); err == nil {
 		slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
@@ -515,7 +528,7 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		}
 		batchReq := EnqueueBatchRequest{
 			Tracks:      tracks,
-			Settings:    req.Settings,
+			Settings:    w.watchlistJobSettings(pl),
 			WatchlistID: pl.ID,
 			UserID:      pl.UserID,
 		}
@@ -538,7 +551,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 			continue
 		}
 
-		outputRoot := pl.EffectiveDownloadPath()
+		outputRoot := w.watchlistOutputRoot(&pl)
 
 		// ── Suppression des fichiers audio (seulement si SyncDeletions) ────────
 		if pl.SyncDeletions {
@@ -687,7 +700,7 @@ func (w *Watcher) SyncWatchlist(id string) error {
 	}
 	util.SafeGo("watcher.syncPlaylist["+pl.ID+"]", func() { w.syncPlaylist(*pl) })
 	// Retry des failed uniquement sur refresh manuel, avec les settings à jour
-	if requeued, err := w.jm.RequeueFailedJobs(id, pl.Settings); err == nil && requeued > 0 {
+	if requeued, err := w.jm.RequeueFailedJobs(id, w.watchlistJobSettings(pl)); err == nil && requeued > 0 {
 		slog.Info("[Watcher] SyncWatchlist: failed jobs requeued", "count", requeued, "playlist", pl.Name)
 	}
 	return nil
@@ -1257,7 +1270,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 		spotifyTrackIDs = append(spotifyTrackIDs, t.SpotifyID)
 	}
 
-	outputDir := pl.EffectiveDownloadPath()
+	outputDir := w.watchlistOutputRoot(pl)
 	resolved := w.resolveTrackPaths(pl, outputDir)
 
 	var pending, failed int
@@ -1495,7 +1508,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		return m3u8GenerationResult{}, fmt.Errorf("M3U8 generation is disabled (createM3u8File setting)")
 	}
 
-	outputDir := pl.EffectiveDownloadPath()
+	outputDir := w.watchlistOutputRoot(pl)
 
 	paths := w.resolveTrackPaths(pl, outputDir)
 	result := m3u8GenerationResult{

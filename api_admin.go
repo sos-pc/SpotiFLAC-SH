@@ -284,10 +284,11 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 		slog.Warn("[Repair] failed to list jobs for retag", "playlist", pl.Name, "err", jobsErr)
 	}
 
-	// 2. Rebuild the catalog for this watchlist's own download path only
-	// (not every root — this is a scoped, per-playlist repair).
+	// 2. Rebuild the catalog for this watchlist owner's download path only
+	// (not every root — this is a scoped, per-playlist repair). Watchlists
+	// follow the owner's global settings now, so that's where their files land.
 	if s.ctr.Catalog != nil {
-		root := pl.Settings.DownloadPath
+		root := EffectiveDownloadSettings(s.ctr.Auth, pl.UserID).DownloadPath
 		if root == "" {
 			root = util.GetDefaultMusicPath()
 		}
@@ -365,7 +366,7 @@ func (s *Server) collectScanRoots() []string {
 	if s.ctr.Watcher != nil {
 		if pls, err := s.ctr.Watcher.GetWatchlists(); err == nil {
 			for _, pl := range pls {
-				dp := pl.Settings.DownloadPath
+				dp := EffectiveDownloadSettings(s.ctr.Auth, pl.UserID).DownloadPath
 				if dp == "" {
 					continue
 				}

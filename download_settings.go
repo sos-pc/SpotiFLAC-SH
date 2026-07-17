@@ -24,6 +24,7 @@ import "github.com/afkarxyz/SpotiFLAC/backend"
 
 type DownloadSettings struct {
 	DownloadPath         string
+	Downloader           string
 	FolderTemplate       string
 	CreatePlaylistFolder bool
 	FilenameTemplate     string
@@ -74,6 +75,7 @@ func ParseDownloadSettings(raw map[string]interface{}) DownloadSettings {
 
 	return DownloadSettings{
 		DownloadPath:         getString("downloadPath"),
+		Downloader:           getString("downloader"),
 		FolderTemplate:       getString("folderTemplate"),
 		CreatePlaylistFolder: getBool("createPlaylistFolder"),
 		FilenameTemplate:     getString("filenameTemplate"),
