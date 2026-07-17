@@ -147,11 +147,18 @@ func (s *Server) registerJobRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		s.ctr.Download.ApplySettingsFallbacks(&req, userIDFromContext(r))
-		// output_dir otherwise reaches disk unconfined: any authenticated
-		// session user (v1RequirePermission passes every non-API-key caller
-		// through regardless of the "manage" perm — see its doc comment)
-		// could point a download anywhere the server can write (S2).
+		req.UserID = userIDFromContext(r)
+		// Backend-authoritative (docs/settings-source-of-truth.md): the download
+		// path is derived server-side from the user's saved settings, not from
+		// the client. Drop any output_dir the frontend computed — ApplySettings-
+		// Fallbacks then fills the base path from those settings and DownloadTrack
+		// applies the folder template. The only per-download override kept is
+		// `service`.
+		req.OutputDir = ""
+		s.ctr.Download.ApplySettingsFallbacks(&req, req.UserID)
+		// The server base path still gets confined: libraryRootFor is that same
+		// downloadPath, so this is the root-confined-to-itself case (S2 stays
+		// enforced for any descendant the template appends).
 		if req.OutputDir != "" {
 			cleaned, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
 			if err != nil {

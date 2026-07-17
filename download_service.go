@@ -128,6 +128,14 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		}
 	}
 
+	// Backend-authoritative path/filename (docs/settings-source-of-truth.md,
+	// step 1): the folder template, filename template and the flags that shape
+	// the output path come from the user's saved server settings, not from the
+	// request. buildOutputDir (in the worker) then applies the template on top
+	// of the already-confined base path. Quality/embed flags still come from the
+	// request for now — that's a later step of the same migration.
+	serverSettings := EffectiveDownloadSettings(d.auth, req.UserID)
+
 	// Création du Job
 	job := &Job{
 		ID:           itemID,
@@ -152,11 +160,17 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 		Settings: JobSettings{
-			Service:              req.Service,
+			Service: req.Service,
+			// Path/filename: server-authoritative. DownloadPath is the confined
+			// server base (handler dropped the client's output_dir); the template
+			// is applied by buildOutputDir.
 			DownloadPath:         req.OutputDir,
-			FilenameTemplate:     req.FilenameFormat,
-			FolderTemplate:       "", // outputDir is pre-built by the frontend (folder template already applied)
-			TrackNumber:          req.TrackNumber,
+			FolderTemplate:       serverSettings.FolderTemplate,
+			CreatePlaylistFolder: serverSettings.CreatePlaylistFolder,
+			FilenameTemplate:     serverSettings.FilenameTemplate,
+			TrackNumber:          serverSettings.TrackNumber,
+			UseFirstArtistOnly:   serverSettings.UseFirstArtistOnly,
+			// Quality/embed/fallback still from the request (later migration step).
 			EmbedLyrics:          req.EmbedLyrics,
 			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
 			AutoOrder:            req.AutoOrder,
@@ -168,11 +182,10 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 				}
 				return ""
 			}(),
-			UseFirstArtistOnly: req.UseFirstArtistOnly,
-			UseSingleGenre:     req.UseSingleGenre,
-			EmbedGenre:         req.EmbedGenre,
-			AllowFallback:      req.AllowFallback,
-			Region:             "", // Region is rarely used in manual download
+			UseSingleGenre: req.UseSingleGenre,
+			EmbedGenre:     req.EmbedGenre,
+			AllowFallback:  req.AllowFallback,
+			Region:         "", // Region is rarely used in manual download
 		},
 	}
 

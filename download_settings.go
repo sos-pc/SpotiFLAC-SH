@@ -24,6 +24,8 @@ import "github.com/afkarxyz/SpotiFLAC/backend"
 
 type DownloadSettings struct {
 	DownloadPath         string
+	FolderTemplate       string
+	CreatePlaylistFolder bool
 	FilenameTemplate     string
 	TidalQuality         string
 	QobuzQuality         string
@@ -71,6 +73,8 @@ func ParseDownloadSettings(raw map[string]interface{}) DownloadSettings {
 
 	return DownloadSettings{
 		DownloadPath:         getString("downloadPath"),
+		FolderTemplate:       getString("folderTemplate"),
+		CreatePlaylistFolder: getBool("createPlaylistFolder"),
 		FilenameTemplate:     getString("filenameTemplate"),
 		TidalQuality:         backend.TidalQualityFor(getString("tidalQuality")),
 		QobuzQuality:         backend.QobuzQualityFor(getString("qobuzQuality")),
