@@ -177,9 +177,12 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      ajouté à la vue serveur. **Preuve prod** : `/downloads/track service=auto` avec `audio_format`
      bidon → log `audio_format=HI_RES_LOSSLESS` (qualité serveur), chaîne `deezer-qobuz-amazon-tidal`
      (autoOrder serveur, aucun envoyé), chemin `{artist}/{album}` serveur. Valeurs client ignorées.
-   - **⚠️ Watchlists = source de vérité distincte, à trancher.** Chaque watchlist stocke sa **propre**
-     copie de `JobSettings` (`WatchedPlaylist.Settings`) : service/qualité/chemin par-watchlist. Décision
-     produit ouverte : garder cette personnalisation par-watchlist, ou faire suivre le global.
+   - **Watchlists — ✅ TRANCHÉ : suivent le global (`de524a4`), CI verte.** L'utilisateur a acté que la
+     copie par-watchlist (`WatchedPlaylist.Settings`) était **cachée et jamais exposée dans l'UI** — donc
+     fonctionnalité morte. Les watchlists suivent désormais les réglages **globaux** du propriétaire
+     partout : `getWatchlistSettings` (override worker), enqueue/requeue du watcher, racine M3U8/scan
+     (`watchlistOutputRoot`), et repair/rebuild admin. `WatchedPlaylist.Settings` devient vestigial
+     (écrit, jamais lu). **Vérif prod en attente** (nécessite une sync watchlist).
    - **3-frontend — à faire, vérif navigateur.** `downloadFallback`/`useDownload`/`WatchlistPage`
      n'envoient plus que l'identité piste + `service` (+ contexte playlist). Lève la limite playlist de
      l'étape 2.
