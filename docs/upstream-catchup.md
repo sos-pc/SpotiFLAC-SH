@@ -244,6 +244,11 @@ entrelacée comme upstream (plus de travail, comportement complet). Ne pas déci
 >
 > **Ordre révisé :** (1) attribution des erreurs ✅ → (2) trancher/refondre l'override de service →
 > (3) alors valider S6 sur des logs lisibles → (4) porter `qobuz_api.go`.
+>
+> **Cartographie de l'étape (2) faite le 2026-07-17 :** [`service-selection-map.md`](service-selection-map.md).
+> L'override n'est qu'une des **4 couches** qui décident du service ; la carte montre lesquelles, les
+> pièges de nommage (`allowFallback` = repli *de qualité*, pas de service), la divergence
+> interactif/batch, et les décisions produit à trancher avant de coder.
 
 > **Vérifié en direct le 2026-07-15 (pas juste lu dans le diff) — les deux moitiés de l'hypothèse
 > sont maintenant des faits, pas des suppositions :**
