@@ -247,8 +247,11 @@ entrelacée comme upstream (plus de travail, comportement complet). Ne pas déci
 >
 > **Cartographie de l'étape (2) faite le 2026-07-17 :** [`service-selection-map.md`](service-selection-map.md).
 > L'override n'est qu'une des **4 couches** qui décident du service ; la carte montre lesquelles, les
-> pièges de nommage (`allowFallback` = repli *de qualité*, pas de service), la divergence
-> interactif/batch, et les décisions produit à trancher avant de coder.
+> pièges de nommage (`allowFallback` = repli *de qualité*, pas de service), et les décisions produit à
+> trancher avant de coder. **Constat prod majeur :** l'override est *universel* (tout téléchargement
+> passe par le worker unique, prouvé en prod), donc le `searchByISRC` de Qobuz est quasi inatteignable
+> — le « Qobuz 401 » qui motivait S6 est masqué par la bascule Tidal. **Conséquence : refondre
+> l'override passe *devant* le portage `qobuz_api.go` en priorité**, pas seulement avant.
 
 > **Vérifié en direct le 2026-07-15 (pas juste lu dans le diff) — les deux moitiés de l'hypothèse
 > sont maintenant des faits, pas des suppositions :**

@@ -9,30 +9,54 @@
 ## 0. Le constat en une phrase
 
 **Quatre couches décident indépendamment du service de téléchargement**, avec des sémantiques qui se
-recouvrent mal et deux chemins d'entrée qui se comportent différemment. L'override signalé
-(`jobs_helpers.go:263`) n'est qu'un des quatre — le plus visible parce qu'il *écrase* un choix
-explicite, mais pas le seul endroit à revoir.
+recouvrent mal. Toutes les entrées (interactif, batch, watchlist) convergent vers **un seul worker**,
+et l'override signalé (`jobs_helpers.go:263`) s'y interpose **universellement** — il n'est pas
+cantonné au batch comme on pouvait le croire (prouvé en prod, voir §1). C'est le plus visible des
+quatre parce qu'il *écrase* un choix explicite, mais pas le seul endroit à revoir.
 
 ## 1. Les quatre points de décision
 
 | # | Où | Rôle | Honore le choix explicite ? |
 |---|----|------|------------------------------|
-| A | **Frontend** [`lib/downloadFallback.ts`](../frontend/src/lib/downloadFallback.ts) | Téléchargement **interactif** (bouton). Lit `settings.downloader` ; si `auto`, itère la chaîne `autoOrder` **côté client** en appelant `/downloads/track` une fois par service. | oui |
-| B | **Backend** [`backend/downloader.go:433`](../backend/downloader.go) | Dispatch réel. `switch req.Service` ; pour `auto`, itère `AutoOrder` **côté serveur**. | oui |
-| C | **Backend jobs** [`jobs_helpers.go:236`](../jobs_helpers.go) `buildDownloadRequest` | Chemin **batch / watchlist**. Pré-résout des URLs (S9/songlink) **puis réécrit `service`** en `tidal`/`qobuz` selon ce qu'il trouve. | **non — c'est l'override** |
+| A | **Frontend** [`lib/downloadFallback.ts`](../frontend/src/lib/downloadFallback.ts) | Téléchargement **interactif** (bouton). Lit `settings.downloader` ; si `auto`, itère la chaîne `autoOrder` **côté client** en appelant `/downloads/track` une fois par service. | intention seulement — voir ci-dessous |
+| B | **Backend** [`backend/downloader.go:433`](../backend/downloader.go) | Dispatch réel. `switch req.Service` ; pour `auto`, itère `AutoOrder` **côté serveur**. | oui, **mais reçoit un `service` déjà réécrit par C** |
+| C | **Backend, worker unique** [`jobs_helpers.go:236`](../jobs_helpers.go) `buildDownloadRequest` | **Tout job** (single, batch, watchlist). Pré-résout des URLs (S9/songlink) **puis réécrit `service`** en `tidal`/`qobuz` selon ce qu'il trouve. | **non — c'est l'override** |
 | D | **Backend** [`download_service.go:41`](../download_service.go) `ApplySettingsFallbacks` | Remplit les réglages vides (`AutoOrder`, `AllowFallback`…) depuis les défauts utilisateur. | n/a (ne choisit pas le service) |
 
-### Le fait structurant : deux chemins d'entrée divergent
+### Le fait structurant : l'override est UNIVERSEL (corrigé le 2026-07-17)
 
-- **Interactif** (`POST /api/v1/downloads/track`, [api_jobs.go:163](../api_jobs.go)) : passe par **A → B**.
-  **Pas** de `buildDownloadRequest`. Le service explicite est respecté.
-- **Batch / watchlist** (`POST /api/v1/jobs` → worker, [jobs_worker.go:126](../jobs_worker.go)) : passe
-  par **C → B**. `buildDownloadRequest` s'interpose et **peut réécrire le service**.
+> ⚠️ **Une version antérieure de cette carte affirmait que les deux chemins « divergent » — que le
+> téléchargement interactif contournait l'override. C'est FAUX, falsifié par observation en prod.**
+> `DownloadService.DownloadTrack` ne télécharge pas en synchrone : il **crée un job et le pousse dans
+> `jm.queue`** ([download_service.go:180-184](../download_service.go)). Donc **toutes** les entrées
+> convergent vers le **worker unique** → `buildDownloadRequest` → override C.
 
-**Conséquence concrète :** un utilisateur qui choisit « qobuz » comme Source voit ses téléchargements
-manuels partir sur Qobuz, mais ses **synchronisations de watchlist réécrites en Tidal** en silence.
-Même réglage, deux comportements. C'est *exactement* ce qui a rendu S6 invalidable : impossible
-d'observer un vrai chemin Qobuz via un job.
+Les entrées, toutes vers le même worker :
+
+- **Interactif** (`POST /downloads/track`, [api_jobs.go:163](../api_jobs.go)) — y compris chaque appel
+  par-service de la couche A du frontend → **enqueue** → worker → **C**.
+- **Batch** (`POST /jobs`) → **enqueue** → worker → **C**.
+- **Watchlist** (sync) → `EnqueueBatch` → worker → **C**.
+
+Il n'existe **aucun** chemin de téléchargement qui échappe à l'override côté serveur.
+
+**Preuve empirique (2026-07-17, prod).** Un `POST /downloads/track` avec `service:"qobuz"` sur une
+piste fraîche → **`[Jobs] Done track=She`**. Or notre `searchByISRC` renvoie 401 (re-vérifié le même
+jour) et `DownloadTrackWithISRC` **retourne immédiatement sur cette erreur**
+([qobuz/client.go:540](../backend/qobuz/client.go)) : un job réellement « qobuz » **ne peut pas**
+produire un `Done`. Donc le service a été réécrit — l'override a fait basculer vers Tidal, sur le
+chemin « interactif » censé le respecter.
+
+**Conséquence — et reformulation de S6 :** pour toute piste que Tidal possède (la majorité),
+l'override diverge vers Tidal *avant* que Qobuz ne soit appelé. Le `searchByISRC` de Qobuz est donc
+**quasi inatteignable en prod** ; le « Qobuz 401 » qui motivait S6 n'est **pas** un mode d'échec
+courant du chemin normal — il est masqué par la bascule Tidal. Porter `qobuz_api.go` (S6) reste juste,
+mais son **impact prod est verrouillé par l'override** : Qobuz n'est atteint que quand Tidal échoue
+*et* qu'un ISRC existe (mode `auto`, [jobs_helpers.go:285](../jobs_helpers.go)). **La refonte de
+l'override est donc le préalable ET le levier le plus fort — devant le portage lui-même.**
+
+La couche frontend A et l'override C se **contredisent** au passage : A demande un service précis, le
+serveur en fait un autre en silence, et A croit que son choix a été honoré (le job « réussit »).
 
 ## 2. L'override, précisément (point C)
 
@@ -103,12 +127,20 @@ Ce qu'il faudra toucher, minimum, pour rendre le comportement cohérent :
 3. **Le réglage de chaîne de fallback.** L'utilisateur a indiqué qu'il **ne devrait plus être pris en
    compte** dans la refonte — à préciser : retiré de l'UI ? ignoré à l'exécution ? remplacé par un
    ordre fixe ? Décision produit, à acter avant de coder.
-4. **Cohérence des deux chemins.** Interactif et batch doivent-ils suivre exactement la même logique de
-   sélection ? (recommandation implicite : oui, mais c'est le cœur de la décision.)
+4. **La couche frontend A garde-t-elle un rôle ?** Puisque tout est réécrit côté serveur (C), la boucle
+   `auto` client-side de `downloadFallback.ts` est au mieux redondante, au pire trompeuse (elle croit
+   choisir un service que le serveur remplace). La refonte doit décider : fallback autoritatif côté
+   serveur et A réduit à « envoyer un service ou `auto` », ou l'inverse. Ce n'est **pas** une question
+   de cohérence entre deux chemins (il n'y en a qu'un) mais de qui, du client ou du serveur, détient la
+   logique.
 
-## 7. Comment cette carte a été établie
+## 7. Comment cette carte a été établie — et une correction
 
-Lecture directe des fichiers cités, graphe d'appel vérifié (`buildDownloadRequest` n'a qu'un appelant :
-`jobs_worker.go:126` ; `DownloadTrack` a deux entrées : batch via `EnqueueBatch`, direct via
-`api_jobs.go:163`). Aucune supposition sur le nom d'un fichier ou d'un réglage — chaque affirmation
-pointe une ligne. Rien n'a été exécuté ni modifié : c'est une carte, pas un patch.
+Lecture directe des fichiers cités, graphe d'appel vérifié. **Une première version de cette carte
+affirmait que `/downloads/track` téléchargeait en synchrone et contournait l'override** — déduit du
+fait que `buildDownloadRequest` n'a qu'un appelant (`jobs_worker.go:126`), sans vérifier que
+`DownloadService.DownloadTrack` y menait. **Faux** : il *enqueue* un job (`download_service.go:180`),
+donc il passe par le worker comme tout le reste. Falsifié en prod par un `service:"qobuz"` qui a rendu
+`Done` (impossible si Qobuz avait vraiment tourné). Même leçon que le reste du projet : *le graphe
+d'appel partiel ne suffit pas — il faut suivre la donnée jusqu'au bout, ou l'observer.* Rien n'a été
+exécuté en écriture ni modifié dans le code : c'est une carte, corrigée par la mesure.
