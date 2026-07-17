@@ -1,19 +1,15 @@
 import { downloadTrack, fetchSpotifyMetadata } from "@/lib/api";
 import { resolveOutputPath } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import { CheckFilesExistence, GetStreamingURLs } from "@/lib/rpc";
+import { CheckFilesExistence } from "@/lib/rpc";
 import type { Settings } from "@/lib/settings";
-import type {
-  FileExistsCheck,
-  TrackAvailability,
-  DownloadResponse,
-} from "@/types/api";
+import type { FileExistsCheck, DownloadResponse } from "@/types/api";
 
-// Parameters for a single-track download with automatic provider fallback.
+// Parameters for a single-track download.
 // Extracted verbatim from useDownload's former inline downloadWithAutoFallback
-// closure (R9) — it never touched the hook's state/refs, only `region`, so it
-// lives here as a pure function. The former 18-positional-argument signature is
-// replaced by this object to make call sites legible.
+// closure (R9) — it never touched the hook's state/refs, so it lives here as a
+// pure function. The former 18-positional-argument signature is replaced by
+// this object to make call sites legible.
 export interface AutoFallbackParams {
   region: string;
   id: string;
@@ -36,15 +32,20 @@ export interface AutoFallbackParams {
   publisher?: string;
 }
 
-// downloadWithAutoFallback downloads one track, honoring settings.downloader:
-// "auto" walks settings.autoOrder (tidal→amazon→qobuz→deezer), returning the
-// first success; a specific service downloads only from it. Returns early with
-// already_exists when CheckFilesExistence finds the file already on disk.
+// downloadWithAutoFallback enqueues one track, honoring settings.downloader.
+//
+// It no longer iterates providers client-side: that loop couldn't observe a
+// real download outcome (POST /downloads/track returns on *enqueue*, not
+// completion — see docs/override-rework-plan.md §3.2), so it only ever tried
+// the first URL-resolved service and never fell back. The whole selection now
+// lives server-side in backend.ExecuteDownload: an explicit service downloads
+// only from it; "auto" walks settings.autoOrder and stops at the first success.
+// This function just resolves the output path, enriches metadata, short-circuits
+// on an already-present file, and enqueues once.
 export async function downloadWithAutoFallback(
   p: AutoFallbackParams,
 ): Promise<DownloadResponse> {
   const {
-    region,
     id,
     settings,
     trackName,
@@ -110,14 +111,6 @@ export async function downloadWithAutoFallback(
       isAlbum: true,
     },
   );
-  const serviceForCheck =
-    service === "auto"
-      ? "flac"
-      : service === "tidal"
-        ? "flac"
-        : service === "qobuz"
-          ? "flac"
-          : "flac";
 
   if (trackName && artistName) {
     try {
@@ -134,7 +127,7 @@ export async function downloadWithAutoFallback(
         use_album_track_number: useAlbumTrackNumber,
         filename_format: settings.filenameTemplate || "",
         include_track_number: settings.trackNumber || false,
-        audio_format: serviceForCheck,
+        audio_format: "flac",
       };
       const existenceResults = await CheckFilesExistence(
         outputDir,
@@ -153,213 +146,14 @@ export async function downloadWithAutoFallback(
       console.warn("File existence check failed:", err);
     }
   }
-  if (service === "auto") {
-    let streamingURLs: TrackAvailability | null = null;
-    if (spotifyId) {
-      try {
-        streamingURLs = await GetStreamingURLs(spotifyId, region);
-      } catch (err) {
-        console.error("Failed to get streaming URLs:", err);
-      }
-    }
-    const durationSeconds = durationMs
-      ? Math.round(durationMs / 1000)
-      : undefined;
-    const order = (settings.autoOrder || "tidal-amazon-qobuz").split("-");
-    let lastResponse: DownloadResponse = {
-      success: false,
-      message: "No matching services found",
-      error: "No matching services found",
-    };
-    const fallbackErrors: string[] = [];
-    const is24Bit = (settings.autoQuality || "24") === "24";
-    const tidalQuality = is24Bit ? "HI_RES_LOSSLESS" : "LOSSLESS";
-    const qobuzQuality = is24Bit ? "27" : "6";
-    for (const s of order) {
-      if (s === "tidal" && streamingURLs?.tidal_url) {
-        try {
-          logger.debug(`trying tidal for: ${trackName} - ${artistName}`);
-          const response = await downloadTrack({
-            service: "tidal",
-            query,
-            track_name: trackName,
-            artist_name: displayArtist,
-            album_name: albumName,
-            album_artist: displayAlbumArtist,
-            release_date: finalReleaseDate || releaseDate,
-            cover_url: coverUrl,
-            output_dir: outputDir,
-            filename_format: settings.filenameTemplate,
-            track_number: settings.trackNumber,
-            position,
-            use_album_track_number: useAlbumTrackNumber,
-            spotify_id: spotifyId,
-            embed_lyrics: settings.embedLyrics,
-            embed_max_quality_cover: settings.embedMaxQualityCover,
-            service_url: streamingURLs.tidal_url,
-            duration: durationSeconds,
-            audio_format: tidalQuality,
-            spotify_track_number: spotifyTrackNumber,
-            spotify_disc_number: spotifyDiscNumber,
-            spotify_total_tracks: spotifyTotalTracks,
-            spotify_total_discs: spotifyTotalDiscs,
-            copyright: copyright,
-            publisher: publisher,
-            use_first_artist_only: settings.useFirstArtistOnly,
-            use_single_genre: settings.useSingleGenre,
-            embed_genre: settings.embedGenre,
-          });
-          if (response.success) {
-            logger.success(`tidal: ${trackName} - ${artistName}`);
-            return response;
-          }
-          const errMsg = response.error || response.message || "Failed";
-          fallbackErrors.push(`[Tidal] ${errMsg}`);
-          lastResponse = response;
-          logger.warning(`tidal failed, trying next...`);
-        } catch (err) {
-          logger.error(`tidal error: ${err}`);
-          fallbackErrors.push(`[Tidal] ${String(err)}`);
-          lastResponse = { success: false, message: String(err), error: String(err) };
-        }
-      } else if (s === "amazon" && streamingURLs?.amazon_url) {
-        try {
-          logger.debug(`trying amazon for: ${trackName} - ${artistName}`);
-          const response = await downloadTrack({
-            service: "amazon",
-            query,
-            track_name: trackName,
-            artist_name: displayArtist,
-            album_name: albumName,
-            album_artist: displayAlbumArtist,
-            release_date: finalReleaseDate || releaseDate,
-            cover_url: coverUrl,
-            output_dir: outputDir,
-            filename_format: settings.filenameTemplate,
-            track_number: settings.trackNumber,
-            position,
-            use_album_track_number: useAlbumTrackNumber,
-            spotify_id: spotifyId,
-            embed_lyrics: settings.embedLyrics,
-            embed_max_quality_cover: settings.embedMaxQualityCover,
-            service_url: streamingURLs.amazon_url,
-            spotify_track_number: spotifyTrackNumber,
-            spotify_disc_number: spotifyDiscNumber,
-            spotify_total_tracks: spotifyTotalTracks,
-            spotify_total_discs: spotifyTotalDiscs,
-            copyright: copyright,
-            publisher: publisher,
-            use_single_genre: settings.useSingleGenre,
-            embed_genre: settings.embedGenre,
-          });
-          if (response.success) {
-            logger.success(`amazon: ${trackName} - ${artistName}`);
-            return response;
-          }
-          const errMsg = response.error || response.message || "Failed";
-          fallbackErrors.push(`[Amazon] ${errMsg}`);
-          lastResponse = response;
-          logger.warning(`amazon failed, trying next...`);
-        } catch (err) {
-          logger.error(`amazon error: ${err}`);
-          fallbackErrors.push(`[Amazon] ${String(err)}`);
-          lastResponse = { success: false, message: String(err), error: String(err) };
-        }
-      } else if (s === "qobuz") {
-        try {
-          logger.debug(`trying qobuz for: ${trackName} - ${artistName}`);
-          const response = await downloadTrack({
-            service: "qobuz",
-            query,
-            track_name: trackName,
-            artist_name: displayArtist,
-            album_name: albumName,
-            album_artist: displayAlbumArtist,
-            release_date: finalReleaseDate || releaseDate,
-            cover_url: coverUrl,
-            output_dir: outputDir,
-            filename_format: settings.filenameTemplate,
-            track_number: settings.trackNumber,
-            position: trackNumberForTemplate,
-            use_album_track_number: useAlbumTrackNumber,
-            spotify_id: spotifyId,
-            embed_lyrics: settings.embedLyrics,
-            embed_max_quality_cover: settings.embedMaxQualityCover,
-            audio_format: qobuzQuality,
-            spotify_track_number: spotifyTrackNumber,
-            spotify_disc_number: spotifyDiscNumber,
-            spotify_total_tracks: spotifyTotalTracks,
-            spotify_total_discs: spotifyTotalDiscs,
-            copyright: copyright,
-            publisher: publisher,
-            use_single_genre: settings.useSingleGenre,
-            embed_genre: settings.embedGenre,
-          });
-          if (response.success) {
-            logger.success(`qobuz: ${trackName} - ${artistName}`);
-            return response;
-          }
-          const errMsg = response.error || response.message || "Failed";
-          fallbackErrors.push(`[Qobuz] ${errMsg}`);
-          lastResponse = response;
-          logger.warning(`qobuz failed, trying next...`);
-        } catch (err) {
-          logger.error(`qobuz error: ${err}`);
-          fallbackErrors.push(`[Qobuz] ${String(err)}`);
-          lastResponse = { success: false, message: String(err), error: String(err) };
-        }
-      } else if (s === "deezer") {
-        try {
-          logger.debug(`trying deezer for: ${trackName} - ${artistName}`);
-          const response = await downloadTrack({
-            service: "deezer",
-            query,
-            track_name: trackName,
-            artist_name: displayArtist,
-            album_name: albumName,
-            album_artist: displayAlbumArtist,
-            release_date: finalReleaseDate || releaseDate,
-            cover_url: coverUrl,
-            output_dir: outputDir,
-            filename_format: settings.filenameTemplate,
-            track_number: settings.trackNumber,
-            position,
-            use_album_track_number: useAlbumTrackNumber,
-            spotify_id: spotifyId,
-            embed_lyrics: settings.embedLyrics,
-            embed_max_quality_cover: settings.embedMaxQualityCover,
-            duration: durationSeconds,
-            audio_format: "flac",
-            spotify_track_number: spotifyTrackNumber,
-            spotify_disc_number: spotifyDiscNumber,
-            spotify_total_tracks: spotifyTotalTracks,
-            spotify_total_discs: spotifyTotalDiscs,
-            copyright: copyright,
-            publisher: publisher,
-            use_first_artist_only: settings.useFirstArtistOnly,
-            use_single_genre: settings.useSingleGenre,
-            embed_genre: settings.embedGenre,
-          });
-          if (response.success) {
-            logger.success(`deezer: ${trackName} - ${artistName}`);
-            return response;
-          }
-          const errMsg = response.error || response.message || "Failed";
-          fallbackErrors.push(`[Deezer] ${errMsg}`);
-          lastResponse = response;
-          logger.warning(`deezer failed, trying next...`);
-        } catch (err) {
-          logger.error(`deezer error: ${err}`);
-          fallbackErrors.push(`[Deezer] ${String(err)}`);
-          lastResponse = { success: false, message: String(err), error: String(err) };
-        }
-      }
-    }
-    return lastResponse;
-  }
-  const durationSecondsForFallback = durationMs
+
+  const durationSeconds = durationMs
     ? Math.round(durationMs / 1000)
     : undefined;
+  // Per-service audio format. For "auto" the backend derives each provider's
+  // format from this single value (TidalQualityFor/QobuzQualityFor) while it
+  // walks the AutoOrder chain, so one value is enough.
+  const is24Bit = (settings.autoQuality || "24") === "24";
   let audioFormat: string | undefined;
   if (service === "tidal") {
     audioFormat = settings.tidalQuality || "LOSSLESS";
@@ -367,10 +161,13 @@ export async function downloadWithAutoFallback(
     audioFormat = settings.qobuzQuality || "6";
   } else if (service === "deezer") {
     audioFormat = "flac";
+  } else if (service === "auto") {
+    audioFormat = is24Bit ? "HI_RES_LOSSLESS" : "LOSSLESS";
   }
-  logger.debug(`trying ${service} for: ${trackName} - ${artistName}`);
-  const singleServiceResponse = await downloadTrack({
-    service: service as "tidal" | "qobuz" | "amazon" | "deezer",
+
+  logger.debug(`enqueue ${service}: ${trackName} - ${artistName}`);
+  return await downloadTrack({
+    service,
     query,
     track_name: trackName,
     artist_name: displayArtist,
@@ -386,7 +183,7 @@ export async function downloadWithAutoFallback(
     spotify_id: spotifyId,
     embed_lyrics: settings.embedLyrics,
     embed_max_quality_cover: settings.embedMaxQualityCover,
-    duration: durationSecondsForFallback,
+    duration: durationSeconds,
     audio_format: audioFormat,
     spotify_track_number: spotifyTrackNumber,
     spotify_disc_number: spotifyDiscNumber,
@@ -397,5 +194,4 @@ export async function downloadWithAutoFallback(
     use_single_genre: settings.useSingleGenre,
     embed_genre: settings.embedGenre,
   });
-  return singleServiceResponse;
 }

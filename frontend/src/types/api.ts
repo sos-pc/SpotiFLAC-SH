@@ -108,7 +108,7 @@ export interface ArtistResponse {
 }
 export type SpotifyMetadataResponse = TrackResponse | AlbumResponse | PlaylistResponse | ArtistDiscographyResponse | ArtistResponse;
 export interface DownloadRequest {
-    service: "tidal" | "qobuz" | "amazon" | "deezer";
+    service: "auto" | "tidal" | "qobuz" | "amazon" | "deezer";
     query?: string;
     track_name?: string;
     artist_name?: string;
