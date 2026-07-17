@@ -39,8 +39,16 @@ jobs:
       # actions below was observed wiping it out (fine for go vet/
       # golangci-lint/govulncheck, which don't need to actually embed file
       # contents to type-check, but not for a real go test build).
+      # -race is not optional here: backend/spotify's concurrency test documents
+      # that it "must be run with -race" (the detector, or a hard map-write
+      # crash, is what actually proves the token-reset fix — a plain run catches
+      # it only unreliably). It was absent for a long time, so the test wasn't
+      # doing its job. Enabled after a throwaway race-probe branch ran the whole
+      # suite with -race and found nothing across the 56 concurrent files: cost
+      # is ~+53s (76s -> 129s), risk of a surprise failure was measured to be
+      # zero before turning it on here.
       - name: Run Go tests
-        run: go test ./... -v
+        run: go test ./... -v -race
 
       - name: go vet
         run: go vet ./...

@@ -239,9 +239,14 @@ contrôlée est une propriété fausse**, y compris quand l'instrument est en ca
 | # | Tâche | Pourquoi ça compte | Bloqué par |
 |---|-------|--------------------|------------|
 | 1 | **`mem_limit`** (§4) | protection absente qu'on croit avoir | diagnostic `/proc/cgroups` |
-| 2 | **`-race` en CI** | Le test `TestQueryConcurrentAccessIsRaceFree` **documente** qu'il doit tourner avec `-race` (« a plain `go test` run without -race would not reliably catch it »), et la CI lance `go test ./... -v` **sans**. Le test ne fait donc pas le travail qu'il annonce. | **décision** : activer `-race` peut révéler d'autres races et ralentir la CI ; non vérifiable en local (pas de gcc) |
-| 3 | **Révoquer la clé API admin utilisée pendant l'audit** | elle a été exposée en clair dans la conversation de travail ; une clé admin ne se périme pas toute seule (voir `authentication.md`) | — |
-| 4 | Rotation du mot de passe Jellyfin de l'opérateur | exposé en clair dans un copier-coller de console navigateur — le champ mot de passe rend sa valeur dans l'attribut `value`, ce que les captures de console embarquent sans qu'on y pense | — |
+| 2 | **Révoquer la clé API admin utilisée pendant l'audit** | elle a été exposée en clair dans la conversation de travail ; une clé admin ne se périme pas toute seule (voir `authentication.md`) | — |
+| 3 | Rotation du mot de passe Jellyfin de l'opérateur | exposé en clair dans un copier-coller de console navigateur — le champ mot de passe rend sa valeur dans l'attribut `value`, ce que les captures de console embarquent sans qu'on y pense | — |
+
+### Clos par mesure le 2026-07-17
+
+| Tâche | Comment on l'a su |
+|-------|-------------------|
+| **`-race` en CI** | La crainte (« ça peut révéler d'autres races et bloquer la CI ») a été **mesurée avant de décider** : une branche jetable `race-probe` a lancé toute la suite avec `-race` → **zéro race sur les 56 fichiers concurrents**, coût **+53 s** (76 s → 129 s), image non publiée (job `build-and-push` désactivé sur la branche). Activé sur `dev` ensuite : le risque était nul, le test `TestQueryConcurrentAccessIsRaceFree` fait enfin le travail qu'il documente. |
 
 ### Clos par mesure le 2026-07-16 (après redéploiement)
 
