@@ -148,6 +148,9 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
 1. **Backend d'abord, sans toucher au front** : retirer les réécritures de service (3.1/3.4), faire
    marcher la boucle `auto` avec URL par service (3.3). Testable en prod via `/downloads/track` avec
    `service` explicite et `auto`. À ce stade, la boucle front (3.2) devient redondante mais inoffensive.
+   — ✅ **codé le 2026-07-17** (`658c814` : override retiré, champ `AmazonURL`, `ExecuteDownload`
+   inchangée) ; build+vet+30 tests download/jobs verts, CI verte (`-race` compris). **Vérif prod en
+   attente de redéploiement.**
 2. **Frontend ensuite** : réduire `downloadFallback.ts` à un envoi simple, recâbler `useDownload`,
    uniformiser le suivi via la queue.
 3. **UI/réglages** : aligner le défaut `AutoOrder` affiché/exécuté, revoir le libellé `allowFallback`.
