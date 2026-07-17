@@ -169,8 +169,15 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
    (valeur client ignorée) ; piste inexistante → `false`. Limite connue (reportée étape 3) : pas de
    contexte playlist par piste, donc `createPlaylistFolder=true` non reflété dans le pré-check (le
    check backend au download le rattrape).
-3. **Frontend arrête d'envoyer les réglages** sur les 3 chemins d'enqueue (D3) — `useDownload`
-   (mono + batch) et `WatchlistPage` n'envoient que l'identité + `service`.
+3. **Backend-autoritaire pour les enqueues, puis frontend arrête d'envoyer** (D3).
+   - **3-backend — ✅ codé le 2026-07-18 (`cc16d97`), CI verte.** `serverJobSettings` construit des
+     `JobSettings` **entièrement serveur** (sauf `service`). `DownloadTrack` (mono) et le handler
+     `/jobs` (batch **non-watchlist**) l'utilisent → ce que le client envoie est **ignoré**. Les
+     watchlists gardent leur modèle propre (`getWatchlistSettings`, enqueue par le watcher). `AutoQuality`
+     ajouté à la vue serveur. **Vérif prod en attente.**
+   - **3-frontend — à faire, vérif navigateur.** `downloadFallback`/`useDownload`/`WatchlistPage`
+     n'envoient plus que l'identité piste + `service` (+ contexte playlist). Lève la limite playlist de
+     l'étape 2.
 4. **Cover/paroles utilisent le chemin retourné** (D4).
 5. **Un seul générateur M3U8** (D5) — trancher.
 6. **`getSettings()` reflète toujours le serveur** (§2/§3) — corriger priorité cache/localStorage +
