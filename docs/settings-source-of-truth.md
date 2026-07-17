@@ -170,11 +170,16 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
    contexte playlist par piste, donc `createPlaylistFolder=true` non reflété dans le pré-check (le
    check backend au download le rattrape).
 3. **Backend-autoritaire pour les enqueues, puis frontend arrête d'envoyer** (D3).
-   - **3-backend — ✅ codé le 2026-07-18 (`cc16d97`), CI verte.** `serverJobSettings` construit des
-     `JobSettings` **entièrement serveur** (sauf `service`). `DownloadTrack` (mono) et le handler
+   - **3-backend — ✅ codé + VÉRIFIÉ EN PROD le 2026-07-18 (`cc16d97`).** `serverJobSettings` construit
+     des `JobSettings` **entièrement serveur** (sauf `service`). `DownloadTrack` (mono) et le handler
      `/jobs` (batch **non-watchlist**) l'utilisent → ce que le client envoie est **ignoré**. Les
      watchlists gardent leur modèle propre (`getWatchlistSettings`, enqueue par le watcher). `AutoQuality`
-     ajouté à la vue serveur. **Vérif prod en attente.**
+     ajouté à la vue serveur. **Preuve prod** : `/downloads/track service=auto` avec `audio_format`
+     bidon → log `audio_format=HI_RES_LOSSLESS` (qualité serveur), chaîne `deezer-qobuz-amazon-tidal`
+     (autoOrder serveur, aucun envoyé), chemin `{artist}/{album}` serveur. Valeurs client ignorées.
+   - **⚠️ Watchlists = source de vérité distincte, à trancher.** Chaque watchlist stocke sa **propre**
+     copie de `JobSettings` (`WatchedPlaylist.Settings`) : service/qualité/chemin par-watchlist. Décision
+     produit ouverte : garder cette personnalisation par-watchlist, ou faire suivre le global.
    - **3-frontend — à faire, vérif navigateur.** `downloadFallback`/`useDownload`/`WatchlistPage`
      n'envoient plus que l'identité piste + `service` (+ contexte playlist). Lève la limite playlist de
      l'étape 2.
