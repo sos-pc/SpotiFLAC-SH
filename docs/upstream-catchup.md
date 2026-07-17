@@ -25,7 +25,7 @@
 | **S3** | Retry/cooldown réseau (429/503) | community_endpoints.go (`doCommunityRequest`) | Pattern identifié, à adapter | **1** |
 | **S4** | Déchiffrement DRM | mp4ff_decrypt.go | À part — décision utilisateur requise avant tout triage technique | — |
 | **S5** ✅ | Client Tidal | tidal.go, tidal_community.go | **lu en entier** — gap réel : pas de validation mimeType-vs-qualité (même famille que S2), fallback HI_RES→LOSSLESS déjà présent chez nous | 2 |
-| **S6** 🟢 | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **hypothèse confirmée en direct (2026-07-15)** — `searchByISRC` échoue à 401 (reproduit), le fix signé fonctionne (reproduit) ; plan de portage prêt, pas encore codé (voir §S6) | **1** (prêt) |
+| **S6** 🟠 | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **hypothèse re-vérifiée 2026-07-17** (401 non signé / 200 signé, toujours vrai) mais **validation prod bloquée** : erreurs providers rendues attribuables (✅ 07-17), mais l'override de service (`jobs_helpers.go:263`) empêche d'observer un vrai chemin Qobuz — chantier héritage à refondre avant de porter (voir §S6) | **bloqué** (observabilité) |
 | **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** 🟢 | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **ISRC-direct implémenté (2026-07-15)** — câblé aux 2 pipelines (téléchargement + genre/R10), build+vet verts ; songstats/UPC/court-circuit Qobuz reportés (voir §S9) | fait (v1) |
@@ -51,9 +51,12 @@
    sont un vrai « aucune source ne connaît », retentées à chaque run sans jamais bloquer). Il reste 2
    pistes bloquées sur `copyright` malgré le fix (probablement un album sans aucune entrée
    copyright chez Spotify, ni C ni P — hypothèse non vérifiée) : signal trop faible pour agir dessus.
-5. **S6 — porter `qobuz_api.go`** (recherche signée). **Confirmation prod faite le 2026-07-15**
-   (voir §S6) : `searchByISRC` échoue bien à 401 avec l'ancien app_id, le fix signé marche, plan prêt
-   — prochain candidat sérieux dès qu'on reprend l'implémentation.
+5. **S6 — porter `qobuz_api.go`** (recherche signée). Hypothèse re-vérifiée le 2026-07-17 (401 non
+   signé / 200 signé, toujours vrai), mais **le portage est bloqué en amont, pas prêt** : la
+   validation prod exige d'observer un vrai chemin Qobuz, or l'override de service
+   (`jobs_helpers.go:263`, décision héritée) le rend inobservable. Préalable fait le 07-17 : les
+   erreurs providers sont désormais attribuables. **Reste à trancher/refondre l'override** (chantier
+   transverse : UI + mécanisme de fallback) avant de porter les 350 lignes (voir §S6).
 6. **S3 — retry/cooldown 429/503** adapté à nos clients providers (aucun n'en a aujourd'hui).
 
 **Décision utilisateur requise avant tout code, pas un item technique :**
@@ -212,7 +215,35 @@ juste la validation dans `DownloadFromManifest` (petit, sûr, échec propre au l
 retry-miroir automatique) ou (b) fusionner `getDownloadURLRotated` + `DownloadFile` en une boucle
 entrelacée comme upstream (plus de travail, comportement complet). Ne pas décider ça seul.
 
-### S6 — Client Qobuz 🟢 hypothèse confirmée en direct, plan prêt (2026-07-15)
+### S6 — Client Qobuz 🟠 hypothèse re-vérifiée, mais **validation prod bloquée par 2 défauts d'observabilité** (2026-07-17)
+
+> **Mise à jour 2026-07-17 — accès prod obtenu, tentative de valider la condition que ce plan pose
+> lui-même (« l'échec réel est-il dans `searchByISRC` ou plus loin ? »). Résultat : les deux moitiés
+> de l'hypothèse tiennent toujours, mais la validation est *structurellement impossible* en l'état.**
+>
+> - **Re-vérifié en direct (les observations 🌍 se re-testent avant d'être citées) :** notre appel
+>   non signé (`app_id=798273057`) → **HTTP 401** sur 3 ISRC ; le même appel **signé** avec la paire
+>   publique (`app_id=712109809` / `589be88e…`) → **HTTP 200** avec résultats réels (Autechre, Joby
+>   Burgess, !!!). Inchangé depuis le 07-15.
+> - **Bloqueur 1 — erreurs inattribuables (corrigé le 07-17).** La chaîne nue `API returned status
+>   401` sortait de **4 endroits** : `songlink/client.go` (×3) **et** `qobuz/client.go:198`.
+>   Impossible de dire lequel a parlé dans les logs prod — c'est *exactement* le piège de R12, et j'ai
+>   failli y retomber en lisant `…and fallbacks failed` (qui vient en fait de **`tidal/client.go`**,
+>   pas de musicdl.me). **Corrigé :** chaque erreur porte maintenant son provider
+>   (`qobuz: unsigned ISRC search returned status %d`, `songlink: …`, `tidal: …`). C'est le préalable
+>   qui rend la validation de S6 possible.
+> - **Bloqueur 2 — Qobuz ne peut pas être forcé (ouvert, chantier à part).** Un job
+>   `service:"qobuz", allowFallback:false` a **réussi via Tidal** : [`jobs_helpers.go:263`](../jobs_helpers.go)
+>   écrase le service demandé (`service = "tidal"`) dès qu'un ISRC résout vers Tidal, **sans consulter
+>   `allowFallback`**. Tant que ce court-circuit existe, on ne peut pas observer un vrai chemin Qobuz
+>   en prod, donc pas valider le fix. **Confirmé par l'utilisateur comme une décision *héritée*** (de
+>   l'époque où aucun autre service ne marchait) — à ré-analyser en profondeur : touche l'UI (le
+>   réglage de chaîne de fallback ne serait plus honoré), le mécanisme de fallback lui-même, et
+>   probablement d'autres points. **Ne pas coder `qobuz_api.go` avant d'avoir tranché ça** : porter
+>   350 lignes sans pouvoir mesurer l'effet, c'est précisément ce que ce plan interdit.
+>
+> **Ordre révisé :** (1) attribution des erreurs ✅ → (2) trancher/refondre l'override de service →
+> (3) alors valider S6 sur des logs lisibles → (4) porter `qobuz_api.go`.
 
 > **Vérifié en direct le 2026-07-15 (pas juste lu dans le diff) — les deux moitiés de l'hypothèse
 > sont maintenant des faits, pas des suppositions :**

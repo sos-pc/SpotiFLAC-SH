@@ -171,7 +171,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 			s.mu.Lock()
 			s.markRateLimited()
 			s.mu.Unlock()
-			return nil, fmt.Errorf("API returned status 429")
+			return nil, fmt.Errorf("songlink: API returned status 429")
 		}
 
 		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
@@ -184,7 +184,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 
 		if resp.StatusCode != 200 {
 			resp.Body.Close()
-			return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+			return nil, fmt.Errorf("songlink: API returned status %d", resp.StatusCode)
 		}
 
 		break
@@ -282,7 +282,7 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 			s.mu.Lock()
 			s.markRateLimited()
 			s.mu.Unlock()
-			return nil, fmt.Errorf("API returned status 429")
+			return nil, fmt.Errorf("songlink: API returned status 429")
 		}
 
 		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
@@ -293,7 +293,7 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 
 		if resp.StatusCode != 200 {
 			resp.Body.Close()
-			return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+			return nil, fmt.Errorf("songlink: API returned status %d", resp.StatusCode)
 		}
 
 		break
@@ -419,7 +419,7 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 			s.mu.Lock()
 			s.markRateLimited()
 			s.mu.Unlock()
-			return "", fmt.Errorf("API returned status 429")
+			return "", fmt.Errorf("songlink: API returned status 429")
 		}
 
 		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
@@ -430,7 +430,7 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 
 		if resp.StatusCode != 200 {
 			resp.Body.Close()
-			return "", fmt.Errorf("API returned status %d", resp.StatusCode)
+			return "", fmt.Errorf("songlink: API returned status %d", resp.StatusCode)
 		}
 
 		break

@@ -270,7 +270,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 	}
 
 	if !success {
-		return "", fmt.Errorf("failed to get download URL: API returned status code %d and fallbacks failed", respStatusCode)
+		return "", fmt.Errorf("tidal: download URL — status %d from primary and all fallbacks failed", respStatusCode)
 	}
 
 	var v2Response TidalAPIResponseV2

@@ -195,7 +195,12 @@ func (q *QobuzDownloader) searchByISRC(isrc string) (*QobuzTrack, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		// Names the exact call so this can't be confused with the identically
+		// worded songlink errors — the mix-up that produced R12's misattribution
+		// and that blocks validating the S6 Qobuz-signing fix. A 401 here means
+		// the unsigned public app_id was rejected (see docs/upstream-catchup.md
+		// §S6), which is a different failure from a download-URL 401 downstream.
+		return nil, fmt.Errorf("qobuz: unsigned ISRC search returned status %d", resp.StatusCode)
 	}
 
 	var searchResp QobuzSearchResponse
