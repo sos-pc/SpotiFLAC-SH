@@ -1,9 +1,10 @@
 # Refonte de la sélection de service — plan d'implémentation
 
-> **🧭 Plan — 2026-07-17.** Décision produit prise (modèle aligné sur l'UI, voir §1). **Investigation
-> faite, implémentation pas commencée.** Ce document dit *ce qu'on veut*, *l'écart avec l'existant*
-> (trois défauts trouvés en creusant, au-delà de l'override), *tout ce que ça touche*, et *les
-> sous-questions encore ouvertes*. À lire avec la carte de l'existant :
+> **🧭 Plan — 2026-07-17. Décisions produit + sous-questions §7 TRANCHÉES ; phase 1 prête à coder.**
+> Modèle aligné sur l'UI (§1). Ce document dit *ce qu'on veut*, *l'écart avec l'existant* (trois défauts
+> trouvés en creusant, au-delà de l'override), *tout ce que ça touche*, et les décisions actées.
+> **Point clé confirmé : la chaîne de fallback existe déjà (`ExecuteDownload`) — on la réutilise, on ne
+> la recode pas** (§3). À lire avec la carte de l'existant :
 > [service-selection-map.md](service-selection-map.md). Index : [README.md](README.md).
 
 ## 1. La décision
@@ -66,9 +67,21 @@ Toujours en `auto` : si la recherche Tidal par nom échoue et qu'un ISRC existe,
 [jobs_helpers.go:285](../jobs_helpers.go) force `service="qobuz"` — **le reste de la chaîne (amazon) est
 sauté**. La chaîne n'est donc pas respectée même côté backend.
 
-**Conclusion :** implémenter la cible n'est pas « retirer l'override ». C'est **faire fonctionner la
-boucle auto pour de vrai** (URLs par service, détection de succès réelle) et **décider où vit la
-boucle** (front ou back).
+**Conclusion :** implémenter la cible n'est pas « retirer l'override », mais ce n'est pas non plus
+« coder une chaîne de fallback ».
+
+> ✅ **La chaîne de fallback EXISTE déjà** (signalé par l'utilisateur, vérifié le 2026-07-17) :
+> `backend.ExecuteDownload` ([downloader.go:441](../backend/downloader.go)) lit `AutoOrder`, itère les
+> services dans l'ordre, s'arrête au premier succès, passe au suivant sur erreur. Le worker l'appelle
+> ([jobs_worker.go:148](../jobs_worker.go)). **On ne la recode pas — on la réutilise.**
+>
+> Il y a même **deux** boucles auto aujourd'hui : celle-ci (backend) *et* le doublon frontend
+> `downloadFallback.ts` (cassé par l'async, 3.2). La refonte **supprime le doublon frontend** et
+> **garde** la boucle backend. Bilan : **moins de composants**, pas plus.
+
+Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle existante de tourner
+(l'override, 3.1/3.4) ; (b) un **petit plombage** pour qu'elle atteigne Amazon (3.3, ci-dessous) ;
+(c) **supprimer** le doublon frontend (3.2). On enlève plus qu'on ajoute.
 
 ## 4. Ce que ça touche
 
@@ -76,10 +89,10 @@ boucle** (front ou back).
 
 | Fichier | Changement |
 |---------|-----------|
-| [`jobs_helpers.go`](../jobs_helpers.go) `buildDownloadRequest` | **Retirer les réécritures de `service`** (3.1, 3.4). Garder la résolution d'URL/ISRC, mais la stocker **par service** (voir 3.3), pas dans un `serviceURL` unique biaisé Tidal. |
-| [`backend/downloader.go`](../backend/downloader.go) | Devient **l'unique autorité** de dispatch + fallback. La boucle `auto` doit lire une URL **par service** et détecter le **vrai** succès de chaque tentative. Aligner le défaut `AutoOrder`. |
+| [`jobs_helpers.go`](../jobs_helpers.go) `buildDownloadRequest` | **Retirer les réécritures de `service`** (3.1, 3.4) — c'est une **suppression**. Et **cesser de jeter `streamingURLs["amazon_url"]`** : le porter dans la requête (voir la ligne `DownloadRequest`). |
+| [`backend/downloader.go`](../backend/downloader.go) `ExecuteDownload` | **Inchangé sur la boucle** — c'est déjà l'autorité de dispatch + fallback, on la garde telle quelle. Seul ajustement : faire lire à Amazon *son* URL (via le nouveau champ) au lieu du `ServiceURL` Tidal. Aligner le défaut `AutoOrder`. |
 | [`download_service.go`](../download_service.go) `ApplySettingsFallbacks` | Vérifier que `AutoOrder`/défauts sont cohérents avec la nouvelle logique. |
-| `DownloadRequest` (champ `ServiceURL`) | Probablement remplacer par une map d'URLs par service, ou résoudre à la demande dans le dispatch. **Décision d'archi.** |
+| `DownloadRequest` (champ `ServiceURL`) | **Petit plombage, pas d'archi.** Aujourd'hui un seul champ, mis à l'URL Tidal pour `auto` → Amazon reçoit une URL Tidal. Ajouter de quoi transporter l'URL Amazon (un champ `AmazonURL`, ou passer les 2 URLs à `runService`). La donnée existe déjà côté `buildDownloadRequest`, elle est juste jetée. |
 
 ### Frontend
 
@@ -113,16 +126,22 @@ boucle** (front ou back).
   l'erreur attribuée) ; `auto` → doit tenter la chaîne dans l'ordre, observable dans les logs.
 - Non-régression : batch/watchlist (le chemin `EnqueueBatch`) suit la même logique que le mono-piste.
 
-## 7. Sous-questions encore ouvertes (décision utilisateur)
+## 7. Sous-questions — TRANCHÉES le 2026-07-17
 
-1. **Où vit la boucle de fallback : backend seul ?** (recommandé — le front devient « envoie un service
-   ou `auto` »). Confirme-t-on la suppression de la boucle client `downloadFallback.ts` ?
-2. **Suivi de progression mono-piste.** Si le front n'itère plus et envoie `auto`, il doit suivre le
-   job via la queue/SSE comme le batch. OK pour uniformiser sur ce modèle ?
-3. **URL par service : map dans `DownloadRequest`, ou résolution paresseuse dans le dispatch ?** Choix
-   d'archi backend — impacte la taille du diff.
-4. **Deezer est `disabled` dans l'UI** ([GeneralTab.tsx:212](../frontend/src/components/settings/GeneralTab.tsx))
-   mais présent dans les chaînes et le dispatch. On le garde dans la chaîne `auto` ou on l'exclut ?
+1. **Boucle de fallback : backend seul.** ✅ La boucle client `downloadFallback.ts` est supprimée ; le
+   front envoie un service ou `auto`, `ExecuteDownload` (existant) itère.
+2. **Suivi de progression : unifié via SSE.** ✅ Le mono-piste suit le job via le flux SSE comme le
+   batch (répare au passage le « affiché terminé dès l'enqueue »).
+3. ~~**URL par service : map ou paresseuse ?**~~ **Question mal posée — retirée.** L'utilisateur a
+   pointé (à raison) que la boucle existe déjà (`ExecuteDownload`) et qu'il ne faut pas la recoder.
+   Ce n'est pas un choix d'archi mais un **plombage** : porter l'`amazon_url` déjà récupérée jusqu'à la
+   boucle (§3.3, §4). Défaut retenu : un champ dans `DownloadRequest`, pas de map ni de résolution
+   paresseuse.
+4. **Deezer : réactivé.** ✅ Remettre Deezer comme Source sélectionnable (retirer `disabled` /
+   « unavailable » dans [GeneralTab.tsx:212](../frontend/src/components/settings/GeneralTab.tsx)) et le
+   garder dans la chaîne `auto`. Son fonctionnement réel sera traité **plus tard** — décision produit
+   assumée : l'UI et la chaîne redeviennent cohérentes, le cas « est-ce que Deezer marche » est un
+   sujet distinct.
 
 ## 8. Ordre d'implémentation suggéré (phasé, révisable)
 
@@ -135,4 +154,6 @@ boucle** (front ou back).
 4. **Valider S6** sur logs lisibles (maintenant possible), puis **porter `qobuz_api.go`** — Qobuz est
    enfin réellement atteignable.
 
-Chaque phase est buildable/testable seule. Rien n'est codé tant que §7 n'est pas tranché.
+Chaque phase est buildable/testable seule. **§7 est tranché — la phase 1 (backend seul) peut
+démarrer.** Elle est testable isolément en prod (via `/downloads/track` avec `service` explicite et
+`auto`) sans toucher au frontend, exactement comme la validation S6.
