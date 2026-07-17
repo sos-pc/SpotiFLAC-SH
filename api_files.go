@@ -493,26 +493,27 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &params) {
 			return
 		}
-		root := s.libraryRootFor(r)
-		outputDir, err := cleanLibraryPath(root, params.OutputDir)
-		if err != nil {
-			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
-			return
+		// Backend-authoritative (docs/settings-source-of-truth.md D2): the
+		// client's output_dir/root_dir are ignored. The base is the user's
+		// server download path, and each track's subfolder is derived from the
+		// server folder template with outputSubfolder — the very function
+		// buildOutputDir uses — so this check targets exactly where a download
+		// would land. Every subfolder part is sanitised (no "../"), so the
+		// result stays confined to base without needing cleanLibraryPath on any
+		// client input.
+		base := s.libraryRootFor(r)
+		settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
+		for i := range params.Tracks {
+			t := &params.Tracks[i]
+			t.RelativePath = outputSubfolder(
+				settings.FolderTemplate, settings.CreatePlaylistFolder, settings.UseFirstArtistOnly,
+				t.ArtistName, t.AlbumName, t.AlbumArtist, t.ReleaseDate, "",
+			)
 		}
-		// root_dir is optional (only used to also match against a second
-		// directory, e.g. a legacy layout) — filepath.Walk on it below makes
-		// it just as much a real I/O target as output_dir, and an unconfined
-		// value would let a caller enumerate .flac/.mp3 filenames anywhere
-		// on the host, so it's only accepted when non-empty.
-		var rootDir string
-		if params.RootDir != "" {
-			rootDir, err = cleanLibraryPath(root, params.RootDir)
-			if err != nil {
-				writeV1Error(w, http.StatusBadRequest, "root_dir: "+err.Error())
-				return
-			}
-		}
-		writeV1JSON(w, http.StatusOK, s.ctr.Files.CheckFilesExistence(outputDir, rootDir, params.Tracks))
+		// rootDir "" — the secondary "match by filename anywhere under the root"
+		// walk is dropped: with the path now computed server-side it can only
+		// produce false positives (a same-named track in another album).
+		writeV1JSON(w, http.StatusOK, s.ctr.Files.CheckFilesExistence(base, "", params.Tracks))
 	}))
 
 	// ── Audio ─────────────────────────────────────────────────────────────

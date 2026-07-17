@@ -180,52 +180,65 @@ func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
 
 func (jm *JobManager) buildOutputDir(job *Job) string {
 	s := job.Settings
-	outputDir := s.DownloadPath
-	if outputDir == "" {
-		outputDir = util.GetDefaultMusicPath()
+	base := s.DownloadPath
+	if base == "" {
+		base = util.GetDefaultMusicPath()
 	}
+	sub := outputSubfolder(s.FolderTemplate, s.CreatePlaylistFolder, s.UseFirstArtistOnly,
+		job.ArtistName, job.AlbumName, job.AlbumArtist, job.ReleaseDate, job.PlaylistName)
+	if sub != "" {
+		base = filepath.Join(base, sub)
+	}
+	return util.SanitizeFolderPath(base)
+}
 
-	if s.CreatePlaylistFolder && job.PlaylistName != "" {
-		if !strings.Contains(s.FolderTemplate, "{album}") &&
-			!strings.Contains(s.FolderTemplate, "{album_artist}") &&
-			!strings.Contains(s.FolderTemplate, "{playlist}") {
-			outputDir = filepath.Join(outputDir, util.SanitizeFilename(job.PlaylistName))
+// outputSubfolder computes the per-track subfolder RELATIVE to the base download
+// path, from the folder template and the track's own fields. Extracted from
+// buildOutputDir so the /files/exists check derives the exact same directory a
+// download would land in — the two must agree, and having one implementation is
+// how they stay in sync (docs/settings-source-of-truth.md D1/D2).
+func outputSubfolder(folderTemplate string, createPlaylistFolder, useFirstArtistOnly bool, artist, album, albumArtist, releaseDate, playlistName string) string {
+	var parts []string
+
+	if createPlaylistFolder && playlistName != "" {
+		if !strings.Contains(folderTemplate, "{album}") &&
+			!strings.Contains(folderTemplate, "{album_artist}") &&
+			!strings.Contains(folderTemplate, "{playlist}") {
+			parts = append(parts, util.SanitizeFilename(playlistName))
 		}
 	}
 
-	if s.FolderTemplate != "" {
+	if folderTemplate != "" {
 		releaseYear := ""
-		if len(job.ReleaseDate) >= 4 {
-			releaseYear = job.ReleaseDate[:4]
+		if len(releaseDate) >= 4 {
+			releaseYear = releaseDate[:4]
 		}
-		artist := job.ArtistName
-		if s.UseFirstArtistOnly {
+		if useFirstArtistOnly {
 			artist = getFirstArtistStatic(artist)
 		}
-		albumArtist := job.AlbumArtist
 		if albumArtist == "" {
 			albumArtist = artist
 		}
-		if s.UseFirstArtistOnly {
+		if useFirstArtistOnly {
 			albumArtist = getFirstArtistStatic(albumArtist)
 		}
 
-		tpl := s.FolderTemplate
+		tpl := folderTemplate
 		tpl = strings.ReplaceAll(tpl, "{artist}", util.SanitizeFilename(artist))
-		tpl = strings.ReplaceAll(tpl, "{album}", util.SanitizeFilename(job.AlbumName))
+		tpl = strings.ReplaceAll(tpl, "{album}", util.SanitizeFilename(album))
 		tpl = strings.ReplaceAll(tpl, "{album_artist}", util.SanitizeFilename(albumArtist))
 		tpl = strings.ReplaceAll(tpl, "{year}", releaseYear)
-		tpl = strings.ReplaceAll(tpl, "{playlist}", util.SanitizeFilename(job.PlaylistName))
+		tpl = strings.ReplaceAll(tpl, "{playlist}", util.SanitizeFilename(playlistName))
 
 		for _, part := range strings.Split(tpl, "/") {
 			part = strings.TrimSpace(part)
 			if part != "" {
-				outputDir = filepath.Join(outputDir, part)
+				parts = append(parts, part)
 			}
 		}
 	}
 
-	return util.SanitizeFolderPath(outputDir)
+	return filepath.Join(parts...)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
