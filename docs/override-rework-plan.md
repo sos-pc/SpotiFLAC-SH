@@ -154,8 +154,17 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
    `searchByISRC`) ; `service:"amazon"` → tente Amazon avec son propre ID (`Failed: all Amazon proxies
    failed`, proxy tiers mort — routage correct, pas de bascule Tidal) ; `auto` → `Done` via Tidal
    (1er de la chaîne). Chaque service explicite est honoré, plus aucune réécriture.
-2. **Frontend ensuite** : réduire `downloadFallback.ts` à un envoi simple, recâbler `useDownload`,
-   uniformiser le suivi via la queue.
+2. **Frontend ensuite**, en deux temps :
+   - **2a — ✅ codé le 2026-07-17 (`24a9c75`), CI verte (tsc + lint).** `downloadFallback.ts` ne fait
+     plus de boucle client : il garde son pré-traitement (métadonnées, chemin de sortie, court-circuit
+     « déjà présent ») et finit sur **un seul** `downloadTrack` portant `settings.downloader` (y
+     compris `auto`) — la sélection/fallback est côté serveur (phase 1). Pour un service explicite,
+     requête identique à l'ancien code ; seul `auto` change (vers le correct). `DownloadRequest.service`
+     élargi à `"auto"`. `useDownload.ts` intact. **Vérif navigateur après redéploiement** (le frontend
+     ne tourne pas en local ici).
+   - **2b — à faire, avec vérif navigateur** : suivi de statut réel par SSE (aujourd'hui le mono-piste
+     est marqué « terminé » dès l'enqueue — malhonnêteté *préexistante*, pas introduite par 2a). Câbler
+     `useJobsStreamEvent` pour refléter done/failed/skipped réels par piste.
 3. **UI/réglages** : aligner le défaut `AutoOrder` affiché/exécuté, revoir le libellé `allowFallback`.
 4. **Valider S6** sur logs lisibles (maintenant possible), puis **porter `qobuz_api.go`** — Qobuz est
    enfin réellement atteignable.
