@@ -47,8 +47,18 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		req.UserID = userIDFromContext(r)
-		// Same confinement as /downloads/track above — req.Settings.DownloadPath
-		// otherwise reaches disk unconfined via buildOutputDir (S2).
+		// Backend-authoritative (docs/settings-source-of-truth.md, step 3): a
+		// normal batch's settings are rebuilt entirely from the user's server
+		// settings, keeping only the per-download service override. Whatever the
+		// client sent is ignored. Watchlist enqueues (WatchlistID != "") are left
+		// alone — they carry their own per-watchlist settings model
+		// (getWatchlistSettings), a separate source of truth.
+		if req.WatchlistID == "" {
+			req.Settings = serverJobSettings(EffectiveDownloadSettings(s.ctr.Auth, req.UserID), req.Settings.Service)
+		}
+		// req.Settings.DownloadPath is now the server download path; confining it
+		// (root-to-itself) keeps S2 for the sanitised subfolders buildOutputDir
+		// appends.
 		if req.Settings.DownloadPath != "" {
 			cleaned, err := cleanLibraryPath(s.libraryRootFor(r), req.Settings.DownloadPath)
 			if err != nil {

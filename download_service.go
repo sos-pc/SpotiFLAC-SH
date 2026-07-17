@@ -159,34 +159,10 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		Status:       StatusPending,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
-		Settings: JobSettings{
-			Service: req.Service,
-			// Path/filename: server-authoritative. DownloadPath is the confined
-			// server base (handler dropped the client's output_dir); the template
-			// is applied by buildOutputDir.
-			DownloadPath:         req.OutputDir,
-			FolderTemplate:       serverSettings.FolderTemplate,
-			CreatePlaylistFolder: serverSettings.CreatePlaylistFolder,
-			FilenameTemplate:     serverSettings.FilenameTemplate,
-			TrackNumber:          serverSettings.TrackNumber,
-			UseFirstArtistOnly:   serverSettings.UseFirstArtistOnly,
-			// Quality/embed/fallback still from the request (later migration step).
-			EmbedLyrics:          req.EmbedLyrics,
-			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
-			AutoOrder:            req.AutoOrder,
-			TidalQuality:         backend.TidalQualityFor(req.AudioFormat),
-			QobuzQuality:         backend.QobuzQualityFor(req.AudioFormat),
-			AutoQuality: func() string {
-				if req.AudioFormat == "HI_RES_LOSSLESS" || req.AudioFormat == "HI_RES" {
-					return "24"
-				}
-				return ""
-			}(),
-			UseSingleGenre: req.UseSingleGenre,
-			EmbedGenre:     req.EmbedGenre,
-			AllowFallback:  req.AllowFallback,
-			Region:         "", // Region is rarely used in manual download
-		},
+		// Fully server-authoritative (step 3): every download setting comes from
+		// the user's server settings; the only per-download override is the
+		// service. The request's quality/embed/path fields are ignored.
+		Settings: serverJobSettings(serverSettings, req.Service),
 	}
 
 	// Ajout à la base de données et à la queue via les méthodes thread-safe de JobManager

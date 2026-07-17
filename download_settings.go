@@ -30,6 +30,7 @@ type DownloadSettings struct {
 	TidalQuality         string
 	QobuzQuality         string
 	AutoOrder            string
+	AutoQuality          string
 	EmbedLyrics          bool
 	EmbedMaxQualityCover bool
 	AllowFallback        bool
@@ -79,6 +80,7 @@ func ParseDownloadSettings(raw map[string]interface{}) DownloadSettings {
 		TidalQuality:         backend.TidalQualityFor(getString("tidalQuality")),
 		QobuzQuality:         backend.QobuzQualityFor(getString("qobuzQuality")),
 		AutoOrder:            getString("autoOrder"),
+		AutoQuality:          getString("autoQuality"),
 		EmbedLyrics:          getBool("embedLyrics"),
 		EmbedMaxQualityCover: getBool("embedMaxQualityCover"),
 		AllowFallback:        getBool("allowFallback"),
@@ -89,6 +91,33 @@ func ParseDownloadSettings(raw map[string]interface{}) DownloadSettings {
 		SpotFetchAPIURL:      getString("spotFetchAPIUrl"),
 		CreateM3u8File:       getBool("createM3u8File"),
 		JellyfinMusicPath:    getString("jellyfinMusicPath"),
+	}
+}
+
+// serverJobSettings builds the JobSettings a download should run with under the
+// backend-authoritative model (docs/settings-source-of-truth.md): every field
+// comes from the user's saved server settings, and the ONLY per-download
+// override honoured is the service (the UI's Source selector). The frontend no
+// longer needs to send any of these — the server is the single source of truth.
+func serverJobSettings(s DownloadSettings, serviceOverride string) JobSettings {
+	return JobSettings{
+		Service:              serviceOverride,
+		DownloadPath:         s.DownloadPath,
+		FolderTemplate:       s.FolderTemplate,
+		CreatePlaylistFolder: s.CreatePlaylistFolder,
+		FilenameTemplate:     s.FilenameTemplate,
+		TrackNumber:          s.TrackNumber,
+		EmbedLyrics:          s.EmbedLyrics,
+		EmbedMaxQualityCover: s.EmbedMaxQualityCover,
+		TidalQuality:         s.TidalQuality,
+		QobuzQuality:         s.QobuzQuality,
+		AutoOrder:            s.AutoOrder,
+		AutoQuality:          s.AutoQuality,
+		UseFirstArtistOnly:   s.UseFirstArtistOnly,
+		UseSingleGenre:       s.UseSingleGenre,
+		EmbedGenre:           s.EmbedGenre,
+		AllowFallback:        s.AllowFallback,
+		Region:               "", // not a persisted setting; unused on the manual path
 	}
 }
 
