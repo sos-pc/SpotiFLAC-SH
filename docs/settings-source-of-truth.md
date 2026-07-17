@@ -88,7 +88,16 @@ donne une seule source (le serveur). Il resterait à :
   périmé) — corriger la priorité cache/localStorage et le timing du boot ;
 - aligner les défauts `autoOrder` (§3).
 
-Mais c'est une **décision produit** : à trancher avant de coder. Ce document ne la tranche pas.
+## 5bis. DÉCISION (2026-07-17) — backend autoritaire, un seul override
+
+**Tranché : modèle backend autoritaire.** Le **serveur** est la seule vérité des réglages de
+téléchargement. Un download n'accepte **qu'un seul override ponctuel : `service`** (le choix de source
+du download en cours) ; tout le reste vient du serveur. Le frontend édite les réglages et les
+**sauvegarde** sur le serveur, les **affiche**, mais ne les **envoie plus** pour piloter un
+téléchargement.
+
+Consigne utilisateur : **cartographier tout ce que ça touche avant de coder** — « je veux pas avoir
+deux systèmes qui se disputent ». C'est le §7.
 
 ## 6. Note de méthode (l'erreur qui a mené ici)
 
@@ -98,3 +107,61 @@ capturer le payload envoyé. J'ai poussé un correctif (`7d8eae4`) sur cette bas
 (`76e96a7`) après avoir capturé la vérité terrain dans le navigateur. La leçon est celle de tout le
 projet : **capturer ce qui se passe réellement avant de conclure** — ici, lire le réglage effectif et
 le corps de la requête, pas interpréter un log ambigu.
+
+## 7. Carte de migration vers backend-autoritaire (tout ce que ça touche)
+
+Relevé exhaustif par lecture du code (2026-07-17). Le but : aucun endroit oublié où frontend et
+backend calculeraient/décideraient la même chose.
+
+### 7.1 Les 30 réglages, classés
+
+| Catégorie | Réglages | Sort sous backend-autoritaire |
+|-----------|----------|-------------------------------|
+| **Téléchargement** (→ serveur seul) | `downloadPath`, `downloader`, `folderPreset`, `folderTemplate`, `filenamePreset`, `filenameTemplate`, `filenameFormat`, `artistSubfolder`, `albumSubfolder`, `trackNumber`, `embedLyrics`, `embedMaxQualityCover`, `tidalQuality`, `qobuzQuality`, `amazonQuality`, `autoOrder`, `autoQuality`, `allowFallback`, `createPlaylistFolder`, `createM3u8File`, `jellyfinMusicPath`, `useFirstArtistOnly`, `useSingleGenre`, `embedGenre`, `operatingSystem` | le backend les lit ; le frontend **ne les envoie plus** (sauf `service` en override) |
+| **UI pure** (→ restent frontend) | `theme`, `themeMode`, `fontFamily`, `sfxEnabled` | inchangés, jamais envoyés au backend |
+| **À vérifier** | `spotFetchAPIUrl` (endpoint provider) | probablement config serveur, pas UI — à trancher |
+
+### 7.2 Les consommateurs frontend des réglages de téléchargement
+
+| Fichier | Rôle | Réglages lus | Ce qui change |
+|---------|------|--------------|---------------|
+| [`hooks/useDownload.ts`](../frontend/src/hooks/useDownload.ts) | enqueue **mono-piste + batch** | ~15 champs | **arrête d'envoyer** les réglages ; n'envoie que l'identité piste + `service` |
+| [`components/WatchlistPage.tsx`](../frontend/src/components/WatchlistPage.tsx) | enqueue **watchlist** (3ᵉ chemin !) | ~17 champs (dont qualités) | idem — arrête d'envoyer |
+| [`hooks/useCover.ts`](../frontend/src/hooks/useCover.ts), [`hooks/useLyrics.ts`](../frontend/src/hooks/useLyrics.ts) | embed cover/paroles **après** download | `folderTemplate`, `filenameTemplate`, `trackNumber` | **recalculent le chemin du fichier** côté client → doivent utiliser le chemin **retourné par le backend**, pas le recalculer |
+| [`components/FileManagerPage.tsx`](../frontend/src/components/FileManagerPage.tsx), [`components/ArtistInfo.tsx`](../frontend/src/components/ArtistInfo.tsx) | parcourir/localiser des fichiers | `downloadPath` | lecture seule d'affichage ; doit refléter le serveur |
+| [`App.tsx`](../frontend/src/App.tsx) | thème/police + `downloadPath` | UI + `downloadPath` | UI pure reste ; `downloadPath` en lecture |
+
+### 7.3 Les points de duplication « deux systèmes » — À RÉSOUDRE
+
+C'est le cœur de ta crainte. Chaque ligne = un calcul fait **des deux côtés** aujourd'hui.
+
+| # | Duplication | Frontend | Backend | Résolution cible |
+|---|-------------|----------|---------|------------------|
+| D1 | **Chemin de sortie + nom de fichier** | `resolveOutputPath` ([utils.ts:70](../frontend/src/lib/utils.ts)) — lit `downloadPath`, `folderTemplate`, `createPlaylistFolder`, `operatingSystem`, `useFirstArtistOnly` | `buildOutputDir` ([jobs_helpers.go:181](../jobs_helpers.go)) + `BuildExpectedFilename` ([util/filename.go:28](../backend/util/filename.go)) | **backend seul** calcule ; le frontend ne calcule plus pour les downloads |
+| D2 | **Check d'existence** (« déjà téléchargé ») | `CheckFilesExistence` avec chemin calculé client | worker `checkFileExists` (path calculé serveur) | l'endpoint `/files/exists` calcule le chemin **serveur** à partir des réglages serveur |
+| D3 | **Trois chemins d'enqueue** | mono-piste + batch (`useDownload`) + watchlist (`WatchlistPage`) — chacun assemble les réglages | worker unique | les trois passent par le serveur (réglages non envoyés) |
+| D4 | **Embed cover/paroles** | `useCover`/`useLyrics` recalculent le chemin pour trouver le fichier | le download connaît le vrai chemin | le frontend utilise le chemin **retourné** (historique/job), ne recalcule pas |
+| D5 | **M3U8** | `createM3U8` ([useDownload](../frontend/src/hooks/useDownload.ts)) — `jellyfinMusicPath`, `downloadPath` | watcher backend génère aussi des M3U8 | décider **un seul** générateur (probablement backend) |
+
+### 7.4 Ce que le backend a déjà (faisabilité)
+
+`buildOutputDir`, `BuildExpectedFilename`, `SanitizeFolderPath`, `ApplySettingsFallbacks`,
+`EffectiveDownloadSettings` existent déjà. La brique manquante côté mono-piste : appliquer les
+**templates de dossier** (le mono-piste via `/downloads/track` ne fait aujourd'hui que
+`OutputDir = settings.DownloadPath`, sans template — c'est le frontend qui applique le template). Il
+faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
+
+### 7.5 Plan phasé (révisé, ancré dans la carte)
+
+1. **Backend calcule le chemin/nom pour le mono-piste** (D1) — router `/downloads/track` par
+   `buildOutputDir`/`BuildExpectedFilename` avec les réglages serveur. Backend seul, testable seul.
+2. **`/files/exists` calcule le chemin serveur** (D2) — ne plus accepter un chemin calculé client.
+3. **Frontend arrête d'envoyer les réglages** sur les 3 chemins d'enqueue (D3) — `useDownload`
+   (mono + batch) et `WatchlistPage` n'envoient que l'identité + `service`.
+4. **Cover/paroles utilisent le chemin retourné** (D4).
+5. **Un seul générateur M3U8** (D5) — trancher.
+6. **`getSettings()` reflète toujours le serveur** (§2/§3) — corriger priorité cache/localStorage +
+   timing du boot ; aligner les défauts `autoOrder`.
+
+Ordre impératif : **1 avant 3** (le backend doit savoir calculer le chemin avant que le frontend
+arrête de l'envoyer, sinon les fichiers atterrissent au mauvais endroit).
