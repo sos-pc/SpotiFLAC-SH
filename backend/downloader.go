@@ -41,6 +41,12 @@ type DownloadRequest struct {
 	EmbedLyrics          bool   `json:"embed_lyrics,omitempty"`
 	EmbedMaxQualityCover bool   `json:"embed_max_quality_cover,omitempty"`
 	ServiceURL           string `json:"service_url,omitempty"`
+	// AmazonURL carries Amazon's own stream URL so the `auto` fallback chain can
+	// hand Amazon the right URL instead of ServiceURL, which holds Tidal's (that
+	// mismatch silently broke auto→amazon). The frontend's direct Amazon
+	// download still sends its URL as service_url, so amazonParams falls back to
+	// ServiceURL when this is empty.
+	AmazonURL            string `json:"amazon_url,omitempty"`
 	ISRC                 string `json:"isrc,omitempty"`
 	AutoOrder            string `json:"auto_order,omitempty"`
 	Duration             int    `json:"duration,omitempty"`
@@ -312,8 +318,15 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	// Amazon parameters: includes PlaylistName/PlaylistOwner (used for filename
 	// generation) but no AllowFallback (Amazon has no quality fallback yet).
 	amazonParams := func() amazon.DownloadParams {
+		// Amazon's own URL (set for the `auto` chain by buildDownloadRequest).
+		// Fall back to ServiceURL for the frontend's direct Amazon download,
+		// which still sends the URL there.
+		amazonURL := req.AmazonURL
+		if amazonURL == "" {
+			amazonURL = req.ServiceURL
+		}
 		return amazon.DownloadParams{
-			URL:                  req.ServiceURL,
+			URL:                  amazonURL,
 			SpotifyTrackID:       req.SpotifyID,
 			OutputDir:            req.OutputDir,
 			Quality:              req.AudioFormat,

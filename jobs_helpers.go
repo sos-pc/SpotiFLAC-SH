@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -243,49 +242,30 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 
 	audioFormat := resolveAudioFormat(service, s)
 
-	serviceURL := ""
+	// URL resolution only — this never rewrites `service`. Rewriting it here was
+	// the legacy override that made an explicit service choice unreachable (it
+	// forced tidal/qobuz whenever it found a Tidal URL or an ISRC). Removed per
+	// docs/override-rework-plan.md: each service now carries its own URL, and
+	// backend.ExecuteDownload dispatches — an explicit service runs alone, `auto`
+	// iterates the AutoOrder chain. The Tidal name-search fallback is not
+	// duplicated here; ExecuteDownload's ensureTidalServiceURL owns it.
+	tidalURL := ""
+	amazonURL := ""
+	isrc := ""
 	if streamingURLs != nil {
+		isrc = streamingURLs["isrc"]
+		amazonURL = streamingURLs["amazon_url"]
+
+		// Only resolve Tidal's URL when Tidal can actually run — no point paying
+		// for a Tidal ISRC lookup on an explicit qobuz/deezer/amazon download.
 		if service == "tidal" || service == "auto" {
-			serviceURL = streamingURLs["tidal_url"]
-		} else if service == "amazon" {
-			serviceURL = streamingURLs["amazon_url"]
-		}
-		// No direct URL but ISRC available — look up Tidal track ID via ISRC.
-		if serviceURL == "" && streamingURLs["isrc"] != "" {
-			isrc := streamingURLs["isrc"]
-			tidalID, tidalAPI, err := tidal.GetTidalIDFromISRC(job.TrackName, job.ArtistName, isrc)
-			if err == nil && tidalID > 0 {
-				tidalURL := fmt.Sprintf("https://tidal.com/track/%d", tidalID)
-				streamingURLs["tidal_url"] = tidalURL
-				streamingURLs["tidal_api"] = tidalAPI
-				serviceURL = tidalURL
-				slog.Debug("[Jobs] Tidal found via ISRC", "track", job.TrackName, "tidal_id", tidalID)
-				if service != "tidal" && service != "auto" {
-					service = "tidal"
-					audioFormat = firstNonEmpty(s.TidalQuality, "LOSSLESS")
+			tidalURL = streamingURLs["tidal_url"]
+			if tidalURL == "" && isrc != "" {
+				if tidalID, _, err := tidal.GetTidalIDFromISRC(job.TrackName, job.ArtistName, isrc); err == nil && tidalID > 0 {
+					tidalURL = fmt.Sprintf("https://tidal.com/track/%d", tidalID)
+					slog.Debug("[Jobs] Tidal found via ISRC", "track", job.TrackName, "tidal_id", tidalID)
 				}
 			}
-		}
-	}
-
-	// Still no URL — try direct Tidal name search.
-	if serviceURL == "" && (service == "tidal" || service == "auto") {
-		downloader := tidal.NewTidalDownloader("")
-		if tidalURL, serr := downloader.SearchTidalByName(job.TrackName, job.ArtistName); serr == nil && tidalURL != "" {
-			if streamingURLs == nil {
-				streamingURLs = make(map[string]string)
-			}
-			streamingURLs["tidal_url"] = tidalURL
-			serviceURL = tidalURL
-			slog.Debug("[Jobs] Tidal found via direct search", "track", job.TrackName)
-			if service != "tidal" && service != "auto" {
-				service = "tidal"
-				audioFormat = firstNonEmpty(s.TidalQuality, "LOSSLESS")
-			}
-		} else if streamingURLs != nil && streamingURLs["isrc"] != "" && service != "qobuz" {
-			service = "qobuz"
-			audioFormat = backend.QobuzQualityFor(audioFormat)
-			slog.Debug("[Jobs] Tidal search failed, but ISRC available, switching to Qobuz", "track", job.TrackName)
 		}
 	}
 
@@ -311,11 +291,6 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		durationSeconds = job.DurationMs / 1000
 	}
 
-	isrc := ""
-	if streamingURLs != nil {
-		isrc = streamingURLs["isrc"]
-	}
-
 	return DownloadRequest{
 		Service:              service,
 		ISRC:                 isrc,
@@ -334,7 +309,8 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		SpotifyID:            job.SpotifyID,
 		EmbedLyrics:          s.EmbedLyrics,
 		EmbedMaxQualityCover: s.EmbedMaxQualityCover,
-		ServiceURL:           serviceURL,
+		ServiceURL:           tidalURL,
+		AmazonURL:            amazonURL,
 		AutoOrder:            s.AutoOrder,
 		Duration:             durationSeconds,
 		ItemID:               job.ID,
