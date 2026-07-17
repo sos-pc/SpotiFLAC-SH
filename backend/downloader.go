@@ -443,6 +443,12 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		}
 	}
 
+	// One always-on line per download so a prod log makes the decision path
+	// visible without a debug build — which service was asked for, at what
+	// quality. The per-service walk below completes the picture for "auto".
+	slog.Info("[Download] Resolving",
+		"track", req.TrackName, "requested_service", req.Service, "audio_format", req.AudioFormat)
+
 	switch req.Service {
 	case "amazon", "qobuz", "deezer":
 		filename, err = runService(req.Service, "")
@@ -458,6 +464,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			orderStr = "tidal-amazon-qobuz"
 		}
 		order := strings.Split(orderStr, "-")
+		slog.Info("[Auto] Walking chain", "track", req.TrackName, "order", orderStr)
 
 		ensureTidalServiceURL("[DownloadTrack/Auto] Found Tidal URL via fallback search")
 
@@ -468,12 +475,16 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			default:
 				continue
 			}
+			slog.Info("[Auto] Trying", "service", svc, "track", req.TrackName)
 			filename, err = runService(svc, "")
 			if err == nil {
+				slog.Info("[Auto] Success", "service", svc, "track", req.TrackName)
 				break
 			}
 			lastErr = err
-			slog.Debug("[Auto] Service failed, trying next", "service", svc, "track", req.TrackName)
+			// Info, not Debug: knowing *why* each provider was skipped is the
+			// whole point of being able to read an auto download in prod.
+			slog.Info("[Auto] Service failed, trying next", "service", svc, "err", err, "track", req.TrackName)
 		}
 		if err != nil {
 			err = lastErr
