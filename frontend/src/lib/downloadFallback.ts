@@ -168,11 +168,6 @@ export async function downloadWithAutoFallback(
   logger.debug(`enqueue ${service}: ${trackName} - ${artistName}`);
   return await downloadTrack({
     service,
-    // Only "auto" consumes the chain; sending it for an explicit service would
-    // change that request's shape for no reason (the backend ignores it there).
-    // Without this the backend fell back to its own AutoOrder default, silently
-    // ignoring the user's configured chain for single-track downloads.
-    auto_order: service === "auto" ? settings.autoOrder : undefined,
     query,
     track_name: trackName,
     artist_name: displayArtist,
