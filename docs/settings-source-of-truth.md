@@ -155,6 +155,10 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
 
 1. **Backend calcule le chemin/nom pour le mono-piste** (D1) — router `/downloads/track` par
    `buildOutputDir`/`BuildExpectedFilename` avec les réglages serveur. Backend seul, testable seul.
+   — ✅ **codé le 2026-07-17 (`f06e8b1`), CI verte (`-race`).** `DownloadSettings` gagne
+   `folderTemplate`/`createPlaylistFolder` ; le handler ignore l'`output_dir` client (base = serveur,
+   confinée) ; le job mono-piste porte les réglages serveur de chemin/nom. Qualité/embed encore issus
+   de la requête (étape ultérieure). **Vérif prod en attente de redéploiement.**
 2. **`/files/exists` calcule le chemin serveur** (D2) — ne plus accepter un chemin calculé client.
 3. **Frontend arrête d'envoyer les réglages** sur les 3 chemins d'enqueue (D3) — `useDownload`
    (mono + batch) et `WatchlistPage` n'envoient que l'identité + `service`.
