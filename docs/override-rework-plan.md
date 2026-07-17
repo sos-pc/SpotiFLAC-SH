@@ -148,9 +148,12 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
 1. **Backend d'abord, sans toucher au front** : retirer les réécritures de service (3.1/3.4), faire
    marcher la boucle `auto` avec URL par service (3.3). Testable en prod via `/downloads/track` avec
    `service` explicite et `auto`. À ce stade, la boucle front (3.2) devient redondante mais inoffensive.
-   — ✅ **codé le 2026-07-17** (`658c814` : override retiré, champ `AmazonURL`, `ExecuteDownload`
-   inchangée) ; build+vet+30 tests download/jobs verts, CI verte (`-race` compris). **Vérif prod en
-   attente de redéploiement.**
+   — ✅ **codé + VÉRIFIÉ EN PROD le 2026-07-17** (`658c814`). Preuve par exécution réelle sur 3 cas :
+   `service:"qobuz"` → `Failed: qobuz: unsigned ISRC search returned status 401` (avant phase 1 :
+   `Done` via l'override Tidal) → **l'override est parti ET S6 est validé** (l'échec est bien dans
+   `searchByISRC`) ; `service:"amazon"` → tente Amazon avec son propre ID (`Failed: all Amazon proxies
+   failed`, proxy tiers mort — routage correct, pas de bascule Tidal) ; `auto` → `Done` via Tidal
+   (1er de la chaîne). Chaque service explicite est honoré, plus aucune réécriture.
 2. **Frontend ensuite** : réduire `downloadFallback.ts` à un envoi simple, recâbler `useDownload`,
    uniformiser le suivi via la queue.
 3. **UI/réglages** : aligner le défaut `AutoOrder` affiché/exécuté, revoir le libellé `allowFallback`.
