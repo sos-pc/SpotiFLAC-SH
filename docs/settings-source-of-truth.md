@@ -162,6 +162,11 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
    (`ZZZ_BOGUS_CLIENT_PATH`) → fichier écrit à `/…/Music/Thylacine/Transsiberian/Swiss Sounds - Thylacine.flac`
    (template serveur `{artist}/{album}` + `filenameTemplate` serveur), la valeur client **ignorée**.
 2. **`/files/exists` calcule le chemin serveur** (D2) — ne plus accepter un chemin calculé client.
+   — ✅ **codé le 2026-07-17 (`4d03d7c`), CI verte (`-race`).** `outputSubfolder` extrait de
+   `buildOutputDir` (une seule implémentation partagée) ; le handler ignore l'`output_dir` client et
+   dérive le sous-dossier par piste du template serveur. Limite connue (reportée étape 3) : pas de
+   contexte playlist par piste, donc `createPlaylistFolder=true` non reflété dans le pré-check (le
+   check backend au download le rattrape). **Vérif prod en attente de redéploiement.**
 3. **Frontend arrête d'envoyer les réglages** sur les 3 chemins d'enqueue (D3) — `useDownload`
    (mono + batch) et `WatchlistPage` n'envoient que l'identité + `service`.
 4. **Cover/paroles utilisent le chemin retourné** (D4).
