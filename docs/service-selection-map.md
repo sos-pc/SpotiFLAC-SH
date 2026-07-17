@@ -124,9 +124,10 @@ Ce qu'il faudra toucher, minimum, pour rendre le comportement cohérent :
    en prendre une autre plutôt qu'échouer ») est le rôle de `auto`. Piste : supprimer la réécriture et
    laisser B décider — mais alors un job `service:"qobuz"` qui échoue **échoue** au lieu de basculer,
    sauf si l'utilisateur a choisi `auto`. C'est un changement de comportement observable.
-3. **Le réglage de chaîne de fallback.** L'utilisateur a indiqué qu'il **ne devrait plus être pris en
-   compte** dans la refonte — à préciser : retiré de l'UI ? ignoré à l'exécution ? remplacé par un
-   ordre fixe ? Décision produit, à acter avant de coder.
+3. ~~**Le réglage de chaîne de fallback.**~~ **TRANCHÉ le 2026-07-17 : la chaîne est CONSERVÉE et
+   honorée.** Modèle retenu = celui déjà affiché par l'UI (`auto` + chaîne paramétrable ; service
+   explicite = forcer). Le backend doit s'aligner dessus. *(Corrige une intention antérieure « ne plus
+   la prendre en compte ».)* Plan d'implémentation : [override-rework-plan.md](override-rework-plan.md).
 4. **La couche frontend A garde-t-elle un rôle ?** Puisque tout est réécrit côté serveur (C), la boucle
    `auto` client-side de `downloadFallback.ts` est au mieux redondante, au pire trompeuse (elle croit
    choisir un service que le serveur remplace). La refonte doit décider : fallback autoritatif côté
