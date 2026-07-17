@@ -162,11 +162,14 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
      **Vérif navigateur (session methammer, in-app browser)** : bundle déployé (`index-36QmQn7V.js`, plus
      aucune chaîne de la boucle client), un clic Download → séquence `/search` → `/files/exists` → **un
      seul** `/downloads/track` (plus de rafale), `service:"auto"` confirmé.
-     **⚠️ Bug attrapé par cette vérif** : le mono-piste n'envoyait pas `auto_order`, donc le backend
-     retombait sur son défaut (`tidal-amazon-qobuz`) au lieu de la chaîne de l'utilisateur — la chaîne
-     n'était **pas honorée**. Corrigé (`7d8eae4`) : `auto_order` transmis pour `service:"auto"`. **À
-     re-vérifier navigateur après redéploiement** (l'ordre de la chaîne effectif doit suivre le réglage
-     UI).
+     **⚠️ Fausse alerte, corrigée (revert `76e96a7`)** : j'avais cru voir un bug de chaîne (mono-piste
+     n'envoyant pas `auto_order`) sur un log à 401 — mais ce téléchargement avait `Source=Qobuz`
+     (service **explicite**), donc le 401 était le comportement **correct**, pas un bug de chaîne. Re-test
+     avec `Source=auto` (chaîne `deezer-qobuz-amazon-tidal`) : le frontend envoie `service:"auto"` **sans**
+     `auto_order`, et la chaîne **est honorée quand même** — le backend la remplit depuis les réglages
+     **serveur** (`ApplySettingsFallbacks`). Le correctif `7d8eae4` était donc redondant *et* nuisible
+     (un seul champ rendu autoritaire-frontend, le reste restant serveur → source mixte). **Revert.** Le
+     vrai sujet soulevé est l'architecture des réglages → [`settings-source-of-truth.md`](settings-source-of-truth.md).
    - **2b — à faire, avec vérif navigateur** : suivi de statut réel par SSE (aujourd'hui le mono-piste
      est marqué « terminé » dès l'enqueue — malhonnêteté *préexistante*, pas introduite par 2a). Câbler
      `useJobsStreamEvent` pour refléter done/failed/skipped réels par piste.
