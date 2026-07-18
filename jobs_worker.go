@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/audio"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -166,6 +167,34 @@ func (jm *JobManager) processJob(jobID string) {
 		}
 		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		return
+	}
+
+	// A download that "succeeded" can still be the wrong audio: a community
+	// Tidal proxy without a Premium token serves a ~30s preview and reports
+	// success. Nothing downstream would notice — the file exists, has tags, and
+	// looks right in a listing — so the library fills with junk silently.
+	// Checked here, at the one point where a job becomes Done
+	// (docs/upstream-catchup.md §S2).
+	if resp.File != "" && job.DurationMs > 0 {
+		if err := audio.ValidateTrackDuration(resp.File, job.DurationMs/1000); err != nil {
+			slog.Warn("[Jobs] Rejected download", "track", job.TrackName, "err", err)
+			if rmErr := os.Remove(resp.File); rmErr != nil && !os.IsNotExist(rmErr) {
+				slog.Error("[Jobs] Could not remove rejected file", "path", resp.File, "err", rmErr)
+			}
+			job.Status = StatusFailed
+			job.Error = err.Error()
+			job.Speed = 0
+			job.UpdatedAt = time.Now()
+			jm.saveJob(job)
+			jm.notifyJob(job)
+			jm.recordCatalogFailed(job)
+			if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil &&
+				isPermanentFailure(job.Error) {
+				jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
+			}
+			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
+			return
+		}
 	}
 
 	job.Status = StatusDone

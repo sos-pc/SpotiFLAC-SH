@@ -134,7 +134,45 @@ tout est déjà rattaché à un autre sujet).
   desktop mono-utilisateur. Non applicable à notre serveur multi-utilisateur (annulerait les
   téléchargements de tout le monde à la fois). On annule par job dans `jobs_worker.go`.
 
-### S2 — Validation post-téléchargement
+### S2 — Validation post-téléchargement 🟢 **IMPLÉMENTÉ le 2026-07-19**
+
+> **Calibré sur des mesures, pas sur les seuils repris tels quels.** Ce code **supprime des
+> fichiers** : avant de l'activer, la durée réelle de 13 fichiers de la bibliothèque a été comparée à
+> la durée annoncée par Spotify (via `/audio/analyze`) :
+>
+> | Écart réel vs Spotify | Fichiers |
+> |---|---|
+> | 0–2 % | **12** |
+> | 11–25 % | 1 (*attendu 75 s, réel 85 s*) |
+> | **> 25 %** | **0** |
+>
+> Les seuils amont ne supprimeraient donc aucun fichier existant. L'unique écart notable (75 s
+> attendu) passe même **sous** le plancher des 90 s de la règle d'écart, qui ne l'évalue pas.
+>
+> **Implémentation :**
+> - `backend/audio/duration_validation.go` — `ProbeDuration` (ffprobe, entrée `duration` seule : pas
+>   `AnalyzeTrack`, qui calcule un spectre et serait absurde après chaque téléchargement) et
+>   `ValidateTrackDuration`. La décision est isolée dans `validateDurations(actuel, attendu)`, **pure**,
+>   donc testable sans produire de fichiers audio.
+> - Câblé dans `jobs_worker.go` **au seul endroit où un job devient `Done`**. Un rejet supprime le
+>   fichier, marque le job `Failed` avec la raison, et suit le même chemin que n'importe quel échec
+>   (catalogue, `OnPermanentFailure`, complétion de lot).
+> - **Ne juge pas quand il ne peut pas** : durée attendue absente ou ffprobe en échec ⇒ accepté. Un
+>   échec de sonde n'est pas une preuve que l'audio est mauvais, et supprimer un bon fichier est pire
+>   que d'en garder un douteux.
+>
+> **Synergie avec la phase 2b** : le rejet apparaît désormais en **échec dans l'UI** au lieu d'être
+> avalé — avant 2b, un job marqué `Failed` après coup n'aurait rien changé au badge.
+>
+> **Portée honnête** : mesuré le 2026-07-18, **0 preview sur 19 téléchargements**. Ça n'aurait donc
+> rien attrapé aujourd'hui. C'est une **assurance** contre le mode de panne le plus coûteux de la
+> seule route qui fonctionne (Tidal via proxys communautaires, limités à `PREVIEW` sans compte
+> Premium), pas un correctif d'un problème actif.
+>
+> **Tests** (`duration_validation_test.go`) : 14 cas, dont les 4 mesures réelles de la bibliothèque
+> qui **ne doivent pas** être supprimées, les bornes des deux règles, et le refus de juger sans donnée.
+
+#### Analyse d'origine
 
 **Fichier :** `download_validation.go` (44 lignes, nouveau upstream).
 
