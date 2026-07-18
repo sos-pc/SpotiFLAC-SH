@@ -67,9 +67,10 @@ func (jm *JobManager) processJobSafely(jobID string) {
 		if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil && isPermanentFailure(job.Error) {
 			jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
 		}
-		if job.WatchlistID != "" {
-			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
-		}
+		// Unconditional: maybeGenerateM3U8 guards on batchID itself and routes by
+		// watchlistID. Gating the CALL on WatchlistID != "" is what kept manual
+		// batches from ever having a completion moment.
+		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 	}()
 	jm.processJob(jobID)
 }
@@ -115,9 +116,7 @@ func (jm *JobManager) processJob(jobID string) {
 		jm.saveJob(job)
 		jm.notifyJob(job)
 		jm.recordCatalogSkipped(job)
-		if job.WatchlistID != "" {
-			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
-		}
+		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		return
 	}
 
@@ -165,9 +164,7 @@ func (jm *JobManager) processJob(jobID string) {
 				jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
 			}
 		}
-		if job.WatchlistID != "" {
-			jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
-		}
+		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		return
 	}
 
@@ -186,9 +183,7 @@ func (jm *JobManager) processJob(jobID string) {
 	jm.recordCatalogDone(job)
 	slog.Info("[Jobs] Done", "track", job.TrackName)
 
-	if job.WatchlistID != "" {
-		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
-	}
+	jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 }
 
 // isPermanentFailure returns true when the error message does not match any

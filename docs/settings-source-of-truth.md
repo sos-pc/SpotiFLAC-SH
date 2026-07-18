@@ -335,6 +335,17 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
 
    **Limite assumée** : les compteurs de lot sont en mémoire. Un lot à cheval sur un redémarrage du
    conteneur n'écrit pas de M3U8 — même dégradation que celle déjà acceptée pour les watchlists.
+
+   > **⚠️ Correctif incomplet au premier essai (2026-07-18).** La première version ne marchait pas :
+   > 4 pistes téléchargées, 4 `[Jobs] Done`, **aucune ligne `[M3U8]`**, fichier inchangé à 185 octets.
+   > Cause : j'avais retiré le garde `watchlistID == ""` **à l'intérieur** de `maybeGenerateM3U8`, mais
+   > le même garde existait à **chacun des quatre points d'appel** dans `jobs_worker.go` —
+   > `if job.WatchlistID != "" { jm.maybeGenerateM3U8(...) }`. La fonction n'était donc jamais appelée
+   > pour un lot manuel.
+   > **Leçon de méthode** : j'avais les numéros de ligne des appelants dans un `grep` antérieur et je
+   > n'ai pas lu leur contexte — j'ai supposé qu'ils étaient inconditionnels. Changer la garde d'une
+   > fonction n'a aucun effet si les appelants portent la même garde. Corrigé en les rendant tous
+   > inconditionnels : `maybeGenerateM3U8` garde désormais sur `batchID` et aiguille sur `watchlistID`.
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`
