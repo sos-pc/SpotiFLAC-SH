@@ -186,9 +186,19 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      réglages stockés ont `service:""`, qui retombait sur **tidal** avant) produit
      `[Download] Resolving requested_service=auto audio_format=HI_RES_LOSSLESS` +
      `order=deezer-qobuz-amazon-tidal` — soit le `downloader`, la qualité et la chaîne **globaux**.
-   - **3-frontend — à faire, vérif navigateur.** `downloadFallback`/`useDownload`/`WatchlistPage`
-     n'envoient plus que l'identité piste + `service` (+ contexte playlist). Lève la limite playlist de
-     l'étape 2.
+   - **3-frontend — ✅ codé le 2026-07-18 (`e52f499`), CI verte (tsc + lint).** Le client n'envoie plus
+     **aucun** réglage : identité de la piste + contexte (`position`, `playlist_name`) + le seul override
+     `service`. `downloadFallback` perd `resolveOutputPath` et 9 champs ; le batch envoie `{ service }`
+     au lieu d'un blob de 15 champs ; `buildExistenceCheckRequests` perd son argument `Settings` ; les
+     appels `CheckFilesExistence` passent `""` pour les dossiers. Artistes envoyés **bruts** (le serveur
+     applique `useFirstArtistOnly`). `playlist_name` ajouté au type (contexte, pas réglage) → lève la
+     limite playlist de l'étape 2.
+     **Trou de l'étape 2 fermé au passage** : `/files/exists` dérivait le *dossier* côté serveur mais
+     prenait encore le *nom de fichier* du client (`filename_format`, `include_track_number`,
+     `use_album_track_number`) et un artiste déjà rogné — à moitié autoritaire, et cassé dès que le
+     client cesserait de les envoyer. Le handler les dérive maintenant tous du serveur, avec le même
+     trimming premier-artiste que `buildDownloadRequest`.
+     **Vérif navigateur en attente de redéploiement.**
 4. **Cover/paroles utilisent le chemin retourné** (D4).
 5. **Un seul générateur M3U8** (D5) — trancher.
 6. **`getSettings()` reflète toujours le serveur** (§2/§3) — corriger priorité cache/localStorage +
