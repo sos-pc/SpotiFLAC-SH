@@ -170,7 +170,15 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
      **serveur** (`ApplySettingsFallbacks`). Le correctif `7d8eae4` était donc redondant *et* nuisible
      (un seul champ rendu autoritaire-frontend, le reste restant serveur → source mixte). **Revert.** Le
      vrai sujet soulevé est l'architecture des réglages → [`settings-source-of-truth.md`](settings-source-of-truth.md).
-   - **2b — ✅ codé le 2026-07-18 (`faaceb3`)**, vérif navigateur en attente de redéploiement.
+   - **2b — ✅ codé ET VÉRIFIÉ NAVIGATEUR le 2026-07-18 (`faaceb3`)**, bundle `index-Bqm4WSxh.js`.
+     **Les deux chemins ont été exercés sur de vraies pistes absentes du disque :**
+     - **Succès** — *Eleven / La Rochelle Band*, source `auto` : clic → **spinner** (et non coche), le
+       serveur parcourt la chaîne (`deezer` ✗ HTML → `qobuz` ✗ 401 → `amazon` ✗ DNS mort → **`tidal` ✓**),
+       puis `[Jobs] Done` → **coche verte**. Le badge suit le job, plus l'enqueue.
+     - **Échec** — *Klaymen's Theme / Terry Scott Taylor*, source forcée sur `deezer` (mort) puis
+       restaurée sur `auto` : `[Jobs] Failed err=all Deezer proxies failed` → **badge rouge ⊗**.
+       **C'est la moitié qui compte** : avant 2b cette piste s'affichait « téléchargé » alors que rien
+       n'avait été téléchargé.
      `POST /downloads/track` et `/jobs` répondent à l'**enqueue**, pas à la fin du téléchargement :
      traiter cette réponse comme le résultat marquait chaque piste « téléchargée » **au moment de la
      mise en file**, y compris celles qui allaient échouer.
