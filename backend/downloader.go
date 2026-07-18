@@ -57,24 +57,24 @@ type DownloadRequest struct {
 	// mismatch silently broke auto→amazon). The frontend's direct Amazon
 	// download still sends its URL as service_url, so amazonParams falls back to
 	// ServiceURL when this is empty.
-	AmazonURL            string `json:"amazon_url,omitempty"`
-	ISRC                 string `json:"isrc,omitempty"`
-	AutoOrder            string `json:"auto_order,omitempty"`
-	Duration             int    `json:"duration,omitempty"`
-	ItemID               string `json:"item_id,omitempty"`
-	SpotifyTrackNumber   int    `json:"spotify_track_number,omitempty"`
-	SpotifyDiscNumber    int    `json:"spotify_disc_number,omitempty"`
-	SpotifyTotalTracks   int    `json:"spotify_total_tracks,omitempty"`
-	SpotifyTotalDiscs    int    `json:"spotify_total_discs,omitempty"`
-	Copyright            string `json:"copyright,omitempty"`
-	Publisher            string `json:"publisher,omitempty"`
-	PlaylistName         string `json:"playlist_name,omitempty"`
-	PlaylistOwner        string `json:"playlist_owner,omitempty"`
-	AllowFallback        bool   `json:"allow_fallback"`
-	UseFirstArtistOnly   bool   `json:"use_first_artist_only,omitempty"`
-	UseSingleGenre       bool   `json:"use_single_genre,omitempty"`
-	EmbedGenre           bool   `json:"embed_genre,omitempty"`
-	UserID               string `json:"user_id,omitempty"`
+	AmazonURL          string `json:"amazon_url,omitempty"`
+	ISRC               string `json:"isrc,omitempty"`
+	AutoOrder          string `json:"auto_order,omitempty"`
+	Duration           int    `json:"duration,omitempty"`
+	ItemID             string `json:"item_id,omitempty"`
+	SpotifyTrackNumber int    `json:"spotify_track_number,omitempty"`
+	SpotifyDiscNumber  int    `json:"spotify_disc_number,omitempty"`
+	SpotifyTotalTracks int    `json:"spotify_total_tracks,omitempty"`
+	SpotifyTotalDiscs  int    `json:"spotify_total_discs,omitempty"`
+	Copyright          string `json:"copyright,omitempty"`
+	Publisher          string `json:"publisher,omitempty"`
+	PlaylistName       string `json:"playlist_name,omitempty"`
+	PlaylistOwner      string `json:"playlist_owner,omitempty"`
+	AllowFallback      bool   `json:"allow_fallback"`
+	UseFirstArtistOnly bool   `json:"use_first_artist_only,omitempty"`
+	UseSingleGenre     bool   `json:"use_single_genre,omitempty"`
+	EmbedGenre         bool   `json:"embed_genre,omitempty"`
+	UserID             string `json:"user_id,omitempty"`
 	// SpeedCallback est appelé pendant le téléchargement avec (mbDownloaded, speedMBps).
 	// Nil si non requis. Non sérialisé.
 	SpeedCallback func(mbDownloaded, speedMBps float64) `json:"-"`
@@ -170,7 +170,12 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	if req.TrackName != "" && req.ArtistName != "" {
-		expectedFilename := util.BuildExpectedFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, req.Position, req.SpotifyDiscNumber, req.UseAlbumTrackNumber)
+		// Resolve the number first. This call used to hand the raw Position to a
+		// parameter the builder ignored, so it looked for a filename the download
+		// never wrote — the divergence that let this check report "already exists"
+		// for a file the worker's own check had missed.
+		trackNumberToPrint := util.ResolveTrackNumber(req.Position, req.SpotifyTrackNumber, req.UseAlbumTrackNumber)
+		expectedFilename := util.BuildExpectedFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.FilenameFormat, req.PlaylistName, req.PlaylistOwner, req.TrackNumber, trackNumberToPrint, req.SpotifyDiscNumber)
 		expectedPath := filepath.Join(req.OutputDir, expectedFilename)
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 100*1024 {
 			return DownloadResponse{

@@ -161,7 +161,7 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 			filenameArtist = util.GetFirstArtist(p.SpotifyArtistName)
 			filenameAlbumArtist = util.GetFirstArtist(p.SpotifyAlbumArtist)
 		}
-		expectedFilename := util.BuildExpectedFilename(p.SpotifyTrackName, filenameArtist, p.SpotifyAlbumName, filenameAlbumArtist, p.SpotifyReleaseDate, p.FilenameFormat, p.PlaylistName, p.PlaylistOwner, p.IncludeTrackNumber, p.Position, p.SpotifyDiscNumber, false)
+		expectedFilename := util.BuildExpectedFilename(p.SpotifyTrackName, filenameArtist, p.SpotifyAlbumName, filenameAlbumArtist, p.SpotifyReleaseDate, p.FilenameFormat, p.PlaylistName, p.PlaylistOwner, p.IncludeTrackNumber, p.Position, p.SpotifyDiscNumber)
 		expectedPath := filepath.Join(p.OutputDir, expectedFilename)
 
 		if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
@@ -187,7 +187,7 @@ func (d *DeezerDownloader) Download(p DownloadParams) (string, error) {
 			filenameArtist = util.GetFirstArtist(p.SpotifyArtistName)
 			filenameAlbumArtist = util.GetFirstArtist(p.SpotifyAlbumArtist)
 		}
-		newFilename := util.BuildExpectedFilename(p.SpotifyTrackName, filenameArtist, p.SpotifyAlbumName, filenameAlbumArtist, p.SpotifyReleaseDate, p.FilenameFormat, p.PlaylistName, p.PlaylistOwner, p.IncludeTrackNumber, p.Position, p.SpotifyDiscNumber, false)
+		newFilename := util.BuildExpectedFilename(p.SpotifyTrackName, filenameArtist, p.SpotifyAlbumName, filenameAlbumArtist, p.SpotifyReleaseDate, p.FilenameFormat, p.PlaylistName, p.PlaylistOwner, p.IncludeTrackNumber, p.Position, p.SpotifyDiscNumber)
 		ext := filepath.Ext(filePath)
 		if ext == "" {
 			ext = ".flac"

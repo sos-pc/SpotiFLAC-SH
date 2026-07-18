@@ -251,17 +251,14 @@ func (f *FileService) CheckFilesExistence(outputDir string, rootDir string, trac
 			if filenameFormat == "" {
 				filenameFormat = defaultFilenameFormat
 			}
-			trackNumber := t.Position
-			if t.UseAlbumTrackNumber && t.TrackNumber > 0 {
-				trackNumber = t.TrackNumber
-			}
+			trackNumberToPrint := util.ResolveTrackNumber(t.Position, t.TrackNumber, t.UseAlbumTrackNumber)
 			fileExt := ".flac"
 			if t.AudioFormat == "mp3" {
 				fileExt = ".mp3"
 			}
 			expectedFilenameBase := util.BuildExpectedFilename(
 				t.TrackName, t.ArtistName, t.AlbumName, t.AlbumArtist, t.ReleaseDate,
-				filenameFormat, "", "", t.IncludeTrackNumber, trackNumber, t.DiscNumber, t.UseAlbumTrackNumber,
+				filenameFormat, "", "", t.IncludeTrackNumber, trackNumberToPrint, t.DiscNumber,
 			)
 			expectedFilename := strings.TrimSuffix(expectedFilenameBase, ".flac") + fileExt
 			targetDir := outputDir

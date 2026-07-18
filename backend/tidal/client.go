@@ -947,10 +947,12 @@ func getDownloadURLRotated(apis []string, trackID int64, quality string) (string
 func buildTidalFilename(title, artist, album, albumArtist, releaseDate string, trackNumber, discNumber int, format string, includeTrackNumber bool, position int, useAlbumTrackNumber bool) string {
 	var filename string
 
-	numberToUse := position
-	if useAlbumTrackNumber && trackNumber > 0 {
-		numberToUse = trackNumber
-	}
+	// One resolved value, used for BOTH the guard and the printed number. They
+	// used to disagree: the guard tested the raw list position while the printed
+	// value was the resolved one, so a track with position 0 and a valid album
+	// number got no number at all — and the existence check, which resolved
+	// properly, then looked for a numbered filename that was never written.
+	numberToUse := util.ResolveTrackNumber(position, trackNumber, useAlbumTrackNumber)
 
 	year := ""
 	if len(releaseDate) >= 4 {
@@ -991,7 +993,7 @@ func buildTidalFilename(title, artist, album, albumArtist, releaseDate string, t
 			filename = fmt.Sprintf("%s - %s", title, artist)
 		}
 
-		if includeTrackNumber && position > 0 {
+		if includeTrackNumber && numberToUse > 0 {
 			filename = fmt.Sprintf("%02d. %s", numberToUse, filename)
 		}
 	}

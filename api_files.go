@@ -667,7 +667,6 @@ func (s *Server) registerFileRoutes() {
 		req.OutputDir = p.OutputDir
 		req.FilenameFormat = p.FilenameFormat
 		req.TrackNumber = p.TrackNumber
-		req.UseAlbumTrackNumber = p.UseAlbumTrackNumber
 		req.ArtistName = p.ArtistName
 		req.AlbumArtist = p.AlbumArtist
 		req.Position = p.trackNumberFor(req.Position, req.AlbumTrackNumber)

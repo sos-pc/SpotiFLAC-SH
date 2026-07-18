@@ -25,7 +25,7 @@ import { CheckFilesExistence, EnqueueBatch } from "@/lib/rpc";
 function buildExistenceCheckRequests(
   tracks: TrackMetadata[],
 ): FileExistsCheck[] {
-  return tracks.map((track) => ({
+  return tracks.map((track, index) => ({
     spotify_id: track.spotify_id || "",
     track_name: track.name || "",
     artist_name: track.artists || "",
@@ -34,7 +34,12 @@ function buildExistenceCheckRequests(
     release_date: track.release_date || "",
     track_number: track.track_number || 0,
     disc_number: track.disc_number || 0,
-    position: 0,
+    // The real 1-based index, matching what enqueueTracksBatch sends. It used
+    // to be 0, so for a template without {album} the server resolved the track
+    // number to 0 and looked for an unnumbered filename while the download
+    // wrote a numbered one — the check never matched and every track was
+    // re-downloaded.
+    position: index + 1,
     audio_format: "flac",
   }));
 }
@@ -367,13 +372,16 @@ export function useDownload(region: string) {
         setDownloadedTracks((prev) => new Set(prev).add(id));
       }
     }
-    // When an M3U8 is wanted, the already-present tracks are sent too. They are
-    // not re-downloaded: the server's catalog dedup drops them before any job is
-    // created, and records their path so the playlist file lists the WHOLE
-    // playlist rather than just what this run fetched
-    // (docs/settings-source-of-truth.md D5). Without an M3U8 there is nothing to
-    // gain from enqueuing them, so the filter stays.
-    const tracksToDownload = folderName
+    // When an M3U8 is wanted, the already-present tracks are sent too so the
+    // server can list the WHOLE playlist and not just what this run fetched
+    // (docs/settings-source-of-truth.md D5).
+    //
+    // Gated on the setting as well as on folderName: without it this sent every
+    // already-downloaded track on every batch even for users who have M3U8
+    // generation switched off — 190 no-op jobs on a 197-track playlist, each
+    // taking a turn through the single worker.
+    const wantsM3U8 = !!folderName && settings.createM3u8File;
+    const tracksToDownload = wantsM3U8
       ? selectedTrackObjects
       : selectedTrackObjects.filter(
           (track) => !existingSpotifyIDs.has(track.spotify_id || ""),
@@ -440,7 +448,8 @@ export function useDownload(region: string) {
       }
     }
     // Same rule as handleDownloadSelected above.
-    const tracksToDownload = folderName
+    const wantsM3U8 = !!folderName && settings.createM3u8File;
+    const tracksToDownload = wantsM3U8
       ? tracksWithId
       : tracksWithId.filter(
           (track) => !existingSpotifyIDs.has(track.spotify_id || ""),

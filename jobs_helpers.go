@@ -397,10 +397,7 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 	}
 
 	useAlbumTrackNumber := strings.Contains(s.FolderTemplate, "{album}")
-	trackNumber := job.Position
-	if useAlbumTrackNumber && job.TrackNumber > 0 {
-		trackNumber = job.TrackNumber
-	}
+	trackNumberToPrint := util.ResolveTrackNumber(job.Position, job.TrackNumber, useAlbumTrackNumber)
 
 	expectedFilename := util.BuildExpectedFilename(
 		job.TrackName,
@@ -412,9 +409,8 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 		job.PlaylistName,
 		"",
 		s.TrackNumber,
-		trackNumber,
+		trackNumberToPrint,
 		job.DiscNumber,
-		useAlbumTrackNumber,
 	)
 
 	expectedPath := filepath.Join(outputDir, expectedFilename)
@@ -446,6 +442,14 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 
 	jm.mu.Lock()
 	m3u8Req, wantsM3U8 := jm.batchM3U8[batchID]
+	// A manual batch that never asked for an M3U8 has nothing to do here, and
+	// the work below is two full BoltDB scans. Leaving without them matters
+	// after a restart, when the counters are gone and every completing job
+	// would otherwise pay for both.
+	if watchlistID == "" && !wantsM3U8 {
+		jm.mu.Unlock()
+		return
+	}
 	total, hasCounter := jm.batchTotals[batchID]
 	if hasCounter {
 		jm.batchDone[batchID]++
@@ -454,10 +458,7 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 			jm.mu.Unlock()
 			return
 		}
-		delete(jm.batchTotals, batchID)
-		delete(jm.batchDone, batchID)
-		delete(jm.batchWatchID, batchID)
-		delete(jm.batchM3U8, batchID)
+		jm.forgetBatch(batchID)
 		jm.mu.Unlock()
 	} else {
 		jm.mu.Unlock()

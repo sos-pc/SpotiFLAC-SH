@@ -221,6 +221,19 @@ type JobManager struct {
 	getWatchlistSettings func(watchlistID string) (JobSettings, bool)
 }
 
+// forgetBatch drops every in-memory trace of a batch, in one place so a new
+// per-batch map cannot be added to EnqueueBatch and forgotten here.
+//
+// Note: clearing the queue does NOT strand these — ClearAllJobs refuses to
+// delete pending or downloading jobs, so an in-flight batch always reaches its
+// own completion.
+func (jm *JobManager) forgetBatch(batchID string) {
+	delete(jm.batchTotals, batchID)
+	delete(jm.batchDone, batchID)
+	delete(jm.batchWatchID, batchID)
+	delete(jm.batchM3U8, batchID)
+}
+
 // SetEventHandler connects the event handler (typically *Watcher).
 // Must be called before the first EnqueueBatch.
 func (jm *JobManager) SetEventHandler(h JobEventHandler) {
@@ -463,14 +476,19 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		// Every track was already downloaded, so no job will ever fire the
 		// completion hook — yet this is exactly the "regenerate the playlist
 		// file" case, and it has all the paths it needs right here.
+		//
+		// Deferred, NOT called inline: this whole function holds jm.mu, and the
+		// handler writes an M3U8 to disk. Doing that under the lock would block
+		// every other EnqueueBatch and every batch-counter update for the length
+		// of a filesystem write, breaking the "brief" contention this lock's own
+		// doc comment promises.
 		sort.Slice(preexisting, func(a, b int) bool { return preexisting[a].Position < preexisting[b].Position })
 		paths := make([]string, 0, len(preexisting))
 		for _, e := range preexisting {
 			paths = append(paths, e.Path)
 		}
-		jm.eventHandler.OnManualBatchComplete(BatchM3U8Request{
-			Name: req.M3U8Name, SourceID: req.M3U8SourceID, UserID: req.UserID,
-		}, paths)
+		m3u8Req := BatchM3U8Request{Name: req.M3U8Name, SourceID: req.M3U8SourceID, UserID: req.UserID}
+		defer func() { jm.eventHandler.OnManualBatchComplete(m3u8Req, paths) }()
 	} else if enqueued == 0 && skipped > 0 && req.WatchlistID != "" && jm.eventHandler != nil {
 		// Every track in the batch was caught by dedup (duplicate active
 		// job or catalog dedup) — no job was ever created with this

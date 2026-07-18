@@ -25,7 +25,29 @@ const Separator = ", "
 // track tagged with this value exactly as if it were still blank.
 const UnknownGenre = "Unknown Genre"
 
-func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position, discNumber int, useAlbumTrackNumber bool) string {
+// ResolveTrackNumber picks the number that goes in a filename: the track's
+// position in the enclosing list, unless the folder layout is album-based and a
+// real album track number exists.
+//
+// It exists because this choice used to be made independently in five places
+// (both existence checks, the Tidal/Qobuz filename builders, the download
+// path), and they disagreed — which meant a file could be written under one
+// name and looked for under another, so it was re-downloaded forever.
+func ResolveTrackNumber(listPosition, albumTrackNumber int, useAlbumTrackNumber bool) int {
+	if useAlbumTrackNumber && albumTrackNumber > 0 {
+		return albumTrackNumber
+	}
+	return listPosition
+}
+
+// BuildExpectedFilename builds the on-disk name for a track.
+//
+// trackNumberToPrint is the number to WRITE — already resolved by the caller
+// via ResolveTrackNumber. This parameter used to be called `position` and sat
+// next to a `useAlbumTrackNumber` flag the function never read, so callers
+// reasonably assumed it resolved the choice itself. It did not: two of them
+// passed a raw list index and got a different filename than the one on disk.
+func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, trackNumberToPrint, discNumber int) string {
 
 	safeTitle := SanitizeFilename(trackName)
 	safeArtist := SanitizeFilename(artistName)
@@ -59,8 +81,8 @@ func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releas
 			filename = strings.ReplaceAll(filename, "{disc}", "")
 		}
 
-		if position > 0 {
-			filename = strings.ReplaceAll(filename, "{track}", fmt.Sprintf("%02d", position))
+		if trackNumberToPrint > 0 {
+			filename = strings.ReplaceAll(filename, "{track}", fmt.Sprintf("%02d", trackNumberToPrint))
 		} else {
 
 			filename = regexp.MustCompile(`\{track\}\.\s*`).ReplaceAllString(filename, "")
@@ -78,8 +100,8 @@ func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releas
 			filename = fmt.Sprintf("%s - %s", safeTitle, safeArtist)
 		}
 
-		if includeTrackNumber && position > 0 {
-			filename = fmt.Sprintf("%02d. %s", position, filename)
+		if includeTrackNumber && trackNumberToPrint > 0 {
+			filename = fmt.Sprintf("%02d. %s", trackNumberToPrint, filename)
 		}
 	}
 

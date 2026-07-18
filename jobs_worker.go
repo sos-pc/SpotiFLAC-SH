@@ -175,7 +175,11 @@ func (jm *JobManager) processJob(jobID string) {
 	// looks right in a listing — so the library fills with junk silently.
 	// Checked here, at the one point where a job becomes Done
 	// (docs/upstream-catchup.md §S2).
-	if resp.File != "" && job.DurationMs > 0 {
+	// resp.AlreadyExists means ExecuteDownload found the file already on disk and
+	// downloaded nothing. Validating it would risk DELETING a file this job never
+	// created — a legitimate extended mix or live version whose duration differs
+	// from Spotify's is not a preview, and it is not ours to remove.
+	if resp.File != "" && !resp.AlreadyExists && job.DurationMs > 0 {
 		if err := audio.ValidateTrackDuration(resp.File, job.DurationMs/1000); err != nil {
 			slog.Warn("[Jobs] Rejected download", "track", job.TrackName, "err", err)
 			if rmErr := os.Remove(resp.File); rmErr != nil && !os.IsNotExist(rmErr) {
