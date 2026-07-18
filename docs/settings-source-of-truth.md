@@ -258,7 +258,7 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      Défauts : les deux occurrences de `tidal-qobuz-amazon` restant dans le bundle sont des
      `SelectItem` (options du menu déroulant), aucun défaut n'y pointe plus.
 
-#### ⚠️ Limite connue introduite par l'étape 6 — l'avertissement « cache froid » est consommé au boot
+#### ✅ Limite de l'étape 6 corrigée le 2026-07-18 (`396698b`) — l'avertissement était consommé au boot
 
 L'avertissement de `getSettings()` **se déclenche bien** (observé : `[web] [warning] getSettings()
 called before the server settings were loaded`), mais son déclencheur est
@@ -272,10 +272,24 @@ déjà chaud.
 chargement — il ne signalera donc plus une lecture froide réellement anormale survenant plus tard,
 typiquement après un `loadSettings()` en échec. **Il masque le cas qu'il devait attraper.**
 
-Atténuation actuelle : un échec de chargement est journalisé séparément
-(`console.error("Failed to load settings from backend")`), donc rien n'est totalement silencieux.
-**À trancher** : distinguer « boot en cours » (attendu, ne pas avertir) de « chargement échoué »
-(anormal, avertir) — quelques lignes d'état, à faire seulement si on juge le signal utile.
+**Correction (`396698b`)** : le booléen est remplacé par un état de chargement explicite
+`SettingsLoadState = "idle" | "loading" | "loaded" | "failed"`.
+
+| État au moment d'une lecture froide | Signification | Journalisation |
+|---|---|---|
+| `idle` / `loading` | **attendu** — lecture pré-paint d'`App.tsx`, thème/police | `debug` |
+| `failed` | **anormal** — le serveur n'a répondu ni en lecture ni en écriture ; toute lecture suivante sert du possiblement périmé, sans correction à venir | `warning`, **une fois par tentative** |
+| `loaded` | le cache répond, cette branche n'est pas atteinte | — |
+
+Le drapeau d'avertissement est **réarmé au début de chaque tentative de chargement** : une nouvelle
+tentative qui échoue est de nouveau signalée, au lieu de rester muette pour le reste du processus.
+
+Cas particulier traité : **être déconnecté n'est pas un échec de chargement** — il n'y a alors aucune
+copie serveur par utilisateur sur laquelle faire autorité, donc ce chemin sort avant d'entrer dans la
+machine à états et ne produit aucun avertissement.
+
+Vérifié : `tsc -b` propre, `eslint` 0 erreur. **Vérif navigateur en attente de redéploiement** (le
+signal attendu : plus de `[web] [warning]` au boot, seulement un `[debug]`).
 
 Ordre impératif : **1 avant 3** (le backend doit savoir calculer le chemin avant que le frontend
 arrête de l'envoyer, sinon les fichiers atterrissent au mauvais endroit).
