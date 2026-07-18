@@ -26,7 +26,7 @@
 > **définitivement** (sous-domaine DNS supprimé, pas en panne). Ce n'est pas un hoquet, c'est une
 > érosion.
 
-> ## 🔴 NOUVEAU — 2026-07-19 : Tidal échoue par intermittence
+> ## 🟡 2026-07-19 : incident Tidal PASSAGER, rétabli — re-mesuré 6/6
 >
 > Observé en prod pendant une vérification : **3 échecs pour 1 succès** sur une fenêtre de quelques
 > minutes, tous avec
@@ -39,9 +39,18 @@
 > de tout changement de code. **Ce n'est pas une panne totale : des téléchargements aboutissent
 > encore.**
 >
-> **Ce que ça implique :** Tidal est la seule route qui fonctionnait. Si la dégradation se confirme,
-> le chantier [external-api-layer.md](external-api-layer.md) — jusqu'ici recommandé « ne rien faire
-> tant que Tidal tient » — change de priorité. À re-mesurer avant toute décision.
+> **✅ RE-MESURÉ le même soir, ~30 min plus tard : l'incident est terminé.** Échantillon de 6 pistes
+> absentes du disque, mises en file et traitées : **6 succès, 0 échec**, tous via
+> `[Auto] Success service=tidal`, **zéro 401 Tidal** dans tout le buffer de logs, zéro
+> rafraîchissement d'auth. La chaîne se comporte normalement (deezer HTML → qobuz 401 → amazon DNS →
+> tidal ✓).
+>
+> **Ce que ça implique :** rien ne change. Le chantier [external-api-layer.md](external-api-layer.md)
+> reste reportable — la recommandation « ne rien faire tant que Tidal tient » vaut toujours.
+>
+> **Ce que ça apprend :** un échantillon de 4 (3 échecs / 1 succès) ne suffit pas à conclure à une
+> dégradation. Il aurait été facile de rouvrir un chantier de ~850 lignes sur ce signal. Re-mesurer
+> avant d'agir a évité ça — c'est exactement la règle que ce document impose pour les observations 🌍.
 
 > ## ⚠️ CORRECTION MAJEURE — 2026-07-18 : « Amazon est mort » était FAUX
 >
