@@ -198,7 +198,21 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      `use_album_track_number`) et un artiste déjà rogné — à moitié autoritaire, et cassé dès que le
      client cesserait de les envoyer. Le handler les dérive maintenant tous du serveur, avec le même
      trimming premier-artiste que `buildDownloadRequest`.
-     **Vérif navigateur en attente de redéploiement.**
+     **✅ VÉRIFIÉ EN PROD le 2026-07-18** (in-app browser, session methammer, bundle
+     `index-DVtMfTAH.js`, `fetch` instrumenté). Téléchargement de *Matrix — Dizzy Gillespie* :
+     - `POST /downloads/track` porte **uniquement** `service:"auto"` + identité + `position`.
+       **Absents** : `output_dir`, `filename_format`, `audio_format`, `folder_name`, `track_number`,
+       `use_album_track_number`, `embed_lyrics`, `embed_max_quality_cover`, `use_first_artist_only`,
+       `use_single_genre`, `embed_genre`, `api_url`.
+     - `POST /files/exists` porte `output_dir:""`, `root_dir:""`, sans `filename_format` /
+       `include_track_number` / `relative_path`.
+     - **Discriminant** : le serveur log `audio_format=HI_RES_LOSSLESS` et
+       `order=deezer-qobuz-amazon-tidal` alors que **le client n'a envoyé ni l'un ni l'autre** →
+       les deux viennent des réglages serveur. Preuve directe du modèle autoritaire.
+     - Chaîne complète observée : `deezer` (HTML au lieu de JSON) → `qobuz` (401, S6) →
+       `amazon` (DNS mort) → **`tidal` Success** → `[Jobs] Done`.
+     - `album_artist:"Dizzy Gillespie, Astrud Gilberto"` part **brut**, les deux artistes : confirme
+       que `useFirstArtistOnly` n'est pas hardcodé (réglage réel, cf. §7.6).
 4. **Cover/paroles utilisent le chemin retourné** (D4).
 5. **Un seul générateur M3U8** (D5) — trancher.
 6. **`getSettings()` reflète toujours le serveur** (§2/§3) — corriger priorité cache/localStorage +
@@ -206,3 +220,24 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
 
 Ordre impératif : **1 avant 3** (le backend doit savoir calculer le chemin avant que le frontend
 arrête de l'envoyer, sinon les fichiers atterrissent au mauvais endroit).
+
+### 7.6 `useFirstArtistOnly` — levée de doute (2026-07-18)
+
+Question posée pendant la revue de l'étape 3-frontend : « garder systématiquement le premier artiste,
+c'est un réglage inexistant dans l'UI et je ne suis pas ok avec ça comme défaut, encore moins
+hardcodé ». Vérifié — **le réglage existe, il n'est ni hardcodé ni activé par défaut** :
+
+| Point | Réalité | Preuve |
+|---|---|---|
+| Présent dans l'UI ? | **Oui**, switch « Use First Artist Only » | [FilesTab.tsx:199](../frontend/src/components/settings/FilesTab.tsx) — onglet **File Management**, pas *General* |
+| Défaut | **`false`** | [settings.ts:152](../frontend/src/lib/settings.ts) + migration qui force `false` s'il est absent |
+| Valeur en prod | **`False`** | `GET /api/v1/settings` |
+| Effet backend | trimming **seulement si vrai** | `if s.UseFirstArtistOnly { artist = getFirstArtistStatic(artist) }` |
+
+**Piège à retenir** : ce réglage est dans *File Management*, pas dans *General* — un `grep` limité à
+`GeneralTab.tsx` conclut à tort qu'il n'existe pas dans l'UI. C'est exactement l'erreur commise ici.
+
+**Ce que l'étape 3 a changé** : *avant*, le frontend rognait l'artiste (selon **son** cache) **et** le
+backend rognait à nouveau (selon les réglages **serveur**) — deux décideurs pouvant diverger, cas
+d'école du problème §1/§2. Désormais le client envoie l'artiste brut et **seul** le serveur décide.
+Le changement **réduit** le risque de trimming inattendu ; il ne l'introduit pas.
