@@ -70,9 +70,16 @@ func TestInvalidateClearsEveryField(t *testing.T) {
 	if spotifyTokenCacheValidLocked(time.Now()) {
 		t.Fatal("cache still reports valid after invalidation")
 	}
-	if spotifyTokenCache.accessToken != "" || spotifyTokenCache.clientID != "" ||
-		!spotifyTokenCache.expiresAt.IsZero() {
-		t.Errorf("invalidation left residue: %+v", spotifyTokenCache)
+	// Field by field: the struct embeds a mutex, and copying it into a format
+	// argument is what go vet rightly refuses.
+	if spotifyTokenCache.accessToken != "" {
+		t.Errorf("invalidation left accessToken = %q", spotifyTokenCache.accessToken)
+	}
+	if spotifyTokenCache.clientID != "" {
+		t.Errorf("invalidation left clientID = %q", spotifyTokenCache.clientID)
+	}
+	if !spotifyTokenCache.expiresAt.IsZero() {
+		t.Errorf("invalidation left expiresAt = %v", spotifyTokenCache.expiresAt)
 	}
 }
 
