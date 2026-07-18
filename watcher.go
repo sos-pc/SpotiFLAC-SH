@@ -720,6 +720,44 @@ func (w *Watcher) OnPermanentFailure(watchlistID, spotifyID string) {
 	w.RemoveTrackID(watchlistID, spotifyID)
 }
 
+// OnManualBatchComplete implémente JobEventHandler pour les lots NON-watchlist.
+//
+// C'est ici que se ferme le trou de l'étape 5 : le client écrivait le M3U8 juste
+// après l'ENQUEUE, à partir du seul contrôle d'existence, donc il ne listait que
+// les pistes déjà présentes — une playlist entièrement neuve n'en obtenait
+// aucun. Le lot a maintenant un vrai moment de fin, côté serveur, et le fichier
+// est écrit à partir des pistes réellement arrivées sur le disque. Ça marche
+// aussi quand l'onglet a été fermé entre-temps.
+//
+// Même écriture partagée que les watchlists (writeM3U8ToPlaylistsDir), donc même
+// dossier et même convention de nommage. Le garde anti-rétrécissement est
+// toujours actif ici : un lot manuel est par nature un sous-ensemble, il ne doit
+// jamais remplacer le fichier complet par une version partielle.
+func (w *Watcher) OnManualBatchComplete(req BatchM3U8Request, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	settings := EffectiveDownloadSettings(w.auth, req.UserID)
+	if !settings.CreateM3u8File {
+		return
+	}
+	root := settings.DownloadPath
+	if root == "" {
+		root = util.GetDefaultMusicPath()
+	}
+	baseName := m3u8BaseName(req.Name, req.SourceID)
+	result, err := writeM3U8ToPlaylistsDir(
+		filepath.Clean(root), baseName, settings.JellyfinMusicPath, paths, len(paths), true,
+	)
+	if err != nil {
+		slog.Error("[M3U8] manual batch write failed", "playlist", req.Name, "err", err)
+		return
+	}
+	if result.Written {
+		slog.Info("[M3U8] manual batch written", "file", baseName+".m3u8", "entries", len(paths))
+	}
+}
+
 // OnBatchComplete implémente JobEventHandler.
 // Trouve le SyncLog par BatchID, met à jour ses compteurs, génère le M3U8.
 func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int) {

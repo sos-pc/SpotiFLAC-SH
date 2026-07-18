@@ -113,6 +113,22 @@ type EnqueueBatchRequest struct {
 	Settings    JobSettings `json:"settings"`
 	WatchlistID string      `json:"watchlist_id,omitempty"`
 	UserID      string      `json:"user_id,omitempty"`
+	// M3U8Name / M3U8SourceID ask for an M3U8 to be written when this batch
+	// finishes. Only manual batches set them: a watchlist's M3U8 is the
+	// watcher's job. The name is the playlist/album label, the source id
+	// disambiguates the filename the way a watchlist id does.
+	M3U8Name     string `json:"m3u8_name,omitempty"`
+	M3U8SourceID string `json:"m3u8_source_id,omitempty"`
+}
+
+// BatchM3U8Request is what a finished manual batch needs to name and place its
+// M3U8. Carried in memory only: after a restart the batch counters are gone
+// too, so a batch spanning a restart writes no M3U8 — same degradation the
+// watchlist counters already accept.
+type BatchM3U8Request struct {
+	Name     string
+	SourceID string
+	UserID   string
 }
 
 // JobTrack is the per-track payload inside EnqueueBatchRequest.
@@ -154,6 +170,11 @@ type JobEventHandler interface {
 	// OnBatchComplete is called when all jobs in a batch have reached a
 	// terminal state. Updates the SyncLog and generates the M3U8 file.
 	OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int)
+	// OnManualBatchComplete is called when a NON-watchlist batch that asked
+	// for an M3U8 has finished, with the file paths that actually landed on
+	// disk, in playlist order. Implemented by the watcher because writing the
+	// file needs the user's settings, which the job manager has no access to.
+	OnManualBatchComplete(req BatchM3U8Request, paths []string)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +199,10 @@ type JobManager struct {
 	batchTotals  map[string]int    // batchID → total jobs enqueued
 	batchDone    map[string]int    // batchID → terminal jobs count
 	batchWatchID map[string]string // batchID → watchlistID
+	// batchID → what a MANUAL (non-watchlist) batch needs to write its M3U8
+	// once every job has finished. Watchlists are absent from this map: the
+	// watcher owns their generation.
+	batchM3U8 map[string]BatchM3U8Request
 	// Injected by NewWatcher to retrieve current watchlist settings at runtime.
 	getWatchlistSettings func(watchlistID string) (JobSettings, bool)
 }
@@ -220,6 +245,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 		batchTotals:    make(map[string]int),
 		batchDone:      make(map[string]int),
 		batchWatchID:   make(map[string]string),
+		batchM3U8:      make(map[string]BatchM3U8Request),
 	}
 
 	jm.recoverPendingJobs()
@@ -394,12 +420,22 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		}
 	}
 
-	if enqueued > 0 && req.WatchlistID != "" {
+	// Counters are registered for MANUAL batches too, not just watchlists:
+	// without them maybeGenerateM3U8 could never detect that a manual batch had
+	// finished, which is why a freshly-downloaded playlist never got an M3U8.
+	if enqueued > 0 {
 		// Already holding jm.mu for the whole call (see the top of this
 		// function) — no separate lock/unlock needed here anymore.
 		jm.batchTotals[batchID] = enqueued
 		jm.batchDone[batchID] = 0
 		jm.batchWatchID[batchID] = req.WatchlistID
+		if req.WatchlistID == "" && req.M3U8Name != "" {
+			jm.batchM3U8[batchID] = BatchM3U8Request{
+				Name:     req.M3U8Name,
+				SourceID: req.M3U8SourceID,
+				UserID:   req.UserID,
+			}
+		}
 	} else if enqueued == 0 && skipped > 0 && req.WatchlistID != "" && jm.eventHandler != nil {
 		// Every track in the batch was caught by dedup (duplicate active
 		// job or catalog dedup) — no job was ever created with this

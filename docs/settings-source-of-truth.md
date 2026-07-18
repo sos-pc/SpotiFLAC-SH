@@ -276,9 +276,8 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      une watchlist ne l'active que si des pistes n'ont pas pu être résolues (une liste plus courte
      entièrement résolue = la playlist a vraiment rétréci) ; un lot manuel l'active **toujours**, étant
      par nature un sous-ensemble qui ne doit jamais écraser le fichier complet.
-   - L'endpoint `/files/m3u8` lit `createM3u8File` et `jellyfinMusicPath` **du serveur** et renvoie le
-     `m3u8GenerationResult` ; le client n'annonce plus « playlist créée » quand le serveur a refusé
-     d'écrire.
+   - ~~L'endpoint `/files/m3u8` lit les réglages du serveur~~ → **route supprimée le 2026-07-18**, voir
+     le complément ci-dessous.
    - `resolvePlaylistBaseDir` et le paramètre `isAlbum` des deux handlers de lot sont **supprimés** —
      c'était le **dernier calcul de chemin côté client**.
    - **Conséquence assumée** : les M3U8 manuels déjà écrits à côté de la musique **restent où ils
@@ -303,6 +302,39 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      `/home/nonroot/Music/` → `/Multimedia/Musique/Spotiflac/`, en-tête présent, chemins absolus.
      Note pour une prochaine fois : l'API n'expose **aucun** endpoint de lecture de fichier texte
      (`/files/audio` liste un dossier, il ne lit pas), donc ce contrôle passe forcément par le conteneur.
+
+   #### ⚠️ Trou trouvé APRÈS cette vérification, et fermé le 2026-07-18
+
+   La vérification ci-dessus est passée sur un **cas favorable qui masquait un vrai trou** : les deux
+   pistes Rey Pila étaient **déjà sur le disque**. Or `finalFilePaths`, la liste que le client envoyait,
+   n'était alimentée que par le **contrôle d'existence** — jamais par les jobs terminés. Conséquences :
+
+   - une playlist **entièrement neuve** produisait une liste vide → `maybeCreateM3U8` sortait tôt →
+     **aucun M3U8 écrit** ;
+   - un lot mixte n'écrivait que les pistes **préexistantes**, en omettant tout ce qui venait d'être
+     téléchargé.
+
+   Cause racine commune avec la phase 2b : **le client ne sait pas quand un téléchargement est
+   réellement fini**. Le correctif est donc côté serveur, pas côté client.
+
+   **Ce qui a été fait :**
+   - `maybeGenerateM3U8` sortait dès que `watchlistID == ""` : un lot manuel n'avait donc **aucun
+     moment de fin**. Le garde devient `batchID == ""`, et les compteurs de lot sont désormais
+     enregistrés pour les lots manuels aussi.
+   - Nouveau `OnManualBatchComplete` sur `JobEventHandler`, implémenté par le **watcher** (c'est lui qui
+     a accès aux réglages utilisateur, le `JobManager` non). Il écrit via le **même**
+     `writeM3U8ToPlaylistsDir` que les watchlists : même dossier, même nommage, même garde.
+   - Le lot transporte `m3u8_name` / `m3u8_source_id` dans `POST /api/v1/jobs`.
+   - Seules les pistes **réellement arrivées sur le disque** entrent dans le fichier (`done`/`skipped`
+     avec un `FilePath` non vide), **triées par `Position`** pour respecter l'ordre de la playlist.
+   - Côté client : `maybeCreateM3U8`, `CreateM3U8File` et la route `POST /api/v1/files/m3u8` sont
+     **supprimés** — plus aucun appelant.
+
+   **Bénéfice de bord** : ça marche même si l'onglet est fermé avant la fin du lot, ce que la version
+   client ne pouvait pas faire.
+
+   **Limite assumée** : les compteurs de lot sont en mémoire. Un lot à cheval sur un redémarrage du
+   conteneur n'écrit pas de M3U8 — même dégradation que celle déjà acceptée pour les watchlists.
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`

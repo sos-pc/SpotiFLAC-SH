@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -427,16 +428,24 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 // Batch completion tracking
 // ─────────────────────────────────────────────────────────────────────────────
 
-// maybeGenerateM3U8 checks whether the batch is complete and notifies Watcher
-// via OnBatchComplete.
+// maybeGenerateM3U8 checks whether the batch is complete, then hands it to the
+// event handler: OnBatchComplete for a watchlist, OnManualBatchComplete for a
+// manual one that asked for an M3U8.
+//
+// It used to bail whenever watchlistID was empty, so a manual batch never had a
+// completion moment at all. That is why a freshly-downloaded playlist got no
+// M3U8: the client wrote one right after ENQUEUE, from the existence check
+// alone, so it only ever listed tracks that were already on disk.
+//
 // Fast path: in-memory counter O(1).
 // Recovery path (after restart, counter unknown): BoltDB scan O(n).
 func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
-	if batchID == "" || watchlistID == "" {
+	if batchID == "" {
 		return
 	}
 
 	jm.mu.Lock()
+	m3u8Req, wantsM3U8 := jm.batchM3U8[batchID]
 	total, hasCounter := jm.batchTotals[batchID]
 	if hasCounter {
 		jm.batchDone[batchID]++
@@ -448,6 +457,7 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 		delete(jm.batchTotals, batchID)
 		delete(jm.batchDone, batchID)
 		delete(jm.batchWatchID, batchID)
+		delete(jm.batchM3U8, batchID)
 		jm.mu.Unlock()
 	} else {
 		jm.mu.Unlock()
@@ -495,9 +505,31 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 		}
 	}
 
-	if jm.eventHandler != nil {
-		jm.eventHandler.OnBatchComplete(watchlistID, batchID, downloaded, skipped, failed)
+	if jm.eventHandler == nil {
+		return
 	}
+	if watchlistID != "" {
+		jm.eventHandler.OnBatchComplete(watchlistID, batchID, downloaded, skipped, failed)
+		return
+	}
+	if !wantsM3U8 {
+		return
+	}
+	// Only tracks that actually landed on disk go in, in playlist order. A
+	// failed track has no file to point at, and a skipped one was already
+	// there — both are legitimate entries only if they resolved to a path.
+	done := make([]Job, 0, len(latest))
+	for _, j := range latest {
+		if (j.Status == StatusDone || j.Status == StatusSkipped) && j.FilePath != "" {
+			done = append(done, j)
+		}
+	}
+	sort.Slice(done, func(a, b int) bool { return done[a].Position < done[b].Position })
+	paths := make([]string, 0, len(done))
+	for _, j := range done {
+		paths = append(paths, j.FilePath)
+	}
+	jm.eventHandler.OnManualBatchComplete(m3u8Req, paths)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

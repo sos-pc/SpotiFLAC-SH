@@ -8,16 +8,16 @@ import { downloadWithAutoFallback } from "@/lib/downloadFallback";
 import { useJobsStreamEvent } from "./useJobsStreamEvent";
 import type { TrackMetadata, FileExistsCheck } from "@/types/api";
 import type { Settings } from "@/lib/settings";
-import { CheckFilesExistence, CreateM3U8File, EnqueueBatch } from "@/lib/rpc";
+import { CheckFilesExistence, EnqueueBatch } from "@/lib/rpc";
 
-// buildExistenceCheckRequests, enqueueTracksBatch and maybeCreateM3U8 are
-// shared by handleDownloadSelected and handleDownloadAll below, which used
-// to independently reimplement all three — including a divergence where
-// handleDownloadAll called CreateM3U8File with an empty path list (creating
-// a bogus empty playlist + a misleading "M3U8 playlist created" toast on any
-// batch with no pre-existing files, i.e. the common case of downloading a
-// brand new playlist/album) while handleDownloadSelected correctly skipped
-// the call in that case.
+// buildExistenceCheckRequests and enqueueTracksBatch are shared by
+// handleDownloadSelected and handleDownloadAll below, which used to
+// reimplement them independently and had drifted apart.
+//
+// M3U8 writing is no longer here at all: the client used to call it right after
+// enqueue with the paths from the existence check, so it listed only tracks
+// already on disk and wrote nothing for a brand-new playlist. The server now
+// writes it when the batch finishes (docs/settings-source-of-truth.md D5).
 // No settings argument by design: the server derives the folder, the filename
 // template, the track-number rule and the first-artist trimming from the user's
 // saved settings, so the check targets exactly where a download lands
@@ -47,6 +47,7 @@ async function enqueueTracksBatch(
   skippedCount: number,
   downloadMode: "server" | "browser",
   browserBatchIdsRef: { current: Set<string> },
+  sourceId?: string,
 ) {
   if (tracksToDownload.length === 0) {
     toast.info(`${skippedCount} tracks already exist`);
@@ -81,7 +82,14 @@ async function enqueueTracksBatch(
     service: settings.downloader || "tidal",
   };
   try {
-    const resp = await EnqueueBatch({ tracks: jobTracks, settings: jobSettings });
+    const resp = await EnqueueBatch({
+      tracks: jobTracks,
+      settings: jobSettings,
+      // The server writes the M3U8 when the batch finishes, from the tracks
+      // that actually landed on disk (docs/settings-source-of-truth.md D5).
+      m3u8_name: folderName || "",
+      m3u8_source_id: sourceId || "",
+    });
     logger.success(
       `[EnqueueBatch] ${resp.enqueued} tracks queued, ${resp.skipped} skipped`,
     );
@@ -96,30 +104,6 @@ async function enqueueTracksBatch(
   } catch (err) {
     logger.error(`EnqueueBatch failed: ${err}`);
     toast.error(`Failed to queue tracks: ${err}`);
-  }
-}
-
-// The client no longer decides whether an M3U8 is written, where it goes, or
-// how the Jellyfin path is rewritten — the server reads all of that from the
-// user's settings (docs/settings-source-of-truth.md D5). It only reports what
-// came back, so a write the server declined is not announced as a success.
-async function maybeCreateM3U8(
-  folderName: string | undefined,
-  sourceId: string,
-  paths: string[],
-) {
-  if (!folderName || paths.length === 0) return;
-  try {
-    logger.info(`creating m3u8 playlist: ${folderName}`);
-    const res = await CreateM3U8File(folderName, sourceId, paths);
-    if (res?.written) {
-      toast.success("M3U8 playlist created");
-    } else if (res?.skipped) {
-      logger.info("m3u8 not written: would have shrunk the existing playlist");
-    }
-  } catch (err) {
-    logger.error(`failed to create m3u8 playlist: ${err}`);
-    toast.error(`Failed to create M3U8 playlist: ${err}`);
   }
 }
 
@@ -399,6 +383,7 @@ export function useDownload(region: string) {
       skippedCount,
       downloadMode,
       browserBatchIdsRef,
+      sourceId,
     );
     // Queued, not downloaded — the stream settles each badge (phase 2b).
     for (const track of tracksToDownload) {
@@ -409,10 +394,6 @@ export function useDownload(region: string) {
     setIsDownloading(false);
     setBulkDownloadType(null);
     shouldStopDownloadRef.current = false;
-    const paths = selectedTrackObjects
-      .map((t) => finalFilePaths.get(t.spotify_id || "") || "")
-      .filter((p) => p !== "");
-    await maybeCreateM3U8(folderName, sourceId || "", paths);
   };
   const handleDownloadAll = async (
     tracks: TrackMetadata[],
@@ -467,6 +448,7 @@ export function useDownload(region: string) {
       skippedCount,
       downloadMode,
       browserBatchIdsRef,
+      sourceId,
     );
     // Queued, not downloaded — the stream settles each badge (phase 2b).
     for (const track of tracksToDownload) {
@@ -477,11 +459,6 @@ export function useDownload(region: string) {
     setIsDownloading(false);
     setBulkDownloadType(null);
     shouldStopDownloadRef.current = false;
-    await maybeCreateM3U8(
-      folderName,
-      sourceId || "",
-      finalFilePaths.filter((p) => p !== ""),
-    );
   };
   const handleStopDownload = () => {
     logger.info("download stopped by user");

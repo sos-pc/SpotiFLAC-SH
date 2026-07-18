@@ -178,8 +178,16 @@ export const DownloadGalleryImage = (req: GalleryImageDownloadRequest) =>
   rest<GalleryImageDownloadResponse>("POST", "/media/gallery", req);
 export const DownloadAvatar = (req: AvatarDownloadRequest) =>
   rest<AvatarDownloadResponse>("POST", "/media/avatar", req);
-export const EnqueueBatch = (req: { tracks: unknown[]; settings: unknown }) =>
-  rest<EnqueueBatchResponse>("POST", "/jobs", req);
+// m3u8_name / m3u8_source_id ask the SERVER to write the playlist's M3U8 once
+// every job in the batch has finished (docs/settings-source-of-truth.md D5).
+// The client used to write it itself right after enqueue, from the existence
+// check alone, so it only ever listed tracks that were already on disk.
+export const EnqueueBatch = (req: {
+  tracks: unknown[];
+  settings: unknown;
+  m3u8_name?: string;
+  m3u8_source_id?: string;
+}) => rest<EnqueueBatchResponse>("POST", "/jobs", req);
 
 // ─── Queue / Progress ─────────────────────────────────────────────────────────
 
@@ -258,19 +266,6 @@ export const UploadImageBytes = (filename: string, base64Data: string) =>
     filename,
     base64_data: base64Data,
   }).then((r) => r.url);
-// The name and the source id only disambiguate the filename; where the file
-// goes, whether it is written at all, and the Jellyfin path rewrite are all the
-// server's call (docs/settings-source-of-truth.md D5).
-export const CreateM3U8File = (
-  m3u8Name: string,
-  sourceId: string,
-  filePaths: string[],
-) =>
-  rest<{ written: boolean; skipped?: boolean; disabled?: boolean }>("POST", "/files/m3u8", {
-    m3u8_name: m3u8Name,
-    source_id: sourceId,
-    file_paths: filePaths,
-  });
 export const CheckFilesExistence = (
   outputDir: string,
   rootDir: string,

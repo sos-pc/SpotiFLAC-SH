@@ -861,19 +861,14 @@ Check which expected files are already on disk. Looks under `output_dir` first, 
 }
 ```
 
-### `POST /api/v1/files/m3u8`
-Atomically generate (or rewrite) an `.m3u8` playlist file. The file is written to `<output_dir>/<m3u8_name>.m3u8` (sanitized) using a write-then-rename strategy so it is never half-written. When `jellyfin_music_path` is set, every entry has `music_root` rewritten to that path.
+### ~~`POST /api/v1/files/m3u8`~~ — **supprimée le 2026-07-18**
+Cette route écrivait un `.m3u8` à la demande du client. Elle n'a plus d'appelant : la génération est
+passée **côté serveur, à la fin du lot** (`OnManualBatchComplete`), parce que le client l'appelait
+juste après l'*enqueue* et ne connaissait donc que les pistes **déjà présentes** sur le disque — une
+playlist entièrement neuve n'obtenait aucun M3U8. Voir
+[settings-source-of-truth.md §7.5 étape 5](settings-source-of-truth.md).
 
-**Body**
-```json
-{
-  "m3u8_name": "Today's Top Hits",
-  "output_dir": "/home/nonroot/Music/Playlists",
-  "file_paths": ["/home/nonroot/Music/Album/01.flac"],
-  "jellyfin_music_path": "/media/music",
-  "music_root": "/home/nonroot/Music"
-}
-```
+Pour demander un M3U8, un lot passe désormais `m3u8_name` / `m3u8_source_id` à `POST /api/v1/jobs`.
 
 ### `POST /api/v1/files/upload/image`
 Upload an image as base64 to a public file-sharing service (`UploadBytesToSendNow`).

@@ -516,51 +516,6 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, map[string]string{"url": url})
 	}))
 
-	s.mux.Handle("POST /api/v1/files/m3u8", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		if !v1RequirePermission(w, r, "manage") {
-			return
-		}
-		// Backend-authoritative (D5). The client used to send output_dir,
-		// jellyfin_music_path and music_root — all three settings-derived — and
-		// the file landed beside the music instead of in the Playlists/ folder
-		// watchlist syncs use. Same playlist, two files, no relationship.
-		//
-		// SourceID is the Spotify playlist/album id. It only disambiguates the
-		// filename (two playlists whose names sanitise identically), exactly as
-		// the watchlist id does; it is not trusted as a path.
-		var params struct {
-			M3U8Name  string   `json:"m3u8_name"`
-			SourceID  string   `json:"source_id"`
-			FilePaths []string `json:"file_paths"`
-		}
-		if !decodeV1JSON(w, r, &params) {
-			return
-		}
-		settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
-		if !settings.CreateM3u8File {
-			writeV1JSON(w, http.StatusOK, map[string]any{"ok": true, "written": false, "disabled": true})
-			return
-		}
-		root := s.libraryRootFor(r)
-		cleanedPaths, err := cleanLibraryPaths(root, params.FilePaths)
-		if err != nil {
-			writeV1Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		// guardShrink is always on here: a manual batch is a subset of a
-		// playlist by nature, so it must never replace a complete file with a
-		// partial one.
-		result, err := writeM3U8ToPlaylistsDir(
-			root, m3u8BaseName(params.M3U8Name, params.SourceID), settings.JellyfinMusicPath,
-			cleanedPaths, len(cleanedPaths), true,
-		)
-		if err != nil {
-			writeV1Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeV1JSON(w, http.StatusOK, result)
-	}))
-
 	s.mux.Handle("POST /api/v1/files/exists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		if !v1RequirePermission(w, r, "read") {
 			return
