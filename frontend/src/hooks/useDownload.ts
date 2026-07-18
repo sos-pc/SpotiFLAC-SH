@@ -18,37 +18,25 @@ import { CheckFilesExistence, CreateM3U8File, EnqueueBatch } from "@/lib/rpc";
 // batch with no pre-existing files, i.e. the common case of downloading a
 // brand new playlist/album) while handleDownloadSelected correctly skipped
 // the call in that case.
+// No settings argument by design: the server derives the folder, the filename
+// template, the track-number rule and the first-artist trimming from the user's
+// saved settings, so the check targets exactly where a download lands
+// (docs/settings-source-of-truth.md). The client sends raw identity only.
 function buildExistenceCheckRequests(
-  settings: Settings,
   tracks: TrackMetadata[],
 ): FileExistsCheck[] {
-  const useAlbumTrackNumber =
-    settings.folderTemplate?.includes("{album}") || false;
-  return tracks.map((track) => {
-    const displayArtist =
-      settings.useFirstArtistOnly && track.artists
-        ? getFirstArtist(track.artists)
-        : track.artists;
-    const displayAlbumArtist =
-      settings.useFirstArtistOnly && track.album_artist
-        ? getFirstArtist(track.album_artist)
-        : track.album_artist;
-    return {
-      spotify_id: track.spotify_id || "",
-      track_name: track.name || "",
-      artist_name: displayArtist || "",
-      album_name: track.album_name || "",
-      album_artist: displayAlbumArtist || "",
-      release_date: track.release_date || "",
-      track_number: track.track_number || 0,
-      disc_number: track.disc_number || 0,
-      position: 0,
-      use_album_track_number: useAlbumTrackNumber,
-      filename_format: settings.filenameTemplate || "",
-      include_track_number: settings.trackNumber || false,
-      audio_format: "flac",
-    };
-  });
+  return tracks.map((track) => ({
+    spotify_id: track.spotify_id || "",
+    track_name: track.name || "",
+    artist_name: track.artists || "",
+    album_name: track.album_name || "",
+    album_artist: track.album_artist || "",
+    release_date: track.release_date || "",
+    track_number: track.track_number || 0,
+    disc_number: track.disc_number || 0,
+    position: 0,
+    audio_format: "flac",
+  }));
 }
 
 async function enqueueTracksBatch(
@@ -64,23 +52,15 @@ async function enqueueTracksBatch(
     toast.info(`${skippedCount} tracks already exist`);
     return;
   }
-  const is24Bit = (settings.autoQuality || "24") === "24";
   const jobTracks = tracksToDownload.map((track) => {
-    const displayArtist =
-      settings.useFirstArtistOnly && track.artists
-        ? getFirstArtist(track.artists)
-        : track.artists;
-    const displayAlbumArtist =
-      settings.useFirstArtistOnly && track.album_artist
-        ? getFirstArtist(track.album_artist)
-        : track.album_artist;
     const originalIndex = orderedTracks.indexOf(track);
     return {
       spotify_id: track.spotify_id || "",
       track_name: track.name || "",
-      artist_name: displayArtist || "",
+      // Raw names: the server applies useFirstArtistOnly itself.
+      artist_name: track.artists || "",
       album_name: track.album_name || "",
-      album_artist: displayAlbumArtist || track.album_artist || "",
+      album_artist: track.album_artist || "",
       release_date: track.release_date || "",
       cover_url: track.images || "",
       track_number: track.track_number || 0,
@@ -94,22 +74,11 @@ async function enqueueTracksBatch(
       playlist_name: folderName || "",
     };
   });
+  // Backend-authoritative (docs/settings-source-of-truth.md): the server rebuilds
+  // every download setting from the user's saved settings for a normal batch.
+  // Only the service override travels with the request.
   const jobSettings = {
     service: settings.downloader || "tidal",
-    downloadPath: settings.downloadPath,
-    filenameTemplate: settings.filenameTemplate || "",
-    folderTemplate: settings.folderTemplate || "",
-    trackNumber: settings.trackNumber ?? true,
-    embedLyrics: settings.embedLyrics ?? false,
-    embedMaxQualityCover: settings.embedMaxQualityCover ?? false,
-    tidalQuality: is24Bit ? "HI_RES_LOSSLESS" : "LOSSLESS",
-    qobuzQuality: is24Bit ? "27" : "6",
-    autoOrder: settings.autoOrder || "tidal-amazon-qobuz",
-    autoQuality: settings.autoQuality || "24",
-    useFirstArtistOnly: settings.useFirstArtistOnly ?? false,
-    useSingleGenre: settings.useSingleGenre ?? false,
-    embedGenre: settings.embedGenre ?? false,
-    createPlaylistFolder: settings.createPlaylistFolder ?? false,
   };
   try {
     const resp = await EnqueueBatch({ tracks: jobTracks, settings: jobSettings });
@@ -327,15 +296,9 @@ export function useDownload(region: string) {
       .map((id) => allTracks.find((t) => t.spotify_id === id))
       .filter((t): t is TrackMetadata => t !== undefined);
     logger.info(`checking existing files in parallel...`);
-    const existenceChecks = buildExistenceCheckRequests(
-      settings,
-      selectedTrackObjects,
-    );
-    const existenceResults = await CheckFilesExistence(
-      outputDir,
-      settings.downloadPath,
-      existenceChecks,
-    );
+    const existenceChecks = buildExistenceCheckRequests(selectedTrackObjects);
+    // Directories ignored by the server — it derives them from the settings.
+    const existenceResults = await CheckFilesExistence("", "", existenceChecks);
     const existingSpotifyIDs = new Set<string>();
     const finalFilePaths = new Map<string, string>();
     for (const result of existenceResults) {
@@ -399,12 +362,9 @@ export function useDownload(region: string) {
     setDownloadProgress(0);
     const outputDir = resolvePlaylistBaseDir(settings, folderName, isAlbum);
     logger.info(`checking existing files in parallel...`);
-    const existenceChecks = buildExistenceCheckRequests(settings, tracksWithId);
-    const existenceResults = await CheckFilesExistence(
-      outputDir,
-      settings.downloadPath,
-      existenceChecks,
-    );
+    const existenceChecks = buildExistenceCheckRequests(tracksWithId);
+    // Directories ignored by the server — it derives them from the settings.
+    const existenceResults = await CheckFilesExistence("", "", existenceChecks);
     const finalFilePaths: string[] = new Array(tracksWithId.length).fill("");
     const existingSpotifyIDs = new Set<string>();
     for (let i = 0; i < existenceResults.length; i++) {

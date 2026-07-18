@@ -1,5 +1,4 @@
 import { downloadTrack, fetchSpotifyMetadata } from "@/lib/api";
-import { resolveOutputPath } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { CheckFilesExistence } from "@/lib/rpc";
 import type { Settings } from "@/lib/settings";
@@ -68,7 +67,6 @@ export async function downloadWithAutoFallback(
   const service = settings.downloader;
   const query =
     trackName && artistName ? `${trackName} ${artistName} ` : undefined;
-  let useAlbumTrackNumber = false;
   let finalReleaseDate = releaseDate;
   let finalTrackNumber = spotifyTrackNumber || 0;
   if (spotifyId) {
@@ -87,53 +85,31 @@ export async function downloadWithAutoFallback(
       // Best-effort enrichment — keep the already-assigned fallback values.
     }
   }
-  const hasSubfolder =
-    settings.folderTemplate && settings.folderTemplate.trim() !== "";
-  const trackNumberForTemplate =
-    hasSubfolder && finalTrackNumber > 0 ? finalTrackNumber : position || 0;
-  if (hasSubfolder) {
-    useAlbumTrackNumber = true;
-  }
-  // isAlbum: true — a single-track download has no album/playlist page
-  // context to distinguish, so this always suppresses the playlist
-  // subfolder when the folder template already covers it, matching the
-  // pre-consolidation behavior of this call site.
-  const { outputDir, displayArtist, displayAlbumArtist } = resolveOutputPath(
-    settings,
-    {
-      artistName,
-      albumName,
-      albumArtist,
-      trackName,
-      playlistName,
-      trackNumber: trackNumberForTemplate,
-      releaseDate: finalReleaseDate || releaseDate,
-      isAlbum: true,
-    },
-  );
+  // Nothing settings-derived is computed here any more. The folder template,
+  // filename template, quality, embed flags and the first-artist trimming all
+  // live on the server (docs/settings-source-of-truth.md — backend-authoritative).
+  // The client sends the track's identity, the per-download context (position,
+  // playlist) and the one allowed override, `service`. Nothing else.
 
   if (trackName && artistName) {
     try {
       const checkRequest: FileExistsCheck = {
         spotify_id: spotifyId || id,
         track_name: trackName,
-        artist_name: displayArtist || "",
+        artist_name: artistName,
         album_name: albumName,
-        album_artist: displayAlbumArtist,
+        album_artist: albumArtist,
         release_date: finalReleaseDate || releaseDate,
         track_number: finalTrackNumber || spotifyTrackNumber || 0,
         disc_number: spotifyDiscNumber || 0,
-        position: trackNumberForTemplate,
-        use_album_track_number: useAlbumTrackNumber,
-        filename_format: settings.filenameTemplate || "",
-        include_track_number: settings.trackNumber || false,
+        position: position || 0,
         audio_format: "flac",
       };
-      const existenceResults = await CheckFilesExistence(
-        outputDir,
-        settings.downloadPath,
-        [checkRequest],
-      );
+      // The directories are ignored by the server (it derives them from the
+      // user's settings), and so are filename_format / include_track_number /
+      // use_album_track_number — passing empty strings keeps the call honest
+      // about who decides.
+      const existenceResults = await CheckFilesExistence("", "", [checkRequest]);
       if (existenceResults.length > 0 && existenceResults[0].exists) {
         return {
           success: true,
@@ -150,48 +126,29 @@ export async function downloadWithAutoFallback(
   const durationSeconds = durationMs
     ? Math.round(durationMs / 1000)
     : undefined;
-  // Per-service audio format. For "auto" the backend derives each provider's
-  // format from this single value (TidalQualityFor/QobuzQualityFor) while it
-  // walks the AutoOrder chain, so one value is enough.
-  const is24Bit = (settings.autoQuality || "24") === "24";
-  let audioFormat: string | undefined;
-  if (service === "tidal") {
-    audioFormat = settings.tidalQuality || "LOSSLESS";
-  } else if (service === "qobuz") {
-    audioFormat = settings.qobuzQuality || "6";
-  } else if (service === "deezer") {
-    audioFormat = "flac";
-  } else if (service === "auto") {
-    audioFormat = is24Bit ? "HI_RES_LOSSLESS" : "LOSSLESS";
-  }
 
   logger.debug(`enqueue ${service}: ${trackName} - ${artistName}`);
   return await downloadTrack({
+    // The one allowed per-download override.
     service,
+    // Identity + per-download context only. No output_dir, filename_format,
+    // quality or embed flags: the server reads those from the user's settings.
     query,
     track_name: trackName,
-    artist_name: displayArtist,
+    artist_name: artistName,
     album_name: albumName,
-    album_artist: displayAlbumArtist,
+    album_artist: albumArtist,
     release_date: finalReleaseDate || releaseDate,
     cover_url: coverUrl,
-    output_dir: outputDir,
-    filename_format: settings.filenameTemplate,
-    track_number: settings.trackNumber,
-    position: trackNumberForTemplate,
-    use_album_track_number: useAlbumTrackNumber,
+    playlist_name: playlistName,
+    position: position || 0,
     spotify_id: spotifyId,
-    embed_lyrics: settings.embedLyrics,
-    embed_max_quality_cover: settings.embedMaxQualityCover,
     duration: durationSeconds,
-    audio_format: audioFormat,
     spotify_track_number: spotifyTrackNumber,
     spotify_disc_number: spotifyDiscNumber,
     spotify_total_tracks: spotifyTotalTracks,
     spotify_total_discs: spotifyTotalDiscs,
     copyright: copyright,
     publisher: publisher,
-    use_single_genre: settings.useSingleGenre,
-    embed_genre: settings.embedGenre,
   });
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 )
@@ -505,10 +506,29 @@ func (s *Server) registerFileRoutes() {
 		settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
 		for i := range params.Tracks {
 			t := &params.Tracks[i]
+			// Folder first: outputSubfolder applies the first-artist rule itself,
+			// so it needs the untrimmed names.
 			t.RelativePath = outputSubfolder(
 				settings.FolderTemplate, settings.CreatePlaylistFolder, settings.UseFirstArtistOnly,
 				t.ArtistName, t.AlbumName, t.AlbumArtist, t.ReleaseDate, "",
 			)
+			// Then the filename, which must match what a download actually writes:
+			// same template, same track-number rule, and the same first-artist
+			// trimming buildDownloadRequest applies before BuildExpectedFilename.
+			// Without this the client still decided the filename while the server
+			// decided the folder — half-authoritative, and a mismatch the moment
+			// the two disagreed.
+			t.FilenameFormat = settings.FilenameTemplate
+			t.IncludeTrackNumber = settings.TrackNumber
+			// Derived from the folder template exactly as buildDownloadRequest does.
+			t.UseAlbumTrackNumber = strings.Contains(settings.FolderTemplate, "{album}") ||
+				strings.Contains(settings.FolderTemplate, "{album_artist}")
+			if settings.UseFirstArtistOnly {
+				t.ArtistName = getFirstArtistStatic(t.ArtistName)
+				if t.AlbumArtist != "" {
+					t.AlbumArtist = getFirstArtistStatic(t.AlbumArtist)
+				}
+			}
 		}
 		// rootDir "" — the secondary "match by filename anywhere under the root"
 		// walk is dropped: with the path now computed server-side it can only
