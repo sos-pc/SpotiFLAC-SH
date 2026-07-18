@@ -170,10 +170,32 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
      **serveur** (`ApplySettingsFallbacks`). Le correctif `7d8eae4` était donc redondant *et* nuisible
      (un seul champ rendu autoritaire-frontend, le reste restant serveur → source mixte). **Revert.** Le
      vrai sujet soulevé est l'architecture des réglages → [`settings-source-of-truth.md`](settings-source-of-truth.md).
-   - **2b — à faire, avec vérif navigateur** : suivi de statut réel par SSE (aujourd'hui le mono-piste
-     est marqué « terminé » dès l'enqueue — malhonnêteté *préexistante*, pas introduite par 2a). Câbler
-     `useJobsStreamEvent` pour refléter done/failed/skipped réels par piste.
-3. **UI/réglages** : aligner le défaut `AutoOrder` affiché/exécuté, revoir le libellé `allowFallback`.
+   - **2b — ✅ codé le 2026-07-18 (`faaceb3`)**, vérif navigateur en attente de redéploiement.
+     `POST /downloads/track` et `/jobs` répondent à l'**enqueue**, pas à la fin du téléchargement :
+     traiter cette réponse comme le résultat marquait chaque piste « téléchargée » **au moment de la
+     mise en file**, y compris celles qui allaient échouer.
+     Un registre des pistes en attente (`spotify_id` → id d'affichage) est désormais résolu par un
+     écouteur `job_update` sur les statuts terminaux : `done`/`skipped` valident le badge, `failed` le
+     marque en échec et retire un éventuel « téléchargé » posé plus tôt. `already_exists` reste
+     immédiat — c'est le seul cas où la réponse tranche vraiment (le serveur a consulté le disque avant
+     de mettre en file). Les deux chemins de lot enregistrent leurs pistes de la même façon.
+3. **UI/réglages — ✅ soldé le 2026-07-18, sans nouveau code.** Les trois points étaient soit déjà
+   traités, soit devenus caducs :
+   - **Défaut `AutoOrder` affiché/exécuté** : **déjà aligné à l'étape 6** de la migration réglages
+     (`DEFAULT_AUTO_ORDER` en TS ↔ `defaultAutoOrder` en Go) — voir
+     [settings-source-of-truth §3](settings-source-of-truth.md).
+   - **Libellé `allowFallback`** : **déjà exact**, vérifié dans le code. Le champ ne pilote que la
+     **qualité** (hi-res → lossless chez Tidal/Qobuz : `tidal/client.go`, `qobuz/client.go`), jamais le
+     choix de service — et le libellé UI dit bien « Allow Quality Fallback (16-bit) ». Rien à changer.
+   - **Réactiver Deezer** : **à ne pas faire.** L'item datait d'avant les mesures. Sonde fraîche du
+     2026-07-18 (`service:"deezer"` forcé sur une piste absente du disque) :
+     `[Jobs] Failed err=all Deezer proxies failed: failed to decode response: invalid character '<'`
+     — Deezer renvoie du **HTML** au lieu de JSON. Le proposer comme source unique offrirait un choix
+     qui échoue à tous les coups.
+     L'UI actuelle est en fait **déjà cohérente** : Deezer est désactivé là où le choisir serait
+     **fatal** (source unique) et autorisé là où il n'est que **coûteux** (un maillon de chaîne, écarté
+     après un échec). À rouvrir le jour où la couche tierce est réparée — chantier distinct, cf.
+     [third-party-layer-status.md](third-party-layer-status.md).
 4. **Valider S6** sur logs lisibles (maintenant possible), puis **porter `qobuz_api.go`** — Qobuz est
    enfin réellement atteignable.
 
