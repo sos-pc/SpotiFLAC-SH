@@ -171,6 +171,21 @@ tout est déjà rattaché à un autre sujet).
 >
 > **Tests** (`duration_validation_test.go`) : 14 cas, dont les 4 mesures réelles de la bibliothèque
 > qui **ne doivent pas** être supprimées, les bornes des deux règles, et le refus de juger sans donnée.
+>
+> **✅ VÉRIFIÉ EN PROD le 2026-07-19**, dans les deux sens :
+>
+> | | *Celestion* (normal) | *Chasing Clouds* (durée annoncée falsifiée à 900s) |
+> |---|---|---|
+> | Job | `done` | **`failed`** |
+> | Erreur | — | `duration mismatch: file is 256s, expected about 900s (tolerance 225s)` |
+> | Sur le disque | ✅ présent | ❌ **supprimé** |
+>
+> Le second cas prouve ce qu'un simple succès ne prouve pas : que la validation **s'exécute**. La
+> sonde a lu la vraie durée (256 s) sur un FLAC réel, la tolérance a été calculée (225 s = 25 % de
+> 900), le fichier a été supprimé et le job marqué en échec avec la raison.
+>
+> Le test a été rendu possible par le fait que `duration` est du **contexte** fourni par le client
+> (et non un réglage) : on peut donc annoncer une durée fausse sans toucher aux réglages serveur.
 
 #### Analyse d'origine
 
