@@ -26,6 +26,23 @@
 > **définitivement** (sous-domaine DNS supprimé, pas en panne). Ce n'est pas un hoquet, c'est une
 > érosion.
 
+> ## 🔴 NOUVEAU — 2026-07-19 : Tidal échoue par intermittence
+>
+> Observé en prod pendant une vérification : **3 échecs pour 1 succès** sur une fenêtre de quelques
+> minutes, tous avec
+> `tidal: download URL — status 401 from primary and all fallbacks failed`
+> (HI_RES_LOSSLESS **et** LOSSLESS), alors que `[Tidal Auth] Token refreshed successfully` apparaît
+> juste avant. L'authentification passe donc, c'est l'obtention de l'URL de téléchargement qui est
+> refusée.
+>
+> Les pistes touchées venaient d'une sync de watchlist, pas de mes tests — l'incident est indépendant
+> de tout changement de code. **Ce n'est pas une panne totale : des téléchargements aboutissent
+> encore.**
+>
+> **Ce que ça implique :** Tidal est la seule route qui fonctionnait. Si la dégradation se confirme,
+> le chantier [external-api-layer.md](external-api-layer.md) — jusqu'ici recommandé « ne rien faire
+> tant que Tidal tient » — change de priorité. À re-mesurer avant toute décision.
+
 > ## ⚠️ CORRECTION MAJEURE — 2026-07-18 : « Amazon est mort » était FAUX
 >
 > Le service Amazon **n'a pas disparu, il a déménagé**. En déchiffrant la config d'endpoints de
