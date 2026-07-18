@@ -215,6 +215,33 @@ Le keepalive est un **commentaire** SSE (`: keepalive`), pas un événement : la
 d'ignorer ces lignes, donc rien n'atteint `onmessage`. 30 s laisse une marge large sous les 240 s.
 `/api/v1/search/stream` n'en reçoit délibérément pas : il diffuse puis se termine.
 
+### 5.3 🔴 NON EXPLIQUÉ — `GET /auth/stream-token` renvoie 502 au premier appel du boot
+
+**Observé le 2026-07-18**, in-app browser, session methammer, pendant la vérif de l'étape 3-frontend.
+Au chargement de la page, le tout premier appel part en **502**, puis **tous les suivants passent en
+200** :
+
+```
+[t+0] GET /api/v1/auth/stream-token → 502
+[t+1] GET /api/v1/auth/me           → 200
+[t+2] GET /api/v1/auth/stream-token → 200   ← et toutes les fois d'après
+```
+
+**Ce qu'on sait** : un 502 vient du **proxy**, pas du handler — SWAG/nginx n'a pas obtenu de réponse
+exploitable de l'amont. Ça n'a aucun effet visible : le SSE se connecte au deuxième essai et le
+`jobs/stream` qui suit est en 200.
+
+**Ce qu'on ne sait pas** (rien de ceci n'a été testé — à ne pas citer comme cause) :
+- si c'est un *cold start* de l'amont (première requête après un redéploiement récent) ;
+- si c'est spécifique à `stream-token` ou si n'importe quelle première requête le prend ;
+- si les logs nginx du conteneur SWAG portent le `upstream` correspondant (`connect() failed` vs
+  `upstream prematurely closed`) — **c'est la première chose à regarder**, ça tranche entre
+  amont-pas-encore-écoutant et amont-qui-répond-mal.
+
+**Pourquoi ne pas l'enterrer** : ce chemin touche l'auth du flux SSE, et deux bugs y ont déjà été
+trouvés (`03260b3` TokenVersion perdu, `e3ce22e` en-tête illégal en HTTP/2). Un 502 reproductible au
+même endroit mérite d'être expliqué, même s'il est bénin. Suivi en §7 tâche 4.
+
 ## 6. Ce que la vérification a appris sur la méthode
 
 **Deux affirmations fausses ont été faites puis corrigées en cours de session**, les deux du même
@@ -241,6 +268,7 @@ contrôlée est une propriété fausse**, y compris quand l'instrument est en ca
 | 1 | **`mem_limit`** (§4) | protection absente qu'on croit avoir | diagnostic `/proc/cgroups` |
 | 2 | **Révoquer la clé API admin utilisée pendant l'audit** | elle a été exposée en clair dans la conversation de travail ; une clé admin ne se périme pas toute seule (voir `authentication.md`) | — |
 | 3 | Rotation du mot de passe Jellyfin de l'opérateur | exposé en clair dans un copier-coller de console navigateur — le champ mot de passe rend sa valeur dans l'attribut `value`, ce que les captures de console embarquent sans qu'on y pense | — |
+| 4 | **Expliquer le 502 sur `/auth/stream-token`** au premier appel du boot (§5.3) | bénin en apparence, mais sur le chemin d'auth du SSE — deux bugs y ont déjà été trouvés ; un 502 reproductible non expliqué n'est pas un 502 inoffensif | lire les logs nginx du conteneur SWAG (`connect() failed` vs `upstream prematurely closed`) |
 
 ### Clos par mesure le 2026-07-17
 
