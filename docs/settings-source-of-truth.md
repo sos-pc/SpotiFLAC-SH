@@ -18,15 +18,24 @@ utiliser des réglages différents, et ce que l'UI affiche n'est pas toujours ce
 | # | Stockage | Écrit par | Lu par |
 |---|----------|-----------|--------|
 | A | **Serveur** (BoltDB, par utilisateur) | `PUT /api/v1/settings` (bouton *Save Changes*) | `ApplySettingsFallbacks` (backend, à chaque download) **et** `loadSettings()` (frontend au boot) |
-| B | **localStorage** (`spotiflac-settings`) | le frontend (changement d'UI, et `loadSettings` recopie le serveur) | `getSettingsFromLocalStorage()` |
+| B | **localStorage** (`spotiflac-settings`) | `saveSettings()` **uniquement** | `getSettingsFromLocalStorage()` |
 | C | **Cache mémoire** (`cachedSettings`) | `loadSettings()` (depuis A) ou fallback depuis B | `getSettings()` |
 
-`getSettings()` = `cachedSettings ?? localStorage` ([settings.ts:259](../frontend/src/lib/settings.ts)).
-`loadSettings()` va chercher le serveur et remplit C **et** B.
+`getSettings()` = `cachedSettings ?? localStorage` ([settings.ts](../frontend/src/lib/settings.ts)).
+
+> **⚠️ Correction (2026-07-18).** Ce paragraphe affirmait que « `loadSettings` recopie le serveur »
+> dans B. **C'était faux**, et c'était précisément la cause racine : `localStorage.setItem(SETTINGS_KEY,…)`
+> n'existait qu'à **un seul endroit**, dans `saveSettings()`. Erreur de déduction — la structure du code
+> le suggérait, la vérification (`grep SETTINGS_KEY`) n'avait pas été faite avant de l'écrire.
 
 **Divergence observée en prod (2026-07-17)** : à un instant, `localStorage.downloader = "auto"` alors
-que l'UI et le serveur montraient `"qobuz"`. Les trois n'étaient pas d'accord. Selon le *timing* (avant
-ou après que `loadSettings` ait rempli le cache), `getSettings()` renvoie l'un ou l'autre.
+que l'UI et le serveur montraient `"qobuz"`. **Mécanisme réel** : B n'étant jamais rafraîchi depuis A,
+un changement fait depuis un autre navigateur, un autre appareil ou une migration serveur laissait la
+copie locale périmée **indéfiniment** — et `getSettings()` la servait à chaque chargement de page,
+jusqu'à ce que l'utilisateur appuie sur *Save*. Ce n'était donc pas une course au boot, mais une
+péremption permanente.
+
+> **✅ Corrigé le 2026-07-18 (`b8a9f0d`, étape 6)** — voir §7.5 étape 6.
 
 ## 2. Deux mécanismes de livraison au backend — la conséquence directe
 
@@ -48,8 +57,13 @@ C'est littéralement « les settings pas appliqués partout ».
 ## 3. Autres problèmes voisins (constatés)
 
 - **Défauts `autoOrder` divergents** (déjà en [service-selection-map §4](service-selection-map.md)) :
-  UI placeholder `tidal-qobuz-amazon`, exécution front/back `tidal-amazon-qobuz`. Ce que l'utilisateur
-  *voit* quand rien n'est réglé n'est pas ce qui *tourne*.
+  **cinq sites, trois valeurs différentes** — `DEFAULT_SETTINGS` = `tidal-qobuz-amazon-deezer`, les deux
+  migrations « champ absent » = `tidal-qobuz-amazon` (**sans Deezer**), le placeholder UI = pareil, et
+  l'exécution backend = `tidal-amazon-qobuz` (**ordre inverse**). Celui qui *tourne* est le backend :
+  un utilisateur qui n'a rien réglé obtenait une chaîne affichée nulle part — Deezer jamais tenté,
+  Amazon et Qobuz dans l'ordre inverse de l'écran de réglages.
+  **✅ Corrigé le 2026-07-18 (`b8a9f0d`)** : un seul constant, `DEFAULT_AUTO_ORDER` (TS) /
+  `defaultAutoOrder` (Go) = `tidal-qobuz-amazon-deezer`.
 - **Champ `format` de l'historique trompeur** : un fichier 16-bit venu de Deezer s'affiche
   `format: "HI_RES_LOSSLESS"` — c'est l'`audio_format` **demandé** (qualité Tidal) stocké tel quel,
   pas le service ni la qualité réelle du fichier.
@@ -215,8 +229,23 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
        que `useFirstArtistOnly` n'est pas hardcodé (réglage réel, cf. §7.6).
 4. **Cover/paroles utilisent le chemin retourné** (D4).
 5. **Un seul générateur M3U8** (D5) — trancher.
-6. **`getSettings()` reflète toujours le serveur** (§2/§3) — corriger priorité cache/localStorage +
-   timing du boot ; aligner les défauts `autoOrder`.
+6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
+   Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
+   **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`
+   n'était écrit que par `saveSettings()`.
+   - **Cause racine fermée** : `rememberSettings()` enregistre désormais dans le cache **et** dans
+     `localStorage`, qui devient un *cache du serveur* et non plus une source rivale.
+   - **Danger côté écriture fermé aussi** : `updateSettings()` partait de `getSettings()` ; avec un
+     cache froid la base est périmée, et comme une mise à jour partielle **réécrit l'objet entier**,
+     changer un champ depuis l'UI pouvait **réverter tous les autres** vers ce que ce navigateur avait
+     vu en dernier — écrasement silencieux du serveur. Il charge maintenant d'abord si le cache est froid.
+     (Fonction sans appelant à ce jour ; corrigée plutôt que laissée en piège.)
+   - **Fenêtre résiduelle rendue visible** : `getSettings()` loggue une fois par chargement quand il doit
+     répondre depuis `localStorage`. `SettingsPage` appelle déjà `loadSettings()` au montage et écrase
+     ses deux états, donc sa fenêtre est brève et auto-corrigée.
+   - **Défauts `autoOrder` alignés** (§3) : `DEFAULT_AUTO_ORDER` / `defaultAutoOrder`.
+   - Vérifié : `go build`, `go vet`, `tsc -b`, `eslint` 0 erreur. **Vérif navigateur en attente de
+     redéploiement.**
 
 Ordre impératif : **1 avant 3** (le backend doit savoir calculer le chemin avant que le frontend
 arrête de l'envoyer, sinon les fichiers atterrissent au mauvais endroit).
