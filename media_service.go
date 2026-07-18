@@ -11,19 +11,31 @@ import (
 // Extracted from the former App god-object (R3).
 type MediaService struct{}
 
+// LyricsDownloadRequest carries the track's identity plus the per-download
+// context. OutputDir, FilenameFormat, TrackNumber and UseAlbumTrackNumber are
+// NOT read from the client: the handler overwrites them from the user's server
+// settings so a .lrc lands beside its track. See docs/settings-source-of-truth.md D4.
 type LyricsDownloadRequest struct {
-	SpotifyID           string `json:"spotify_id"`
-	TrackName           string `json:"track_name"`
-	ArtistName          string `json:"artist_name"`
-	AlbumName           string `json:"album_name"`
-	AlbumArtist         string `json:"album_artist"`
-	ReleaseDate         string `json:"release_date"`
+	SpotifyID   string `json:"spotify_id"`
+	TrackName   string `json:"track_name"`
+	ArtistName  string `json:"artist_name"`
+	AlbumName   string `json:"album_name"`
+	AlbumArtist string `json:"album_artist"`
+	ReleaseDate string `json:"release_date"`
+	// PlaylistName is context, not a setting: it is the folder the enclosing
+	// view downloads into, and must match what the track download was given.
+	PlaylistName string `json:"playlist_name"`
+	// Position is the track's index in the enclosing list; AlbumTrackNumber is
+	// its number within its album. Both are sent raw and the SERVER picks
+	// between them from its own UseAlbumTrackNumber rule — the client used to
+	// collapse the two into one value using its own copy of the setting.
+	Position            int    `json:"position"`
+	AlbumTrackNumber    int    `json:"album_track_number"`
+	DiscNumber          int    `json:"disc_number"`
 	OutputDir           string `json:"output_dir"`
 	FilenameFormat      string `json:"filename_format"`
 	TrackNumber         bool   `json:"track_number"`
-	Position            int    `json:"position"`
 	UseAlbumTrackNumber bool   `json:"use_album_track_number"`
-	DiscNumber          int    `json:"disc_number"`
 }
 
 func (m *MediaService) DownloadLyrics(req LyricsDownloadRequest) (meta.LyricsDownloadResponse, error) {
@@ -53,18 +65,24 @@ func (m *MediaService) DownloadLyrics(req LyricsDownloadRequest) (meta.LyricsDow
 	return *resp, nil
 }
 
+// CoverDownloadRequest — same contract as LyricsDownloadRequest: identity and
+// context from the client, placement from the server's settings.
 type CoverDownloadRequest struct {
-	CoverURL       string `json:"cover_url"`
-	TrackName      string `json:"track_name"`
-	ArtistName     string `json:"artist_name"`
-	AlbumName      string `json:"album_name"`
-	AlbumArtist    string `json:"album_artist"`
-	ReleaseDate    string `json:"release_date"`
+	CoverURL     string `json:"cover_url"`
+	TrackName    string `json:"track_name"`
+	ArtistName   string `json:"artist_name"`
+	AlbumName    string `json:"album_name"`
+	AlbumArtist  string `json:"album_artist"`
+	ReleaseDate  string `json:"release_date"`
+	PlaylistName string `json:"playlist_name"`
+	// See LyricsDownloadRequest: raw values, the server picks between them.
+	Position         int `json:"position"`
+	AlbumTrackNumber int `json:"album_track_number"`
+	DiscNumber       int `json:"disc_number"`
+
 	OutputDir      string `json:"output_dir"`
 	FilenameFormat string `json:"filename_format"`
 	TrackNumber    bool   `json:"track_number"`
-	Position       int    `json:"position"`
-	DiscNumber     int    `json:"disc_number"`
 }
 
 func (m *MediaService) DownloadCover(req CoverDownloadRequest) (meta.CoverDownloadResponse, error) {

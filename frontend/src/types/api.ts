@@ -175,6 +175,11 @@ export interface AnalysisResult {
     rms_level: number;
     spectrum?: SpectrumData;
 }
+// Identity + per-download context only. The output directory, the filename
+// template, the track-number flags and the first-artist rule all live on the
+// server (docs/settings-source-of-truth.md D4) so the .lrc lands beside its
+// track. `position` and `album_track_number` are both sent raw — the server
+// picks between them.
 export interface LyricsDownloadRequest {
     spotify_id: string;
     track_name: string;
@@ -182,11 +187,9 @@ export interface LyricsDownloadRequest {
     album_name?: string;
     album_artist?: string;
     release_date?: string;
-    output_dir?: string;
-    filename_format?: string;
-    track_number?: boolean;
+    playlist_name?: string;
     position?: number;
-    use_album_track_number?: boolean;
+    album_track_number?: number;
     disc_number?: number;
 }
 export interface LyricsDownloadResponse {
@@ -207,6 +210,7 @@ export interface TrackAvailability {
     qobuz_url?: string;
     deezer_url?: string;
 }
+// Same contract as LyricsDownloadRequest (D4).
 export interface CoverDownloadRequest {
     cover_url: string;
     track_name: string;
@@ -214,10 +218,9 @@ export interface CoverDownloadRequest {
     album_name?: string;
     album_artist?: string;
     release_date?: string;
-    output_dir?: string;
-    filename_format?: string;
-    track_number?: boolean;
+    playlist_name?: string;
     position?: number;
+    album_track_number?: number;
     disc_number?: number;
 }
 export interface CoverDownloadResponse {

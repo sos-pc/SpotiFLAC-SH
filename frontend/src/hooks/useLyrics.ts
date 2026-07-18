@@ -1,8 +1,6 @@
 import { useState, useRef } from "react";
 import { downloadLyrics } from "@/lib/api";
-import { getSettings } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { resolveOutputPath } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import type { TrackMetadata } from "@/types/api";
 export function useLyrics() {
@@ -13,38 +11,25 @@ export function useLyrics() {
     const [isBulkDownloadingLyrics, setIsBulkDownloadingLyrics] = useState(false);
     const [lyricsDownloadProgress, setLyricsDownloadProgress] = useState(0);
     const stopBulkDownloadRef = useRef(false);
-    const handleDownloadLyrics = async (spotifyId: string, trackName: string, artistName: string, albumName?: string, playlistName?: string, position?: number, albumArtist?: string, releaseDate?: string, discNumber?: number, isAlbum?: boolean) => {
+    const handleDownloadLyrics = async (spotifyId: string, trackName: string, artistName: string, albumName?: string, playlistName?: string, position?: number, albumArtist?: string, releaseDate?: string, discNumber?: number) => {
         if (!spotifyId) {
             toast.error("No Spotify ID found for this track");
             return;
         }
         logger.info(`downloading lyrics: ${trackName} - ${artistName}`);
-        const settings = getSettings();
         setDownloadingLyricsTrack(spotifyId);
         try {
-            const { outputDir, displayArtist, displayAlbumArtist } = resolveOutputPath(settings, {
-                artistName,
-                albumName,
-                albumArtist,
-                trackName,
-                playlistName,
-                trackNumber: position,
-                releaseDate,
-                isAlbum,
-            });
-            const useAlbumTrackNumber = settings.folderTemplate?.includes("{album}") || false;
+            // Identity + context only — the server decides where the .lrc goes
+            // and what it is called (docs/settings-source-of-truth.md D4).
             const response = await downloadLyrics({
                 spotify_id: spotifyId,
                 track_name: trackName,
-                artist_name: displayArtist,
+                artist_name: artistName,
                 album_name: albumName,
-                album_artist: displayAlbumArtist,
+                album_artist: albumArtist,
                 release_date: releaseDate,
-                output_dir: outputDir,
-                filename_format: settings.filenameTemplate || "{title}",
-                track_number: settings.trackNumber,
+                playlist_name: playlistName,
                 position: position || 0,
-                use_album_track_number: useAlbumTrackNumber,
                 disc_number: discNumber,
             });
             if (response.success) {
@@ -75,13 +60,12 @@ export function useLyrics() {
             setDownloadingLyricsTrack(null);
         }
     };
-    const handleDownloadAllLyrics = async (tracks: TrackMetadata[], playlistName?: string, _isArtistDiscography?: boolean, isAlbum?: boolean) => {
+    const handleDownloadAllLyrics = async (tracks: TrackMetadata[], playlistName?: string, _isArtistDiscography?: boolean) => {
         const tracksWithSpotifyId = tracks.filter((track) => track.spotify_id);
         if (tracksWithSpotifyId.length === 0) {
             toast.error("No tracks with Spotify ID available for lyrics download");
             return;
         }
-        const settings = getSettings();
         setIsBulkDownloadingLyrics(true);
         setLyricsDownloadProgress(0);
         stopBulkDownloadRef.current = false;
@@ -100,30 +84,17 @@ export function useLyrics() {
             setDownloadingLyricsTrack(id);
             setLyricsDownloadProgress(Math.round((completed / total) * 100));
             try {
-                const useAlbumTrackNumber = settings.folderTemplate?.includes("{album}") || false;
-                const trackPosition = useAlbumTrackNumber ? (track.track_number || i + 1) : (i + 1);
-                const { outputDir, displayArtist, displayAlbumArtist } = resolveOutputPath(settings, {
-                    artistName: track.artists,
-                    albumName: track.album_name,
-                    albumArtist: track.album_artist,
-                    trackName: track.name,
-                    playlistName,
-                    trackNumber: trackPosition,
-                    releaseDate: track.release_date,
-                    isAlbum,
-                });
                 const response = await downloadLyrics({
                     spotify_id: id,
                     track_name: track.name,
-                    artist_name: displayArtist,
+                    artist_name: track.artists,
                     album_name: track.album_name,
-                    album_artist: displayAlbumArtist,
+                    album_artist: track.album_artist,
                     release_date: track.release_date,
-                    output_dir: outputDir,
-                    filename_format: settings.filenameTemplate || "{title}",
-                    track_number: settings.trackNumber,
-                    position: trackPosition,
-                    use_album_track_number: useAlbumTrackNumber,
+                    playlist_name: playlistName,
+                    // Both raw: the server chooses which to use.
+                    position: i + 1,
+                    album_track_number: track.track_number,
                     disc_number: track.disc_number,
                 });
                 if (response.success) {

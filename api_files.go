@@ -8,11 +8,77 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-track media placement (D4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// trackMediaPlacement is where a per-track sidecar file (a cover, a .lrc) must
+// be written, and under what name, for it to sit beside its audio file.
+type trackMediaPlacement struct {
+	OutputDir           string
+	FilenameFormat      string
+	TrackNumber         bool
+	UseAlbumTrackNumber bool
+	// The artist names to write, after the server's first-artist rule. They are
+	// returned rather than applied in place because the caller's request struct
+	// owns them, and because outputSubfolder needs the UNTRIMMED names (it
+	// applies the rule itself).
+	ArtistName  string
+	AlbumArtist string
+}
+
+// trackNumberFor picks between the list index and the album track number the
+// same way file_service.go does for the existence check, so a sidecar file is
+// numbered exactly like the audio file it accompanies.
+func (p trackMediaPlacement) trackNumberFor(position, albumTrackNumber int) int {
+	if p.UseAlbumTrackNumber && albumTrackNumber > 0 {
+		return albumTrackNumber
+	}
+	return position
+}
+
+// mediaPlacement resolves that placement from the requesting user's settings,
+// reusing outputSubfolder — the very function buildOutputDir uses for the audio
+// file. Sharing the implementation is the point: a cover computed by a second,
+// slightly different rule is a cover in the wrong folder.
+//
+// Every subfolder part is sanitised by outputSubfolder, so the result stays
+// confined to the library root without needing cleanLibraryPath on client input
+// — there is no client input left in the path.
+func (s *Server) mediaPlacement(
+	r *http.Request,
+	artistName, albumName, albumArtist, releaseDate, playlistName string,
+) trackMediaPlacement {
+	settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
+	sub := outputSubfolder(
+		settings.FolderTemplate, settings.CreatePlaylistFolder, settings.UseFirstArtistOnly,
+		artistName, albumName, albumArtist, releaseDate, playlistName,
+	)
+	p := trackMediaPlacement{
+		OutputDir:      filepath.Join(s.libraryRootFor(r), sub),
+		FilenameFormat: settings.FilenameTemplate,
+		TrackNumber:    settings.TrackNumber,
+		// Derived from the folder template exactly as buildDownloadRequest does.
+		UseAlbumTrackNumber: strings.Contains(settings.FolderTemplate, "{album}") ||
+			strings.Contains(settings.FolderTemplate, "{album_artist}"),
+		ArtistName:  artistName,
+		AlbumArtist: albumArtist,
+	}
+	if settings.UseFirstArtistOnly {
+		p.ArtistName = getFirstArtistStatic(p.ArtistName)
+		if p.AlbumArtist != "" {
+			p.AlbumArtist = getFirstArtistStatic(p.AlbumArtist)
+		}
+	}
+	return p
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route registration — everything not in auth / jobs / watchlists
@@ -606,10 +672,11 @@ func (s *Server) registerFileRoutes() {
 	}))
 
 	// ── Media (lyrics, cover, header, gallery, avatar) ────────────────────
-	// Each of these takes an output_dir the server writes a downloaded file
-	// into — previously accepted straight from the request body with no
-	// validation at all (not even cleanAbsPath), the same gap as the
-	// Files/Audio routes above.
+	// The lyrics and cover routes place their file beside the track, so they
+	// derive that placement from the user's settings rather than trusting the
+	// request (see mediaPlacement). The artist/header/gallery/avatar routes
+	// below still take an output_dir from the client, validated with
+	// cleanLibraryPath — they are not per-track and have no track to sit next to.
 	s.mux.Handle("POST /api/v1/media/lyrics", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		if !v1RequirePermission(w, r, "manage") {
 			return
@@ -618,12 +685,24 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
-		if err != nil {
-			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
-			return
-		}
-		req.OutputDir = outputDir
+		// Backend-authoritative (D4): the client's output_dir/filename_format/
+		// track-number flags are discarded and recomputed here, so the .lrc lands
+		// beside the track instead of wherever the client thought it would.
+		//
+		// The client used to resolve this path itself, with a rule that did not
+		// match the server's: it appended a playlist folder whenever the view was
+		// not an album, even when the folder template already contained {album} —
+		// outputSubfolder never does. With createPlaylistFolder on, the lyrics
+		// landed one directory away from their track.
+		p := s.mediaPlacement(r, req.ArtistName, req.AlbumName, req.AlbumArtist,
+			req.ReleaseDate, req.PlaylistName)
+		req.OutputDir = p.OutputDir
+		req.FilenameFormat = p.FilenameFormat
+		req.TrackNumber = p.TrackNumber
+		req.UseAlbumTrackNumber = p.UseAlbumTrackNumber
+		req.ArtistName = p.ArtistName
+		req.AlbumArtist = p.AlbumArtist
+		req.Position = p.trackNumberFor(req.Position, req.AlbumTrackNumber)
 		result, err := s.ctr.Media.DownloadLyrics(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
@@ -640,12 +719,15 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
-		outputDir, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
-		if err != nil {
-			writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
-			return
-		}
-		req.OutputDir = outputDir
+		// Same server-side placement as the lyrics route above (D4).
+		p := s.mediaPlacement(r, req.ArtistName, req.AlbumName, req.AlbumArtist,
+			req.ReleaseDate, req.PlaylistName)
+		req.OutputDir = p.OutputDir
+		req.FilenameFormat = p.FilenameFormat
+		req.TrackNumber = p.TrackNumber
+		req.ArtistName = p.ArtistName
+		req.AlbumArtist = p.AlbumArtist
+		req.Position = p.trackNumberFor(req.Position, req.AlbumTrackNumber)
 		result, err := s.ctr.Media.DownloadCover(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
