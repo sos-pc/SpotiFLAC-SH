@@ -20,48 +20,53 @@ fausse à l'écriture ; deux ont pourri, une n'avait jamais été vérifiée.
 
 ## L'index
 
-Rangé par **ce que tu cherches**, pas alphabétiquement. Si tu reprends le travail : commence par §A.
+Rangé par **état** d'abord, par chantier ensuite. Si tu reprends le travail : §A.
 
-### A. Chantiers actifs — le travail en cours
+### A. Chantiers EN COURS
 
-| Doc | Type | Où ça en est | Pour quoi |
+| Chantier | Doc | Où ça en est | Prochain pas concret |
 |---|---|---|---|
-| [settings-source-of-truth.md](settings-source-of-truth.md) | 🔍+🧭 | **étapes 1, 2, 3, 6 + watchlists ✅ vérifiées prod** (6 par test d'empoisonnement du localStorage) ; **étapes 1→6 + watchlists ✅ toutes vérifiées en prod. Migration terminée** : plus aucun calcul de chemin côté client, un seul override (`service`). | Les réglages n'avaient pas de source unique (3 stockages, 2 mécanismes). **Décidé : backend autoritaire**, un seul override (`service`). §7 = carte exhaustive + plan phasé, §7.5 = avancement. |
-| [override-rework-plan.md](override-rework-plan.md) | 🧭 | 🟢 **terminé** — phases 1, 2a, 2b ✅ vérifiées navigateur ; **3 soldée sans code** (défauts déjà alignés, libellé déjà exact, Deezer à ne PAS réactiver — mort, mesuré le 07-18) | Refonte de la sélection de service vers le modèle UI (`auto`+chaîne honorée / explicite = forcer). La boucle de fallback **existait déjà** (`ExecuteDownload`) — réutilisée, pas recodée. |
-| [upstream-catchup.md](upstream-catchup.md) | 🔍 | 🟡 en cours (S1–S16) · **S6 validé en prod le 07-18, prêt à porter** | Rattrapage de l'upstream. Le tableau §0 porte le statut par sujet. Prochain morceau concret : porter `qobuz_api.go` (recherche signée). |
-| [deployment-hardening.md](deployment-hardening.md) | 🔍 | 🟡 5 corrigés+vérifiés · **`mem_limit` + 502 `stream-token` ouverts** | Compose, SWAG/nginx, conteneur. DoS login et port LAN **corrigés** ; a fait surgir 2 bugs dormants (upload, SSE) et une anomalie non expliquée (§5.3 : 502 au premier appel du boot). §7 : reste `mem_limit`, le 502, et les rotations d'identifiants. |
-| [api-redesign-plan.md](api-redesign-plan.md) | 🧭 | ⏸️ non commencé | Cohérence read/manage/admin + accès DB. Décisions ouvertes en §3. |
+| **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; **3 points ouverts** | `grep memory /proc/cgroups` (mem_limit) ; logs nginx SWAG (502 `stream-token`) ; **rotations d'identifiants** |
+| **Couche API externe** (Qobuz, Amazon, DRM) | [external-api-layer.md](external-api-layer.md) | 🧭 **ouvert le 07-18**, non commencé | Décision produit : construire ou non le flux de vérification humaine (§5). Recommandé : **ne rien faire tant que Tidal tient** |
+| **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | ⏸️ non commencé | Trancher les décisions ouvertes en §3 |
 
-### B. Constats clos — pour comprendre le « pourquoi », pas l'état actuel
+### B. Chantiers TERMINÉS (2026-07-18/19) — vérifiés en prod
+
+| Chantier | Doc | Ce qui a été obtenu |
+|---|---|---|
+| **Source unique des réglages** | [settings-source-of-truth.md](settings-source-of-truth.md) | 🟢 **terminé** — étapes 1→6 + watchlists, toutes vérifiées en prod. Plus aucun calcul de chemin côté client, **un seul override** (`service`). Inclut la fermeture du trou M3U8 (lot manuel) et le ménage du code mort. |
+| **Refonte de la sélection de service** | [override-rework-plan.md](override-rework-plan.md) | 🟢 **terminé** — phases 1, 2a, 2b vérifiées navigateur ; phase 3 soldée **sans code** (défauts déjà alignés, libellé déjà exact, Deezer à ne PAS réactiver car mort). |
+| **Rattrapage amont** | [upstream-catchup.md](upstream-catchup.md) | 🟢 **terminé pour tout ce qui était indépendant** — S8 (client Spotify) et S2 (validation post-téléchargement) implémentés et vérifiés. S6/S7/S4/S1 → chantier **API externe**. S11/S12/S13 **écartés avec argument**, pas oubliés. |
+
+### C. Constats clos — pour comprendre le « pourquoi », pas l'état actuel
 
 | Doc | Type | Statut | Pour quoi |
 |---|---|---|---|
-| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟢 **clos**, vérifié en prod 07-16 | ffmpeg ne démarrait pas (`scratch` sans loader ELF). Corrigé (distroless/cc + smoke test CI), durcissement complet (9 sites). **§4bis : ce que le durcissement ne protège pas — toujours valable.** |
+| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟢 clos, vérifié prod 07-16 | ffmpeg ne démarrait pas (`scratch` sans loader ELF). **§4bis : ce que le durcissement ne protège pas — toujours valable.** |
 | [audit-refactoring-couche2.md](audit-refactoring-couche2.md) | 🔍 | 🟢 clos (R1–R12) | Audit couche 2. ⚠️ R12 contenait une attribution fausse — voir l'encadré. |
-| [service-selection-map.md](service-selection-map.md) | 🕰️ **historique** | décrit l'état **AVANT** la refonte | ⚠️ **Ne décrit plus le code actuel** (l'override et la boucle client ont été supprimés). Utile pour comprendre *pourquoi* la refonte : les 4 couches, les pièges de nommage, la dérive des défauts. |
+| [service-selection-map.md](service-selection-map.md) | 🕰️ **historique** | décrit l'état **AVANT** la refonte | ⚠️ **Ne décrit plus le code actuel.** Utile pour comprendre *pourquoi* la refonte. |
 
-### C. Observations du monde extérieur — à re-vérifier avant de citer
+### D. Observations du monde extérieur — à re-vérifier avant de citer
 
 | Doc | Type | Vérifié | Pour quoi |
 |---|---|---|---|
-| [third-party-layer-status.md](third-party-layer-status.md) | 🌍 | relevé 07-15, **complété le 2026-07-18** (logs de downloads réels) | L'état réel des services tiers. **Commencer ici** avant tout travail touchant un provider. **Constat 07-18 : Deezer cassé (HTML au lieu de JSON), proxy Amazon mort, Songlink en 429 — la chaîne `auto` finit presque toujours sur Tidal.** |
-| [EXTERNAL_APIS.md](EXTERNAL_APIS.md) | 🌍 | Amazon corrigé 07-15 ; le reste non re-vérifié | Les API externes utilisées. Croiser avec `third-party-layer-status.md`. |
+| [third-party-layer-status.md](third-party-layer-status.md) | 🌍 | **corrigé le 2026-07-18** | L'état réel des services tiers. **Commencer ici** avant tout travail touchant un provider. ⚠️ **Correction majeure : « Amazon est mort » était faux** — le service a déménagé (`amz-oss`), c'est notre config qui est périmée. |
+| [EXTERNAL_APIS.md](EXTERNAL_APIS.md) | 🌍 | Amazon corrigé 07-15 ; le reste non re-vérifié | Les API externes utilisées. Croiser avec le doc ci-dessus. |
 
-### D. Références du code — la doc « comment ça marche »
+### E. Références du code — la doc « comment ça marche »
 
 | Doc | Type | Statut | Pour quoi |
 |---|---|---|---|
+| [api-reference.md](api-reference.md) | 📘 | ⚠️ `/downloads/track`, `/files/exists` et `/files/m3u8` **corrigés le 07-18** ; le reste non re-vérifié | Référence REST (~70 routes). |
 | [deployment.md](deployment.md) | 📘+🌍 | ⚠️ minimal, pas durci — lire `deployment-hardening.md` avant de mettre en ligne | Déploiement de base. |
 | [troubleshooting.md](troubleshooting.md) | 📘 | ⚠️ §FFmpeg corrigé 07-15 | Pannes courantes. |
-| [api-reference.md](api-reference.md) | 📘 | ❔ non re-vérifié | Référence REST (~70 routes). |
 | [authentication.md](authentication.md) | 📘 | ❔ non re-vérifié | JWT, clés API, Jellyfin. |
-| [settings-reference.md](settings-reference.md) | 📘 | ❔ non re-vérifié | Les réglages et leur effet. ⚠️ à relire après la migration backend-autoritaire. |
+| [settings-reference.md](settings-reference.md) | 📘 | ❔ non re-vérifié | ⚠️ **à relire** après la migration backend-autoritaire. |
 | [tidal-auth.md](tidal-auth.md) | 📘+🌍 | ❔ non re-vérifié | Flow device-code Tidal. |
-| [watchlist.md](watchlist.md) | 📘 | ❔ non re-vérifié | Watchlists et synchronisation. ⚠️ à relire : les watchlists suivent désormais les réglages **globaux**. |
+| [watchlist.md](watchlist.md) | 📘 | ❔ non re-vérifié | ⚠️ **à relire** : les watchlists suivent désormais les réglages **globaux**. |
 
 **« ❔ non re-vérifié »** est une information, pas un aveu : ces docs n'ont pas été relus lors des
-travaux de juillet 2026. Ils ne sont pas présumés faux — ils sont **présumés non testés**. À traiter
-comme tels si on s'appuie dessus.
+travaux de juillet 2026. Ils ne sont pas présumés faux — ils sont **présumés non testés**.
 
 ## L'en-tête à mettre sur un doc 🌍 ou 🔍
 
