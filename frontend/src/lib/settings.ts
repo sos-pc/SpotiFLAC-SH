@@ -195,11 +195,26 @@ export function applyFont(fontFamily: FontFamily): void {
 }
 const SETTINGS_KEY = "spotiflac-settings";
 let cachedSettings: Settings | null = null;
-// True once the server's settings have been read at least once this page load.
-// Before that, getSettings() can only answer from localStorage, which may be
-// stale (see rememberSettings).
-let serverSettingsSeen = false;
-let warnedAboutColdCache = false;
+// Where the settings load stands this page load. It exists to tell two very
+// different cold reads apart:
+//
+//   "idle" / "loading" — EXPECTED. App.tsx reads settings in a useLayoutEffect,
+//     synchronously before the first paint, to apply the theme and font. That
+//     read must not await the server: doing so would flash the wrong theme, and
+//     last session's values are the right trade-off. Logged at debug.
+//
+//   "failed" — ABNORMAL. The server was unreachable or errored, so every read
+//     from here on serves values that may predate a change made elsewhere, with
+//     no correction coming. Worth a warning.
+//
+// The first version of this warned once per page load without distinguishing
+// the two. The expected pre-paint read consumed the one shot on every boot, so
+// the abnormal case — the one it was added for — could no longer be reported.
+type SettingsLoadState = "idle" | "loading" | "loaded" | "failed";
+let settingsLoadState: SettingsLoadState = "idle";
+// Re-armed at the start of every load attempt, so each failed episode is
+// reported once instead of once per process.
+let warnedSinceLoadAttempt = false;
 // Records the authoritative settings in BOTH the in-memory cache and
 // localStorage. localStorage is a *cache of the server*, never a rival source.
 //
@@ -212,7 +227,7 @@ let warnedAboutColdCache = false;
 // user happened to press Save.
 function rememberSettings(s: Settings): Settings {
     cachedSettings = s;
-    serverSettingsSeen = true;
+    settingsLoadState = "loaded";
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch {
@@ -294,25 +309,33 @@ function getSettingsFromLocalStorage(): Settings {
 // Synchronous read of the current settings.
 //
 // It answers from the server-backed cache as soon as loadSettings() has run.
-// Before that — the boot window, or after a failed load — it can only fall back
-// to localStorage. That value is no longer able to drift silently (see
-// rememberSettings), but it can still predate a change made elsewhere, so the
-// first such read is logged instead of passing unnoticed.
+// Before that — the boot window — or after a failed load, it falls back to
+// localStorage. That value can no longer drift silently (see rememberSettings),
+// but it can still predate a change made elsewhere. Which of those two cases
+// applies decides whether it is worth reporting: see SettingsLoadState.
 export function getSettings(): Settings {
     if (cachedSettings)
         return cachedSettings;
-    if (!warnedAboutColdCache) {
-        warnedAboutColdCache = true;
-        logger.warning(
-            "getSettings() called before the server settings were loaded — " +
-            "answering from localStorage, which may predate a change made elsewhere",
-        );
+    if (settingsLoadState === "failed") {
+        if (!warnedSinceLoadAttempt) {
+            warnedSinceLoadAttempt = true;
+            logger.warning(
+                "settings could not be loaded from the server — reads are answering " +
+                "from localStorage, which may predate a change made elsewhere",
+            );
+        }
+    } else {
+        logger.debug("getSettings() before the server load finished — answering from localStorage");
     }
     return getSettingsFromLocalStorage();
 }
 export async function loadSettings(): Promise<Settings> {
     const token = localStorage.getItem("spotiflac_token");
+    // Logged out: there is no per-user server copy to be authoritative over, so
+    // this is not a failed load and must not be reported as one.
     if (!token) return getSettingsFromLocalStorage();
+    settingsLoadState = "loading";
+    warnedSinceLoadAttempt = false;
     try {
         const backendSettings = await LoadSettings();
         if (backendSettings) {
@@ -408,6 +431,10 @@ export async function loadSettings(): Promise<Settings> {
     }
     catch (error) {
         console.error("Failed to migrate settings to backend:", error);
+        // Neither read nor write reached the server: the cache stays cold and
+        // every later read serves possibly-stale values with no correction
+        // coming. This is the state getSettings() reports on.
+        settingsLoadState = "failed";
     }
     return local;
 }
@@ -474,7 +501,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
 // from the UI could revert every other field to what this browser last saw.
 // Loading first costs one request and makes that impossible.
 export async function updateSettings(partial: Partial<Settings>): Promise<Settings> {
-    const current = serverSettingsSeen ? getSettings() : await loadSettings();
+    const current = settingsLoadState === "loaded" ? getSettings() : await loadSettings();
     const updated = { ...current, ...partial };
     await saveSettings(updated);
     return updated;
