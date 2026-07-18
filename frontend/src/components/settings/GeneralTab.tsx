@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { FolderOpen, ArrowRight } from "lucide-react";
 import { themes } from "@/lib/themes";
 import {
+  DEFAULT_AUTO_ORDER,
   FONT_OPTIONS,
   type Settings as SettingsType,
   type FontFamily,
@@ -221,7 +222,7 @@ export function GeneralTab({
                   {tempSettings.downloader === "auto" && (
                     <>
                       <Select
-                        value={tempSettings.autoOrder || "tidal-qobuz-amazon"}
+                        value={tempSettings.autoOrder || DEFAULT_AUTO_ORDER}
                         onValueChange={(value: string) =>
                           setTempSettings((prev) => ({
                             ...prev,

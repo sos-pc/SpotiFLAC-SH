@@ -21,6 +21,17 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
+// defaultAutoOrder is the fallback chain used when "auto" is requested with no
+// configured order. It mirrors DEFAULT_AUTO_ORDER in frontend/src/lib/settings.ts
+// — keep the two in step.
+//
+// It used to read "tidal-amazon-qobuz", which matched neither the frontend
+// default ("tidal-qobuz-amazon-deezer") nor the UI placeholder
+// ("tidal-qobuz-amazon"). Since this is the value that actually *runs*, an
+// unconfigured user got a chain that was displayed nowhere: Deezer never tried,
+// Amazon and Qobuz in the opposite order to what the settings screen showed.
+const defaultAutoOrder = "tidal-qobuz-amazon-deezer"
+
 type DownloadRequest struct {
 	Service              string `json:"service"`
 	Query                string `json:"query,omitempty"`
@@ -461,7 +472,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		// Respecter l'ordre configuré par l'user (AutoOrder)
 		orderStr := req.AutoOrder
 		if orderStr == "" {
-			orderStr = "tidal-amazon-qobuz"
+			orderStr = defaultAutoOrder
 		}
 		order := strings.Split(orderStr, "-")
 		slog.Info("[Auto] Walking chain", "track", req.TrackName, "order", orderStr)

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { GetDefaults, LoadSettings, SaveSettings as SaveToBackend } from "@/lib/rpc";
 export type FontFamily = "google-sans" | "inter" | "poppins" | "roboto" | "dm-sans" | "plus-jakarta-sans" | "manrope" | "space-grotesk" | "noto-sans" | "nunito-sans" | "figtree" | "raleway" | "public-sans" | "outfit" | "jetbrains-mono" | "geist-sans" | "bricolage-grotesque";
 export type FolderPreset = "none" | "artist" | "album" | "year-album" | "year-artist-album" | "artist-album" | "artist-year-album" | "artist-year-nested-album" | "album-artist" | "album-artist-album" | "album-artist-year-album" | "album-artist-year-nested-album" | "year" | "year-artist" | "custom";
@@ -124,6 +125,15 @@ function rememberServerOS(goos: string | undefined): void {
         /* ignore */
     }
 }
+// The single source for the auto fallback chain's default. It used to be
+// spelled out at five sites with THREE different values: DEFAULT_SETTINGS said
+// "tidal-qobuz-amazon-deezer", the two "field absent" migrations said
+// "tidal-qobuz-amazon" (no Deezer), the UI placeholder said the same, and the
+// backend's execution fallback said "tidal-amazon-qobuz" (different order).
+// So what actually ran when nothing was configured matched neither what the UI
+// displayed nor what the frontend default declared. Every site now points here;
+// the Go side mirrors it in backend/downloader.go (keep the two in step).
+export const DEFAULT_AUTO_ORDER = "tidal-qobuz-amazon-deezer";
 export const DEFAULT_SETTINGS: Settings = {
     downloadPath: "",
     downloader: "auto",
@@ -142,7 +152,7 @@ export const DEFAULT_SETTINGS: Settings = {
     tidalQuality: "LOSSLESS",
     qobuzQuality: "6",
     amazonQuality: "original",
-    autoOrder: "tidal-qobuz-amazon-deezer",
+    autoOrder: DEFAULT_AUTO_ORDER,
     autoQuality: "16",
     allowFallback: true,
     spotFetchAPIUrl: "https://spotify.afkarxyz.fun/api",
@@ -185,6 +195,31 @@ export function applyFont(fontFamily: FontFamily): void {
 }
 const SETTINGS_KEY = "spotiflac-settings";
 let cachedSettings: Settings | null = null;
+// True once the server's settings have been read at least once this page load.
+// Before that, getSettings() can only answer from localStorage, which may be
+// stale (see rememberSettings).
+let serverSettingsSeen = false;
+let warnedAboutColdCache = false;
+// Records the authoritative settings in BOTH the in-memory cache and
+// localStorage. localStorage is a *cache of the server*, never a rival source.
+//
+// This is the fix for the divergence observed in prod on 2026-07-17
+// (localStorage.downloader = "auto" while the server and the UI both said
+// "qobuz"): loadSettings() used to fill only the memory cache, so localStorage
+// was written by saveSettings() alone. Any change made from another browser,
+// another device, or a server-side migration left this browser's localStorage
+// stale *forever*, and getSettings() served it on every page load until the
+// user happened to press Save.
+function rememberSettings(s: Settings): Settings {
+    cachedSettings = s;
+    serverSettingsSeen = true;
+    try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    } catch {
+        /* private mode / quota — the memory cache still holds the truth */
+    }
+    return s;
+}
 function getSettingsFromLocalStorage(): Settings {
     try {
         const stored = localStorage.getItem(SETTINGS_KEY);
@@ -240,7 +275,7 @@ function getSettingsFromLocalStorage(): Settings {
                 parsed.amazonQuality = "original";
             }
             if (!('autoOrder' in parsed)) {
-                parsed.autoOrder = "tidal-qobuz-amazon";
+                parsed.autoOrder = DEFAULT_AUTO_ORDER;
             }
             if (!('autoQuality' in parsed)) {
                 parsed.autoQuality = "16";
@@ -256,9 +291,23 @@ function getSettingsFromLocalStorage(): Settings {
     }
     return DEFAULT_SETTINGS;
 }
+// Synchronous read of the current settings.
+//
+// It answers from the server-backed cache as soon as loadSettings() has run.
+// Before that — the boot window, or after a failed load — it can only fall back
+// to localStorage. That value is no longer able to drift silently (see
+// rememberSettings), but it can still predate a change made elsewhere, so the
+// first such read is logged instead of passing unnoticed.
 export function getSettings(): Settings {
     if (cachedSettings)
         return cachedSettings;
+    if (!warnedAboutColdCache) {
+        warnedAboutColdCache = true;
+        logger.warning(
+            "getSettings() called before the server settings were loaded — " +
+            "answering from localStorage, which may predate a change made elsewhere",
+        );
+    }
     return getSettingsFromLocalStorage();
 }
 export async function loadSettings(): Promise<Settings> {
@@ -318,7 +367,7 @@ export async function loadSettings(): Promise<Settings> {
                 parsed.amazonQuality = "original";
             }
             if (!('autoOrder' in parsed)) {
-                parsed.autoOrder = "tidal-qobuz-amazon";
+                parsed.autoOrder = DEFAULT_AUTO_ORDER;
             }
             if (!('autoQuality' in parsed)) {
                 parsed.autoQuality = "16";
@@ -344,8 +393,7 @@ export async function loadSettings(): Promise<Settings> {
             if (!('embedGenre' in parsed)) {
                 parsed.embedGenre = true;
             }
-            cachedSettings = { ...DEFAULT_SETTINGS, ...parsed };
-            return cachedSettings!;
+            return rememberSettings({ ...DEFAULT_SETTINGS, ...parsed } as Settings);
         }
     }
     catch (error) {
@@ -354,7 +402,9 @@ export async function loadSettings(): Promise<Settings> {
     const local = getSettingsFromLocalStorage();
     try {
         await SaveToBackend(local);
-        cachedSettings = local;
+        // The local copy has just become the server's copy, so it is
+        // authoritative now — record it as such.
+        rememberSettings(local);
     }
     catch (error) {
         console.error("Failed to migrate settings to backend:", error);
@@ -408,8 +458,7 @@ export async function getSettingsWithDefaults(): Promise<Settings> {
 }
 export async function saveSettings(settings: Settings): Promise<void> {
     try {
-        cachedSettings = settings;
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        rememberSettings(settings);
         await SaveToBackend(settings);
         window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
     }
@@ -417,8 +466,15 @@ export async function saveSettings(settings: Settings): Promise<void> {
         console.error("Failed to save settings:", error);
     }
 }
+// Applies a partial change on top of the CURRENT SERVER state.
+//
+// The base must not come from getSettings() while the cache is cold: a
+// partial update writes the whole object back, so a stale localStorage base
+// would silently push old values over newer server ones — changing one field
+// from the UI could revert every other field to what this browser last saw.
+// Loading first costs one request and makes that impossible.
 export async function updateSettings(partial: Partial<Settings>): Promise<Settings> {
-    const current = getSettings();
+    const current = serverSettingsSeen ? getSettings() : await loadSettings();
     const updated = { ...current, ...partial };
     await saveSettings(updated);
     return updated;
