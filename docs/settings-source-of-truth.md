@@ -372,11 +372,31 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
    moitié — et le garde anti-rétrécissement peut même refuser d'écrire si la seconde moitié est plus
    petite (`Skipped: true`, aucune erreur visible).
 
-   **Correctif proposé** : que le client **cesse de filtrer** pour un lot demandant un M3U8, et envoie
-   toutes les pistes. Le serveur les marque `skipped` avec leur `FilePath`, et le filtre déjà en place
-   (`StatusDone || StatusSkipped` avec chemin non vide) les inclurait sans autre changement — **le code
-   serveur est déjà prêt**. À arbitrer : cela réintroduit N jobs « inutiles » par lot (rapides, ils
-   sortent au contrôle d'existence côté serveur) contre un M3U8 réellement complet.
+   **✅ CORRIGÉ ET VÉRIFIÉ EN PROD le 2026-07-18** (`948eabb`). Le client cesse de filtrer les pistes
+   déjà présentes **quand un M3U8 est demandé** (`folderName` non vide) ; elles ne sont pas
+   retéléchargées, le serveur les reconnaît et enregistre leur chemin.
+
+   | Test | Envoyé | Résultat |
+   |---|---|---|
+   | **Lot mixte** — 5 présentes + 1 absente | 6 pistes | `[M3U8] … entries=6`, fichier 374 → **620 o** |
+   | **Tout déjà présent** — 8 pistes sur disque | 8 pistes | `[M3U8] … entries=8`, 620 → **863 o**, **rien de retéléchargé** |
+
+   Le fichier liste de nouveau **la playlist**, pas le dernier lot.
+
+   > **⚠️ Deux nuances à ne pas enterrer.**
+   >
+   > **1. Mon affirmation « le correctif annoncé n'aurait pas marché » était trop forte.** J'avais
+   > déduit que `checkCatalogDedup` ferait sortir les pistes déjà présentes **avant** la création d'un
+   > job, rendant inutile le simple arrêt du filtrage côté client. En prod, `Catalog dedup` s'est
+   > déclenché **0 fois** sur les deux tests : les pistes existantes sont devenues de vrais jobs,
+   > résolus par le chemin `[Jobs] Already exists` du worker (`StatusSkipped` + `FilePath`) — mécanisme
+   > qui existait **déjà**. Le changement côté client aurait donc suffi dans ces conditions.
+   >
+   > **2. La capture des chemins dans la branche de dédup (`BatchM3U8Request.Preexisting`) n'est donc
+   > PAS vérifiée.** Elle reste une ceinture pour le cas où la dédup catalogue mord réellement (piste
+   > au catalogue à qualité égale ou meilleure), mais aucune observation ne la confirme. De même, la
+   > branche « `enqueued == 0`, tout dédupliqué » n'a jamais été atteinte, puisque des jobs sont
+   > toujours créés. **À traiter comme du code non testé.**
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`
