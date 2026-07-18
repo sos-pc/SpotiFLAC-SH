@@ -109,7 +109,7 @@ export async function downloadWithAutoFallback(
       // user's settings), and so are filename_format / include_track_number /
       // use_album_track_number — passing empty strings keeps the call honest
       // about who decides.
-      const existenceResults = await CheckFilesExistence("", "", [checkRequest]);
+      const existenceResults = await CheckFilesExistence([checkRequest]);
       if (existenceResults.length > 0 && existenceResults[0].exists) {
         return {
           success: true,

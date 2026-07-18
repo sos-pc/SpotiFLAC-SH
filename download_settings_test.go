@@ -91,7 +91,8 @@ func TestParseDownloadSettingsPassesThroughValidValues(t *testing.T) {
 }
 
 // TestEffectiveDownloadSettingsPrefersPerUserOverGlobal is the regression
-// test for the R8 bug: libraryRoot, ApplySettingsFallbacks and the
+// test for the R8 bug: libraryRoot, the download-request settings filler
+// (ApplySettingsFallbacks, since removed as vestigial) and the
 // spotFetchAPIUrl readers used to call SystemService.LoadSettings()
 // directly, ignoring a signed-in user's own saved settings entirely — even
 // though GET /api/v1/settings already correctly returned them. A user who

@@ -158,25 +158,19 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		req.UserID = userIDFromContext(r)
-		// Backend-authoritative (docs/settings-source-of-truth.md): the download
-		// path is derived server-side from the user's saved settings, not from
-		// the client. Drop any output_dir the frontend computed — ApplySettings-
-		// Fallbacks then fills the base path from those settings and DownloadTrack
-		// applies the folder template. The only per-download override kept is
-		// `service`.
-		req.OutputDir = ""
-		s.ctr.Download.ApplySettingsFallbacks(&req, req.UserID)
-		// The server base path still gets confined: libraryRootFor is that same
-		// downloadPath, so this is the root-confined-to-itself case (S2 stays
-		// enforced for any descendant the template appends).
-		if req.OutputDir != "" {
-			cleaned, err := cleanLibraryPath(s.libraryRootFor(r), req.OutputDir)
-			if err != nil {
-				writeV1Error(w, http.StatusBadRequest, "output_dir: "+err.Error())
-				return
-			}
-			req.OutputDir = cleaned
-		}
+		// Backend-authoritative (docs/settings-source-of-truth.md): nothing the
+		// client sends in a settings field has any effect here. DownloadTrack
+		// builds the job with serverJobSettings(), so every download setting
+		// comes from the user's saved settings and `service` is the only
+		// per-download override. The request's own quality/embed/path fields are
+		// never read.
+		//
+		// There used to be an ApplySettingsFallbacks call here that filled those
+		// zero-value fields, plus a cleanLibraryPath check on the output_dir it
+		// produced. Both were dead weight: the Job struct has no OutputDir, and
+		// the fields it wrote were never read again. Removing them also removes
+		// the trap where a client could only ever flip a boolean setting ON
+		// (`if !req.X { req.X = settings.X }`), never off.
 		result, err := s.ctr.Download.DownloadTrack(req)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())

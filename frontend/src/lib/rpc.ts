@@ -266,16 +266,11 @@ export const UploadImageBytes = (filename: string, base64Data: string) =>
     filename,
     base64_data: base64Data,
   }).then((r) => r.url);
-export const CheckFilesExistence = (
-  outputDir: string,
-  rootDir: string,
-  tracks: FileExistsCheck[],
-) =>
-  rest<FileExistsResult[]>("POST", "/files/exists", {
-    output_dir: outputDir,
-    root_dir: rootDir,
-    tracks,
-  });
+// No directory arguments: the server derives where a download lands from the
+// user's saved settings and ignores anything the client would send
+// (docs/settings-source-of-truth.md). Every caller was already passing "".
+export const CheckFilesExistence = (tracks: FileExistsCheck[]) =>
+  rest<FileExistsResult[]>("POST", "/files/exists", { tracks });
 
 // ─── Watchlist ────────────────────────────────────────────────────────────────
 

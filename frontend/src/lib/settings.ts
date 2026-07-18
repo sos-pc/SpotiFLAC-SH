@@ -20,7 +20,6 @@ export interface Settings {
     sfxEnabled: boolean;
     embedLyrics: boolean;
     embedMaxQualityCover: boolean;
-    operatingSystem: "Windows" | "linux/MacOS";
     tidalQuality: "LOSSLESS" | "HI_RES_LOSSLESS";
     qobuzQuality: "6" | "7" | "27";
     amazonQuality: "original";
@@ -83,56 +82,6 @@ export const TEMPLATE_VARIABLES = [
     { key: "{year}", description: "Release year", example: "2014" },
     { key: "{date}", description: "Release date (YYYY-MM-DD)", example: "2014-10-27" },
 ];
-function detectOS(): "Windows" | "linux/MacOS" {
-    const platform = window.navigator.platform.toLowerCase();
-    if (platform.includes('win')) {
-        return "Windows";
-    }
-    return "linux/MacOS";
-}
-// A download's output_dir is built for the SERVER's filesystem (that's where
-// files land), so its path separator and filename-sanitization rules must
-// follow the server's OS — not the browser's, which detectOS() reports. In a
-// self-hosted web deployment the two often differ (a Windows browser talking
-// to a Linux Docker server would otherwise build backslash paths the server
-// can't place files under). The server OS is learned from GetDefaults (see
-// getSettingsWithDefaults) and cached in localStorage so it survives reloads
-// and is available synchronously wherever the OS is needed. Until it's been
-// learned once, we fall back to the browser's OS (the backend also tolerates
-// this by folding "\"→"/" — see cleanAbsPath).
-const SERVER_OS_KEY = "spotiflac-server-os";
-let cachedServerOS: "Windows" | "linux/MacOS" | null = null;
-function serverOSFamily(): "Windows" | "linux/MacOS" {
-    if (cachedServerOS) return cachedServerOS;
-    try {
-        const stored = localStorage.getItem(SERVER_OS_KEY);
-        if (stored === "Windows" || stored === "linux/MacOS") {
-            cachedServerOS = stored;
-            return stored;
-        }
-    } catch {
-        /* ignore */
-    }
-    return detectOS();
-}
-function rememberServerOS(goos: string | undefined): void {
-    if (!goos) return;
-    const family = goos === "windows" ? "Windows" : "linux/MacOS";
-    cachedServerOS = family;
-    try {
-        localStorage.setItem(SERVER_OS_KEY, family);
-    } catch {
-        /* ignore */
-    }
-}
-// The single source for the auto fallback chain's default. It used to be
-// spelled out at five sites with THREE different values: DEFAULT_SETTINGS said
-// "tidal-qobuz-amazon-deezer", the two "field absent" migrations said
-// "tidal-qobuz-amazon" (no Deezer), the UI placeholder said the same, and the
-// backend's execution fallback said "tidal-amazon-qobuz" (different order).
-// So what actually ran when nothing was configured matched neither what the UI
-// displayed nor what the frontend default declared. Every site now points here;
-// the Go side mirrors it in backend/downloader.go (keep the two in step).
 export const DEFAULT_AUTO_ORDER = "tidal-qobuz-amazon-deezer";
 export const DEFAULT_SETTINGS: Settings = {
     downloadPath: "",
@@ -148,7 +97,6 @@ export const DEFAULT_SETTINGS: Settings = {
     sfxEnabled: true,
     embedLyrics: false,
     embedMaxQualityCover: false,
-    operatingSystem: serverOSFamily(),
     tidalQuality: "LOSSLESS",
     qobuzQuality: "6",
     amazonQuality: "original",
@@ -279,7 +227,6 @@ function getSettingsFromLocalStorage(): Settings {
                     parsed.filenameTemplate = "{title}";
                 }
             }
-            parsed.operatingSystem = serverOSFamily();
             if (!('tidalQuality' in parsed)) {
                 parsed.tidalQuality = "LOSSLESS";
             }
@@ -379,7 +326,6 @@ export async function loadSettings(): Promise<Settings> {
                     parsed.filenameTemplate = "{title}";
                 }
             }
-            parsed.operatingSystem = serverOSFamily();
             if (!('tidalQuality' in parsed)) {
                 parsed.tidalQuality = "LOSSLESS";
             }
@@ -468,11 +414,6 @@ export async function getSettingsWithDefaults(): Promise<Settings> {
     const settings = await loadSettings();
     try {
         const defaults = await GetDefaults();
-        // Learn the server's OS (cached for synchronous use everywhere the
-        // path separator / filename rules are needed) and align this
-        // settings object's operatingSystem to it.
-        rememberServerOS(defaults.os);
-        settings.operatingSystem = serverOSFamily();
         if (!settings.downloadPath && defaults.downloadPath) {
             settings.downloadPath = defaults.downloadPath;
             await saveSettings(settings);
@@ -510,18 +451,14 @@ export async function resetToDefaultSettings(): Promise<Settings> {
     let defaultPath = "";
     try {
         const defaults = await GetDefaults();
-        rememberServerOS(defaults.os);
         defaultPath = defaults.downloadPath || "";
     }
     catch (error) {
         console.error("Failed to fetch defaults:", error);
     }
-    // DEFAULT_SETTINGS.operatingSystem was frozen at module load (possibly
-    // before the server OS was known) — re-derive it here.
     const defaultSettings: Settings = {
         ...DEFAULT_SETTINGS,
         downloadPath: defaultPath,
-        operatingSystem: serverOSFamily(),
     };
     await saveSettings(defaultSettings);
     return defaultSettings;

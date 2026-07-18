@@ -33,54 +33,6 @@ func NewDownloadService(jobs *JobManager, auth *AuthManager) *DownloadService {
 	return &DownloadService{jobs: jobs, auth: auth}
 }
 
-// ApplySettingsFallbacks fills zero-value fields in req with userID's
-// effective settings (their own saved settings if any, else the operator's
-// global config.json — see EffectiveDownloadSettings). Intended for REST API
-// callers that send minimal payloads; the Wails frontend always provides all
-// fields explicitly. userID == "" resolves to the global settings.
-func (d *DownloadService) ApplySettingsFallbacks(req *DownloadRequest, userID string) {
-	settings := EffectiveDownloadSettings(d.auth, userID)
-
-	if req.OutputDir == "" {
-		req.OutputDir = settings.DownloadPath
-	}
-	if req.FilenameFormat == "" {
-		req.FilenameFormat = settings.FilenameTemplate
-	}
-	if req.AudioFormat == "" {
-		switch req.Service {
-		case "qobuz":
-			req.AudioFormat = settings.QobuzQuality
-		default:
-			req.AudioFormat = settings.TidalQuality
-		}
-	}
-	if req.AutoOrder == "" {
-		req.AutoOrder = settings.AutoOrder
-	}
-	if !req.EmbedLyrics {
-		req.EmbedLyrics = settings.EmbedLyrics
-	}
-	if !req.EmbedMaxQualityCover {
-		req.EmbedMaxQualityCover = settings.EmbedMaxQualityCover
-	}
-	if !req.AllowFallback {
-		req.AllowFallback = settings.AllowFallback
-	}
-	if !req.UseFirstArtistOnly {
-		req.UseFirstArtistOnly = settings.UseFirstArtistOnly
-	}
-	if !req.UseSingleGenre {
-		req.UseSingleGenre = settings.UseSingleGenre
-	}
-	if !req.EmbedGenre {
-		req.EmbedGenre = settings.EmbedGenre
-	}
-	if !req.TrackNumber {
-		req.TrackNumber = settings.TrackNumber
-	}
-}
-
 func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 	if req.Service == "" {
 		req.Service = "auto"

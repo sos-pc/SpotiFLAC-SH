@@ -107,6 +107,12 @@ export interface ArtistResponse {
     };
 }
 export type SpotifyMetadataResponse = TrackResponse | AlbumResponse | PlaylistResponse | ArtistDiscographyResponse | ArtistResponse;
+// Identity + per-download context, plus the ONE allowed override: service.
+// Every download setting comes from the user's saved settings server-side
+// (docs/settings-source-of-truth.md), so the settings fields this type used to
+// advertise — output_dir, audio_format, filename_format, the embed flags,
+// api_url, service_url… — are gone: no caller set them, and DownloadTrack
+// would not have read them (it builds the job with serverJobSettings).
 export interface DownloadRequest {
     service: "auto" | "tidal" | "qobuz" | "amazon" | "deezer";
     playlist_name?: string;
@@ -117,30 +123,15 @@ export interface DownloadRequest {
     album_artist?: string;
     release_date?: string;
     cover_url?: string;
-    api_url?: string;
-    output_dir?: string;
-    audio_format?: string;
-    folder_name?: string;
-    filename_format?: string;
-    track_number?: boolean;
     position?: number;
-    use_album_track_number?: boolean;
     spotify_id?: string;
-    embed_lyrics?: boolean;
-    embed_max_quality_cover?: boolean;
-    service_url?: string;
     duration?: number;
-    item_id?: string;
     spotify_track_number?: number;
     spotify_disc_number?: number;
     spotify_total_tracks?: number;
     spotify_total_discs?: number;
     copyright?: string;
     publisher?: string;
-    spotify_url?: string;
-    use_first_artist_only?: boolean;
-    use_single_genre?: boolean;
-    embed_genre?: boolean;
 }
 export interface DownloadResponse {
     success: boolean;

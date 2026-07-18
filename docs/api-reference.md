@@ -426,9 +426,19 @@ Get streaming URLs on every supported platform (raw Song.link payload, plus a Ti
 ## Downloads
 
 ### `POST /api/v1/downloads/track`
-Direct one-off download. Internally creates a Job and pushes it onto the queue (does **not** bypass the queue — single workflow). Server-side settings (`downloadPath`, `filenameTemplate`, etc.) fill in any zero-value request fields via `ApplySettingsFallbacks`.
+Direct one-off download. Internally creates a Job and pushes it onto the queue (does **not** bypass the
+queue — single workflow).
 
-**Body** (every field except `service` is optional)
+Backend-authoritative : **aucun réglage envoyé par le client n'a d'effet**. `DownloadTrack` construit le
+job avec `serverJobSettings()`, donc dossier, modèle de nom, qualité, chaîne de repli et drapeaux
+d'embed viennent tous des réglages enregistrés de l'utilisateur. Le **seul** override par téléchargement
+est `service`.
+
+> Jusqu'au 2026-07-18 cette section décrivait un remplissage des champs à valeur nulle via
+> `ApplySettingsFallbacks`. Cette fonction écrivait dans des champs que plus personne ne relisait ; elle
+> a été supprimée. Les champs de réglages ont donc disparu du corps de requête ci-dessous.
+
+**Body** (tout sauf `service` est optionnel)
 ```json
 {
   "service": "auto",
@@ -439,22 +449,9 @@ Direct one-off download. Internally creates a Job and pushes it onto the queue (
   "album_artist": "The Beatles",
   "release_date": "1969-09-26",
   "cover_url": "https://...",
-  "output_dir": "/home/nonroot/Music",
-  "audio_format": "LOSSLESS",
-  "filename_format": "{title} - {artist}",
-  "track_number": false,
+  "playlist_name": "",
   "position": 2,
-  "use_album_track_number": true,
-  "duration": 259,
-  "isrc": "GBAYE0601477",
-  "service_url": "",
-  "auto_order": "tidal-qobuz-amazon-deezer",
-  "embed_lyrics": false,
-  "embed_max_quality_cover": false,
-  "embed_genre": false,
-  "use_first_artist_only": false,
-  "use_single_genre": false,
-  "allow_fallback": true
+  "duration": 259
 }
 ```
 
@@ -833,14 +830,22 @@ Return file sizes (bytes) keyed by path.
 ```
 
 ### `POST /api/v1/files/exists`
-Check which expected files are already on disk. Looks under `output_dir` first, then falls back to walking `root_dir`.
+Check which expected files are already on disk.
+
+Backend-authoritative : le serveur dérive **lui-même** le dossier et le nom de fichier attendus depuis
+les réglages de l'utilisateur (`outputSubfolder`, la fonction que `buildOutputDir` utilise pour l'audio),
+afin que le contrôle vise exactement l'endroit où un téléchargement atterrirait.
+
+**Ne sont plus lus** : `output_dir` et `root_dir` (racine déduite de l'utilisateur), ainsi que
+`filename_format`, `include_track_number`, `use_album_track_number` et `relative_path` par piste — le
+serveur les recalcule. Le repli « parcours de `root_dir` » a également été supprimé : avec le chemin
+calculé côté serveur, il ne pouvait plus produire que des faux positifs (un morceau homonyme dans un
+autre album).
 
 **Body**
 ```json
 {
-  "output_dir": "/home/nonroot/Music/Album",
-  "root_dir":   "/home/nonroot/Music",
-  "tracks":     [
+  "tracks": [
     {
       "spotify_id": "...",
       "track_name": "...",
@@ -851,11 +856,7 @@ Check which expected files are already on disk. Looks under `output_dir` first, 
       "track_number": 2,
       "disc_number": 1,
       "position": 2,
-      "use_album_track_number": true,
-      "filename_format": "{title} - {artist}",
-      "include_track_number": false,
-      "audio_format": "flac",
-      "relative_path": ""
+      "audio_format": "flac"
     }
   ]
 }

@@ -347,7 +347,7 @@ export function useDownload(region: string) {
     logger.info(`checking existing files in parallel...`);
     const existenceChecks = buildExistenceCheckRequests(selectedTrackObjects);
     // Directories ignored by the server — it derives them from the settings.
-    const existenceResults = await CheckFilesExistence("", "", existenceChecks);
+    const existenceResults = await CheckFilesExistence(existenceChecks);
     const existingSpotifyIDs = new Set<string>();
     const finalFilePaths = new Map<string, string>();
     for (const result of existenceResults) {
@@ -420,7 +420,7 @@ export function useDownload(region: string) {
     logger.info(`checking existing files in parallel...`);
     const existenceChecks = buildExistenceCheckRequests(tracksWithId);
     // Directories ignored by the server — it derives them from the settings.
-    const existenceResults = await CheckFilesExistence("", "", existenceChecks);
+    const existenceResults = await CheckFilesExistence(existenceChecks);
     const finalFilePaths: string[] = new Array(tracksWithId.length).fill("");
     const existingSpotifyIDs = new Set<string>();
     for (let i = 0; i < existenceResults.length; i++) {

@@ -49,6 +49,11 @@ localStorage) et le mono-piste utilise la valeur **serveur**. Si les deux diverg
 changement d'UI non sauvegardé), **les deux chemins de téléchargement se comportent différemment**.
 C'est littéralement « les settings pas appliqués partout ».
 
+> **Note (2026-07-18)** — `ApplySettingsFallbacks` **n'existe plus**. Cette section décrit l'état
+> *avant* la migration. Le mono-piste construit désormais son job avec `serverJobSettings()`, comme le
+> batch : les deux chemins lisent le serveur, et la fonction de remplissage écrivait de toute façon
+> dans des champs que plus personne ne relisait (supprimée avec son unique appel).
+
 > **Vérifié le 2026-07-17** : `Source=auto`, chaîne `deezer-qobuz-amazon-tidal` sauvegardée. Un
 > download mono-piste envoie `service:"auto"` **sans** `auto_order` → le backend le remplit depuis le
 > serveur → la chaîne **est** honorée (Teardrop est revenu en 16-bit, cohérent avec Deezer en tête).

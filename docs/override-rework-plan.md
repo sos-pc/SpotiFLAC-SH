@@ -91,7 +91,7 @@ Ce qui reste à faire n'est donc que : (a) **retirer** ce qui empêche la boucle
 |---------|-----------|
 | [`jobs_helpers.go`](../jobs_helpers.go) `buildDownloadRequest` | **Retirer les réécritures de `service`** (3.1, 3.4) — c'est une **suppression**. Et **cesser de jeter `streamingURLs["amazon_url"]`** : le porter dans la requête (voir la ligne `DownloadRequest`). |
 | [`backend/downloader.go`](../backend/downloader.go) `ExecuteDownload` | **Inchangé sur la boucle** — c'est déjà l'autorité de dispatch + fallback, on la garde telle quelle. Seul ajustement : faire lire à Amazon *son* URL (via le nouveau champ) au lieu du `ServiceURL` Tidal. Aligner le défaut `AutoOrder`. |
-| [`download_service.go`](../download_service.go) `ApplySettingsFallbacks` | Vérifier que `AutoOrder`/défauts sont cohérents avec la nouvelle logique. |
+| ~~[`download_service.go`](../download_service.go) `ApplySettingsFallbacks`~~ | **Sans objet** : la fonction a été supprimée le 2026-07-18 (vestigiale — elle remplissait des champs jamais relus). Les défauts viennent de `serverJobSettings()`. |
 | `DownloadRequest` (champ `ServiceURL`) | **Petit plombage, pas d'archi.** Aujourd'hui un seul champ, mis à l'URL Tidal pour `auto` → Amazon reçoit une URL Tidal. Ajouter de quoi transporter l'URL Amazon (un champ `AmazonURL`, ou passer les 2 URLs à `runService`). La donnée existe déjà côté `buildDownloadRequest`, elle est juste jetée. |
 
 ### Frontend
