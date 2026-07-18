@@ -288,8 +288,19 @@ Cas particulier traité : **être déconnecté n'est pas un échec de chargement
 copie serveur par utilisateur sur laquelle faire autorité, donc ce chemin sort avant d'entrer dans la
 machine à états et ne produit aucun avertissement.
 
-Vérifié : `tsc -b` propre, `eslint` 0 erreur. **Vérif navigateur en attente de redéploiement** (le
-signal attendu : plus de `[web] [warning]` au boot, seulement un `[debug]`).
+Vérifié : `tsc -b` propre, `eslint` 0 erreur.
+**✅ VÉRIFIÉ EN PROD le 2026-07-18** (bundle `index-D4-nQCUC.js`) :
+- **Cas attendu** : au boot, la ligne est désormais `[web] [debug] getSettings() before the server
+  load finished` — **plus de `[warning]`**. La régression est fermée.
+- **Cas anormal atteignable** : `/api/v1/settings` (GET + PUT) forcé en échec via interception `fetch`,
+  puis remontage de la page Settings → les deux journaux `Failed to load settings from backend` **et**
+  `Failed to migrate settings to backend` apparaissent, ce qui prouve que le `catch` posant
+  `settingsLoadState = "failed"` est exécuté.
+- **Limite du test live** : l'émission du `warning` elle-même exige `cachedSettings === null` ; dans une
+  session déjà chargée le cache est chaud, donc `getSettings()` répond depuis le cache sans passer par
+  la branche — comportement correct. La reproduire demanderait un **boot** avec `/settings` coupé avant
+  le chargement du JS (injection pré-boot impossible dans le navigateur intégré). L'émission est donc
+  vérifiée par lecture de code, l'entrée dans l'état `failed` par observation live.
 
 Ordre impératif : **1 avant 3** (le backend doit savoir calculer le chemin avant que le frontend
 arrête de l'envoyer, sinon les fichiers atterrissent au mauvais endroit).
