@@ -372,7 +372,7 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
    Fichier passé de **185 à 374 octets**, écrit **après** la fin du lot. La charge utile d'enqueue
    portait bien `m3u8_name` + `m3u8_source_id` et `settings` réduit au seul `service`.
 
-   ### 🔴 OUVERT — le M3U8 manuel est « le dernier lot », pas « la playlist »
+   ### ✅ RÉSOLU — le M3U8 manuel était « le dernier lot », pas « la playlist »
 
    Le test ci-dessus le rend visible : le fichier contenait les 2 pistes Rey Pila d'un lot précédent,
    il contient maintenant les 4 nouvelles — **les 2 anciennes ont disparu**. C'est cohérent avec la
