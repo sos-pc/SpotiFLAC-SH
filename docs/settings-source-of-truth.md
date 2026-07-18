@@ -182,7 +182,10 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      fonctionnalité morte. Les watchlists suivent désormais les réglages **globaux** du propriétaire
      partout : `getWatchlistSettings` (override worker), enqueue/requeue du watcher, racine M3U8/scan
      (`watchlistOutputRoot`), et repair/rebuild admin. `WatchedPlaylist.Settings` devient vestigial
-     (écrit, jamais lu). **Vérif prod en attente** (nécessite une sync watchlist).
+     (écrit, jamais lu). **VÉRIFIÉ EN PROD le 2026-07-18** : une sync de la watchlist `/all` (dont les
+     réglages stockés ont `service:""`, qui retombait sur **tidal** avant) produit
+     `[Download] Resolving requested_service=auto audio_format=HI_RES_LOSSLESS` +
+     `order=deezer-qobuz-amazon-tidal` — soit le `downloader`, la qualité et la chaîne **globaux**.
    - **3-frontend — à faire, vérif navigateur.** `downloadFallback`/`useDownload`/`WatchlistPage`
      n'envoient plus que l'identité piste + `service` (+ contexte playlist). Lève la limite playlist de
      l'étape 2.

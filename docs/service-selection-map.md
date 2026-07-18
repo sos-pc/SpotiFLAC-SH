@@ -1,10 +1,15 @@
-# Sélection de service & fallback — cartographie de l'existant
+# Sélection de service & fallback — cartographie de l'AVANT-refonte
 
-> **🔍 Carte — 2026-07-17.** Relevé par lecture directe du code (pas déduit), en préparation de la
-> refonte de l'override de service découvert en validant S6 (voir
-> [upstream-catchup.md §S6](upstream-catchup.md)). **Ne décide rien** — décrit *comment ça marche
-> aujourd'hui*, où sont les points de décision, et ce qu'une refonte toucherait. Les questions de
-> design ouvertes sont en §6, non tranchées. Index : [README.md](README.md).
+> **🕰️ DOCUMENT HISTORIQUE — décrit l'état du code AVANT la refonte (relevé le 2026-07-17).**
+> **Ne pas le lire comme l'état actuel.** Ce qu'il décrit a depuis été corrigé :
+> l'override `jobs_helpers.go:263` est **supprimé** (refonte phase 1) et la boucle de fallback du
+> frontend est **supprimée** (phase 2a). Pour l'état courant et ce qui reste :
+> [override-rework-plan.md](override-rework-plan.md).
+>
+> Il reste utile pour **comprendre pourquoi** la refonte était nécessaire : il documente les 4 couches
+> de décision, l'universalité de l'override (prouvée en prod), les pièges de nommage
+> (`allowFallback` = repli de *qualité*), et la dérive des défauts `autoOrder`. Relevé par lecture
+> directe du code, pas déduit. Index : [README.md](README.md).
 
 ## 0. Le constat en une phrase
 

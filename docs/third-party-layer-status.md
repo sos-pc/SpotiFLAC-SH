@@ -1,9 +1,23 @@
-# État des lieux — la couche de services tiers (2026-07-15)
+# État des lieux — la couche de services tiers (2026-07-15, complété le 2026-07-18)
 
-> **🌍 Observation — vérifié le 2026-07-15** (sondes live : DNS, `/api/v1/apis/status` en prod,
+> **🌍 Observation — relevé initial le 2026-07-15** (sondes live : DNS, `/api/v1/apis/status` en prod,
 > requêtes directes aux API). **C'est le document le plus périssable du repo** : il décrit des
 > services tiers qui meurent sans prévenir — c'est tout son sujet. **Re-tester avant de citer.**
 > Index : [README.md](README.md).
+
+> **🔄 Mise à jour du 2026-07-18 — observations en prod, l'érosion continue.** Relevées pendant les
+> vérifications de la refonte de sélection de service (logs de téléchargements réels, pas des sondes) :
+>
+> | Service | Observation (07-17/18) |
+> |---|---|
+> | **Deezer** (Deezmate) | **Cassé** : `all Deezer proxies failed: failed to decode response: invalid character '<'` — le proxy renvoie du **HTML** au lieu de JSON. Et sur une autre piste : `deezer: no results`. |
+> | **Amazon** (`amazon.spotbye.qzz.io`) | **Mort** : `dial tcp: lookup amazon.spotbye.qzz.io: no such host` — confirme la disparition DNS déjà notée. |
+> | **Songlink / Odesli** | **429 récurrents** : `songlink: API returned status 429`, puis `Rate limited, skipping calls for 5 minutes`. Fait échouer la résolution Amazon **et** Tidal quand elle est le seul chemin. |
+> | **Qobuz** | 401 sur la recherche non signée — **attendu**, corrigé par le portage S6 (pas encore fait). |
+> | **Tidal** | Fonctionne (le seul qui aboutit régulièrement). |
+>
+> **Conséquence pratique** : la chaîne `auto` finit presque toujours sur **Tidal**, les trois autres
+> échouant. La redondance annoncée par la chaîne est donc largement théorique aujourd'hui.
 
 > **Ce document existe parce que R12 s'est trompé de temporalité.** L'audit couche 2
 > ([`audit-refactoring-couche2.md`](audit-refactoring-couche2.md) §R12) a constaté le 13/07 une

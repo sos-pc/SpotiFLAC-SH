@@ -20,25 +20,44 @@ fausse à l'écriture ; deux ont pourri, une n'avait jamais été vérifiée.
 
 ## L'index
 
-| Doc | Type | Statut | Vérifié | Pour quoi |
-|---|---|---|---|---|
-| [third-party-layer-status.md](third-party-layer-status.md) | 🌍 | ⚠️ **périssable** | **2026-07-15**, sondes live | L'état réel des services tiers. **Commencer ici** avant tout travail touchant un provider. |
-| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟢 **clos** | **2026-07-16, exécution réelle en prod** (+ ELF parsé, couches listées) | ffmpeg/ffprobe ne démarraient pas (`scratch` sans loader ELF). Corrigé via distroless/cc + smoke test CI ; durcissement **complet** (9 sites) vérifié en prod, chemin Tidal compris. **§4bis : ce que le durcissement ne protège pas — toujours valable.** |
-| [deployment-hardening.md](deployment-hardening.md) | 🔍 | 🟡 **5 corrigés+vérifiés, `mem_limit` ouvert** | **2026-07-16**, sondes HTTP/2 + tests de ports + upload réel + lecture du code | Compose, SWAG/nginx, conteneur. DoS login (compteur partagé) et port LAN ouvert **corrigés et vérifiés en prod** ; les 2 bugs applicatifs dormants qu'ils ont fait surgir (upload cassé derrière tout proxy, SSE coupé toutes les 4 min) aussi. **`mem_limit` rejeté par le noyau : ouvert.** §7 : les tâches restantes. |
-| [upstream-catchup.md](upstream-catchup.md) | 🔍 | 🟡 en cours (S1–S16) | 2026-07-15 | Rattrapage de l'upstream. Le tableau §0 porte le statut par sujet. |
-| [audit-refactoring-couche2.md](audit-refactoring-couche2.md) | 🔍 | 🟢 clos (R1–R12) | 07-13 · **§R12 corrigé le 07-15** | Audit couche 2. ⚠️ R12 contenait une attribution fausse — voir l'encadré. |
-| [api-redesign-plan.md](api-redesign-plan.md) | 🧭 | ⏸️ non commencé | 2026-07-15 | Cohérence read/manage/admin + accès DB. Décisions ouvertes en §3. |
-| [service-selection-map.md](service-selection-map.md) | 🔍+🧭 | 🗺️ carte de l'existant | **2026-07-17**, lecture directe du code | Comment le service de téléchargement est choisi : **4 couches** de décision, l'override `jobs_helpers.go:263` (universel), pièges de nommage. Décision produit actée en §6. |
-| [override-rework-plan.md](override-rework-plan.md) | 🧭 | phase 1 ✅, phase 2a ✅ (vérif nav.) | **2026-07-17**, investigation + vérif navigateur | Refonte de la sélection de service vers le modèle UI (`auto`+chaîne honorée / explicite = forcer). Phase 1 (backend) et 2a (frontend, boucle client supprimée) faites et vérifiées. **La boucle de fallback existe déjà (`ExecuteDownload`) — réutilisée.** Reste 2b (statut SSE) + phase 3 (UI). |
-| [settings-source-of-truth.md](settings-source-of-truth.md) | 🔍+🧭 | ✅ décidé (backend-autoritaire), carte faite | **2026-07-17**, code + observation prod | Les réglages n'avaient **pas de source unique** (3 stockages + 2 mécanismes de livraison). **Décision : backend autoritaire**, un seul override (`service`). §7 = carte exhaustive de tout ce que ça touche (5 duplications « deux systèmes » : chemin, existence, 3 enqueues, cover/lyrics, M3U8) + plan phasé. Non commencé. |
-| [EXTERNAL_APIS.md](EXTERNAL_APIS.md) | 🌍 | ⚠️ **partiellement périmé** | Amazon corrigé 07-15 ; **le reste non re-vérifié** | Les API externes utilisées. Croiser avec `third-party-layer-status.md`. |
-| [deployment.md](deployment.md) | 📘+🌍 | ⚠️ §Docker inexact | ffmpeg corrigé 07-15 | Déploiement. L'archi Docker décrite est l'intention, pas la réalité (cf. régression ffmpeg). |
-| [troubleshooting.md](troubleshooting.md) | 📘 | ⚠️ §FFmpeg corrigé 07-15 | — | Pannes courantes. Disait « should never happen » sur ce qui arrive. |
-| [api-reference.md](api-reference.md) | 📘 | ❔ **non re-vérifié** | — | Référence REST (~70 routes). Généré en lisant les fichiers de routes. |
-| [authentication.md](authentication.md) | 📘 | ❔ non re-vérifié | — | JWT, clés API, Jellyfin. |
-| [settings-reference.md](settings-reference.md) | 📘 | ❔ non re-vérifié | — | Les réglages et leur effet. |
-| [tidal-auth.md](tidal-auth.md) | 📘+🌍 | ❔ non re-vérifié | — | Flow device-code Tidal. |
-| [watchlist.md](watchlist.md) | 📘 | ❔ non re-vérifié | — | Watchlists et synchronisation. |
+Rangé par **ce que tu cherches**, pas alphabétiquement. Si tu reprends le travail : commence par §A.
+
+### A. Chantiers actifs — le travail en cours
+
+| Doc | Type | Où ça en est | Pour quoi |
+|---|---|---|---|
+| [settings-source-of-truth.md](settings-source-of-truth.md) | 🔍+🧭 | **étapes 1, 2, 3-backend + watchlists ✅ vérifiées prod** ; reste 3-frontend, 4 (cover/paroles), 5 (M3U8), 6 (`getSettings`/défauts) | Les réglages n'avaient pas de source unique (3 stockages, 2 mécanismes). **Décidé : backend autoritaire**, un seul override (`service`). §7 = carte exhaustive + plan phasé, §7.5 = avancement. |
+| [override-rework-plan.md](override-rework-plan.md) | 🧭 | **phases 1 + 2a ✅ vérifiées** ; reste 2b (statut SSE honnête), 3 (UI : Deezer, défauts `autoOrder`) | Refonte de la sélection de service vers le modèle UI (`auto`+chaîne honorée / explicite = forcer). La boucle de fallback **existait déjà** (`ExecuteDownload`) — réutilisée, pas recodée. |
+| [upstream-catchup.md](upstream-catchup.md) | 🔍 | 🟡 en cours (S1–S16) · **S6 validé en prod le 07-18, prêt à porter** | Rattrapage de l'upstream. Le tableau §0 porte le statut par sujet. Prochain morceau concret : porter `qobuz_api.go` (recherche signée). |
+| [deployment-hardening.md](deployment-hardening.md) | 🔍 | 🟡 5 corrigés+vérifiés · **`mem_limit` ouvert** | Compose, SWAG/nginx, conteneur. DoS login et port LAN **corrigés** ; a fait surgir 2 bugs dormants (upload, SSE). §7 : reste `mem_limit` + rotations d'identifiants. |
+| [api-redesign-plan.md](api-redesign-plan.md) | 🧭 | ⏸️ non commencé | Cohérence read/manage/admin + accès DB. Décisions ouvertes en §3. |
+
+### B. Constats clos — pour comprendre le « pourquoi », pas l'état actuel
+
+| Doc | Type | Statut | Pour quoi |
+|---|---|---|---|
+| [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) | 🔍 | 🟢 **clos**, vérifié en prod 07-16 | ffmpeg ne démarrait pas (`scratch` sans loader ELF). Corrigé (distroless/cc + smoke test CI), durcissement complet (9 sites). **§4bis : ce que le durcissement ne protège pas — toujours valable.** |
+| [audit-refactoring-couche2.md](audit-refactoring-couche2.md) | 🔍 | 🟢 clos (R1–R12) | Audit couche 2. ⚠️ R12 contenait une attribution fausse — voir l'encadré. |
+| [service-selection-map.md](service-selection-map.md) | 🕰️ **historique** | décrit l'état **AVANT** la refonte | ⚠️ **Ne décrit plus le code actuel** (l'override et la boucle client ont été supprimés). Utile pour comprendre *pourquoi* la refonte : les 4 couches, les pièges de nommage, la dérive des défauts. |
+
+### C. Observations du monde extérieur — à re-vérifier avant de citer
+
+| Doc | Type | Vérifié | Pour quoi |
+|---|---|---|---|
+| [third-party-layer-status.md](third-party-layer-status.md) | 🌍 | relevé 07-15, **complété le 2026-07-18** (logs de downloads réels) | L'état réel des services tiers. **Commencer ici** avant tout travail touchant un provider. **Constat 07-18 : Deezer cassé (HTML au lieu de JSON), proxy Amazon mort, Songlink en 429 — la chaîne `auto` finit presque toujours sur Tidal.** |
+| [EXTERNAL_APIS.md](EXTERNAL_APIS.md) | 🌍 | Amazon corrigé 07-15 ; le reste non re-vérifié | Les API externes utilisées. Croiser avec `third-party-layer-status.md`. |
+
+### D. Références du code — la doc « comment ça marche »
+
+| Doc | Type | Statut | Pour quoi |
+|---|---|---|---|
+| [deployment.md](deployment.md) | 📘+🌍 | ⚠️ minimal, pas durci — lire `deployment-hardening.md` avant de mettre en ligne | Déploiement de base. |
+| [troubleshooting.md](troubleshooting.md) | 📘 | ⚠️ §FFmpeg corrigé 07-15 | Pannes courantes. |
+| [api-reference.md](api-reference.md) | 📘 | ❔ non re-vérifié | Référence REST (~70 routes). |
+| [authentication.md](authentication.md) | 📘 | ❔ non re-vérifié | JWT, clés API, Jellyfin. |
+| [settings-reference.md](settings-reference.md) | 📘 | ❔ non re-vérifié | Les réglages et leur effet. ⚠️ à relire après la migration backend-autoritaire. |
+| [tidal-auth.md](tidal-auth.md) | 📘+🌍 | ❔ non re-vérifié | Flow device-code Tidal. |
+| [watchlist.md](watchlist.md) | 📘 | ❔ non re-vérifié | Watchlists et synchronisation. ⚠️ à relire : les watchlists suivent désormais les réglages **globaux**. |
 
 **« ❔ non re-vérifié »** est une information, pas un aveu : ces docs n'ont pas été relus lors des
 travaux de juillet 2026. Ils ne sont pas présumés faux — ils sont **présumés non testés**. À traiter
