@@ -244,8 +244,38 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      répondre depuis `localStorage`. `SettingsPage` appelle déjà `loadSettings()` au montage et écrase
      ses deux états, donc sa fenêtre est brève et auto-corrigée.
    - **Défauts `autoOrder` alignés** (§3) : `DEFAULT_AUTO_ORDER` / `defaultAutoOrder`.
-   - Vérifié : `go build`, `go vet`, `tsc -b`, `eslint` 0 erreur. **Vérif navigateur en attente de
-     redéploiement.**
+   - Vérifié : `go build`, `go vet`, `tsc -b`, `eslint` 0 erreur.
+   - **✅ VÉRIFIÉ EN PROD le 2026-07-18** (bundle `index-DGoIymbZ.js`), par **test d'empoisonnement** :
+     `localStorage` forcé à `downloader:"deezer"`, `autoOrder:"POISON-qobuz-amazon-tidal"`,
+     `tidalQuality:"HI_RES_LOSSLESS"` **sans toucher au serveur**, puis rechargement sans aucune action
+     utilisateur → le poison a disparu et `localStorage` correspond de nouveau au serveur
+     (`auto` / `deezer-qobuz-amazon-tidal` / `LOSSLESS`). **Avec l'ancien code le poison survivait**,
+     `loadSettings()` n'écrivant jamais `localStorage`.
+     **Interprétation verrouillée** : `saveSettings()` est le seul autre écrivain, et le chemin qui
+     l'appelle au boot (`getSettingsWithDefaults`, si `downloadPath` est vide) ne se déclenche pas ici —
+     `downloadPath` est renseigné, vérifié dans la même sonde. Le seul écrivain restant est donc
+     `rememberSettings()`.
+     Défauts : les deux occurrences de `tidal-qobuz-amazon` restant dans le bundle sont des
+     `SelectItem` (options du menu déroulant), aucun défaut n'y pointe plus.
+
+#### ⚠️ Limite connue introduite par l'étape 6 — l'avertissement « cache froid » est consommé au boot
+
+L'avertissement de `getSettings()` **se déclenche bien** (observé : `[web] [warning] getSettings()
+called before the server settings were loaded`), mais son déclencheur est
+[App.tsx:115](../frontend/src/App.tsx) — un `useLayoutEffect` qui lit les réglages **synchronement
+avant le premier paint** pour appliquer thème/police. Cette lecture est **délibérée et correcte** :
+attendre le serveur provoquerait un flash de thème erroné, et les valeurs de la session précédente
+sont le bon compromis. Les lecteurs critiques (téléchargement) tournent sur action utilisateur, cache
+déjà chaud.
+
+**Le défaut** : l'avertissement étant *one-shot*, cette lecture attendue le consomme à chaque
+chargement — il ne signalera donc plus une lecture froide réellement anormale survenant plus tard,
+typiquement après un `loadSettings()` en échec. **Il masque le cas qu'il devait attraper.**
+
+Atténuation actuelle : un échec de chargement est journalisé séparément
+(`console.error("Failed to load settings from backend")`), donc rien n'est totalement silencieux.
+**À trancher** : distinguer « boot en cours » (attendu, ne pas avertir) de « chargement échoué »
+(anormal, avertir) — quelques lignes d'état, à faire seulement si on juge le signal utile.
 
 Ordre impératif : **1 avant 3** (le backend doit savoir calculer le chemin avant que le frontend
 arrête de l'envoyer, sinon les fichiers atterrissent au mauvais endroit).
