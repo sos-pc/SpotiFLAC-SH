@@ -293,12 +293,16 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      - **emplacement** : `/home/nonroot/Music/Playlists/Add 6 [34a1c4a9].m3u8`, à côté des M3U8 de
        watchlists (`all [957f2ab0].m3u8`, `26 [fbe144be].m3u8`) — **même dossier, même convention de
        nommage** (nom assaini + suffixe de désambiguïsation).
-   - ⚠️ **Non observé** : le **contenu** du fichier, donc la réécriture du préfixe Jellyfin. L'API n'a
-     aucun endpoint de lecture de fichier texte (`/files/audio` liste un dossier, il ne lit pas). La
-     réécriture passe par le **même** `CreateM3U8File` que les watchlists, alimenté par
-     `settings.JellyfinMusicPath` lu côté serveur — mais c'est une déduction, pas une mesure.
-     **Pour trancher** : `cat "/home/nonroot/Music/Playlists/Add 6 [34a1c4a9].m3u8"` dans le conteneur ;
-     les entrées doivent commencer par `/Multimedia/Musique/Spotiflac/`, pas par `/home/nonroot/Music/`.
+   - **✅ Contenu vérifié** (`cat` dans le conteneur, fourni par l'utilisateur) — la réécriture du
+     préfixe Jellyfin est **mesurée**, plus déduite :
+     ```
+     #EXTM3U
+     /Multimedia/Musique/Spotiflac/Rey Pila/Velox Veritas/Casting a Shadow - Rey Pila.flac
+     /Multimedia/Musique/Spotiflac/Rey Pila/ESTAN STRANGE I (Deluxe)/Blind Date - Rey Pila.flac
+     ```
+     `/home/nonroot/Music/` → `/Multimedia/Musique/Spotiflac/`, en-tête présent, chemins absolus.
+     Note pour une prochaine fois : l'API n'expose **aucun** endpoint de lecture de fichier texte
+     (`/files/audio` liste un dossier, il ne lit pas), donc ce contrôle passe forcément par le conteneur.
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`
