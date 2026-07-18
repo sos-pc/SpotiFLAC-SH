@@ -346,6 +346,37 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
    > n'ai pas lu leur contexte — j'ai supposé qu'ils étaient inconditionnels. Changer la garde d'une
    > fonction n'a aucun effet si les appelants portent la même garde. Corrigé en les rendant tous
    > inconditionnels : `maybeGenerateM3U8` garde désormais sur `batchID` et aiguille sur `watchlistID`.
+
+   **✅ VÉRIFIÉ EN PROD le 2026-07-18** (après le correctif des points d'appel, `1ba7542`), sur
+   4 pistes **absentes du disque** — le cas qui ne produisait rien auparavant :
+   ```
+   INFO [Jobs] Done track=84' Dreamin
+   INFO [Jobs] Done track=Cataclysme
+   INFO [Jobs] Done track=Optimisme
+   INFO [Jobs] Done track=Le Roi et l'Oiseau - Main Theme
+   INFO [M3U8] manual batch written file=Add 6 [34a1c4a9].m3u8 entries=4
+   ```
+   Fichier passé de **185 à 374 octets**, écrit **après** la fin du lot. La charge utile d'enqueue
+   portait bien `m3u8_name` + `m3u8_source_id` et `settings` réduit au seul `service`.
+
+   ### 🔴 OUVERT — le M3U8 manuel est « le dernier lot », pas « la playlist »
+
+   Le test ci-dessus le rend visible : le fichier contenait les 2 pistes Rey Pila d'un lot précédent,
+   il contient maintenant les 4 nouvelles — **les 2 anciennes ont disparu**. C'est cohérent avec la
+   conception (le serveur ne voit que les jobs *du lot*), mais ce n'est pas ce qu'un utilisateur attend
+   d'un fichier nommé d'après la playlist.
+
+   **Pourquoi** : le client filtre en amont les pistes déjà présentes (`tracksToDownload` exclut ce que
+   le contrôle d'existence a trouvé), donc elles ne sont **jamais mises en file** et le serveur ignore
+   leur existence. Télécharger une playlist en deux fois donne un M3U8 qui ne contient que la seconde
+   moitié — et le garde anti-rétrécissement peut même refuser d'écrire si la seconde moitié est plus
+   petite (`Skipped: true`, aucune erreur visible).
+
+   **Correctif proposé** : que le client **cesse de filtrer** pour un lot demandant un M3U8, et envoie
+   toutes les pistes. Le serveur les marque `skipped` avec leur `FilePath`, et le filtre déjà en place
+   (`StatusDone || StatusSkipped` avec chemin non vide) les inclurait sans autre changement — **le code
+   serveur est déjà prêt**. À arbitrer : cela réintroduit N jobs « inutiles » par lot (rapides, ils
+   sortent au contrôle d'existence côté serveur) contre un M3U8 réellement complet.
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`
