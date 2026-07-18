@@ -26,11 +26,38 @@
 > **définitivement** (sous-domaine DNS supprimé, pas en panne). Ce n'est pas un hoquet, c'est une
 > érosion.
 
+> ## ⚠️ CORRECTION MAJEURE — 2026-07-18 : « Amazon est mort » était FAUX
+>
+> Le service Amazon **n'a pas disparu, il a déménagé**. En déchiffrant la config d'endpoints de
+> l'amont (`community_endpoints.go`, autorisation utilisateur sur les API communautaires), puis en
+> sondant en direct :
+>
+> | Hôte | Sonde du 2026-07-18 |
+> |---|---|
+> | `amazon.spotbye.qzz.io` (**le nôtre**) | 🔴 DNS échoue |
+> | `amz-oss.spotbye.qzz.io` (**celui de l'amont**) | 🟢 **HTTP 200** — `{"ok":true,"has_wvd":true,"has_login":true}` |
+> | `qbz-oss.spotbye.qzz.io` (Qobuz, amont) | 🟢 **HTTP 200** — `{"success":true,"data":{"status":"ok"}}` |
+>
+> **Ce n'est pas un simple changement d'URL** : le protocole diffère (nous `GET /api/track/<ASIN>`,
+> eux `POST /api/dl` + en-têtes signés).
+>
+> **Le vrai obstacle, mesuré :** l'accès communautaire exige une **session obtenue par vérification
+> humaine dans un navigateur** (amorçage → `challenge_url` → l'utilisateur complète un défi → *grant*
+> → session signée, `X-Sig-Platform: desktop`). Une sonde réelle s'arrête sur
+> `browser integration is not ready`. Ce n'est donc pas un portage de code mais une fonctionnalité
+> produit, avec l'utilisateur dans la boucle. **Aucun contournement automatique ne sera implémenté.**
+>
+> **Et `musicdl.me`** (notre remplaçant Qobuz de mai 2026) est mort de son côté : HTTP 500 avec un
+> corps chiffré `application/octet-stream`, **identique avec la bonne clé, une fausse clé et sans
+> clé** — l'endpoint échoue avant même de regarder l'authentification.
+>
+> Voir [upstream-catchup.md §S6](upstream-catchup.md).
+
 ## 1. L'état, vérifié en direct le 2026-07-15
 
 | Service | Rôle | État | Nature de la panne |
 |---|---|---|---|
-| **Amazon proxy** (`amazon.spotbye.qzz.io`) | seule source Amazon | 🔴 **mort** | **DNS supprimé** — le domaine parent `spotbye.qzz.io` résout (Cloudflare), le sous-domaine `amazon.` non. Retiré, pas en panne. |
+| **Amazon proxy** (`amazon.spotbye.qzz.io`) | seule source Amazon | 🔴 DNS mort | ⚠️ **relecture 07-18 : le service a déménagé sur `amz-oss.spotbye.qzz.io`, qui répond 200.** C'est notre configuration qui est périmée, pas le service qui a disparu. |
 | **SpotFetch** (`spotify.afkarxyz.fun/api`) | métadonnées Spotify alternatives | 🔴 timeout | ⚠️ **`useSpotFetchAPI = True` en prod** — donc activé alors qu'il ne répond pas |
 | **`tidal-uptime.geeked.wtf`** | source de découverte auto des proxies Tidal | 🔴 DNS mort | la goroutine de découverte échoue à chaque cycle (`[Discovery] Failed to fetch tidal-uptime`) |
 | **Qobuz** (`app_id` en dur) | recherche par ISRC | 🔴 **401** | identifiant révoqué par Qobuz — reproduit sur 3 ISRC, voir `upstream-catchup.md` §S6 |
@@ -67,9 +94,11 @@ contiennent aucune trace de 401 Qobuz aujourd'hui, alors que le bug est bien ré
 **Cette question est sans objet en l'état** : il n'y a plus d'endpoint Amazon dont déchiffrer quoi
 que ce soit. Le sous-domaine est supprimé.
 
-Récupérer une source Amazon suppose d'abord de **retrouver l'endpoint actuel**, que l'upstream a
-déplacé dans sa config chiffrée (`community_endpoints.go`, AES-GCM — voir §S1). L'ordre logique est
-donc : endpoint d'abord, déchiffrement DRM ensuite (et seulement s'il s'avère nécessaire).
+~~Récupérer une source Amazon suppose d'abord de **retrouver l'endpoint actuel**~~ — **fait le
+2026-07-18** : `amz-oss.spotbye.qzz.io`, vivant (`has_wvd:true`, `has_login:true`). La question S4
+n'est donc plus « sans objet » : elle redevient pertinente **si** on décide de construire le flux de
+vérification humaine décrit dans l'encadré en tête de document. L'ordre reste : accès d'abord,
+déchiffrement DRM ensuite, et seulement s'il s'avère nécessaire.
 
 ## 4. Question ouverte — l'écrasement du service est-il voulu ?
 

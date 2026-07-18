@@ -25,7 +25,7 @@
 | **S3** | Retry/cooldown réseau (429/503) | community_endpoints.go (`doCommunityRequest`) | Pattern identifié, à adapter | **1** |
 | **S4** | Déchiffrement DRM | mp4ff_decrypt.go | À part — décision utilisateur requise avant tout triage technique | — |
 | **S5** ✅ | Client Tidal | tidal.go, tidal_community.go | **lu en entier** — gap réel : pas de validation mimeType-vs-qualité (même famille que S2), fallback HI_RES→LOSSLESS déjà présent chez nous | 2 |
-| **S6** 🟢 | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **VALIDÉ EN PROD 2026-07-17** : override retiré (refonte phase 1), un `service:"qobuz"` atteint enfin `searchByISRC` et remonte `qobuz: unsigned ISRC search returned status 401` — l'échec prod est bien là, hypothèse confirmée par exécution. Reste à **porter `qobuz_api.go`** (recherche signée) pour que Qobuz marche ; plan prêt (voir §S6) | **prêt à porter** |
+| **S6** 🔵 | Client Qobuz | qobuz.go, qobuz_api.go, qobuz_community.go | **SORTI DU RATTRAPAGE le 2026-07-18** → chantier « API externes ». Mesuré : recherche signée OK (~40 lignes) mais téléchargement mort des deux côtés (`musicdl.me` 500 ; route communautaire vivante mais derrière une **vérification humaine**). Porter les 407 lignes réparerait une recherche qui ne débouche sur rien (voir §S6) | **hors rattrapage** |
 | **S7** ✅ | Client Amazon | amazon.go | **lu en entier** — relie S4 : mp4ff_decrypt remplace notre déchiffrement à clé unique, potentiellement déjà cassé si notre proxy a évolué pareil (voir §S7) | 2 (lié à S4) |
 | **S8** ✅ | Client Spotify authentifié | spotfetch, spotify_metadata, spotify_totp | **lu en entier** — 2 fixes candidats + 1 écart mineur, TOTP confirmé identique, retry 401/403 déjà couvert chez nous | 4 (portage) |
 | **S9** 🟢 | Résolution de liens + ISRC cross-provider | songlink.go, link_resolver.go, songstats.go, isrc_cache.go, isrc_finder.go, isrc_helper.go | **ISRC-direct implémenté (2026-07-15)** — câblé aux 2 pipelines (téléchargement + genre/R10), build+vet verts ; songstats/UPC/court-circuit Qobuz reportés (voir §S9) | fait (v1) |
@@ -36,6 +36,23 @@
 | **S14** ✅ | go.mod | dépendances upstream | **lu en entier** — rien de nouveau au-delà de S4/S11, a permis de corriger S11 (pas de blocage CGO probable) | 5 |
 
 **Les 14 sujets sont maintenant lus (2026-07-15).** Bilan pour la prochaine étape (implémentation) :
+
+> **RE-TRIAGE DU 2026-07-18.** Après mesures (voir §S6), le rattrapage se scinde en deux :
+>
+> **Parti vers le chantier « couche API externe »** — S6 (Qobuz), S7 (Amazon), S4 (DRM), S1 (infra
+> communautaire), et la part de S3 qui touche les clients providers. Point commun : tous butent sur
+> la même chose, l'accès aux services tiers et sa vérification humaine. Ce n'est plus du portage.
+>
+> **Reste dans le rattrapage, indépendant :**
+>
+> | Sujet | Besoin | Mesure du 2026-07-18 |
+> |---|---|---|
+> | **S8** — client Spotify | ✅ **mesuré** | 9 instanciations, token non partagé ; + retry TOTP sur dérive d'horloge ; + `(?s)` manquant |
+> | **S2** (+ trou de S5) — validation post-téléchargement | 🟡 assurance | **0 preview sur 19 téléchargements** — les tailles suivent les durées (4–8 Mo/min). N'attraperait rien aujourd'hui, mais couvre le pire mode de panne de la seule route qui marche |
+> | S11 — migration lib de tagging | ❌ aucun | effort 4, aucun problème observé qui la motive — **laisser** |
+> | S12 / S13 | — | fonctionnalités produit, pas des bugs |
+>
+> **Ordre retenu : S8 puis S2.**
 
 **À implémenter, par ordre de valeur/risque :**
 1. **S2 — validation durée post-téléchargement.** Petit, autonome, corrige un vrai trou (preview Tidal
@@ -215,7 +232,33 @@ juste la validation dans `DownloadFromManifest` (petit, sûr, échec propre au l
 retry-miroir automatique) ou (b) fusionner `getDownloadURLRotated` + `DownloadFile` en une boucle
 entrelacée comme upstream (plus de travail, comportement complet). Ne pas décider ça seul.
 
-### S6 — Client Qobuz 🟠 hypothèse re-vérifiée, mais **validation prod bloquée par 2 défauts d'observabilité** (2026-07-17)
+### S6 — Client Qobuz 🔵 **SORTI DU RATTRAPAGE le 2026-07-18** → chantier « API externes »
+
+> **Décision (2026-07-18, utilisateur) : S6 rejoint le chantier de la couche API externe**, avec S7
+> (Amazon), S4 (DRM) et S1 (infra communautaire). Motif : ce n'est plus un portage de code amont.
+>
+> **Mesures du 2026-07-18 qui ont conduit là :**
+>
+> | Question | Mesure |
+> |---|---|
+> | La recherche non signée échoue-t-elle toujours ? | 🔴 **401** sur 3 ISRC — inchangé |
+> | La recherche signée (paire publique) marche-t-elle ? | 🟢 **200** avec résultats réels — inchangé |
+> | Notre téléchargement Qobuz (`musicdl.me`) ? | 🔴 **500**, corps chiffré, **identique avec bonne clé / fausse clé / sans clé** — échoue avant l'auth. Aucune référence amont : **ils n'ont jamais utilisé musicdl.me** |
+> | La route communautaire de l'amont (`qbz-oss`) ? | 🟢 **health 200** — le service tourne |
+> | Peut-on s'y connecter ? | 🔴 **non** — session par **vérification humaine dans un navigateur** (`browser integration is not ready`) |
+>
+> **Conséquence : porter `qobuz_api.go` (407 lignes) réparerait une recherche qui débouche sur un
+> téléchargement mort.** Le plan « prêt à porter » ci-dessous était fondé sur un périmètre incomplet :
+> il ne traitait que la recherche, alors que Qobuz a **deux** maillons cassés.
+>
+> Ce qui reste vrai et réutilisable le jour du chantier : la **recherche signée ~40 lignes**
+> (mesurée fonctionnelle), et le fait que le scraping/cache (le reste des 407 lignes) n'est qu'une
+> mesure de **durabilité**, sans objet tant que le téléchargement ne marche pas.
+>
+> ⚠️ **Aucun contournement de la vérification humaine ne sera implémenté.** Si le chantier se fait,
+> ce sera un flux où l'utilisateur complète lui-même le défi dans son navigateur.
+
+#### Historique (état au 2026-07-17, conservé pour le raisonnement)
 
 > **Mise à jour 2026-07-17 — accès prod obtenu, tentative de valider la condition que ce plan pose
 > lui-même (« l'échec réel est-il dans `searchByISRC` ou plus loin ? »). Résultat : les deux moitiés
@@ -373,7 +416,7 @@ l'album, `ArtistIds`) — mineur, pas d'ISRC exposé ici (confirmé par grep sur
 
 | Changement | Verdict | Pourquoi |
 |---|---|---|
-| Cache du token d'accès au niveau package (partagé entre instances, expiry réelle ~55 min) | **Candidat au portage** | On instancie a priori un `SpotifyClient` par usage sans partager le token entre eux — moins de handshakes TOTP-signés, donc moins de surface pour se faire limiter. À vérifier : combien de fois `NewSpotifyClient()` est appelé par téléchargement/sync. |
+| Cache du token d'accès au niveau package (partagé entre instances, expiry réelle ~55 min) | **À PORTER — besoin mesuré le 2026-07-18** | La question laissée ouverte est tranchée : **9 sites appellent `NewSpotifyClient()`** et `accessToken` est un **champ d'instance** (`backend/spotify/client.go:42`), donc **jamais partagé**. Chaque site refait un handshake TOTP signé. Deux sites se nomment déjà `sharedClient`, signe d'une conscience partielle du problème. |
 | Retry TOTP sur 3 fenêtres d'horloge (`now`, `now-30s`, `now+30s`) | **Candidat au portage** | Protège contre le clock drift qui invaliderait silencieusement le TOTP. On n'a rien d'équivalent. Petit, sûr. |
 | Retry auto sur 401/403 dans `Query()` (invalide le cache, réinitialise, retente 1×) | **Déjà couvert, on est même en avance** | Notre `Query()` (`backend/spotify/client.go:332-352`) gère déjà le 401 (reset + retry) **et** le 429 avec `Retry-After` + backoff exponentiel (10s/30s/60s) — chose qu'on n'a pas vue dans ce diff upstream. Rien à porter ici. |
 | `(?s)` ajouté à la regex de `stripHTMLTags` | **Candidat au portage, trivial** | Sans ce flag, `.` ne matche pas les retours à la ligne dans une bio/description HTML multi-lignes — un vrai bug de troncature. Un caractère à changer si on a l'équivalent. |
