@@ -53,6 +53,14 @@ C'est littéralement « les settings pas appliqués partout ».
 > *avant* la migration. Le mono-piste construit désormais son job avec `serverJobSettings()`, comme le
 > batch : les deux chemins lisent le serveur, et la fonction de remplissage écrivait de toute façon
 > dans des champs que plus personne ne relisait (supprimée avec son unique appel).
+>
+> **Suppression vérifiée en prod le 2026-07-18** (bundle `index-CZk1kZSv.js`) : aller-retour de
+> sauvegarde des réglages intact (14 champs clés identiques) ; `/files/exists` répond avec le corps
+> réduit ; un téléchargement mono-piste atterrit sur
+> `/home/nonroot/Music/Fai Baba/Veränderet/Rägeboge - Fai Baba.flac`, soit `{artist}/{album}` +
+> `{title} - {artist}` — les réglages **serveur**, dans le même dossier que la piste du lot précédent.
+> À noter : la clé orpheline `operatingSystem` subsiste dans les blobs déjà enregistrés, avec la valeur
+> `"Windows"` — l'OS du **navigateur**, pour un serveur Linux. La valeur était fausse ; rien ne la lit.
 
 > **Vérifié le 2026-07-17** : `Source=auto`, chaîne `deezer-qobuz-amazon-tidal` sauvegardée. Un
 > download mono-piste envoie `service:"auto"` **sans** `auto_order` → le backend le remplit depuis le
