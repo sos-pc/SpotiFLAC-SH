@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"sync"
 	"time"
 
@@ -129,6 +130,19 @@ type BatchM3U8Request struct {
 	Name     string
 	SourceID string
 	UserID   string
+	// Tracks the catalog dedup recognised as already downloaded, so no job was
+	// ever created for them. Without this the M3U8 would list only what THIS
+	// batch downloaded — "the last batch" rather than "the playlist" — because
+	// a deduped track never reaches a worker and so never becomes a skipped job
+	// with a path.
+	Preexisting []M3U8Entry
+}
+
+// M3U8Entry is one line of a generated playlist, kept with its position so the
+// final file follows playlist order rather than completion order.
+type M3U8Entry struct {
+	Position int
+	Path     string
 }
 
 // JobTrack is the per-track payload inside EnqueueBatchRequest.
@@ -354,6 +368,11 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 	batchID := fmt.Sprintf("%s-%d", req.WatchlistID, time.Now().UnixNano())
 	enqueued := 0
 	skipped := 0
+	// A manual batch that asked for an M3U8 must end up listing the whole
+	// playlist, not just what this run downloaded — so remember the tracks the
+	// catalog dedup takes out below, which never become jobs.
+	wantsM3U8 := req.WatchlistID == "" && req.M3U8Name != ""
+	var preexisting []M3U8Entry
 
 	for _, track := range req.Tracks {
 		if track.SpotifyID == "" {
@@ -373,6 +392,9 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		if dedup := jm.checkCatalogDedup(track.SpotifyID, req.Settings); dedup.skip {
 			slog.Info("[Jobs] Catalog dedup", "track", track.TrackName, "reason", dedup.reason)
 			jm.recordCatalogDedupSkip(track, req, dedup.libraryFileID, dedup.filePath, dedup.reason)
+			if wantsM3U8 && dedup.filePath != "" {
+				preexisting = append(preexisting, M3U8Entry{Position: track.Position, Path: dedup.filePath})
+			}
 			skipped++
 			continue
 		}
@@ -429,13 +451,26 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		jm.batchTotals[batchID] = enqueued
 		jm.batchDone[batchID] = 0
 		jm.batchWatchID[batchID] = req.WatchlistID
-		if req.WatchlistID == "" && req.M3U8Name != "" {
+		if wantsM3U8 {
 			jm.batchM3U8[batchID] = BatchM3U8Request{
-				Name:     req.M3U8Name,
-				SourceID: req.M3U8SourceID,
-				UserID:   req.UserID,
+				Name:        req.M3U8Name,
+				SourceID:    req.M3U8SourceID,
+				UserID:      req.UserID,
+				Preexisting: preexisting,
 			}
 		}
+	} else if enqueued == 0 && wantsM3U8 && len(preexisting) > 0 && jm.eventHandler != nil {
+		// Every track was already downloaded, so no job will ever fire the
+		// completion hook — yet this is exactly the "regenerate the playlist
+		// file" case, and it has all the paths it needs right here.
+		sort.Slice(preexisting, func(a, b int) bool { return preexisting[a].Position < preexisting[b].Position })
+		paths := make([]string, 0, len(preexisting))
+		for _, e := range preexisting {
+			paths = append(paths, e.Path)
+		}
+		jm.eventHandler.OnManualBatchComplete(BatchM3U8Request{
+			Name: req.M3U8Name, SourceID: req.M3U8SourceID, UserID: req.UserID,
+		}, paths)
 	} else if enqueued == 0 && skipped > 0 && req.WatchlistID != "" && jm.eventHandler != nil {
 		// Every track in the batch was caught by dedup (duplicate active
 		// job or catalog dedup) — no job was ever created with this

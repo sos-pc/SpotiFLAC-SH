@@ -518,16 +518,26 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 	// Only tracks that actually landed on disk go in, in playlist order. A
 	// failed track has no file to point at, and a skipped one was already
 	// there — both are legitimate entries only if they resolved to a path.
-	done := make([]Job, 0, len(latest))
+	//
+	// The batch's own jobs are merged with the tracks the catalog dedup took out
+	// at enqueue time: those never become jobs, so listing jobs alone would make
+	// the file "the last batch" instead of "the playlist".
+	entries := make([]M3U8Entry, 0, len(latest)+len(m3u8Req.Preexisting))
 	for _, j := range latest {
 		if (j.Status == StatusDone || j.Status == StatusSkipped) && j.FilePath != "" {
-			done = append(done, j)
+			entries = append(entries, M3U8Entry{Position: j.Position, Path: j.FilePath})
 		}
 	}
-	sort.Slice(done, func(a, b int) bool { return done[a].Position < done[b].Position })
-	paths := make([]string, 0, len(done))
-	for _, j := range done {
-		paths = append(paths, j.FilePath)
+	entries = append(entries, m3u8Req.Preexisting...)
+	sort.Slice(entries, func(a, b int) bool { return entries[a].Position < entries[b].Position })
+	paths := make([]string, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if seen[e.Path] {
+			continue
+		}
+		seen[e.Path] = true
+		paths = append(paths, e.Path)
 	}
 	jm.eventHandler.OnManualBatchComplete(m3u8Req, paths)
 }

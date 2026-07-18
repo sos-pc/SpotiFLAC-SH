@@ -367,10 +367,17 @@ export function useDownload(region: string) {
         setDownloadedTracks((prev) => new Set(prev).add(id));
       }
     }
-    const tracksToDownload = selectedTrackObjects.filter((track) => {
-      const trackID = track.spotify_id || "";
-      return !existingSpotifyIDs.has(trackID);
-    });
+    // When an M3U8 is wanted, the already-present tracks are sent too. They are
+    // not re-downloaded: the server's catalog dedup drops them before any job is
+    // created, and records their path so the playlist file lists the WHOLE
+    // playlist rather than just what this run fetched
+    // (docs/settings-source-of-truth.md D5). Without an M3U8 there is nothing to
+    // gain from enqueuing them, so the filter stays.
+    const tracksToDownload = folderName
+      ? selectedTrackObjects
+      : selectedTrackObjects.filter(
+          (track) => !existingSpotifyIDs.has(track.spotify_id || ""),
+        );
     const skippedCount = existingSpotifyIDs.size;
     const total = selectedTracks.length;
     setDownloadProgress(Math.round((skippedCount / total) * 100));
@@ -432,10 +439,12 @@ export function useDownload(region: string) {
         setDownloadedTracks((prev: Set<string>) => new Set(prev).add(trackID));
       }
     }
-    const tracksToDownload = tracksWithId.filter((track) => {
-      const trackID = track.spotify_id || "";
-      return !existingSpotifyIDs.has(trackID);
-    });
+    // Same rule as handleDownloadSelected above.
+    const tracksToDownload = folderName
+      ? tracksWithId
+      : tracksWithId.filter(
+          (track) => !existingSpotifyIDs.has(track.spotify_id || ""),
+        );
     const skippedCount = existingSpotifyIDs.size;
     const total = tracksWithId.length;
     setDownloadProgress(Math.round((skippedCount / total) * 100));
