@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { getSettings } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { getFirstArtist, resolvePlaylistBaseDir } from "@/lib/utils";
+import { getFirstArtist } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { getStreamToken } from "@/lib/auth";
 import { downloadWithAutoFallback } from "@/lib/downloadFallback";
@@ -99,23 +99,24 @@ async function enqueueTracksBatch(
   }
 }
 
+// The client no longer decides whether an M3U8 is written, where it goes, or
+// how the Jellyfin path is rewritten — the server reads all of that from the
+// user's settings (docs/settings-source-of-truth.md D5). It only reports what
+// came back, so a write the server declined is not announced as a success.
 async function maybeCreateM3U8(
-  settings: Settings,
   folderName: string | undefined,
-  outputDir: string,
+  sourceId: string,
   paths: string[],
 ) {
-  if (!settings.createM3u8File || !folderName || paths.length === 0) return;
+  if (!folderName || paths.length === 0) return;
   try {
     logger.info(`creating m3u8 playlist: ${folderName}`);
-    await CreateM3U8File(
-      folderName,
-      outputDir,
-      paths,
-      settings.jellyfinMusicPath || "",
-      settings.downloadPath || "",
-    );
-    toast.success("M3U8 playlist created");
+    const res = await CreateM3U8File(folderName, sourceId, paths);
+    if (res?.written) {
+      toast.success("M3U8 playlist created");
+    } else if (res?.skipped) {
+      logger.info("m3u8 not written: would have shrunk the existing playlist");
+    }
   } catch (err) {
     logger.error(`failed to create m3u8 playlist: ${err}`);
     toast.error(`Failed to create M3U8 playlist: ${err}`);
@@ -278,7 +279,11 @@ export function useDownload(region: string) {
     selectedTracks: string[],
     allTracks: TrackMetadata[],
     folderName?: string,
-    isAlbum?: boolean,
+    // Identity of what was fetched, used only to disambiguate the M3U8
+    // filename (two playlists whose names sanitise identically), the way a
+    // watchlist id does. isAlbum used to sit here too: it fed the client-side
+    // playlist-folder rule, which the server now owns.
+    sourceId?: string,
   ) => {
     if (selectedTracks.length === 0) {
       toast.error("No tracks selected");
@@ -291,7 +296,6 @@ export function useDownload(region: string) {
     setIsDownloading(true);
     setBulkDownloadType("selected");
     setDownloadProgress(0);
-    const outputDir = resolvePlaylistBaseDir(settings, folderName, isAlbum);
     const selectedTrackObjects = selectedTracks
       .map((id) => allTracks.find((t) => t.spotify_id === id))
       .filter((t): t is TrackMetadata => t !== undefined);
@@ -343,12 +347,12 @@ export function useDownload(region: string) {
     const paths = selectedTrackObjects
       .map((t) => finalFilePaths.get(t.spotify_id || "") || "")
       .filter((p) => p !== "");
-    await maybeCreateM3U8(settings, folderName, outputDir, paths);
+    await maybeCreateM3U8(folderName, sourceId || "", paths);
   };
   const handleDownloadAll = async (
     tracks: TrackMetadata[],
     folderName?: string,
-    isAlbum?: boolean,
+    sourceId?: string,
   ) => {
     const tracksWithId = tracks.filter((track) => track.spotify_id);
     if (tracksWithId.length === 0) {
@@ -360,7 +364,6 @@ export function useDownload(region: string) {
     setIsDownloading(true);
     setBulkDownloadType("all");
     setDownloadProgress(0);
-    const outputDir = resolvePlaylistBaseDir(settings, folderName, isAlbum);
     logger.info(`checking existing files in parallel...`);
     const existenceChecks = buildExistenceCheckRequests(tracksWithId);
     // Directories ignored by the server — it derives them from the settings.
@@ -406,9 +409,8 @@ export function useDownload(region: string) {
     setBulkDownloadType(null);
     shouldStopDownloadRef.current = false;
     await maybeCreateM3U8(
-      settings,
       folderName,
-      outputDir,
+      sourceId || "",
       finalFilePaths.filter((p) => p !== ""),
     );
   };

@@ -1524,11 +1524,6 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		return result, nil
 	}
 
-	playlistDir := filepath.Join(outputDir, "Playlists")
-	if err := os.MkdirAll(playlistDir, 0755); err != nil {
-		return result, fmt.Errorf("failed to create Playlists dir: %w", err)
-	}
-
 	// resolveTrackPaths can legitimately fail to resolve some of pl.TrackIDs
 	// — no catalog entry, no SPOTIFY_ID tag, and no BoltDB job record left
 	// (exactly the state of a pre-existing library downloaded before tag
@@ -1548,26 +1543,25 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 	// and "AC:DC Hits") get distinct files instead of silently overwriting
 	// each other every sync.
 	baseName := m3u8BaseName(pl.Name, pl.ID)
-	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
 	if result.Unresolved > 0 {
 		slog.Warn("[Watcher] M3U8: tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them",
 			"playlist", pl.Name, "unresolved", result.Unresolved, "total", len(pl.TrackIDs))
-		if !force {
-			if existingCount, ok := countM3U8Entries(m3u8Path); ok && shouldSkipShrinkingWrite(len(paths), existingCount) {
-				slog.Warn("[Watcher] M3U8: refusing to shrink, leaving the existing file untouched",
-					"playlist", pl.Name, "existing_entries", existingCount, "new_entries", len(paths))
-				result.Skipped = true
-				return result, nil
-			}
-		}
 	}
 
-	sys := &SystemService{}
-	if err := sys.CreateM3U8File(baseName, playlistDir, paths, settings.JellyfinPath, outputDir); err != nil {
+	// The shrink guard applies only when tracks failed to resolve: a
+	// fully-resolved shorter list means the playlist genuinely shrank, and
+	// sync_deletions has already pruned pl.TrackIDs before we get here.
+	result, err = writeM3U8ToPlaylistsDir(outputDir, baseName, settings.JellyfinPath,
+		paths, len(pl.TrackIDs), result.Unresolved > 0 && !force)
+	if err != nil {
 		return result, fmt.Errorf("failed to create %s: %w", pl.Name, err)
 	}
-	result.Written = true
+	if result.Skipped {
+		return result, nil
+	}
 	slog.Info("[Watcher] M3U8 written", "file", baseName+".m3u8", "entries", len(paths))
+	playlistDir := filepath.Join(outputDir, playlistsDirName)
+	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
 
 	// One-time migration cleanup: remove the pre-disambiguation file (no ID
 	// suffix) now that the new-format one has been written successfully.

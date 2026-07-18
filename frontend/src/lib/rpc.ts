@@ -258,19 +258,18 @@ export const UploadImageBytes = (filename: string, base64Data: string) =>
     filename,
     base64_data: base64Data,
   }).then((r) => r.url);
+// The name and the source id only disambiguate the filename; where the file
+// goes, whether it is written at all, and the Jellyfin path rewrite are all the
+// server's call (docs/settings-source-of-truth.md D5).
 export const CreateM3U8File = (
   m3u8Name: string,
-  outputDir: string,
+  sourceId: string,
   filePaths: string[],
-  jellyfinMusicPath: string,
-  musicRoot: string,
 ) =>
-  rest<void>("POST", "/files/m3u8", {
+  rest<{ written: boolean; skipped?: boolean; disabled?: boolean }>("POST", "/files/m3u8", {
     m3u8_name: m3u8Name,
-    output_dir: outputDir,
+    source_id: sourceId,
     file_paths: filePaths,
-    jellyfin_music_path: jellyfinMusicPath,
-    music_root: musicRoot,
   });
 export const CheckFilesExistence = (
   outputDir: string,

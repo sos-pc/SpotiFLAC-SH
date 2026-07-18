@@ -227,8 +227,51 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
        `amazon` (DNS mort) → **`tidal` Success** → `[Jobs] Done`.
      - `album_artist:"Dizzy Gillespie, Astrud Gilberto"` part **brut**, les deux artistes : confirme
        que `useFirstArtistOnly` n'est pas hardcodé (réglage réel, cf. §7.6).
-4. **Cover/paroles utilisent le chemin retourné** (D4).
-5. **Un seul générateur M3U8** (D5) — trancher.
+4. **Cover/paroles placées par le serveur** (D4) — **✅ codé le 2026-07-18 (`5f70f65`)**.
+   Les routes `/media/cover` et `/media/lyrics` prenaient `output_dir`, `filename_format` et les
+   drapeaux de numérotation **du client**, qui les calculait avec `resolveOutputPath` — une **seconde
+   implémentation** de la règle de placement, qui **ne correspondait pas** à `outputSubfolder` :
+   elle ajoutait un dossier playlist dès que la vue n'était pas un album, **même quand le template
+   contenait déjà `{album}`**, ce que le serveur ne fait jamais. Avec `createPlaylistFolder` activé,
+   la pochette atterrissait **un dossier à côté** du morceau.
+   - Les deux routes passent par `mediaPlacement()`, qui appelle **le même `outputSubfolder`** que
+     `buildOutputDir`. Partager l'implémentation *est* le correctif : un sidecar calculé par une règle
+     « presque identique » est un sidecar au mauvais endroit.
+   - **Incohérence de point d'appel corrigée aussi** : dans la vue « track » isolée, le morceau partait
+     avec `playlistName=undefined` ([TrackInfo.tsx:99](../frontend/src/components/TrackInfo.tsx)) et la
+     pochette avec `track.album_name` ([App.tsx](../frontend/src/App.tsx)). Forwarder la valeur du
+     client telle quelle aurait **préservé** l'écart au lieu de le fermer.
+   - **Numérotation** : le client envoie l'index de liste **et** le numéro de piste d'album en deux
+     champs bruts, le serveur choisit — même pattern que `/files/exists`
+     ([file_service.go:254](../file_service.go)). À noter : `meta.LyricsDownloadRequest.UseAlbumTrackNumber`
+     est **déclaré mais jamais lu** — le choix a toujours été fait avant cette couche.
+   - `resolveOutputPath` et ses deux types sont **supprimés** (plus aucun appelant).
+5. **Un seul emplacement M3U8** (D5) — **✅ codé le 2026-07-18**.
+   Il n'y avait pas deux *générateurs* mais **un seul writer** (`SystemService.CreateM3U8File`) piloté
+   par **deux orchestrateurs divergents** :
+
+   | | Watchlists | Téléchargements manuels (avant) |
+   |---|---|---|
+   | Réglages | serveur | **client** (`createM3u8File`, `jellyfinMusicPath`, `downloadPath`) |
+   | Emplacement | `<racine>/Playlists/<nom> [<id>].m3u8` | `<dossier de sortie>/<nom>.m3u8` |
+   | Protections | anti-rétrécissement + désambiguïsation | aucune |
+
+   **Décision de l'utilisateur (2026-07-18) : aligner le manuel sur les watchlists.**
+   - Nouvelle brique commune `writeM3U8ToPlaylistsDir()` — **un seul endroit décide où va un M3U8**.
+   - Le garde anti-rétrécissement devient un paramètre explicite, parce que la bonne réponse diffère :
+     une watchlist ne l'active que si des pistes n'ont pas pu être résolues (une liste plus courte
+     entièrement résolue = la playlist a vraiment rétréci) ; un lot manuel l'active **toujours**, étant
+     par nature un sous-ensemble qui ne doit jamais écraser le fichier complet.
+   - L'endpoint `/files/m3u8` lit `createM3u8File` et `jellyfinMusicPath` **du serveur** et renvoie le
+     `m3u8GenerationResult` ; le client n'annonce plus « playlist créée » quand le serveur a refusé
+     d'écrire.
+   - `resolvePlaylistBaseDir` et le paramètre `isAlbum` des deux handlers de lot sont **supprimés** —
+     c'était le **dernier calcul de chemin côté client**.
+   - **Conséquence assumée** : les M3U8 manuels déjà écrits à côté de la musique **restent où ils
+     sont**. Les nouveaux vont dans `Playlists/`. Ménage manuel à prévoir.
+   - Changement de journalisation mineur : le refus de rétrécissement est désormais loggé
+     `[M3U8]` au lieu de `[Watcher] M3U8:`.
+   - **Vérif navigateur en attente de redéploiement.**
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`

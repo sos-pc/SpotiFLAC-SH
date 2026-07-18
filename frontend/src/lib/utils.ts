@@ -1,6 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { type Settings } from "./settings";
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
@@ -26,32 +25,6 @@ export function joinPath(os: string, ...parts: string[]): string {
         .filter(Boolean)
         .join(sep);
     return joined;
-}
-// resolvePlaylistBaseDir computes just the "downloadPath + optional playlist
-// subfolder" portion used by the bulk-download existence-check pass, where a
-// single shared per-track folder-template resolution isn't possible (each
-// selected track can have a different artist/album/title) — the rest of the
-// folder template is resolved per-track server-side instead.
-export function resolvePlaylistBaseDir(
-    settings: Settings,
-    folderName: string | undefined,
-    isAlbum: boolean | undefined,
-): string {
-    const os = settings.operatingSystem;
-    let outputDir = settings.downloadPath;
-    const useAlbumTag = settings.folderTemplate?.includes("{album}");
-    if (
-        settings.createPlaylistFolder &&
-        folderName &&
-        (!isAlbum || !useAlbumTag)
-    ) {
-        outputDir = joinPath(
-            os,
-            outputDir,
-            sanitizePath(folderName.replace(/\//g, " "), os),
-        );
-    }
-    return outputDir;
 }
 export function openExternal(url: string) {
     if (!url)
