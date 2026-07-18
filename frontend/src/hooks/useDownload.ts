@@ -152,6 +152,61 @@ export function useDownload(region: string) {
   const browserBatchIdsRef = useRef<Set<string>>(new Set());
   const triggeredJobIdsRef = useRef<Set<string>>(new Set());
 
+  // Tracks enqueued but not yet finished, keyed by Spotify id → the id the UI
+  // uses for its badges (they differ in some views).
+  //
+  // POST /downloads/track and /jobs return on ENQUEUE, not on completion, so
+  // treating that response as the outcome marked every track "downloaded" the
+  // moment it was queued — including ones that went on to fail. The real
+  // outcome only ever arrives on the jobs SSE stream, which is what resolves
+  // these entries (docs/override-rework-plan.md phase 2b).
+  const pendingTracksRef = useRef<Map<string, string>>(new Map());
+
+  const markTrackPending = (spotifyId: string, uiId: string) => {
+    if (!spotifyId) return;
+    pendingTracksRef.current.set(spotifyId, uiId);
+  };
+
+  // Terminal job statuses seen on the stream resolve the badge for their track.
+  useJobsStreamEvent("job_update", (e: MessageEvent) => {
+    const job = JSON.parse(e.data) as {
+      spotify_id?: string;
+      status?: string;
+      error?: string;
+    };
+    if (!job.spotify_id) return;
+    const uiId = pendingTracksRef.current.get(job.spotify_id);
+    if (!uiId) return;
+    if (
+      job.status !== "done" &&
+      job.status !== "failed" &&
+      job.status !== "skipped"
+    ) {
+      return;
+    }
+    pendingTracksRef.current.delete(job.spotify_id);
+    setDownloadingTrack((cur) => (cur === uiId ? null : cur));
+    if (job.status === "failed") {
+      logger.error(`download failed: ${uiId} — ${job.error || "unknown error"}`);
+      setFailedTracks((prev) => new Set(prev).add(uiId));
+      setDownloadedTracks((prev) => {
+        const next = new Set(prev);
+        next.delete(uiId);
+        return next;
+      });
+      return;
+    }
+    if (job.status === "skipped") {
+      setSkippedTracks((prev) => new Set(prev).add(uiId));
+    }
+    setDownloadedTracks((prev) => new Set(prev).add(uiId));
+    setFailedTracks((prev) => {
+      const next = new Set(prev);
+      next.delete(uiId);
+      return next;
+    });
+  });
+
   // Sync with DownloadModeToggle dispatching "spotif:downloadModeChange"
   useEffect(() => {
     const handler = (e: Event) => {
@@ -253,25 +308,31 @@ export function useDownload(region: string) {
       });
       if (response.success) {
         if (response.already_exists) {
+          // The only case the response settles on its own: the server checked
+          // the disk before queuing anything.
           toast.info(response.message);
           setSkippedTracks((prev) => new Set(prev).add(id));
-        } else {
-          toast.success(response.message);
+          setDownloadedTracks((prev) => new Set(prev).add(id));
+          setFailedTracks((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(id);
+            return newSet;
+          });
+          setDownloadingTrack(null);
+          return;
         }
-        setDownloadedTracks((prev) => new Set(prev).add(id));
-        setFailedTracks((prev) => {
-          const newSet = new Set(prev);
-          newSet.delete(id);
-          return newSet;
-        });
-      } else {
-        toast.error(response.error || "Download failed");
-        setFailedTracks((prev) => new Set(prev).add(id));
+        // Queued, not downloaded. The badge stays in its downloading state
+        // until the jobs stream reports the real outcome (phase 2b).
+        toast.info(response.message);
+        markTrackPending(spotifyId || id, id);
+        return;
       }
+      toast.error(response.error || "Download failed");
+      setFailedTracks((prev) => new Set(prev).add(id));
+      setDownloadingTrack(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Download failed");
       setFailedTracks((prev) => new Set(prev).add(id));
-    } finally {
       setDownloadingTrack(null);
     }
   };
@@ -339,6 +400,10 @@ export function useDownload(region: string) {
       downloadMode,
       browserBatchIdsRef,
     );
+    // Queued, not downloaded — the stream settles each badge (phase 2b).
+    for (const track of tracksToDownload) {
+      markTrackPending(track.spotify_id || "", track.spotify_id || "");
+    }
     setDownloadingTrack(null);
     setCurrentDownloadInfo(null);
     setIsDownloading(false);
@@ -403,6 +468,10 @@ export function useDownload(region: string) {
       downloadMode,
       browserBatchIdsRef,
     );
+    // Queued, not downloaded — the stream settles each badge (phase 2b).
+    for (const track of tracksToDownload) {
+      markTrackPending(track.spotify_id || "", track.spotify_id || "");
+    }
     setDownloadingTrack(null);
     setCurrentDownloadInfo(null);
     setIsDownloading(false);
