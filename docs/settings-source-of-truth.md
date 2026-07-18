@@ -246,6 +246,20 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      ([file_service.go:254](../file_service.go)). À noter : `meta.LyricsDownloadRequest.UseAlbumTrackNumber`
      est **déclaré mais jamais lu** — le choix a toujours été fait avant cette couche.
    - `resolveOutputPath` et ses deux types sont **supprimés** (plus aucun appelant).
+   - **✅ VÉRIFIÉ EN PROD le 2026-07-18** (bundle `index-MX5xzzT-.js`), pochette de *Matrix — Dizzy
+     Gillespie* depuis la vue « track » isolée :
+     - requête = `cover_url`, `track_name`, `artist_name`, `album_name`, `album_artist`,
+       `release_date`, `position`, `disc_number`. **Absents** : `output_dir`, `filename_format`,
+       `track_number` — et **`playlist_name` absent**, ce qui est précisément la correction (il valait
+       `track.album_name` avant).
+     - chemin renvoyé par le serveur :
+       `/home/nonroot/Music/Dizzy Gillespie/Best of Perception .../Matrix - Dizzy Gillespie.jpg`
+       → `{artist}/{album}` + `{title} - {artist}`, sans dossier playlist parasite.
+     - **preuve du placement** : listing du dossier =
+       `Matrix - Dizzy Gillespie.flac` + `Matrix - Dizzy Gillespie.jpg`. La pochette est bien **dans le
+       même dossier que le morceau**, même nom de base.
+     - Les paroles ont échoué (`lyrics not found in any source`) : c'est un manque côté fournisseur
+       tiers pour ce titre instrumental, pas un défaut du chemin — la requête, elle, était conforme.
 5. **Un seul emplacement M3U8** (D5) — **✅ codé le 2026-07-18**.
    Il n'y avait pas deux *générateurs* mais **un seul writer** (`SystemService.CreateM3U8File`) piloté
    par **deux orchestrateurs divergents** :
@@ -271,7 +285,20 @@ faut router le mono-piste par la même logique `buildOutputDir` que les jobs.
      sont**. Les nouveaux vont dans `Playlists/`. Ménage manuel à prévoir.
    - Changement de journalisation mineur : le refus de rétrécissement est désormais loggé
      `[M3U8]` au lieu de `[Watcher] M3U8:`.
-   - **Vérif navigateur en attente de redéploiement.**
+   - **✅ VÉRIFIÉ EN PROD le 2026-07-18** — 2 pistes sélectionnées dans la playlist « Add?6 » :
+     - requête = `m3u8_name`, `source_id`, `file_paths`. **Absents** : `output_dir`,
+       `jellyfin_music_path`, `music_root` — les trois réglages ont quitté le client.
+     - réponse = `{written:true, skipped:false, total:2, resolved:2, unresolved:0}` (le
+       `m3u8GenerationResult`, que le client sait maintenant interpréter).
+     - **emplacement** : `/home/nonroot/Music/Playlists/Add 6 [34a1c4a9].m3u8`, à côté des M3U8 de
+       watchlists (`all [957f2ab0].m3u8`, `26 [fbe144be].m3u8`) — **même dossier, même convention de
+       nommage** (nom assaini + suffixe de désambiguïsation).
+   - ⚠️ **Non observé** : le **contenu** du fichier, donc la réécriture du préfixe Jellyfin. L'API n'a
+     aucun endpoint de lecture de fichier texte (`/files/audio` liste un dossier, il ne lit pas). La
+     réécriture passe par le **même** `CreateM3U8File` que les watchlists, alimenté par
+     `settings.JellyfinMusicPath` lu côté serveur — mais c'est une déduction, pas une mesure.
+     **Pour trancher** : `cat "/home/nonroot/Music/Playlists/Add 6 [34a1c4a9].m3u8"` dans le conteneur ;
+     les entrées doivent commencer par `/Multimedia/Musique/Spotiflac/`, pas par `/home/nonroot/Music/`.
 6. **`getSettings()` reflète toujours le serveur** — **✅ codé le 2026-07-18 (`b8a9f0d`)**.
    Le diagnostic du §1 était à revoir : ce n'était pas un problème de *timing* de boot mais de
    **péremption permanente** — `loadSettings()` ne remplissait que le cache mémoire, `localStorage`
