@@ -395,7 +395,32 @@ avec un message clé/déchiffrement ?) avant de trancher S4 uniquement sur des p
 (`DownloadFromAfkarXYZ` → `downloadFromCommunity`, on a déjà fait cette transition nous-mêmes). Rien
 d'autre à signaler.
 
-### S8 — Client Spotify authentifié (spotfetch.go / spotify_metadata.go / spotify_totp.go) ✅ lu
+### S8 — Client Spotify authentifié ✅ lu · 🟢 **IMPLÉMENTÉ le 2026-07-18**
+
+> **2 des 3 candidats portés ; le 3ᵉ était un faux positif.**
+>
+> | Item | Résultat |
+> |---|---|
+> | **Cache du token au niveau paquet** | ✅ porté. Mesuré avant : **9 sites** appellent `NewSpotifyClient()`, `accessToken` était un champ d'instance → chaque site refaisait un handshake TOTP signé. Le token est désormais partagé, avec expiry réelle (`accessTokenExpirationTimestampMs`, repli 55 min) et une marge de 60 s. |
+> | **Retry TOTP sur 3 fenêtres d'horloge** | ✅ porté. `generateTOTP()` devient `generateTOTPAt(instant)` ; les 3 tentatives couvrent `now`, `now-30s`, `now+30s`. **L'ancien code régénérait le code à chaque essai mais toujours sur `time.Now()`** : utile au passage d'une rotation, inopérant contre une horloge décalée. |
+> | **`(?s)` sur `stripHTMLTags`** | ❌ **NON APPLICABLE — la doc se trompait.** `(?s)` n'agit que sur `.` ; notre motif est `<[^>]*>`, une classe négative qui accepte déjà `
+`. Vérifié par exécution : sortie **identique** avec et sans le drapeau. Le motif amont étant le même, leur `(?s)` est un no-op chez eux aussi. Il n'y avait pas de « bug de troncature ». |
+>
+> **Fusion, pas copie :** la version amont **perd** notre gestion des erreurs transitoires (retry 5xx
+> avec backoff progressif, retry réseau). Nos 3 tentatives ont été conservées et se contentent de
+> varier la fenêtre TOTP — on gagne la couverture de dérive sans perdre la résilience.
+>
+> **Point critique traité :** un 401 invalide désormais **aussi** le cache partagé
+> (`invalidateSpotifyTokenCache`). Sans ça, le rafraîchissement qui suit un 401 aurait relu depuis le
+> cache le token que Spotify venait de rejeter, en boucle.
+>
+> **Tests ajoutés** (`token_cache_test.go`, 4 cas) : entrée incomplète rejetée, expiration anticipée
+> par la marge, invalidation complète, et **les 3 fenêtres TOTP produisent bien des codes différents**
+> — sans quoi le retry serait décoratif.
+>
+> `-race` non exécutable en local (pas de gcc) ; couvert par la CI.
+
+#### Analyse d'origine (2026-07-15)
 
 **Triangé le 2026-07-15, diffs lus en entier et comparés ligne à ligne à `backend/spotify/`.**
 

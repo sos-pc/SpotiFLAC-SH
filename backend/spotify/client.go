@@ -47,6 +47,39 @@ type SpotifyClient struct {
 	cookies       map[string]string
 }
 
+// spotifyTokenCache shares one access token across every SpotifyClient in the
+// process. The token was a per-instance field, and NewSpotifyClient() is called
+// from 9 distinct sites (measured 2026-07-18), so a single fetch or download
+// could redo several signed TOTP handshakes against Spotify — pure extra
+// exposure to rate limiting for a credential that is identical every time.
+//
+// Invalidated by invalidateSpotifyTokenCache() whenever a caller sees a 401,
+// otherwise a revoked token would keep being served from here.
+var spotifyTokenCache struct {
+	sync.Mutex
+	accessToken string
+	clientID    string
+	expiresAt   time.Time
+}
+
+// Refresh a little before the real expiry rather than exactly on it, so a
+// request already in flight cannot land just past the boundary.
+const spotifyTokenCacheSkew = 60 * time.Second
+
+func spotifyTokenCacheValidLocked(now time.Time) bool {
+	return spotifyTokenCache.accessToken != "" &&
+		spotifyTokenCache.clientID != "" &&
+		now.Before(spotifyTokenCache.expiresAt.Add(-spotifyTokenCacheSkew))
+}
+
+func invalidateSpotifyTokenCache() {
+	spotifyTokenCache.Lock()
+	defer spotifyTokenCache.Unlock()
+	spotifyTokenCache.accessToken = ""
+	spotifyTokenCache.clientID = ""
+	spotifyTokenCache.expiresAt = time.Time{}
+}
+
 func NewSpotifyClient() *SpotifyClient {
 	return &SpotifyClient{
 		client:  util.NewHTTPClient(30 * time.Second),
@@ -54,7 +87,12 @@ func NewSpotifyClient() *SpotifyClient {
 	}
 }
 
-func (c *SpotifyClient) generateTOTP() (string, int, error) {
+// generateTOTPAt builds the code for a GIVEN instant rather than always for
+// time.Now(). Spotify validates the code against its own clock, so a host whose
+// clock has drifted produces a code that is silently wrong — retrying with the
+// same instant just repeats the same wrong code. getAccessToken uses this to
+// walk the adjacent 30s windows (upstream-catchup.md §S8).
+func (c *SpotifyClient) generateTOTPAt(at time.Time) (string, int, error) {
 
 	secret := "GM3TMMJTGYZTQNZVGM4DINJZHA4TGOBYGMZTCMRTGEYDSMJRHE4TEOBUG4YTCMRUGQ4DQOJUGQYTAMRRGA2TCMJSHE3TCMBY"
 	version := 61
@@ -64,7 +102,7 @@ func (c *SpotifyClient) generateTOTP() (string, int, error) {
 		return "", 0, err
 	}
 
-	totpCode, err := totp.GenerateCode(key.Secret(), time.Now())
+	totpCode, err := totp.GenerateCode(key.Secret(), at)
 	if err != nil {
 		return "", 0, err
 	}
@@ -77,11 +115,24 @@ func (c *SpotifyClient) generateTOTP() (string, int, error) {
 // only ever reached via initializeLocked (directly, or transitively through
 // getClientToken's own fallback call to the first two).
 func (c *SpotifyClient) getAccessToken() error {
-	const maxAttempts = 3
+	spotifyTokenCache.Lock()
+	defer spotifyTokenCache.Unlock()
+
+	// A token fetched by any other client in this process is just as valid.
+	if spotifyTokenCacheValidLocked(time.Now()) {
+		c.accessToken = spotifyTokenCache.accessToken
+		c.clientID = spotifyTokenCache.clientID
+		return nil
+	}
+
+	// One attempt per TOTP window: the current one, then the two adjacent ones.
+	// Retrying with time.Now() alone (what this used to do) only helps when the
+	// delay happens to cross a rotation boundary — it cannot recover from a
+	// host clock that is simply off, which produces a wrong code every time.
+	totpWindows := []time.Duration{0, -30 * time.Second, 30 * time.Second}
+	maxAttempts := len(totpWindows)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Regenerate TOTP on each attempt — the code rotates every 30s,
-		// so a retry after a delay may land in a new window.
-		totpCode, version, err := c.generateTOTP()
+		totpCode, version, err := c.generateTOTPAt(time.Now().Add(totpWindows[attempt]))
 		if err != nil {
 			return err
 		}
@@ -135,6 +186,16 @@ func (c *SpotifyClient) getAccessToken() error {
 
 		c.accessToken = getString(data, "accessToken")
 		c.clientID = getString(data, "clientId")
+
+		// Share it with every other client in the process. Spotify returns the
+		// real expiry; fall back to a conservative 55 min when it is absent.
+		expiresAt := time.Now().Add(55 * time.Minute)
+		if ms := getFloat64(data, "accessTokenExpirationTimestampMs"); ms > 0 {
+			expiresAt = time.UnixMilli(int64(ms))
+		}
+		spotifyTokenCache.accessToken = c.accessToken
+		spotifyTokenCache.clientID = c.clientID
+		spotifyTokenCache.expiresAt = expiresAt
 
 		for _, cookie := range resp.Cookies() {
 			if cookie.Name == "sp_t" {
@@ -338,11 +399,14 @@ func (c *SpotifyClient) Query(payload map[string]interface{}) (map[string]interf
 			}
 			return result, nil
 		case 401:
-			// Token expired — reset and retry with fresh tokens
+			// Token expired — reset and retry with fresh tokens. The shared
+			// cache must be cleared too, otherwise the refresh below would read
+			// the very token Spotify just rejected straight back out of it.
 			c.mu.Lock()
 			c.accessToken = ""
 			c.clientToken = ""
 			c.mu.Unlock()
+			invalidateSpotifyTokenCache()
 			continue
 		case 429:
 			// Rate limited — honour Retry-After if present.
