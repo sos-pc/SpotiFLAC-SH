@@ -152,6 +152,36 @@ d'authentification seule.
 **Critère de fin :** `GET /files/metadata` sur une piste retaguée renvoie son `copyright` et son
 `spotify_id` sans modification de code supplémentaire.
 
+### ⚠️ Phase 1 — périmètre CORRIGÉ après vérification (2026-07-19)
+
+Le plan supposait « ajouter deux champs à une struct ». **Faux.** `/files/metadata` ne passe **pas**
+par `ReadFullTrackTags` : la chaîne est `ReadFileMetadata` → `backend.ReadAudioMetadata` →
+`readFlacMetadata` / `readMp3Metadata` / `readM4aMetadata`. **Il existe deux lecteurs de tags
+indépendants**, chacun avec son propre dispatch par format.
+
+| Format | Lecteur File Manager | Lecteur retag |
+|---|---|---|
+| FLAC | `readFlacMetadata` — 9 champs | `readFullTrackTagsFromFlac` — **11** (+`SpotifyID`, +`Copyright`) |
+| MP3 | `readMp3Metadata` — 9 | `readFullTrackTagsFromMp3` — **11** |
+| M4A | `readM4aMetadata` → `readMetadataWithFFprobe` | `readFullTrackTagsFromFFprobe` → `util.ReadFFprobeTags` |
+
+**Le lecteur du retag n'est PAS un sur-ensemble strict.** Sur M4A, celui du File Manager est plus
+tolérant sur les clés ffprobe :
+
+| Donnée | File Manager | Retag |
+|---|---|---|
+| disque | `disc` | **`disk`** — clé différente |
+| artiste d'album | `album_artist` **ou** `albumartist` | `album_artist` |
+| année | `date` **ou** `year` | `date` |
+| ISRC | `isrc` **ou** `tsrc` | `isrc` |
+
+→ **Brancher naïvement `/files/metadata` sur `ReadFullTrackTags` perdrait des données M4A.**
+
+**Phase 1 révisée :** (1) fusionner les tolérances de clés dans le lecteur du retag ; (2) faire passer
+`ReadAudioMetadata` par `ReadFullTrackTags` + mapper vers `AudioMetadata` enrichi ; (3) un test
+d'équivalence entre les deux lecteurs sur les mêmes fichiers. **Effort : petit → petit-moyen. Risque :
+nul → réel mais identifié.**
+
 ### Phase 2 — parcours structuré du catalogue · *moyen, 1 décision*
 
 **Périmètre mesuré :** 7 tables — `tracks`, `albums`, `library_files`, `download_attempts`,
@@ -164,6 +194,16 @@ d'authentification seule.
 
 **Décision requise :** jusqu'où va le filtrage ? (égalité simple suffit-elle, ou faut-il `LIKE` /
 plages ?) Plus le filtre est riche, plus la surface d'injection à couvrir est large.
+
+**Vérifié le 2026-07-19 — mieux placé que prévu :**
+- 7 tables confirmées, et **36 fonctions d'accès existent déjà** (`tracks.go` 5, `albums.go` 3,
+  `library_files.go` 7, `download_attempts.go` 11, `snapshots.go` 5, `watchlists.go` 5).
+- Le handle est directement atteignable : `Container.Catalog *sql.DB` ([container.go:13](../container.go)).
+- **Aucun secret dans le catalogue.** Colonnes relevées : métadonnées musicales + `user_id`,
+  `downloaded_by`, `file_path`, `error`. Ni token, ni identifiant, ni mot de passe. La préoccupation de
+  redaction du §3.3 vise **BoltDB**, pas SQLite — elle ne bloque donc pas cette phase.
+- Reste sensible à la vie privée sur une instance multi-utilisateur : `user_id` / `downloaded_by`
+  disent qui a téléchargé quoi. Endpoint admin, donc cohérent.
 
 ### Phase 3 — console SQL en lecture · *moyen, 2 décisions*
 
@@ -178,9 +218,36 @@ plages ?) Plus le filtre est riche, plus la surface d'injection à couvrir est l
 2. **Redaction des secrets** : localiser le token Tidal personnel et les configs proxy dans BoltDB,
    et poser l'exclusion par défaut **comme principe** avant d'exposer le moindre outil générique.
 
+**Vérifié le 2026-07-19 — une option que le plan n'avait pas envisagée :** la base est ouverte en
+lecture-écriture (`sql.Open("sqlite", dsn)`, [backend/db/db.go:46](../backend/db/db.go)). Ouvrir une
+**seconde connexion en `mode=ro`** rendrait le « SELECT seul » **structurel** plutôt que dépendant
+d'une analyse de la requête pour en refuser les verbes. C'est une garantie bien plus solide qu'un
+filtrage de chaîne, et ça désamorce largement la décision « SQL arbitraire ou actions fermées ».
+
 ### Phase 4 — audit des ~70 endpoints · *gros, à faire en dernier*
 
-Corrigé : **ce n'est pas un trou de sécurité**, les 3 niveaux fonctionnent. Le travail est :
+> ⚠️ **Deuxième correction, dans l'autre sens (2026-07-19).** J'avais d'abord dit « le niveau `admin`
+> est mort » (faux), puis « la phase 4 est de la cohérence, pas de la sécurité » — **cette seconde
+> affirmation était trop large**. Le *mécanisme* admin est sain ; le problème est ailleurs : des routes
+> **sans aucun contrôle de niveau**.
+>
+> **Audit des 72 routes v1** (délégations aux handlers nommés résolues) : 24 `read`, 21 `manage`,
+> 8 `admin` inline, 4 `admin` dans la fonction — et un reste **sans contrôle**, dont :
+>
+> | Route | Ce qu'elle fait | Portée |
+> |---|---|---|
+> | `DELETE /auth/tidal` | `tidal.DeleteTidalToken()` — **sans argument utilisateur** | le token est un **singleton de processus** → déconnecte Tidal pour **toute l'instance** |
+> | `POST /auth/tidal/device/start` + `/poll` | `PollTidalDeviceAuth` lie le compte globalement | **remplacer** le compte Tidal de l'instance |
+> | `DELETE /auth/keys/{id}` | révoque une clé | limité au compte de l'appelant, mais faisable **avec une clé `read`** |
+>
+> Toutes exigent `v1Auth` (authentifié) mais **aucun niveau**. Conséquence concrète : une clé API
+> `read` — la moins privilégiée — peut couper Tidal, c'est-à-dire le **seul provider qui fonctionne**
+> (mesuré le 07-19). Recouvrable par ré-authentification device-code, mais c'est un déni de service
+> à un clic.
+>
+> **Ça remonte la phase 4 dans la file** : ce n'est plus seulement du rangement.
+
+Le travail est :
 
 1. Recenser chaque endpoint et le niveau qu'il exige aujourd'hui.
 2. Repérer les incohérences réelles — ex. `GET /files/metadata` est `v1RequireAdmin` alors que lire
