@@ -73,3 +73,69 @@ func TestAuthRouteGuards(t *testing.T) {
 		})
 	}
 }
+
+// Measured on prod 2026-07-19: a read-only API key created a ["read","manage"]
+// key and wrote settings with it. POST /auth/keys had no level check at all,
+// and its only guard tested the *account*'s admin flag — "manage" is not
+// "admin", so nothing stopped the escalation. API keys never expire, so it was
+// permanent: a leaked read-only key could grant itself write access for good.
+//
+// The rule now: no API key may mint a key stronger than itself.
+func TestAnAPIKeyCannotMintAStrongerKey(t *testing.T) {
+	readKey := &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read"}}
+	manageKey := &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "manage"}}
+	legacyKey := &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "download"}}
+	adminKey := &JWTClaims{UserID: "u1", IsAPIKey: true, IsAdmin: true,
+		Permissions: []string{"read", "manage", "admin"}}
+	browser := &JWTClaims{UserID: "u1", IsAPIKey: false}
+
+	tests := []struct {
+		name   string
+		caller *JWTClaims
+		grant  string
+		want   bool
+	}{
+		{"read ne peut pas accorder manage", readKey, "manage", false},
+		{"read ne peut pas accorder admin", readKey, "admin", false},
+		{"read peut accorder read", readKey, "read", true},
+
+		{"manage peut accorder manage", manageKey, "manage", true},
+		{"manage ne peut pas accorder admin", manageKey, "admin", false},
+
+		// "download" is the pre-rename name for "manage"; a key holding it
+		// really does have that power, so it may grant it. This is the case
+		// that would break first if the two membership rules ever drift.
+		{"download hérité vaut manage", legacyKey, "manage", true},
+
+		{"admin peut tout accorder", adminKey, "admin", true},
+
+		// A browser session is the human, bounded by the account's admin flag
+		// rather than by key permissions.
+		{"session navigateur non contrainte", browser, "manage", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := callerHasPermission(tc.caller, tc.grant); got != tc.want {
+				t.Errorf("callerHasPermission(%v, %q) = %v, want %v",
+					tc.caller.Permissions, tc.grant, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("les deux règles d'appartenance restent d'accord", func(t *testing.T) {
+		// callerHasPermission duplicates v1RequirePermission's rule without the
+		// HTTP response. If they drift, a key could be granted a permission it
+		// cannot itself use — pin them together.
+		for _, caller := range []*JWTClaims{readKey, manageKey, legacyKey, adminKey, browser} {
+			for _, perm := range []string{"read", "manage", "admin"} {
+				req := httptest.NewRequest(http.MethodGet, "/x", nil)
+				req = req.WithContext(context.WithValue(req.Context(), contextKeyUser, caller))
+				enforced := v1RequirePermission(httptest.NewRecorder(), req, perm)
+				if asked := callerHasPermission(caller, perm); asked != enforced {
+					t.Errorf("perms=%v perm=%q: asked %v but enforced %v",
+						caller.Permissions, perm, asked, enforced)
+				}
+			}
+		}
+	})
+}

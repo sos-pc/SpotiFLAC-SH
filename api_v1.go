@@ -347,6 +347,30 @@ func v1RequirePermission(w http.ResponseWriter, r *http.Request, perm string) bo
 	return false
 }
 
+// callerHasPermission is v1RequirePermission's membership rule with no HTTP
+// response attached, for callers that need to *ask* rather than enforce —
+// currently v1CreateAPIKey, which must refuse to mint a key stronger than the
+// key requesting it.
+//
+// It lives here, next to v1RequirePermission, on purpose: the two must agree
+// about what "holding a permission" means, including the "download" alias. If
+// they ever drift, a key could be granted a permission it cannot itself use,
+// or refused one it can.
+func callerHasPermission(user *JWTClaims, perm string) bool {
+	if user == nil {
+		return false
+	}
+	if user.IsAdmin || !user.IsAPIKey {
+		return true
+	}
+	for _, p := range user.Permissions {
+		if p == perm || (perm == "manage" && p == "download") {
+			return true
+		}
+	}
+	return false
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Route registration — top-level dispatcher
 // ─────────────────────────────────────────────────────────────────────────────

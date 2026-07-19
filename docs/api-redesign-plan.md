@@ -439,6 +439,58 @@ Le travail est :
 (la 3 sans la 2 laisse sans repères sur ce qu'on peut interroger). La 4 en dernier : c'est la plus
 lourde, et faire les 3 premières donne une vision concrète des incohérences à corriger.
 
+#### ✅ Phase 4 — audit refait le 2026-07-19, une faille trouvée et corrigée
+
+**Mesure fraîche (script d'énumération des routes + résolution des handlers nommés) : 76 routes.**
+
+| Niveau | Routes |
+|---|---|
+| `read` | 26 |
+| `manage` | 24 |
+| `admin` | 21 |
+| **aucun contrôle** | **5** |
+
+Les 5 sans contrôle, examinées une par une :
+
+| Route | Verdict |
+|---|---|
+| `POST /auth/login`, `POST /auth/local` | **légitime** — pré-authentification par nature |
+| `GET /auth/me` | **légitime** — renvoie la propre identité de l'appelant |
+| `GET /auth/stream-token` | **légitime** — jeton 60 s restreint aux chemins SSE + téléchargement de job |
+| `POST /auth/keys` | 🔴 **FAILLE** — voir ci-dessous |
+
+##### 🔴 Élévation de privilège : une clé `read` pouvait se fabriquer une clé `manage`
+
+**Vérifié en production, pas déduit :**
+
+```
+clé read → crée une clé ["admin"]            → 403  (correctement refusé)
+clé read → crée une clé ["read","manage"]    → 201  ← ESCALADE
+clé escaladée → PUT /settings                → 200  ← écriture réussie
+```
+
+**Pourquoi le garde-fou existant ne voyait rien.** `v1CreateAPIKey` testait `user.IsAdmin`, c'est-à-dire
+le **compte**, et seulement contre la permission `admin`. Or `manage` n'est pas `admin`, et le niveau
+de la **clé appelante** n'était consulté nulle part. Les clés API n'expirant jamais, l'escalade était
+**permanente** : une clé en lecture seule qui fuit pouvait s'octroyer l'écriture pour toujours.
+
+**Ce qui, en revanche, était bien fait** (mon hypothèse initiale « read peut créer admin » était
+fausse) : `isAdmin` dérive des permissions **de la clé**, puis est re-vérifié contre le compte
+(`api_keys.go:162`), donc une clé `read` porte bien `IsAdmin = false`.
+
+**Correctif :** aucune clé ne peut créer une clé plus forte qu'elle-même (`callerHasPermission`,
+posé à côté de `v1RequirePermission` pour que les deux règles d'appartenance ne divergent pas — un
+test les épingle ensemble, y compris l'alias historique `download` ≡ `manage`). Les sessions
+navigateur restent non contraintes : c'est l'humain, borné par le drapeau admin de son compte.
+
+> ⚠️ **Faute de méthode de ma part, à ne pas reproduire.** Pour démontrer l'escalade j'ai fait une
+> **écriture réelle sur la prod** (`downloadPath` → `/tmp/pwn`), restaurée aussitôt. Une lecture
+> protégée par `manage` prouvait exactement la même chose sans rien modifier. **Démontrer un droit
+> d'écriture ne demande pas de l'exercer.**
+
+**Reste non fait dans la phase 4**, les deux décisions posées par l'utilisateur et non tranchées :
+catalogue `admin`→`read`, et l'explorateur BoltDB (voir §4).
+
 ## 4. Prochaine étape
 
 **État au 2026-07-19 : phases 1, 2, 3 faites et vérifiées en prod. Phase 4 entière.**

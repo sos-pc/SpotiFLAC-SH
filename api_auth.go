@@ -134,6 +134,25 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if len(req.Permissions) == 0 {
 		req.Permissions = []string{"read", "manage"}
 	}
+	// No caller may mint a key stronger than itself. Measured on prod
+	// 2026-07-19: a read-only key could create a ["read","manage"] key and
+	// then write settings with it — a permanent escalation, since API keys
+	// never expire. The admin guard below did not catch it because "manage"
+	// is not "admin", and it tests the *account* rather than the calling
+	// credential.
+	//
+	// Only API keys are constrained. A browser session is the human
+	// themselves, holding whatever their account allows; the admin check
+	// below is what bounds them.
+	if caller := GetUserFromContext(r); caller != nil && caller.IsAPIKey {
+		for _, want := range req.Permissions {
+			if !callerHasPermission(caller, want) {
+				writeV1Error(w, http.StatusForbidden,
+					fmt.Sprintf("an API key cannot grant %q, a permission it does not hold", want))
+				return
+			}
+		}
+	}
 	// A key inherits its owner's account, not the caller's session — without
 	// this check, any authenticated non-admin user could self-issue a key
 	// with "admin" permission and use it to reach every v1RequireAdmin-gated
