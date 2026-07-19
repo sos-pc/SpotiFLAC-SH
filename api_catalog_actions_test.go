@@ -191,3 +191,87 @@ func TestCheckDeletedDetectsAndOnlyWritesWhenApplied(t *testing.T) {
 		}
 	})
 }
+
+// The repair half of the pair. check-deleted marks a row missing; this one is
+// the only thing that can bring the file back, because a watchlist sync drops
+// every track already in knownIDs before reaching the enqueue path — and the
+// enqueue path is the only place that stats the disk.
+//
+// The enqueue itself needs a live JobManager (BoltDB and workers), so this
+// covers the selection and the dry-run gate, which is everything that happens
+// before EnqueueBatch is reached.
+func TestRedownloadMissingSelectsOnlyMissingAndRespectsDryRun(t *testing.T) {
+	database := openTestCatalogDB(t)
+	// A non-nil JobManager satisfies the handler's guard; the dry-run path
+	// returns before ever using it.
+	s := &Server{ctr: &Container{Catalog: database, Jobs: &JobManager{}}}
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	present := filepath.Join(dir, "here.flac")
+	if err := os.WriteFile(present, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	seedLibraryFile(t, database, "spotify:track:here", present)
+	seedLibraryFile(t, database, "spotify:track:gone", filepath.Join(dir, "gone.flac"))
+
+	// Give the missing one real metadata, so the handler can describe a
+	// download for it.
+	if err := db.UpsertTrack(ctx, database, &db.Track{
+		SpotifyID: "spotify:track:gone", Name: "Even When The Water's Cold",
+		ArtistName: "!!!", AlbumName: "Thr!!!er", TrackNumber: 1, DurationMs: 1000,
+	}); err != nil {
+		t.Fatalf("UpsertTrack: %v", err)
+	}
+
+	t.Run("rien n'est missing tant qu'on n'a pas vérifié", func(t *testing.T) {
+		// Both rows were created "present": nothing has checked disk yet.
+		ids, err := db.ListMissingSpotifyIDs(ctx, database)
+		if err != nil {
+			t.Fatalf("ListMissingSpotifyIDs: %v", err)
+		}
+		if len(ids) != 0 {
+			t.Errorf("got %v, want none — no check has run yet", ids)
+		}
+	})
+
+	// Now run the detector, which is the real prerequisite.
+	if got := callCheckDeleted(t, s, `{"apply": true}`); got.WentMissing != 1 {
+		t.Fatalf("check-deleted found %d missing, want 1", got.WentMissing)
+	}
+
+	t.Run("seule la piste manquante est sélectionnée", func(t *testing.T) {
+		ids, err := db.ListMissingSpotifyIDs(ctx, database)
+		if err != nil {
+			t.Fatalf("ListMissingSpotifyIDs: %v", err)
+		}
+		if len(ids) != 1 || ids[0] != "spotify:track:gone" {
+			t.Errorf("got %v, want [spotify:track:gone] — the present file must not be requeued", ids)
+		}
+	})
+
+	t.Run("la simulation ne met rien en file", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/admin/library-redownload-missing", nil)
+		r = r.WithContext(context.WithValue(r.Context(), contextKeyUser,
+			&JWTClaims{UserID: "u1", IsAdmin: true}))
+		rec := httptest.NewRecorder()
+		s.v1RedownloadMissing(rec, r)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var got redownloadMissingResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Applied {
+			t.Error("applied = true on an empty body")
+		}
+		if got.Missing != 1 || got.Queued != 0 {
+			t.Errorf("missing=%d queued=%d, want 1/0", got.Missing, got.Queued)
+		}
+		if len(got.Tracks) != 1 || !strings.Contains(got.Tracks[0], "Water") {
+			t.Errorf("tracks = %v, want the missing track named", got.Tracks)
+		}
+	})
+}

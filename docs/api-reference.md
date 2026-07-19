@@ -282,6 +282,35 @@ nothing else — not quality, not provider, not the path. Repairing a *moved* fi
 > maintain them. A closed action can be tested against its invariant; a generic write console cannot,
 > because it can produce any state at all.
 
+### `POST /api/v1/admin/library-redownload-missing`
+Re-queues a download for every track whose file the catalog knows is gone (`status = "missing"`).
+Dry run unless `{"apply": true}`.
+
+```json
+{ "applied": true, "missing": 1, "queued": 1, "skipped": 0,
+  "tracks": ["!!! — Even When The Water's Cold"] }
+```
+
+`queued` can be lower than `missing`: `EnqueueBatch` runs its own dedup and drops a track that
+already has an active job. `no_metadata` counts missing rows whose `tracks` row could not be read —
+a download cannot be described without a title and artist, so those are reported, not guessed.
+
+**Why this endpoint has to exist.** Nothing else re-downloads a file deleted outside SpotiFLAC:
+
+- A **watchlist sync** only considers tracks *new to the playlist*. `watcher.go` drops anything
+  already in `knownIDs` before the enqueue path is reached — and the enqueue path
+  (`checkCatalogDedup`) is the only place that stats the disk. However many times a sync runs, it
+  never reconsiders a track it already knows.
+- **`library-rebuild`** walks the disk, and a file that is gone leaves nothing to walk.
+- **`watchlists/{id}/repair`** is retag + rebuild + M3U8, so it inherits the same blind spot.
+
+Before this, the only way back was to remove the track from the watchlist and re-add it so it
+counted as new. It pairs with `library-check-deleted`: **that one detects, this one repairs.** Run
+them in that order — a row is only selected here once something has marked it missing.
+
+Jobs are enqueued as a **manual batch** with no `watchlist_id`: attributing them to a watchlist would
+make the watcher treat them as part of a sync and regenerate that playlist's M3U8 from a partial batch.
+
 ### `GET /api/v1/admin/logs`
 Returns a snapshot of the in-memory backend log buffer (last 1000 lines, same content as `docker logs`) — used by the Debug Logs page for its initial load; live updates then arrive as `server_log` SSE events on `GET /api/v1/jobs/stream` (see below). Admin-only: log lines can mention other users' watchlist names, file paths, and error details.
 

@@ -80,6 +80,7 @@ const (
 
 func (s *Server) registerCatalogActionRoutes() {
 	s.mux.Handle("POST /api/v1/admin/library-check-deleted", s.v1Auth(s.v1CheckDeletedFiles))
+	s.mux.Handle("POST /api/v1/admin/library-redownload-missing", s.v1Auth(s.v1RedownloadMissing))
 }
 
 // v1ReconcileLibrary checks every non-deleted library_files row against disk
@@ -188,4 +189,128 @@ func statLibraryFile(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// redownloadMissingRequest is the body of POST /admin/library-redownload-missing.
+type redownloadMissingRequest struct {
+	// Apply defaults to false, same as check-deleted: a write action should be
+	// inspectable before it runs.
+	Apply bool `json:"apply"`
+}
+
+// redownloadMissingResult reports what was found and what was queued.
+type redownloadMissingResult struct {
+	Applied bool `json:"applied"`
+	// Missing is how many library_files rows are marked missing right now.
+	Missing int `json:"missing"`
+	// Queued is how many download jobs were actually created. It can be lower
+	// than Missing: EnqueueBatch runs its own dedup and drops a track that
+	// already has an active job.
+	Queued  int `json:"queued"`
+	Skipped int `json:"skipped"`
+	// NoMetadata counts missing rows whose track row could not be read, so no
+	// download could be described. Reported rather than silently dropped.
+	NoMetadata int      `json:"no_metadata,omitempty"`
+	Tracks     []string `json:"tracks,omitempty"`
+}
+
+// redownloadSampleLimit caps the track list in the response.
+const redownloadSampleLimit = 50
+
+// v1RedownloadMissing re-queues a download for every track whose file the
+// catalog knows is gone.
+//
+// Why this has to exist. A watchlist sync only looks at tracks that are *new*
+// to the playlist — watcher.go drops anything in knownIDs before the enqueue
+// path is reached, and the enqueue path is the only place that stats the disk
+// (checkCatalogDedup). So a file deleted outside SpotiFLAC is never noticed by
+// a sync, however many times it runs. Repair does not cover it either: it is
+// retag + library-rebuild + M3U8, and a disk walk cannot see a file that is
+// not there. Before this, the only way back was to remove the track from the
+// watchlist and re-add it so it counted as new.
+//
+// It pairs with library-check-deleted, which is what marks a row missing in
+// the first place: that one detects, this one repairs.
+func (s *Server) v1RedownloadMissing(w http.ResponseWriter, r *http.Request) {
+	if !v1RequireAdmin(w, r) {
+		return
+	}
+	if s.ctr == nil || s.ctr.Catalog == nil || s.ctr.Jobs == nil {
+		writeV1Error(w, http.StatusInternalServerError, "catalog or job manager is not available")
+		return
+	}
+
+	var req redownloadMissingRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), checkDeletedTimeout)
+	defer cancel()
+
+	ids, err := db.ListMissingSpotifyIDs(ctx, s.ctr.Catalog)
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	result := redownloadMissingResult{Applied: req.Apply, Missing: len(ids)}
+
+	var tracks []JobTrack
+	for _, id := range ids {
+		t, err := db.GetTrack(ctx, s.ctr.Catalog, id)
+		if err != nil || t == nil {
+			// A library_file with no track row should not happen (the foreign
+			// key is ON DELETE RESTRICT), but a download cannot be described
+			// without a title and artist, so count it rather than guess.
+			slog.Warn("[Library] redownload-missing: no track metadata", "spotify_id", id, "err", err)
+			result.NoMetadata++
+			continue
+		}
+		if len(result.Tracks) < redownloadSampleLimit {
+			result.Tracks = append(result.Tracks, t.ArtistName+" — "+t.Name)
+		}
+		tracks = append(tracks, JobTrack{
+			SpotifyID:   t.SpotifyID,
+			TrackName:   t.Name,
+			ArtistName:  t.ArtistName,
+			AlbumName:   t.AlbumName,
+			AlbumArtist: t.AlbumArtist,
+			ReleaseDate: t.ReleaseDate,
+			CoverURL:    t.CoverURL,
+			TrackNumber: t.TrackNumber,
+			DiscNumber:  t.DiscNumber,
+			Copyright:   t.Copyright,
+			DurationMs:  t.DurationMs,
+		})
+	}
+
+	if !req.Apply || len(tracks) == 0 {
+		writeV1JSON(w, http.StatusOK, result)
+		return
+	}
+
+	// Enqueued as a manual batch: no WatchlistID. Attributing these to a
+	// watchlist would make the watcher treat them as part of a sync and
+	// regenerate that playlist's M3U8 from a partial batch.
+	userID := userIDFromContext(r)
+	resp, err := s.ctr.Jobs.EnqueueBatch(EnqueueBatchRequest{
+		Tracks:   tracks,
+		Settings: serverJobSettings(EffectiveDownloadSettings(s.ctr.Auth, userID), ""),
+		UserID:   userID,
+	})
+	if err != nil {
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result.Queued = resp.Enqueued
+	result.Skipped = resp.Skipped
+
+	slog.Info("[Library] Redownload missing",
+		"missing", result.Missing, "queued", result.Queued,
+		"skipped", result.Skipped, "no_metadata", result.NoMetadata)
+
+	writeV1JSON(w, http.StatusOK, result)
 }

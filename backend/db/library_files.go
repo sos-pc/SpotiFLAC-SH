@@ -187,6 +187,38 @@ func ListCheckableLibraryFiles(ctx context.Context, q Querier) ([]CheckableLibra
 	return out, nil
 }
 
+// ListMissingSpotifyIDs returns the spotify_id of every row currently marked
+// "missing" — the tracks whose file the catalog knows is gone from disk.
+//
+// Ordered by id for a stable sequence, and deduplicated by the partial unique
+// index: at most one non-deleted row exists per spotify_id, so no track can
+// appear twice.
+func ListMissingSpotifyIDs(ctx context.Context, q Querier) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT spotify_id
+		FROM library_files
+		WHERE status = ?
+		ORDER BY id
+	`, StatusMissing)
+	if err != nil {
+		return nil, fmt.Errorf("list missing library_files: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan missing spotify_id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate missing library_files: %w", err)
+	}
+	return out, nil
+}
+
 // MarkLibraryFileDeleted flips status to "deleted" without removing the row.
 // Used when replacing with a higher-quality version (audit trail) or when
 // sync_deletions has removed the underlying file.
