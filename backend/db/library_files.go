@@ -22,7 +22,10 @@ const libraryFileIDBytes = 16
 //
 // Lifecycle:
 //   - Created when a download succeeds with status="present".
-//   - Marked "missing" by the rescan task when stat() fails on file_path.
+//   - Marked "missing" by POST /api/v1/admin/db/library/reconcile when stat()
+//     fails on file_path. Until 2026-07-19 this line named a "rescan task"
+//     that did not exist: nothing outside tests ever wrote StatusMissing, so
+//     every row claimed "present" without that ever having been checked.
 //   - Updated to a new file_path with status="present" when the SPOTIFY_ID
 //     tag scan finds the same content elsewhere on disk.
 //   - Replaced by a new row when a higher-quality download lands: the old
@@ -30,8 +33,8 @@ const libraryFileIDBytes = 16
 //
 // At most one non-deleted row per spotify_id at any time.
 type LibraryFile struct {
-	ID          string
-	SpotifyID   string
+	ID        string
+	SpotifyID string
 
 	Provider    string
 	Quality     string
@@ -143,6 +146,45 @@ func GetActiveLibraryFile(ctx context.Context, q Querier, spotifyID string) (*Li
 		return nil, fmt.Errorf("get active library_file for %s: %w", spotifyID, err)
 	}
 	return &lf, nil
+}
+
+// ReconcilableLibraryFile is the subset of a row needed to check it against
+// disk: where the file should be, and what the catalog currently claims.
+type ReconcilableLibraryFile struct {
+	ID       string
+	FilePath string
+	Status   string
+}
+
+// ListReconcilableLibraryFiles returns every non-deleted row, ordered by id so
+// a paused-and-resumed reconcile sees a stable sequence.
+//
+// "deleted" rows are excluded on purpose: they are historical audit entries
+// whose file is *expected* to be gone, so stat() failing on them says nothing.
+func ListReconcilableLibraryFiles(ctx context.Context, q Querier) ([]ReconcilableLibraryFile, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT id, file_path, status
+		FROM library_files
+		WHERE status != ?
+		ORDER BY id
+	`, StatusDeleted)
+	if err != nil {
+		return nil, fmt.Errorf("list reconcilable library_files: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReconcilableLibraryFile
+	for rows.Next() {
+		var lf ReconcilableLibraryFile
+		if err := rows.Scan(&lf.ID, &lf.FilePath, &lf.Status); err != nil {
+			return nil, fmt.Errorf("scan reconcilable library_file: %w", err)
+		}
+		out = append(out, lf)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate reconcilable library_files: %w", err)
+	}
+	return out, nil
 }
 
 // MarkLibraryFileDeleted flips status to "deleted" without removing the row.

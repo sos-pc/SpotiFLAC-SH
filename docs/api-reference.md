@@ -240,6 +240,43 @@ stale there, making a real column silently invisible.
 Admin-only, deliberately: these tables carry `user_id` and `downloaded_by`, so they record who
 downloaded what. They hold **no secrets** — tokens and passwords live in BoltDB, not in the catalog.
 
+### `POST /api/v1/admin/db/library/reconcile`
+Checks every non-`deleted` `library_files` row against disk and reconciles its `status`. Lives in
+`api_catalog_actions.go`.
+
+**Body** — `{"apply": true}`. **Omitting it is a dry run**: it reports what it would change and writes
+nothing. The safe default is the one that changes nothing.
+
+```json
+{
+  "applied": true, "checked": 2589,
+  "went_missing": 3, "came_back": 0, "unchanged": 2586,
+  "missing_sample": ["/home/nonroot/Music/…/track.flac"]
+}
+```
+
+`failed` counts rows that could not be checked for a reason *other* than absence (a permission error,
+a stalled mount). Those are left untouched — an unreadable directory must not be recorded as a
+library that lost every file.
+
+**Why it exists.** Three comments in the codebase referred to a "rescan task" that marks files
+missing. **That task did not exist**: `StatusMissing` was written only by tests, so all 2589 prod rows
+claimed `present` without anything ever verifying it. Delete a file from disk and the catalog would
+say `present` forever.
+
+**Scope, deliberately narrow.** It only answers "is the file at `file_path` right now?" and touches
+nothing else — not quality, not provider, not the path. Repairing a *moved* file is
+`library-rebuild`'s job, which matches by `SPOTIFY_ID` tag.
+
+> **Why writes are closed actions and not arbitrary SQL.** The catalog is a mirror, not the source of
+> truth — `jobs_catalog.go` states that the BoltDB job is authoritative and the catalog is an audit
+> trail of it and of the files on disk. Editing the mirror does not change the thing mirrored: a genre
+> "fixed" with an `UPDATE` leaves the FLAC tag alone and is overwritten by the next rebuild. Worse,
+> arbitrary writes can produce states no code path produces — a status nothing emits, a `quality_rank`
+> inconsistent with `quality` — and every reader assumes those invariants because the write functions
+> maintain them. A closed action can be tested against its invariant; a generic write console cannot,
+> because it can produce any state at all.
+
 ### `GET /api/v1/admin/logs`
 Returns a snapshot of the in-memory backend log buffer (last 1000 lines, same content as `docker logs`) — used by the Debug Logs page for its initial load; live updates then arrive as `server_log` SSE events on `GET /api/v1/jobs/stream` (see below). Admin-only: log lines can mention other users' watchlist names, file paths, and error details.
 
