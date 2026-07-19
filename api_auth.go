@@ -94,6 +94,10 @@ func (s *Server) v1Me(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) v1ListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	// Read-only: key metadata for the caller's own account.
+	if !v1RequirePermission(w, r, "read") {
+		return
+	}
 	user := GetUserFromContext(r)
 	if user == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
@@ -157,6 +161,11 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	// Destructive, though scoped to the caller's own account by RevokeAPIKey.
+	// A read-only key has no business revoking credentials.
+	if !v1RequirePermission(w, r, "manage") {
+		return
+	}
 	user := GetUserFromContext(r)
 	if user == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
@@ -175,6 +184,10 @@ func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
+	// Read-only: connection state of the instance's Tidal account.
+	if !v1RequirePermission(w, r, "read") {
+		return
+	}
 	token := tidal.LoadTidalToken()
 	if token == nil {
 		writeV1JSON(w, http.StatusOK, map[string]interface{}{"connected": false})
@@ -187,11 +200,22 @@ func (s *Server) v1TidalStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) v1TidalDisconnect(w http.ResponseWriter, r *http.Request) {
+	// Instance-wide: DeleteTidalToken clears a process-global token, so this cuts
+	// Tidal for every user. Measured 2026-07-19: reachable by a read-only API key
+	// before this guard (docs/api-redesign-plan.md phase 4).
+	if !v1RequireAdmin(w, r) {
+		return
+	}
 	tidal.DeleteTidalToken()
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) v1TidalDeviceStart(w http.ResponseWriter, r *http.Request) {
+	// Binds the instance's single Tidal account — same global resource as the
+	// disconnect above.
+	if !v1RequireAdmin(w, r) {
+		return
+	}
 	resp, err := tidal.StartTidalDeviceAuth()
 	if err != nil {
 		writeV1Error(w, http.StatusBadGateway, err.Error())
@@ -201,6 +225,10 @@ func (s *Server) v1TidalDeviceStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) v1TidalDevicePoll(w http.ResponseWriter, r *http.Request) {
+	// Completes the binding and saves the token globally.
+	if !v1RequireAdmin(w, r) {
+		return
+	}
 	var req struct {
 		DeviceCode string `json:"device_code"`
 	}
@@ -220,6 +248,10 @@ func (s *Server) v1TidalDevicePoll(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
+	// Read-only: third-party service status.
+	if !v1RequirePermission(w, r, "read") {
+		return
+	}
 	if cached, ok := getCachedStatuses(); ok {
 		writeV1JSON(w, http.StatusOK, cached)
 		return
@@ -243,6 +275,10 @@ type ProxyConfigResponse struct {
 }
 
 func (s *Server) v1GetProxies(w http.ResponseWriter, r *http.Request) {
+	// Read-only: proxy configuration.
+	if !v1RequirePermission(w, r, "read") {
+		return
+	}
 	cfg := GetProxyConfig(s.ctr.DB)
 	resp := ProxyConfigResponse{ProxyConfig: cfg}
 

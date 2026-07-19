@@ -472,6 +472,12 @@ func (s *Server) registerFileRoutes() {
 	// configured cover-art host — no path-confinement concern here, unlike
 	// upload/path below.
 	s.mux.Handle("POST /api/v1/files/upload/image", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		// Outbound: uploads client-supplied bytes to a third-party public host and
+		// returns a public URL. Not something a read-only key should be able to do
+		// with the instance's network identity.
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
 		var params struct {
 			Filename   string `json:"filename"`
 			Base64Data string `json:"base64_data"`
