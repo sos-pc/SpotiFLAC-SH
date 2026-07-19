@@ -1,6 +1,28 @@
 # Plan — cohérence de l'API (read / manage / admin) + accès DB
 
-> **Statut : documenté, pas commencé.** Ce chantier a été identifié le 2026-07-15 pendant le suivi
+> **Statut re-vérifié contre le code le 2026-07-19 : toujours rien de commencé.** Les 4 phases sont
+> intactes. Vérification faite parce que beaucoup de travail API a eu lieu le 18/19 (migration des
+> réglages : `/downloads/track`, `/files/exists`, `/media/*`, suppression de `/files/m3u8`) — mais
+> c'était un chantier **orthogonal** : qui décide des réglages, pas ce que l'API expose ni qui y accède.
+>
+> **État mesuré :**
+>
+> | Phase | Vérification | État |
+> |---|---|---|
+> | 1 | `AudioMetadata` (backend/filemanager.go:33) a `genre`+`isrc` ; `meta.FullTrackTags` a en plus **`SpotifyID`, `ReleaseDate`, `Copyright`** | ❌ écart réel |
+> | 2 | seuls endpoints admin : `retag-legacy`, `library-rebuild`, `retag-incomplete-metadata`, `logs` | ❌ rien |
+> | 3 | aucune console SQL | ❌ rien |
+> | 4 | 72 `read`, 68 `manage` via `v1RequirePermission` ; 12 routes via `v1RequireAdmin` | ❌ non fait |
+>
+> ⚠️ **Correction d'une affirmation faite en séance** : j'avais dit que le niveau `admin` était « déclaré
+> mais mort » parce que `v1RequirePermission(…, "admin")` n'est jamais appelé. **C'est faux.** Le niveau
+> transite par `v1RequireAdmin`, qui lit `JWTClaims.IsAdmin` ; pour une clé API celui-ci vaut
+> « la clé porte la permission `admin` **ET** le compte propriétaire est toujours admin », re-vérifié à
+> chaque requête ([api_keys.go:161-180](../api_keys.go), avec garde explicite contre l'escalade et
+> contre un admin rétrogradé). Les trois niveaux fonctionnent. La phase 4 est donc une question de
+> **cohérence**, pas de sécurité.
+>
+> **Statut d'origine (2026-07-15) : documenté, pas commencé.** Ce chantier a été identifié le 2026-07-15 pendant le suivi
 > de R10 (convergence du retag), mais volontairement **pas entamé** — décision explicite de
 > l'utilisateur de le documenter d'abord et d'y revenir plus tard. Ne pas coder sans repasser par ce
 > document pour confirmer les décisions ouvertes (§3).
@@ -111,6 +133,68 @@ d'authentification seule.
 3. **Redaction des secrets BoltDB** : finir de localiser le token Tidal personnel et vérifier les
    configs proxy avant d'exposer tout outil de lecture générique — exclusion par défaut de ces
    champs, à confirmer comme principe.
+
+## 3bis. Plan d'exécution détaillé (établi le 2026-07-19)
+
+### Phase 1 — exposer tous les champs · *petit, risque nul, aucune décision requise*
+
+**Écart mesuré :** `AudioMetadata` omet `SpotifyID`, `ReleaseDate`, `Copyright` que
+`meta.FullTrackTags` lit déjà.
+
+1. Ajouter les 3 champs à `AudioMetadata` (`backend/filemanager.go:33`).
+2. Les remplir là où la struct est construite — **à confirmer avant de coder** : vérifier que le
+   lecteur utilisé par `GET /api/v1/files/metadata` est bien `ReadFullTrackTags` et non un lecteur
+   partiel distinct. Si c'est un autre lecteur, le vrai travail est de le faire converger.
+3. Frontend : `FileManagerPage` affiche ces métadonnées — l'affichage des nouveaux champs est
+   **optionnel**, l'API seule suffit à lever la friction (scripts de debug).
+4. Mettre à jour `api-reference.md`.
+
+**Critère de fin :** `GET /files/metadata` sur une piste retaguée renvoie son `copyright` et son
+`spotify_id` sans modification de code supplémentaire.
+
+### Phase 2 — parcours structuré du catalogue · *moyen, 1 décision*
+
+**Périmètre mesuré :** 7 tables — `tracks`, `albums`, `library_files`, `download_attempts`,
+`watchlist_tracks`, `playlist_snapshots`, `playlist_snapshot_tracks`.
+
+- `GET /api/v1/admin/db/tables` → liste + nombre de lignes.
+- `GET /api/v1/admin/db/{table}?limit&offset&order&filtre` → lecture paginée, **liste blanche de
+  tables et de colonnes** (pas de nom de table venant du client dans le SQL).
+- Réutilise `v1RequireAdmin`, déjà en place.
+
+**Décision requise :** jusqu'où va le filtrage ? (égalité simple suffit-elle, ou faut-il `LIKE` /
+plages ?) Plus le filtre est riche, plus la surface d'injection à couvrir est large.
+
+### Phase 3 — console SQL en lecture · *moyen, 2 décisions*
+
+- `POST /api/v1/admin/db/query` avec `SELECT` **uniquement**, refus explicite de tout autre verbe,
+  `LIMIT` imposé, délai d'exécution borné.
+- Réponse en colonnes/lignes génériques.
+
+**Décisions requises :**
+1. **Écriture manuelle : SQL arbitraire ou actions fermées ?** Une console acceptant `UPDATE`/`DELETE`
+   sur le réseau peut corrompre des données sans confirmation possible. L'alternative — une liste
+   fermée d'actions admin — est plus sûre mais moins souple. **Non tranché.**
+2. **Redaction des secrets** : localiser le token Tidal personnel et les configs proxy dans BoltDB,
+   et poser l'exclusion par défaut **comme principe** avant d'exposer le moindre outil générique.
+
+### Phase 4 — audit des ~70 endpoints · *gros, à faire en dernier*
+
+Corrigé : **ce n'est pas un trou de sécurité**, les 3 niveaux fonctionnent. Le travail est :
+
+1. Recenser chaque endpoint et le niveau qu'il exige aujourd'hui.
+2. Repérer les incohérences réelles — ex. `GET /files/metadata` est `v1RequireAdmin` alors que lire
+   les tags d'un fichier ressemble à du `read`.
+3. Trancher : garder deux mécanismes (`v1RequirePermission` + `v1RequireAdmin`) ou tout unifier sur
+   `v1RequirePermission(…, "admin")`. Deux mécanismes pour trois niveaux est ce qui m'a fait conclure
+   à tort que `admin` était mort — le prochain lecteur trébuchera pareil.
+4. Corriger, en assumant les ruptures de compatibilité pour les clés existantes.
+
+### Ordre recommandé
+
+**1 → 2 → 3 → 4.** La phase 1 est indépendante et livrable seule. Les phases 2 et 3 se tiennent
+(la 3 sans la 2 laisse sans repères sur ce qu'on peut interroger). La 4 en dernier : c'est la plus
+lourde, et faire les 3 premières donne une vision concrète des incohérences à corriger.
 
 ## 4. Prochaine étape
 
