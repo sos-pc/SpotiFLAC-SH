@@ -182,6 +182,26 @@ tolérant sur les clés ffprobe :
 d'équivalence entre les deux lecteurs sur les mêmes fichiers. **Effort : petit → petit-moyen. Risque :
 nul → réel mais identifié.**
 
+#### ✅ Phase 1 — faite (2026-07-19), reste à vérifier en prod
+
+1. `firstTag(tags, keys...)` ajouté dans `backend/meta/spotify_index.go` ;
+   `readFullTrackTagsFromFFprobe` accepte désormais les deux orthographes de chacune des quatre
+   données du tableau ci-dessus.
+2. `AudioMetadata` gagne `SpotifyID` et `Copyright` ; `ReadAudioMetadata` délègue à
+   `meta.ReadFullTrackTags` et mappe `ReleaseDate → Year`.
+3. Les quatre lecteurs devenus orphelins (`readFlacMetadata`, `readMp3Metadata`, `readM4aMetadata`,
+   `readMetadataWithFFprobe`, ~154 lignes) sont supprimés, avec leurs imports. **Il ne reste qu'un
+   seul lecteur de tags dans le projet** — c'était le vrai sujet de la phase.
+
+**Écart assumé avec le plan :** le point (3) demandait « un test d'équivalence entre les deux
+lecteurs ». Ce test n'a plus d'objet une fois le second lecteur supprimé. Le test écrit
+(`backend/meta/ffprobe_tag_aliases_test.go`) couvre à la place le risque précis que la vérification
+avait mis au jour : les alias de clés ffprobe, y compris le cas « clé présente mais vide » qui ne
+doit pas masquer l'autre orthographe.
+
+**Reste :** confirmer en prod que `GET /files/metadata` sur une piste retaguée renvoie `copyright`
+et `spotify_id`, et vérifier un M4A pour le chemin des alias.
+
 ### Phase 2 — parcours structuré du catalogue · *moyen, 1 décision*
 
 **Périmètre mesuré :** 7 tables — `tracks`, `albums`, `library_files`, `download_attempts`,

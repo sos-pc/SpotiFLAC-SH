@@ -789,7 +789,22 @@ List files in a directory. `path` must be absolute.
 List audio files in a directory with metadata.
 
 ### `GET /api/v1/files/metadata?path={file}`
-Read embedded tags from an audio file.
+Read embedded tags from an audio file. Since 2026-07-19 this shares the single tag reader used by
+retagging, so it returns everything the retagger writes — including `spotify_id` and `copyright`,
+which the old File Manager reader dropped.
+
+**Response**
+```json
+{
+  "title": "...", "artist": "...", "album": "...", "album_artist": "...",
+  "track_number": 3, "disc_number": 1, "year": "2020-01-01",
+  "genre": "...", "isrc": "...", "spotify_id": "...", "copyright": "..."
+}
+```
+
+`year` carries the full release date when the file has one; it is whatever string the tag holds, not
+a normalised year. String fields are `""` and the two numbers are `0` when the file does not carry
+that tag.
 
 ### `GET /api/v1/files/image?path={file}` *(admin only)*
 Return a file as a `data:image/...;base64,...` URL.

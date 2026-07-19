@@ -335,6 +335,24 @@ func readFullTrackTagsFromMp3(path string) FullTrackTags {
 	return out
 }
 
+// firstTag returns the first non-empty value among several possible spellings
+// of the same ffprobe tag.
+//
+// ffprobe does not normalise container tag names: an M4A can carry "disk" or
+// "disc", "album_artist" or "albumartist", "date" or "year", "isrc" or "tsrc",
+// depending on what wrote the file. This reader accepted only one spelling of
+// each while the File Manager's own reader accepted both — so routing the
+// File Manager through here (2026-07-19) would have silently dropped disc
+// numbers, album artists, years and ISRCs on part of the M4A library.
+func firstTag(tags map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(tags[k]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func readFullTrackTagsFromFFprobe(path string) FullTrackTags {
 	tags, err := util.ReadFFprobeTags(path)
 	if err != nil {
@@ -345,11 +363,11 @@ func readFullTrackTagsFromFFprobe(path string) FullTrackTags {
 		Title:       tags["title"],
 		Artist:      tags["artist"],
 		Album:       tags["album"],
-		AlbumArtist: tags["album_artist"],
-		ReleaseDate: tags["date"],
+		AlbumArtist: firstTag(tags, "album_artist", "albumartist"),
+		ReleaseDate: firstTag(tags, "date", "year"),
 		TrackNumber: parseLeadingInt(tags["track"]),
-		DiscNumber:  parseLeadingInt(tags["disk"]),
-		ISRC:        tags["isrc"],
+		DiscNumber:  parseLeadingInt(firstTag(tags, "disk", "disc")),
+		ISRC:        firstTag(tags, "isrc", "tsrc"),
 		Genre:       tags["genre"],
 		Copyright:   tags["copyright"],
 	}
@@ -366,8 +384,6 @@ func parseLeadingInt(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
 }
-
-
 
 // WriteSpotifyIDTag writes the SPOTIFY_ID tag to an existing audio file
 // without touching any other metadata. Used to retro-fit legacy files

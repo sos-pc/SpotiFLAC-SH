@@ -4,13 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
-	id3v2 "github.com/bogem/id3v2/v2"
-	"github.com/go-flac/flacvorbis"
-	"github.com/go-flac/go-flac"
 )
 
 type FileInfo struct {
@@ -40,6 +37,11 @@ type AudioMetadata struct {
 	Year        string `json:"year"`
 	Genre       string `json:"genre"`
 	ISRC        string `json:"isrc"`
+	// Added 2026-07-19. meta.ReadFullTrackTags already read both; the File
+	// Manager's own reader simply never exposed them, so every investigation
+	// needing a copyright or a Spotify ID meant another field, another release.
+	SpotifyID string `json:"spotify_id"`
+	Copyright string `json:"copyright"`
 }
 
 type RenamePreview struct {
@@ -123,177 +125,44 @@ func ListAudioFiles(dirPath string) ([]FileInfo, error) {
 	return result, nil
 }
 
+// ReadAudioMetadata reads a file's tags for the File Manager API.
+//
+// It delegates to meta.ReadFullTrackTags rather than keeping its own per-format
+// readers. There used to be TWO independent tag readers with their own
+// .flac/.mp3/.m4a dispatch, and they had drifted: the retag one knew SPOTIFY_ID
+// and COPYRIGHT, this one knew neither, while this one tolerated more ffprobe
+// key spellings on M4A than the retag one did. Converging on the richer reader
+// required teaching it those spellings first (see meta.firstTag) — otherwise
+// this "cleanup" would have quietly lost M4A data.
 func ReadAudioMetadata(filePath string) (*AudioMetadata, error) {
 	if !util.FileExists(filePath) {
 		return nil, fmt.Errorf("file does not exist")
 	}
 
 	ext := strings.ToLower(filepath.Ext(filePath))
-
 	switch ext {
-	case ".flac":
-		return readFlacMetadata(filePath)
-	case ".mp3":
-		return readMp3Metadata(filePath)
-	case ".m4a":
-		return readM4aMetadata(filePath)
+	case ".flac", ".mp3", ".m4a":
 	default:
 		return nil, fmt.Errorf("unsupported file format: %s", ext)
 	}
-}
 
-func readFlacMetadata(filePath string) (*AudioMetadata, error) {
-	f, err := flac.ParseFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse FLAC file: %w", err)
-	}
-
-	metadata := &AudioMetadata{}
-
-	for _, block := range f.Meta {
-		if block.Type == flac.VorbisComment {
-			cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
-			if err != nil {
-				continue
-			}
-
-			for _, comment := range cmt.Comments {
-				parts := strings.SplitN(comment, "=", 2)
-				if len(parts) != 2 {
-					continue
-				}
-
-				fieldName := strings.ToUpper(parts[0])
-				value := parts[1]
-
-				switch fieldName {
-				case "TITLE":
-					metadata.Title = value
-				case "ARTIST":
-					metadata.Artist = value
-				case "ALBUM":
-					metadata.Album = value
-				case "ALBUMARTIST":
-					metadata.AlbumArtist = value
-				case "TRACKNUMBER":
-					if num, err := strconv.Atoi(value); err == nil {
-						metadata.TrackNumber = num
-					}
-				case "DISCNUMBER":
-					if num, err := strconv.Atoi(value); err == nil {
-						metadata.DiscNumber = num
-					}
-				case "DATE", "YEAR":
-					metadata.Year = value
-				case "GENRE":
-					metadata.Genre = value
-				case "ISRC":
-					metadata.ISRC = value
-				}
-			}
-		}
-	}
-
-	return metadata, nil
-}
-
-func readMp3Metadata(filePath string) (*AudioMetadata, error) {
-	tag, err := id3v2.Open(filePath, id3v2.Options{Parse: true})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open MP3 file: %w", err)
-	}
-	defer tag.Close()
-
-	metadata := &AudioMetadata{
-		Title:  tag.Title(),
-		Artist: tag.Artist(),
-		Album:  tag.Album(),
-		Year:   tag.Year(),
-		Genre:  tag.Genre(),
-	}
-
-	if frames := tag.GetFrames("TPE2"); len(frames) > 0 {
-		if textFrame, ok := frames[0].(id3v2.TextFrame); ok {
-			metadata.AlbumArtist = textFrame.Text
-		}
-	}
-
-	// TSRC is ID3v2's ISRC frame.
-	if frames := tag.GetFrames("TSRC"); len(frames) > 0 {
-		if textFrame, ok := frames[0].(id3v2.TextFrame); ok {
-			metadata.ISRC = textFrame.Text
-		}
-	}
-
-	if frames := tag.GetFrames(tag.CommonID("Track number/Position in set")); len(frames) > 0 {
-		if textFrame, ok := frames[0].(id3v2.TextFrame); ok {
-			trackStr := strings.Split(textFrame.Text, "/")[0]
-			if num, err := strconv.Atoi(trackStr); err == nil {
-				metadata.TrackNumber = num
-			}
-		}
-	}
-
-	if frames := tag.GetFrames(tag.CommonID("Part of a set")); len(frames) > 0 {
-		if textFrame, ok := frames[0].(id3v2.TextFrame); ok {
-			discStr := strings.Split(textFrame.Text, "/")[0]
-			if num, err := strconv.Atoi(discStr); err == nil {
-				metadata.DiscNumber = num
-			}
-		}
-	}
-
-	return metadata, nil
-}
-
-func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
-	tags, err := util.ReadFFprobeTags(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	metadata := &AudioMetadata{}
-
-	for key, value := range tags {
-		switch key {
-		case "title":
-			metadata.Title = value
-		case "artist":
-			metadata.Artist = value
-		case "album":
-			metadata.Album = value
-		case "album_artist", "albumartist":
-			metadata.AlbumArtist = value
-		case "track":
-			trackStr := strings.Split(value, "/")[0]
-			if num, err := strconv.Atoi(trackStr); err == nil {
-				metadata.TrackNumber = num
-			}
-		case "disc":
-			discStr := strings.Split(value, "/")[0]
-			if num, err := strconv.Atoi(discStr); err == nil {
-				metadata.DiscNumber = num
-			}
-		case "date", "year":
-			if metadata.Year == "" || len(value) > len(metadata.Year) {
-				metadata.Year = value
-			}
-		case "genre":
-			metadata.Genre = value
-		case "isrc", "tsrc":
-			metadata.ISRC = value
-		}
-	}
-
-	return metadata, nil
-}
-
-func readM4aMetadata(filePath string) (*AudioMetadata, error) {
-	metadata, err := readMetadataWithFFprobe(filePath)
-	if err != nil {
-		return &AudioMetadata{}, nil
-	}
-	return metadata, nil
+	t := meta.ReadFullTrackTags(filePath)
+	return &AudioMetadata{
+		Title:       t.Title,
+		Artist:      t.Artist,
+		Album:       t.Album,
+		AlbumArtist: t.AlbumArtist,
+		TrackNumber: t.TrackNumber,
+		DiscNumber:  t.DiscNumber,
+		// FullTrackTags calls it ReleaseDate; the File Manager field has always
+		// been "year" and carries whatever the DATE tag holds, so this is a
+		// rename, not a truncation.
+		Year:      t.ReleaseDate,
+		Genre:     t.Genre,
+		ISRC:      t.ISRC,
+		SpotifyID: t.SpotifyID,
+		Copyright: t.Copyright,
+	}, nil
 }
 
 func GenerateFilename(metadata *AudioMetadata, format string, ext string) string {

@@ -9,7 +9,7 @@ import (
 
 // ReadFFprobeTags runs ffprobe on filePath and returns all audio tags as a
 // lowercase key → value map.  It is the single ffprobe invocation shared by
-// filemanager.readMetadataWithFFprobe and meta.ExtractFullMetadataFromFile.
+// meta.readFullTrackTagsFromFFprobe and meta.ExtractFullMetadataFromFile.
 func ReadFFprobeTags(filePath string) (map[string]string, error) {
 	ffprobePath, err := GetFFprobePath()
 	if err != nil {
