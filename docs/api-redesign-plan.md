@@ -245,6 +245,26 @@ filtrage de chaîne, et ça désamorce largement la décision « SQL arbitraire 
 > (mesuré le 07-19). Recouvrable par ré-authentification device-code, mais c'est un déni de service
 > à un clic.
 >
+> **✅ MESURÉ EN PROD le 2026-07-19, avec contrôles négatifs.** L'accessibilité par une clé `read`
+> n'était qu'une déduction ; elle est maintenant établie. Clé API temporaire créée avec la seule
+> permission `read` (en-tête `X-API-Key`, pas `Authorization`), puis révoquée et vérifiée inopérante.
+>
+> | Appel | Résultat | Ce que ça prouve |
+> |---|---|---|
+> | `GET /settings` (`read`) | **200** | la clé fonctionne |
+> | `POST /downloads/track` (`manage`) | **403** | le cloisonnement fonctionne |
+> | `GET /admin/logs` (`admin`) | **403** | le cloisonnement fonctionne |
+> | `GET /auth/tidal/status` | **200** | atteignable **sans niveau** |
+> | `GET /auth/keys` | **200** | atteignable **sans niveau** |
+>
+> Les deux 403 sont l'essentiel : ils démontrent que la clé est réellement limitée, donc que les 200
+> ne viennent pas d'un cloisonnement globalement cassé mais bien de **l'absence de contrôle sur ces
+> routes précises**.
+>
+> `DELETE /auth/tidal` n'a **pas** été appelé — inutile de déconnecter une instance pour prouver un
+> point. Il porte le même `v1Auth` sans contrôle de niveau (handler lu ligne à ligne), donc il est
+> atteignable par construction.
+>
 > **Ça remonte la phase 4 dans la file** : ce n'est plus seulement du rangement.
 
 Le travail est :
