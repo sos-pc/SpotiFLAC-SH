@@ -28,7 +28,7 @@ Rangé par **état** d'abord, par chantier ensuite. Si tu reprends le travail : 
 |---|---|---|---|
 | **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; **3 points ouverts** | `grep memory /proc/cgroups` (mem_limit) ; logs nginx SWAG (502 `stream-token`) ; **rotations d'identifiants** |
 | **Couche API externe** (Qobuz, Amazon, DRM) | [external-api-layer.md](external-api-layer.md) | 🧭 **ouvert le 07-18**, non commencé | Décision produit : construire ou non le flux de vérification humaine (§5). Recommandé : **ne rien faire tant que Tidal tient** |
-| **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | ⏸️ non commencé | Trancher les décisions ouvertes en §3 |
+| **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | 🟡 **phases 1-3 faites**, vérifiées en prod ; **phase 4 entière** | Audit des ~70 endpoints (§4). 2 décisions posées, non tranchées : catalogue `admin`→`read`, explorateur BoltDB |
 
 ### B. Chantiers TERMINÉS (2026-07-18/19) — vérifiés en prod
 

@@ -356,6 +356,30 @@ lecture-écriture (`sql.Open("sqlite", dsn)`, [backend/db/db.go:46](../backend/d
 d'une analyse de la requête pour en refuser les verbes. C'est une garantie bien plus solide qu'un
 filtrage de chaîne, et ça désamorce largement la décision « SQL arbitraire ou actions fermées ».
 
+#### ✅ Phase 3 — soldée autrement que prévu (2026-07-19), vérifiée en prod
+
+**Décision 1 tranchée : lecture libre, écriture en actions fermées.** Décision 2 (redaction) **sans
+objet** : le périmètre reste le catalogue SQLite, qui ne contient aucun secret par construction.
+
+**`mode=ro` tient — mais pas seul, contrairement à ce que j'affirmais ci-dessus.** Mesuré
+(`backend/db/readonly_probe_test.go`) : il refuse INSERT, UPDATE, DELETE, DROP, ALTER, CREATE,
+VACUUM, **et** une écriture cachée derrière `/* SELECT */ iNsErT` — la forme qu'un filtrage de verbes
+rate. **Mais `ATTACH` est accepté, la base attachée est inscriptible, et un fichier apparaît sur le
+disque.** `mode=ro` contraint le fichier d'origine, pas la capacité de la connexion à en atteindre un
+autre. `sqlite3_limit(SQLITE_LIMIT_ATTACHED, 0)` ferme ça (mesuré `10 → 0`).
+
+> **Contrainte de conception qui en découle :** les limites sont liées à *une* connexion, alors que
+> `*sql.DB` distribue un pool. Une console devra détenir une connexion dédiée unique et sérialiser
+> derrière un mutex. Et **ne jamais interroger le pool en la détenant** sous `SetMaxOpenConns(1)` —
+> interblocage garanti, mon propre test s'y est pris.
+
+**La console SQL n'a finalement pas été construite** — la lecture libre de la phase 2 (filtres +
+recherche) couvrait les besoins rencontrés. La fondation est mesurée et documentée si le besoin
+revient.
+
+**Ce qui a été construit à la place, parce que la mesure a révélé un trou réel :** la paire
+`library-check-deleted` (détecte) / `library-redownload-missing` (répare). Voir §5.
+
 ### Phase 4 — audit des ~70 endpoints · *gros, à faire en dernier*
 
 > ⚠️ **Deuxième correction, dans l'autre sens (2026-07-19).** J'avais d'abord dit « le niveau `admin`
@@ -417,6 +441,68 @@ lourde, et faire les 3 premières donne une vision concrète des incohérences �
 
 ## 4. Prochaine étape
 
-Reprendre ce document au moment de démarrer le chantier : confirmer §3, puis exécuter les phases dans
-l'ordre (1 → 2 → 3 → 4, la 4 pouvant être découplée dans le temps si jugée trop grosse pour être
-groupée avec le reste).
+**État au 2026-07-19 : phases 1, 2, 3 faites et vérifiées en prod. Phase 4 entière.**
+
+Reprendre à la **phase 4** — l'audit des ~70 endpoints. Le travail préparatoire est déjà fait
+(mesure des 72 routes, tableau des routes sans contrôle ci-dessus) et une partie a été corrigée en
+amont (`d7eebf9`). Deux décisions restent posées par l'utilisateur et **non tranchées** :
+
+1. **Basculer les routes de lecture du catalogue de `admin` à `read`.** Proposé par l'utilisateur, et
+   c'est un meilleur découpage que celui livré : `read` → données musicales, `admin` → fonctionnement
+   interne. Mesuré à l'appui : l'instance compte **un seul utilisateur réel** (2850 tentatives sur un
+   `user_id`, 12 sans), donc l'argument « le catalogue dit qui a téléchargé quoi » ne pèse presque
+   rien ici. À traiter avec l'incohérence `manage` n'implique pas `read`.
+2. **Explorateur BoltDB admin-only.** Le besoin est réel (profils, jobs, `TokenVersion`), mais **il
+   n'y a ni SQL ni `mode=ro` de ce côté** : la protection serait « n'appeler que `View()` », une
+   discipline de code et non une propriété. À concevoir séparément, ce n'est pas la même
+   fonctionnalité qu'une console SQL.
+
+## 5. La paire check-deleted / redownload-missing (2026-07-19)
+
+Née de la phase 3 : en cherchant quelles écritures méritaient d'exister, la mesure a trouvé un trou
+plutôt qu'un besoin.
+
+**Le trou.** Trois commentaires du code parlaient d'une « rescan task » marquant les fichiers
+manquants. **Elle n'existait pas** : `StatusMissing` n'était écrit que dans des tests, donc les 2589
+lignes affirmaient `present` sans que rien ne l'ait jamais vérifié.
+
+**Et le trou était plus profond que ça.** Une fois la détection écrite, forcer une sync a démontré
+qu'**aucun chemin ne pouvait retélécharger un fichier supprimé hors de l'app** :
+
+| Chemin | Pourquoi il échoue |
+|---|---|
+| sync de watchlist | `watcher.go:287` écarte toute piste déjà dans `knownIDs` **avant** l'enfilement — or l'enfilement (`checkCatalogDedup`) est le seul endroit qui fait `os.Stat` |
+| `library-rebuild` | parcourt le disque ; un fichier absent n'y laisse rien à parcourir |
+| `watchlists/{id}/repair` | retag + rebuild + M3U8 → hérite du même angle mort |
+
+Le seul contournement était de retirer la piste de la watchlist et de la remettre pour qu'elle
+redevienne « nouvelle ».
+
+> ⚠️ **Correction d'une affirmation que j'avais faite deux fois.** J'ai dit à l'utilisateur « ton
+> fichier sera retéléchargé à la prochaine sync, sans rien faire ». **Faux.** J'avais lu la bonne
+> fonction (`checkCatalogDedup` fait bien son propre `stat`) mais **pas vérifié qu'on y arrivait**.
+> 20 relevés sur 10 minutes après une sync réellement exécutée : la piste n'a jamais été
+> reconsidérée. **Leçon : lire la fonction ne suffit pas, il faut vérifier que le chemin l'atteint.**
+
+**Cycle complet vérifié en prod** sur une vraie suppression via WinSCP : `went_missing 1` →
+`queued 1` → téléchargement `done` (tidal, LOSSLESS) → fichier sur disque → `0 missing`.
+
+**Détail contre-intuitif :** `came_back` n'a pas servi — le chemin de téléchargement remet lui-même
+le statut à `present` en écrivant le fichier. `came_back` ne concerne donc que la restauration
+*externe* (une sauvegarde remise en place à la main).
+
+### Branchement automatique après sync — proposé, NON fait
+
+L'utilisateur l'avait demandé ; il n'est pas fait, et l'arbitrage a changé deux fois :
+
+- D'abord recommandé pour une **mauvaise raison** (« la dédup lit `status` ») — **faux**, rien ne lit
+  cette colonne.
+- Puis déconseillé comme « cosmétique » — **également faux**, une fois établi qu'aucun chemin ne
+  répare : la paire est bien fonctionnelle, elle est simplement manuelle.
+
+**Impact réel jugé faible** : une suppression hors de l'app est un événement rare et volontaire, et
+la paire manuelle la couvre en deux appels. À faire si les suppressions externes deviennent
+courantes. **Garde-fou obligatoire si c'est branché :** un plafond de disparitions au-delà duquel on
+marque mais on ne retélécharge pas. Un montage disque tombé ferait voir des milliers de fichiers
+absents — le compteur `failed` couvre l'erreur de permission, **pas** un montage vide qui répond
+honnêtement « ce fichier n'existe pas ».
