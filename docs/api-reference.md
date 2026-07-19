@@ -184,6 +184,13 @@ Lists every table in the SQLite catalog with its row count and columns. Lives in
 [ { "name": "tracks", "rows": 2589, "columns": ["spotify_id", "isrc", "name", "…"] } ]
 ```
 
+> **`albums` shows 0 rows, and that is intentional — not a bug.** Migration 0005 chose to denormalise
+> the album fields onto `tracks` instead of linking `tracks.album_id`, because threading Spotify's
+> per-track album ID would mean touching five JSON payload shapes in `watcher.go` plus the manual
+> download path. Nothing reads or writes the table today: `UpsertAlbum` and `GetAlbum` have no
+> callers. See `backend/db/migrations/0005_track_album_fields.sql` for the reasoning and the stated
+> condition for revisiting it.
+
 ### `GET /api/v1/admin/db/{table}`
 Reads one catalog table, paginated.
 

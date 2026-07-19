@@ -299,11 +299,43 @@ vrai en SQL. Correct au sens SQL, **trompeur** en pratique : on conclut l'invers
 Une valeur de filtre vide couvre désormais `IS NULL OR = ''`. Même principe que le refus des
 paramètres inconnus : un outil d'enquête ne doit jamais répondre « rien » de façon plausible et fausse.
 
-**🔍 Observation (hors périmètre, non corrigée) :** la table `albums` est **vide** (0 ligne pour 2619
-pistes) et `tracks.album_id` est `NULL` partout. Cause : `UpsertAlbum` n'a **aucun appelant** —
-`jobs_catalog.go:14` porte le commentaire « *A later commit will plumb the album ID through and
-enable UpsertAlbum* », jamais fait. Ce n'est pas une régression, c'est une fonctionnalité restée
-inachevée. À traiter séparément.
+**🔍 Observation — la table `albums` est vide, VOLONTAIREMENT**
+
+0 ligne pour 2619 pistes, `tracks.album_id` `NULL` partout, `UpsertAlbum` et `GetAlbum` sans aucun
+appelant, `UpsertAlbumStub` avec un appelant qui ne se déclenche jamais.
+
+> ⚠️ **Je l'ai d'abord présentée comme « un TODO oublié, une fonctionnalité inachevée ». C'était
+> faux**, et j'avais même ouvert une tâche sur ce cadrage erroné (retirée depuis). La migration
+> `0005_track_album_fields.sql` **documente un arbitrage délibéré** : lier `tracks.album_id`
+> demanderait de faire passer l'album ID de Spotify à travers *cinq formes de payload JSON* dans
+> `watcher.go` plus le chemin de téléchargement manuel. Les colonnes dénormalisées ont été le
+> compromis, avec une condition de réexamen écrite : *« si/quand le parcours par album devient une
+> vraie fonctionnalité »*. **Leçon : le commentaire de `jobs_catalog.go:14` disait « a later commit
+> will… », la migration disait « on a choisi de ne pas ». Le second était la source de vérité.**
+
+**Trois colonnes n'existent que dans `albums`** : `total_tracks`, `total_discs`, `label`.
+
+**💡 Piste retenue pour plus tard (intérêt confirmé par l'utilisateur le 2026-07-19) — détection des
+albums incomplets.** C'est le seul usage qui touche au cœur de l'app, et il est aujourd'hui
+**impossible** : sans `total_tracks`, on ne peut qu'inférer une *borne inférieure* depuis les numéros
+de piste possédés. Mesuré en prod :
+
+```
+Furi (Original Game Soundtrack)   7 pistes possédées, track_number max = 20
+Demon Days — Gorillaz             5 pistes possédées, track_number max = 13
+```
+
+On sait que Furi a *au moins* 20 pistes ; s'il manque justement la fin, **rien ne le dit**.
+`total_tracks` rendrait la question triviale et un « compléter cet album » possible.
+
+**Ce que les données disent du reste :** 2203 albums distincts pour 2619 pistes, soit **1,2 piste par
+album** — une collection de titres issus de playlists, pas d'albums. Le parcours par album regrouperait
+donc presque rien. 14 noms d'album sont toutefois partagés par plusieurs artistes (`Mirage` →
+Camel / Digitalism / Glass Beams), ce que la clé actuelle `(album_name, album_artist)` couvre, mais
+qu'un ID stable couvrirait exactement.
+
+**Conclusion :** ne rien câbler tant que la détection d'albums incomplets n'est pas conçue comme une
+fonctionnalité à part entière. Ce n'est pas un remplissage de table.
 
 ### Phase 3 — console SQL en lecture · *moyen, 2 décisions*
 
