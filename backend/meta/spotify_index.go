@@ -353,6 +353,21 @@ func firstTag(tags map[string]string, keys ...string) string {
 	return ""
 }
 
+// longestTag picks the most precise of several spellings rather than the first.
+// A file can carry both DATE=2020 and YEAR=2020-03-05; taking whichever comes
+// first would throw away the month and day. The reader this one replaced made
+// the same choice deliberately, so ordering the keys here would be a silent
+// regression on any file that carries both.
+func longestTag(tags map[string]string, keys ...string) string {
+	best := ""
+	for _, k := range keys {
+		if v := strings.TrimSpace(tags[k]); len(v) > len(best) {
+			best = v
+		}
+	}
+	return best
+}
+
 func readFullTrackTagsFromFFprobe(path string) FullTrackTags {
 	tags, err := util.ReadFFprobeTags(path)
 	if err != nil {
@@ -364,7 +379,7 @@ func readFullTrackTagsFromFFprobe(path string) FullTrackTags {
 		Artist:      tags["artist"],
 		Album:       tags["album"],
 		AlbumArtist: firstTag(tags, "album_artist", "albumartist"),
-		ReleaseDate: firstTag(tags, "date", "year"),
+		ReleaseDate: longestTag(tags, "date", "year"),
 		TrackNumber: parseLeadingInt(tags["track"]),
 		DiscNumber:  parseLeadingInt(firstTag(tags, "disk", "disc")),
 		ISRC:        firstTag(tags, "isrc", "tsrc"),

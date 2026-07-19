@@ -170,10 +170,21 @@ tolérant sur les clés ffprobe :
 
 | Donnée | File Manager | Retag |
 |---|---|---|
-| disque | `disc` | **`disk`** — clé différente |
+| disque | `disc` | **`disk`** — chacun une clé *différente*, pas un sur-ensemble |
 | artiste d'album | `album_artist` **ou** `albumartist` | `album_artist` |
-| année | `date` **ou** `year` | `date` |
+| année | `date` **ou** `year`, **la plus longue gagne** | `date` |
 | ISRC | `isrc` **ou** `tsrc` | `isrc` |
+
+**Correction du 2026-07-19, après relecture du lecteur supprimé** (`git show b4a0121^`). J'avais décrit
+l'écart comme « le File Manager tolère les deux orthographes, le retag une seule ». C'est vrai pour
+3 lignes sur 4, mais faux deux fois :
+
+- **disque** : chacun lisait une clé *différente* et unique. L'union couvre bien les deux, mais la
+  forme de l'écart n'était pas celle que j'ai décrite.
+- **année** : le File Manager ne prenait pas la première clé trouvée, il gardait **la valeur la plus
+  longue** (`if metadata.Year == "" || len(value) > len(metadata.Year)`), donc la plus précise —
+  `2020-03-05` plutôt que `2020`. Un `firstTag(tags, "date", "year")` aurait perdu le mois et le
+  jour sur tout fichier portant les deux tags. D'où `longestTag()`, distinct de `firstTag()`.
 
 → **Brancher naïvement `/files/metadata` sur `ReadFullTrackTags` perdrait des données M4A.**
 
@@ -199,8 +210,21 @@ lecteurs ». Ce test n'a plus d'objet une fois le second lecteur supprimé. Le t
 avait mis au jour : les alias de clés ffprobe, y compris le cas « clé présente mais vide » qui ne
 doit pas masquer l'autre orthographe.
 
-**Reste :** confirmer en prod que `GET /files/metadata` sur une piste retaguée renvoie `copyright`
-et `spotify_id`, et vérifier un M4A pour le chemin des alias.
+#### ✅ Vérifié en prod (2026-07-19)
+
+- **FLAC** (`Yadnus - !!!.flac`) : `"spotify_id": "6xglGBh5aaqL10Jx8jRChr"`,
+  `"copyright": "2007 Warp Records"`. **Critère de fin atteint.**
+- **MP3** (`Tour De France - Powerplant.mp3`) : `copyright` présent ; `spotify_id` et `isrc` vides —
+  fichier ajouté à la main, jamais retagué, donc cohérent.
+- **M4A : non vérifiable.** Inventaire de la bibliothèque : 2589 `.flac`, 1 `.mp3`, **0 `.m4a`**.
+  Le format est pourtant bien produit, par le chemin Amazon (`backend/amazon/client.go:211`) — son
+  absence vient du provider Amazon bloqué derrière la vérification navigateur, pas d'un format mort.
+  Le chemin des alias reste donc **couvert en unitaire et par relecture du câblage, pas de bout en
+  bout**. À retester quand Amazon redeviendra utilisable (chantier couche API externe).
+
+**Note d'exploitation :** la racine de bibliothèque est `/home/nonroot/Music` (pas `/music`), et
+`/files/metadata` est **admin-only** (`v1RequireAdmin`, `api_files.go:331`) — un endpoint de lecture
+pure protégé au niveau le plus haut, à réexaminer en phase 4.
 
 ### Phase 2 — parcours structuré du catalogue · *moyen, 1 décision*
 
