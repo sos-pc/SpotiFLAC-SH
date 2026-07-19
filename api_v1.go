@@ -379,6 +379,9 @@ func (s *Server) registerV1Routes() {
 
 	// ── Admin maintenance ─────────────────────────────────────────────────
 	s.registerAdminRoutes()
+
+	// ── Admin read access to the SQLite catalog ───────────────────────────
+	s.registerCatalogRoutes()
 }
 
 // v1LocalLogin handles POST /api/v1/auth/local — auto-login on direct LAN access.

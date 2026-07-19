@@ -236,8 +236,14 @@ pure protégé au niveau le plus haut, à réexaminer en phase 4.
   tables et de colonnes** (pas de nom de table venant du client dans le SQL).
 - Réutilise `v1RequireAdmin`, déjà en place.
 
-**Décision requise :** jusqu'où va le filtrage ? (égalité simple suffit-elle, ou faut-il `LIKE` /
-plages ?) Plus le filtre est riche, plus la surface d'injection à couvrir est large.
+**Décision tranchée le 2026-07-19 : égalité + recherche texte.** Plages écartées (elles ne servaient
+vraiment que sur `download_attempts.started_at`, que `order`+`dir`+pagination couvrent déjà).
+
+> ⚠️ **La question était mal posée dans ce plan.** J'écrivais « plus le filtre est riche, plus la
+> surface d'injection est large ». **Faux dans cette conception.** Ce serait vrai en construisant le
+> `WHERE` par concaténation. Avec des valeurs liées et des identifiants validés contre le schéma,
+> ajouter `LIKE` n'ajoute **aucune** surface d'injection : même mécanique, un opérateur de plus. Le
+> vrai arbitrage était donc l'utilité contre le code à écrire et tester, pas la sécurité.
 
 **Vérifié le 2026-07-19 — mieux placé que prévu :**
 - 7 tables confirmées, et **36 fonctions d'accès existent déjà** (`tracks.go` 5, `albums.go` 3,
@@ -248,6 +254,34 @@ plages ?) Plus le filtre est riche, plus la surface d'injection à couvrir est l
   redaction du §3.3 vise **BoltDB**, pas SQLite — elle ne bloque donc pas cette phase.
 - Reste sensible à la vie privée sur une instance multi-utilisateur : `user_id` / `downloaded_by`
   disent qui a téléchargé quoi. Endpoint admin, donc cohérent.
+
+#### ✅ Phase 2 — faite (2026-07-19), reste à vérifier en prod
+
+`api_catalog.go` + `api_catalog_test.go`. `GET /admin/db/tables` et `GET /admin/db/{table}`
+(`limit`/`offset`/`order`/`dir`/`q` + égalité sur toute colonne), sous `v1RequireAdmin`.
+
+**Deux corrections au périmètre annoncé ici :**
+- **8 tables, pas 7** : `schema_migrations` existe aussi (créée par `migrate.go`, hors migrations).
+  Elle est exposée — elle ne contient que la liste des migrations appliquées, ce qu'on veut
+  justement pouvoir consulter quand un déploiement se comporte bizarrement.
+- La liste blanche n'est **pas écrite à la main** mais lue du schéma vivant. La migration 0005 avait
+  déjà ajouté 5 colonnes à `tracks` : une liste manuelle aurait dérivé dès celle-là, et une colonne
+  oubliée devient *invisible sans erreur*.
+
+**Choix de conception à retenir :** un paramètre inconnu est un **400, pas un silence**. Ignorer
+`?statuz=failed` renverrait toutes les lignes en ayant l'air de réussir — le pire résultat possible
+pour un outil d'enquête.
+
+**Deux pièges attrapés en testant plutôt qu'en supposant :**
+1. `ORDER BY "rowid"` — SQLite résout un identifiant entre guillemets qui ne correspond à aucune
+   colonne comme un **littéral chaîne** au lieu d'échouer. Tout aurait alors été trié par une
+   constante, et la pagination aurait répété et sauté des lignes. Vérifié en demandant `DESC` et en
+   contrôlant que l'ordre s'inverse réellement — un simple test de non-chevauchement des pages
+   n'aurait rien vu, l'ordre de scan de SQLite restant stable sous un tri constant.
+2. `/admin/db/tables` et `/admin/db/{table}` matchent la même URL. Le littéral l'emporte bien, mais
+   si la règle changeait, `tables` serait lu comme un nom de table et renverrait 404. Test posé.
+
+`q` échappe `%` et `_` : chercher `100%` doit trouver *100% Pure Love*, pas toute la table.
 
 ### Phase 3 — console SQL en lecture · *moyen, 2 décisions*
 

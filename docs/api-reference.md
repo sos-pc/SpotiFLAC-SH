@@ -177,6 +177,57 @@ Disconnect the Tidal account (deletes `tidal_token.json` and clears the in-memor
 
 These endpoints require `admin` privilege (`v1RequireAdmin` guard). They live in `api_admin.go`.
 
+### `GET /api/v1/admin/db/tables`
+Lists every table in the SQLite catalog with its row count and columns. Lives in `api_catalog.go`.
+
+```json
+[ { "name": "tracks", "rows": 2589, "columns": ["spotify_id", "isrc", "name", "…"] } ]
+```
+
+### `GET /api/v1/admin/db/{table}`
+Reads one catalog table, paginated.
+
+| Param | Meaning |
+|---|---|
+| `limit` | page size, default 50, capped at 500 |
+| `offset` | rows to skip, default 0 |
+| `order` | sort column, default `rowid` (stable pagination) |
+| `dir` | `asc` (default) or `desc` |
+| `q` | substring search across that table's **text** columns |
+| *anything else* | equality filter on the column of that name |
+
+An unrecognised parameter is a **400, not ignored** — silently dropping `?statuz=failed` would return
+every row and look like a successful query.
+
+```
+GET /api/v1/admin/db/download_attempts?status=failed&order=started_at&dir=desc&limit=20
+GET /api/v1/admin/db/tracks?q=yadnus
+```
+
+```json
+{
+  "table": "tracks", "total": 1, "limit": 50, "offset": 0,
+  "order": "rowid", "dir": "ASC",
+  "columns": ["spotify_id", "name", "…"],
+  "rows": [ { "spotify_id": "6xgl…", "name": "Yadnus" } ]
+}
+```
+
+`total` counts rows matching the filters *before* pagination, so a caller can tell "20 of 3000" from
+"20 of 20".
+
+**Why this is not an injection surface.** SQL separates *values* from *identifiers*. Values
+(`status=failed`, the `q` term, `limit`/`offset`) are passed as bound parameters, so nothing a client
+sends is ever parsed as SQL. Identifiers (table, column, sort column) cannot be bound, so they are
+never inserted from the request at all: the name is *compared* against what the database reports via
+`sqlite_master` / `PRAGMA table_info`, and on a match the server uses its own copy. The client picks
+from a closed set; it never writes one. The set is read from the live schema rather than hand-written
+because migration 0005 already added five columns to `tracks` — a hand-kept list would have gone
+stale there, making a real column silently invisible.
+
+Admin-only, deliberately: these tables carry `user_id` and `downloaded_by`, so they record who
+downloaded what. They hold **no secrets** — tokens and passwords live in BoltDB, not in the catalog.
+
 ### `GET /api/v1/admin/logs`
 Returns a snapshot of the in-memory backend log buffer (last 1000 lines, same content as `docker logs`) — used by the Debug Logs page for its initial load; live updates then arrive as `server_log` SSE events on `GET /api/v1/jobs/stream` (see below). Admin-only: log lines can mention other users' watchlist names, file paths, and error details.
 
