@@ -240,9 +240,14 @@ stale there, making a real column silently invisible.
 Admin-only, deliberately: these tables carry `user_id` and `downloaded_by`, so they record who
 downloaded what. They hold **no secrets** — tokens and passwords live in BoltDB, not in the catalog.
 
-### `POST /api/v1/admin/db/library/reconcile`
-Checks every non-`deleted` `library_files` row against disk and reconciles its `status`. Lives in
+### `POST /api/v1/admin/library-check-deleted`
+Checks every non-`deleted` `library_files` row against disk and updates its `status`. Lives in
 `api_catalog_actions.go`.
+
+**The complement of `library-rebuild`, not a duplicate of it.** Rebuild walks the *disk* and syncs the
+catalog to what it finds, so it catches added and moved files. It structurally cannot catch a
+*deleted* one: a file that is gone leaves nothing for a disk walk to visit. This walks the *catalog*
+instead and asks, per row, "is it still there?".
 
 **Body** — `{"apply": true}`. **Omitting it is a dry run**: it reports what it would change and writes
 nothing. The safe default is the one that changes nothing.

@@ -14,7 +14,7 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 )
 
-// The one distinction the reconcile pass rests on: "the file is not there" and
+// The one distinction the check-deleted pass rests on: "the file is not there" and
 // "I could not tell" must not be the same answer. util.FileExists returns a
 // bare bool and folds a permission error into "absent"; used here, an
 // unreadable mount would be recorded as a library that lost every file.
@@ -90,22 +90,22 @@ func statusOf(t *testing.T, database *sql.DB, spotifyID string) string {
 	return lf.Status
 }
 
-func callReconcile(t *testing.T, s *Server, body string) reconcileResult {
+func callCheckDeleted(t *testing.T, s *Server, body string) checkDeletedResult {
 	t.Helper()
 	var r *http.Request
 	if body == "" {
-		r = httptest.NewRequest(http.MethodPost, "/api/v1/admin/db/library/reconcile", nil)
+		r = httptest.NewRequest(http.MethodPost, "/api/v1/admin/library-check-deleted", nil)
 	} else {
-		r = httptest.NewRequest(http.MethodPost, "/api/v1/admin/db/library/reconcile", strings.NewReader(body))
+		r = httptest.NewRequest(http.MethodPost, "/api/v1/admin/library-check-deleted", strings.NewReader(body))
 	}
 	r = r.WithContext(context.WithValue(r.Context(), contextKeyUser,
 		&JWTClaims{UserID: "u1", IsAdmin: true}))
 	rec := httptest.NewRecorder()
-	s.v1ReconcileLibrary(rec, r)
+	s.v1CheckDeletedFiles(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	var out reconcileResult
+	var out checkDeletedResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -115,7 +115,7 @@ func callReconcile(t *testing.T, s *Server, body string) reconcileResult {
 // Prod could not verify this: all 2589 rows are present, so a dry run and an
 // apply produce identical output there. This exercises the part that only
 // shows itself when a file is actually gone.
-func TestReconcileDetectsAndOnlyWritesWhenApplied(t *testing.T) {
+func TestCheckDeletedDetectsAndOnlyWritesWhenApplied(t *testing.T) {
 	database := openTestCatalogDB(t)
 	s := &Server{ctr: &Container{Catalog: database}}
 	dir := t.TempDir()
@@ -138,7 +138,7 @@ func TestReconcileDetectsAndOnlyWritesWhenApplied(t *testing.T) {
 	}
 
 	t.Run("la simulation détecte mais n'écrit pas", func(t *testing.T) {
-		got := callReconcile(t, s, "")
+		got := callCheckDeleted(t, s, "")
 		if got.Applied {
 			t.Error("applied = true on an empty body; the safe default must be a dry run")
 		}
@@ -156,7 +156,7 @@ func TestReconcileDetectsAndOnlyWritesWhenApplied(t *testing.T) {
 	})
 
 	t.Run("apply écrit", func(t *testing.T) {
-		got := callReconcile(t, s, `{"apply": true}`)
+		got := callCheckDeleted(t, s, `{"apply": true}`)
 		if !got.Applied || got.WentMissing != 1 {
 			t.Fatalf("applied=%v went_missing=%d", got.Applied, got.WentMissing)
 		}
@@ -172,7 +172,7 @@ func TestReconcileDetectsAndOnlyWritesWhenApplied(t *testing.T) {
 	t.Run("une seconde passe ne recompte pas", func(t *testing.T) {
 		// Already marked missing, so it is now "unchanged" — the pass must be
 		// idempotent, or a scheduled run would report the same loss forever.
-		got := callReconcile(t, s, `{"apply": true}`)
+		got := callCheckDeleted(t, s, `{"apply": true}`)
 		if got.WentMissing != 0 || got.Unchanged != 2 {
 			t.Errorf("went_missing=%d unchanged=%d, want 0/2", got.WentMissing, got.Unchanged)
 		}
@@ -182,7 +182,7 @@ func TestReconcileDetectsAndOnlyWritesWhenApplied(t *testing.T) {
 		if err := os.WriteFile(vanished, []byte("x"), 0o644); err != nil {
 			t.Fatalf("restore: %v", err)
 		}
-		got := callReconcile(t, s, `{"apply": true}`)
+		got := callCheckDeleted(t, s, `{"apply": true}`)
 		if got.CameBack != 1 {
 			t.Errorf("came_back = %d, want 1", got.CameBack)
 		}

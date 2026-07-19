@@ -22,7 +22,7 @@ const libraryFileIDBytes = 16
 //
 // Lifecycle:
 //   - Created when a download succeeds with status="present".
-//   - Marked "missing" by POST /api/v1/admin/db/library/reconcile when stat()
+//   - Marked "missing" by POST /api/v1/admin/library-check-deleted when stat()
 //     fails on file_path. Until 2026-07-19 this line named a "rescan task"
 //     that did not exist: nothing outside tests ever wrote StatusMissing, so
 //     every row claimed "present" without that ever having been checked.
@@ -148,20 +148,20 @@ func GetActiveLibraryFile(ctx context.Context, q Querier, spotifyID string) (*Li
 	return &lf, nil
 }
 
-// ReconcilableLibraryFile is the subset of a row needed to check it against
+// CheckableLibraryFile is the subset of a row needed to check it against
 // disk: where the file should be, and what the catalog currently claims.
-type ReconcilableLibraryFile struct {
+type CheckableLibraryFile struct {
 	ID       string
 	FilePath string
 	Status   string
 }
 
-// ListReconcilableLibraryFiles returns every non-deleted row, ordered by id so
-// a paused-and-resumed reconcile sees a stable sequence.
+// ListCheckableLibraryFiles returns every non-deleted row, ordered by id so
+// a paused-and-resumed pass sees a stable sequence.
 //
 // "deleted" rows are excluded on purpose: they are historical audit entries
 // whose file is *expected* to be gone, so stat() failing on them says nothing.
-func ListReconcilableLibraryFiles(ctx context.Context, q Querier) ([]ReconcilableLibraryFile, error) {
+func ListCheckableLibraryFiles(ctx context.Context, q Querier) ([]CheckableLibraryFile, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT id, file_path, status
 		FROM library_files
@@ -169,20 +169,20 @@ func ListReconcilableLibraryFiles(ctx context.Context, q Querier) ([]Reconcilabl
 		ORDER BY id
 	`, StatusDeleted)
 	if err != nil {
-		return nil, fmt.Errorf("list reconcilable library_files: %w", err)
+		return nil, fmt.Errorf("list checkable library_files: %w", err)
 	}
 	defer rows.Close()
 
-	var out []ReconcilableLibraryFile
+	var out []CheckableLibraryFile
 	for rows.Next() {
-		var lf ReconcilableLibraryFile
+		var lf CheckableLibraryFile
 		if err := rows.Scan(&lf.ID, &lf.FilePath, &lf.Status); err != nil {
-			return nil, fmt.Errorf("scan reconcilable library_file: %w", err)
+			return nil, fmt.Errorf("scan checkable library_file: %w", err)
 		}
 		out = append(out, lf)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate reconcilable library_files: %w", err)
+		return nil, fmt.Errorf("iterate checkable library_files: %w", err)
 	}
 	return out, nil
 }

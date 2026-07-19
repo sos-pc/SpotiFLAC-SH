@@ -36,16 +36,16 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/db"
 )
 
-// reconcileRequest is the body of POST /admin/db/library/reconcile.
-type reconcileRequest struct {
+// checkDeletedRequest is the body of POST /admin/library-check-deleted.
+type checkDeletedRequest struct {
 	// Apply must be set explicitly. The default is a dry run: a write action
 	// should be inspectable before it runs, and the safe default is the one
 	// that changes nothing.
 	Apply bool `json:"apply"`
 }
 
-// reconcileResult reports what the pass saw and what it changed.
-type reconcileResult struct {
+// checkDeletedResult reports what the pass saw and what it changed.
+type checkDeletedResult struct {
 	Applied bool `json:"applied"` // false = nothing was written
 	Checked int  `json:"checked"`
 
@@ -70,16 +70,16 @@ type reconcileResult struct {
 }
 
 const (
-	// reconcileSampleLimit caps the sample; a library that lost thousands of
+	// checkDeletedSampleLimit caps the sample; a library that lost thousands of
 	// files should not return thousands of strings.
-	reconcileSampleLimit = 50
-	// reconcileTimeout bounds the pass. 2589 stat() calls are fast, but a
+	checkDeletedSampleLimit = 50
+	// checkDeletedTimeout bounds the pass. 2589 stat() calls are fast, but a
 	// stalled network mount must not wedge the request forever.
-	reconcileTimeout = 2 * time.Minute
+	checkDeletedTimeout = 2 * time.Minute
 )
 
 func (s *Server) registerCatalogActionRoutes() {
-	s.mux.Handle("POST /api/v1/admin/db/library/reconcile", s.v1Auth(s.v1ReconcileLibrary))
+	s.mux.Handle("POST /api/v1/admin/library-check-deleted", s.v1Auth(s.v1CheckDeletedFiles))
 }
 
 // v1ReconcileLibrary checks every non-deleted library_files row against disk
@@ -95,7 +95,7 @@ func (s *Server) registerCatalogActionRoutes() {
 // marks files missing. That task does not exist. StatusMissing was written
 // only by tests, so all 2589 rows in prod claimed "present" without anything
 // ever having verified it.
-func (s *Server) v1ReconcileLibrary(w http.ResponseWriter, r *http.Request) {
+func (s *Server) v1CheckDeletedFiles(w http.ResponseWriter, r *http.Request) {
 	if !v1RequireAdmin(w, r) {
 		return
 	}
@@ -104,22 +104,22 @@ func (s *Server) v1ReconcileLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req reconcileRequest
+	var req checkDeletedRequest
 	if r.Body != nil {
 		// An absent or empty body is a dry run, which is the safe default.
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), reconcileTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), checkDeletedTimeout)
 	defer cancel()
 
-	files, err := db.ListReconcilableLibraryFiles(ctx, s.ctr.Catalog)
+	files, err := db.ListCheckableLibraryFiles(ctx, s.ctr.Catalog)
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	result := reconcileResult{Applied: req.Apply}
+	result := checkDeletedResult{Applied: req.Apply}
 	for _, f := range files {
 		if ctx.Err() != nil {
 			result.TimedOut = true
@@ -139,12 +139,12 @@ func (s *Server) v1ReconcileLibrary(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !onDisk && f.Status != db.StatusMissing:
 			result.WentMissing++
-			if len(result.MissingSample) < reconcileSampleLimit {
+			if len(result.MissingSample) < checkDeletedSampleLimit {
 				result.MissingSample = append(result.MissingSample, f.FilePath)
 			}
 			if req.Apply {
 				if err := db.UpdateLibraryFileStatus(ctx, s.ctr.Catalog, f.ID, db.StatusMissing); err != nil {
-					slog.Warn("[Catalog] reconcile: could not mark missing", "id", f.ID, "err", err)
+					slog.Warn("[Library] check-deleted: could not mark missing", "id", f.ID, "err", err)
 					result.Failed++
 				}
 			}
@@ -152,7 +152,7 @@ func (s *Server) v1ReconcileLibrary(w http.ResponseWriter, r *http.Request) {
 			result.CameBack++
 			if req.Apply {
 				if err := db.UpdateLibraryFileStatus(ctx, s.ctr.Catalog, f.ID, db.StatusPresent); err != nil {
-					slog.Warn("[Catalog] reconcile: could not mark present", "id", f.ID, "err", err)
+					slog.Warn("[Library] check-deleted: could not mark present", "id", f.ID, "err", err)
 					result.Failed++
 				}
 			}
@@ -161,7 +161,7 @@ func (s *Server) v1ReconcileLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Info("[Catalog] Library reconcile",
+	slog.Info("[Library] Check deleted files",
 		"applied", result.Applied, "checked", result.Checked,
 		"went_missing", result.WentMissing, "came_back", result.CameBack,
 		"failed", result.Failed, "timed_out", result.TimedOut)
