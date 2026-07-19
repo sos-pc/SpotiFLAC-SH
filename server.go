@@ -158,6 +158,19 @@ func (s *Server) registerRoutes() {
 			path = "index.html"
 		}
 		if _, err := fs.Stat(distFS, path); err != nil {
+			// An unmatched /api/ path must not fall through to the SPA. It did
+			// until 2026-07-19, so a typo'd endpoint answered 200 with an HTML
+			// page: a client asking for JSON got "success" and a web page, and
+			// had to parse the body to discover the route does not exist. Same
+			// failure mode as silently ignoring an unknown query parameter —
+			// answering plausibly and wrongly is worse than answering "no".
+			//
+			// Checked here rather than before the Stat so a static asset that
+			// genuinely lives under api/ would still be served.
+			if strings.HasPrefix(path, "api/") {
+				writeV1Error(w, http.StatusNotFound, "no such endpoint: "+r.URL.Path)
+				return
+			}
 			// SPA fallback → index.html
 			r.URL.Path = "/"
 			path = "index.html"
