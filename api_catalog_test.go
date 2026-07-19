@@ -163,6 +163,32 @@ func TestCatalogFiltersBindTheirValues(t *testing.T) {
 		}
 	})
 
+	t.Run("valeur vide couvre NULL", func(t *testing.T) {
+		// Found in prod: every one of 2619 tracks had a NULL album_id, and
+		// ?album_id= reported 0 matches because SQL says NULL = '' is false.
+		// "No row is missing an album" was the opposite of the truth.
+		// Its own database: this subtest alters the schema, and sharing the
+		// outer one would make the sibling subtests order-dependent.
+		dbh := newCatalogTestDB(t)
+		if _, err := dbh.Exec(`ALTER TABLE tracks ADD COLUMN album_id TEXT`); err != nil {
+			t.Fatalf("alter: %v", err)
+		}
+		schema := loadTestSchema(t, dbh) // album_id is NULL on every row
+
+		r := httptest.NewRequest(http.MethodGet, "/?album_id=", nil)
+		where, args, err := buildCatalogFilters(schema, "tracks", r)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		var count int
+		if err := dbh.QueryRow(`SELECT COUNT(*) FROM "tracks"`+where, args...).Scan(&count); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if count != 4 {
+			t.Errorf("empty-value filter matched %d rows, want all 4 — NULLs were missed", count)
+		}
+	})
+
 	t.Run("colonne inconnue refusée, pas ignorée", func(t *testing.T) {
 		// Silently ignoring ?statuz=failed would return every row and look
 		// like a successful query — the worst outcome for a debugging tool.

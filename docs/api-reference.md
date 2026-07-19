@@ -199,6 +199,11 @@ Reads one catalog table, paginated.
 An unrecognised parameter is a **400, not ignored** — silently dropping `?statuz=failed` would return
 every row and look like a successful query.
 
+An **empty** filter value means "rows with nothing here" and matches `NULL` as well as `''`. Plain
+SQL equality would answer that wrongly: `NULL = ''` is never true, so a nullable column full of
+`NULL`s reports zero matches. Measured on prod — all 2619 `tracks` rows have a `NULL` `album_id`, and
+`?album_id=` returned 0 before this was handled.
+
 ```
 GET /api/v1/admin/db/download_attempts?status=failed&order=started_at&dir=desc&limit=20
 GET /api/v1/admin/db/tracks?q=yadnus

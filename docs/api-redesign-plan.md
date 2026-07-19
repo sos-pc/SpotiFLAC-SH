@@ -281,7 +281,29 @@ pour un outil d'enquête.
 2. `/admin/db/tables` et `/admin/db/{table}` matchent la même URL. Le littéral l'emporte bien, mais
    si la règle changeait, `tables` serait lu comme un nom de table et renverrait 404. Test posé.
 
-`q` échappe `%` et `_` : chercher `100%` doit trouver *100% Pure Love*, pas toute la table.
+`q` échappe `%` et `_` : chercher `100%` doit trouver un album littéralement nommé ainsi, pas toute
+la table.
+
+#### ✅ Vérifié en prod (2026-07-19)
+
+Listing des 8 tables OK. `q=yadnus` → 1 piste. `artist_name=!!!` → 2. `status=failed` trié
+`started_at desc` → 260 échecs. Refus corrects : colonne inconnue 400, table inconnue 404, `dir`
+invalide 400, `limit=0` 400, `limit=99999` plafonné à 500, sans clé 401, clé invalide 401. Les
+tentatives d'injection sur le nom de table et de colonne repartent en 404/400 avec le nom hostile
+cité tel quel dans le message — donc jamais exécuté ; `tracks` a toujours ses 2619 lignes après.
+`q=100%` renvoie **1** ligne sur 2619, l'album `100% YES` : l'échappement tient sur données réelles.
+
+**🐛 Trouvé sur mon propre endpoint en le testant (corrigé) :** `?album_id=` renvoyait « 0 lignes »
+alors que **les 2619** pistes ont un `album_id` vide — elles sont `NULL`, et `NULL = ''` n'est jamais
+vrai en SQL. Correct au sens SQL, **trompeur** en pratique : on conclut l'inverse de la réalité.
+Une valeur de filtre vide couvre désormais `IS NULL OR = ''`. Même principe que le refus des
+paramètres inconnus : un outil d'enquête ne doit jamais répondre « rien » de façon plausible et fausse.
+
+**🔍 Observation (hors périmètre, non corrigée) :** la table `albums` est **vide** (0 ligne pour 2619
+pistes) et `tracks.album_id` est `NULL` partout. Cause : `UpsertAlbum` n'a **aucun appelant** —
+`jobs_catalog.go:14` porte le commentaire « *A later commit will plumb the album ID through and
+enable UpsertAlbum* », jamais fait. Ce n'est pas une régression, c'est une fonctionnalité restée
+inachevée. À traiter séparément.
 
 ### Phase 3 — console SQL en lecture · *moyen, 2 décisions*
 

@@ -382,8 +382,18 @@ func buildCatalogFilters(schema *catalogSchema, table string, r *http.Request) (
 		if !ok {
 			return "", nil, fmt.Errorf("unknown column %q on table %q", key, table)
 		}
+		value := r.URL.Query().Get(key)
+		if value == "" {
+			// Asking for an empty value means "rows with nothing here", and a
+			// plain `= ''` answers that wrongly: SQL says NULL = '' is never
+			// true, so a nullable column full of NULLs reports zero matches —
+			// the exact opposite of the truth. Measured on prod: all 2619
+			// tracks have a NULL album_id, and ?album_id= returned 0.
+			clauses = append(clauses, fmt.Sprintf("(%q IS NULL OR %q = '')", col, col))
+			continue
+		}
 		clauses = append(clauses, fmt.Sprintf("%q = ?", col))
-		args = append(args, r.URL.Query().Get(key))
+		args = append(args, value)
 	}
 
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
