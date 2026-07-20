@@ -306,8 +306,10 @@ class GrantSolverServer:
             await asyncio.sleep(7)
 
             # Poll for the Turnstile response to be filled (auto-solve)
+            # with detailed DOM inspection for debugging
             token = None
-            for attempt in range(15):
+            for attempt in range(20):
+                await asyncio.sleep(1)
                 try:
                     t = await page.input_value(
                         "[name=cf-turnstile-response]", timeout=3000)
@@ -319,7 +321,31 @@ class GrantSolverServer:
                         break
                 except Exception:
                     pass
-                await asyncio.sleep(1)
+
+                # On first and last attempt, dump DOM state
+                if attempt == 0 or attempt == 18:
+                    try:
+                        state = await page.evaluate("""
+                            (() => {
+                                const w = document.querySelector('.cf-turnstile');
+                                const inp = document.querySelector('[name=cf-turnstile-response]');
+                                const iframes = document.querySelectorAll('iframe');
+                                const tw = typeof turnstile !== 'undefined';
+                                return JSON.stringify({
+                                    has_widget: !!w,
+                                    widget_html: w ? w.outerHTML.substring(0,200) : 'none',
+                                    has_input: !!inp,
+                                    input_value: inp ? (inp.value ? inp.value.substring(0,20)+'...' : '(empty)') : 'none',
+                                    iframe_count: iframes.length,
+                                    iframe_srcs: Array.from(iframes).map(function(f){return f.src.substring(0,80)}),
+                                    turnstile_defined: tw,
+                                    body_preview: document.body ? document.body.innerText.substring(0,200) : 'no body',
+                                });
+                            })()
+                        """)
+                        logger.debug(f"Browser {index}: DOM @{attempt}s: {state}")
+                    except Exception:
+                        pass
 
             if not token:
                 logger.debug(
