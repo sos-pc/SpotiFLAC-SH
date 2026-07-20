@@ -119,31 +119,71 @@ class GrantSolverServer:
             if self.debug:
                 logger.debug(f"Browser {index}: navigating to challenge URL")
 
-            await page.goto(challenge_url, wait_until="domcontentloaded",
+            # networkidle rather than domcontentloaded: the challenge page may
+            # load Turnstile via JS after the initial DOM is ready.
+            await page.goto(challenge_url, wait_until="networkidle",
                             timeout=30000)
 
-            # Wait for the Turnstile iframe to appear — the challenge page
-            # embeds it. We don't inject our own widget; we interact with the
-            # one Cloudflare put there.
+            # ── Solve Turnstile ──────────────────────────────────────────
+            # The challenge page embeds a Cloudflare Turnstile widget. We try
+            # multiple strategies because the widget DOM varies by site config.
+            solved = False
             try:
-                frame = page.frame_locator("iframe[src*='challenges.cloudflare.com']")
-                # Click the checkbox inside the iframe to trigger the challenge
+                # Strategy 1: iframe with checkbox (managed challenge)
+                frame = page.frame_locator(
+                    "iframe[src*='challenges.cloudflare.com']")
                 checkbox = frame.locator("#checkbox")
-                await checkbox.wait_for(state="visible", timeout=15000)
+                await checkbox.wait_for(state="visible", timeout=10000)
                 await checkbox.click()
                 if self.debug:
-                    logger.debug(f"Browser {index}: Turnstile checkbox clicked")
+                    logger.debug(f"Browser {index}: checkbox clicked")
+                solved = True
             except Exception:
-                # Some challenge pages auto-start — not finding the checkbox
-                # is normal for non-interactive challenges.
-                if self.debug:
-                    logger.debug(f"Browser {index}: no checkbox, challenge may be non-interactive")
+                pass
 
-            # Wait for the page to redirect away from the challenge domain.
-            # After solving, Cloudflare redirects to the cb= URL with ?grant=...
-            for attempt in range(20):
+            if not solved:
+                try:
+                    # Strategy 2: Turnstile div rendered inline (no iframe)
+                    widget = page.locator(".cf-turnstile")
+                    await widget.wait_for(state="visible", timeout=8000)
+                    # Click the widget to trigger the challenge
+                    await widget.click()
+                    await asyncio.sleep(2)
+                    if self.debug:
+                        logger.debug(f"Browser {index}: inline widget clicked")
+                    solved = True
+                except Exception:
+                    pass
+
+            if not solved:
+                try:
+                    # Strategy 3: any iframe from Cloudflare
+                    frame = page.frame_locator(
+                        "iframe[src*='cloudflare.com']")
+                    body = frame.locator("body")
+                    await body.wait_for(state="visible", timeout=8000)
+                    await body.click()
+                    await asyncio.sleep(2)
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Cloudflare iframe clicked")
+                    solved = True
+                except Exception:
+                    pass
+
+            if not solved and self.debug:
+                title = await page.title()
+                logger.debug(
+                    f"Browser {index}: no Turnstile widget found, "
+                    f"page title: '{title}'")
+
+            # ── Wait for redirect ─────────────────────────────────────────
+            # After a successful solve the page redirects to the cb= URL.
+            # Give it up to 60 attempts (90s) — some challenges take longer.
+            for attempt in range(60):
                 await asyncio.sleep(1.5)
                 current = page.url
+
+                # Primary: parse ?grant= from query string
                 parsed = urlparse(current)
                 qs = parse_qs(parsed.query)
                 grant = qs.get('grant', [None])[0]
@@ -155,30 +195,38 @@ class GrantSolverServer:
                     )
                     return {"grant": grant, "elapsed": elapsed}
 
-                # Also detect if we landed on the callback path
-                if 'session-grant' in current or 'grant=' in current:
-                    # The grant might be embedded differently — try raw parse
+                # Fallback: URL contains 'grant=' somewhere
+                if 'grant=' in current:
                     for part in current.split('?', 1)[-1].split('&'):
                         if part.startswith('grant='):
                             grant_val = part.split('=', 1)[1]
                             elapsed = round(time.time() - start, 3)
                             logger.success(
-                                f"Browser {index}: grant captured via raw parse "
+                                f"Browser {index}: grant via raw parse "
                                 f"({grant_val[:12]}...) in {elapsed}s"
                             )
                             return {"grant": grant_val, "elapsed": elapsed}
 
-                if self.debug:
+                if self.debug and attempt % 10 == 0:
                     logger.debug(
-                        f"Browser {index}: attempt {attempt+1}/20, "
-                        f"url={current[:100]}"
+                        f"Browser {index}: waiting {attempt+1}/60, "
+                        f"url={current[:120]}"
                     )
 
             elapsed = round(time.time() - start, 3)
-            logger.error(
-                f"Browser {index}: timed out waiting for grant redirect "
-                f"(last url: {page.url[:120]})"
-            )
+            # Log page state to help debug why the challenge didn't redirect
+            try:
+                title = await page.title()
+                body_text = await page.locator("body").inner_text()
+                logger.error(
+                    f"Browser {index}: timed out waiting for grant redirect "
+                    f"(title='{title}', body_preview='{body_text[:200]}')"
+                )
+            except Exception:
+                logger.error(
+                    f"Browser {index}: timed out waiting for grant redirect "
+                    f"(last url: {page.url[:120]})"
+                )
             return {"grant": "", "elapsed": elapsed, "error": "timeout"}
 
         except Exception as exc:
