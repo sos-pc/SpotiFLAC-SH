@@ -400,38 +400,41 @@ class GrantSolverServer:
                     return {"grant": "", "elapsed": round(time.time()-start,3),
                             "error": "turnstile unsolved"}
 
-                # Navigate back to the REAL page and wait for verified()
-                await page.goto(challenge_url, wait_until="domcontentloaded",
-                                timeout=15000)
-                await page.wait_for_function(
-                    "typeof verified === 'function'", timeout=10000)
-                logger.debug("verified() found, calling it")
-
-                # Call the page's own verified() function, intercepting
-                # location.replace() to capture the redirect URL
-                logger.debug("Calling page's verified() via browser")
+                # Call /verify via fetch() from the page context (cookies included)
+                logger.debug("Calling /verify via browser fetch()")
                 result = await page.evaluate(f"""
                     (async () => {{
-                        let capturedUrl = null;
-                        const origReplace = location.replace.bind(location);
-                        location.replace = function(url) {{
-                            capturedUrl = url;
-                        }};
-                        try {{
-                            await verified('{token}');
-                        }} catch(e) {{
-                            return JSON.stringify({{error: e.message}});
-                        }}
-                        location.replace = origReplace;
-                        return JSON.stringify({{capturedUrl: capturedUrl}});
+                        const resp = await fetch('/verify', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            body: JSON.stringify({{
+                                challenge: '{challenge_jwt}',
+                                callback: '{callback_url}',
+                                token: '{token}'
+                            }})
+                        }});
+                        const body = await resp.text();
+                        return JSON.stringify({{
+                            status: resp.status,
+                            ok: resp.ok,
+                            body: body
+                        }});
                     }})()
                 """)
                 data = json.loads(result)
-                if data.get('error'):
-                    raise Exception(data['error'])
-                if data.get('capturedUrl'):
-                    return self._extract_grant(data['capturedUrl'], start)
-                raise Exception('verified() did not redirect')
+                if not data.get('ok'):
+                    raise Exception(
+                        f"/verify HTTP {data['status']}: "
+                        f"{data['body'][:200]}")
+                parsed = json.loads(data['body'])
+                if not parsed.get('success'):
+                    raise Exception(
+                        f"{parsed.get('error', 'unknown')} "
+                        f"(HTTP {data['status']})")
+                grant_url = parsed.get('callback_url', '')
+                if not grant_url:
+                    raise Exception("no callback_url in /verify response")
+                return self._extract_grant(grant_url, start)
             finally:
                 if page:
                     await page.close()
