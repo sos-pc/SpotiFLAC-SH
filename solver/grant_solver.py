@@ -400,10 +400,12 @@ class GrantSolverServer:
                     return {"grant": "", "elapsed": round(time.time()-start,3),
                             "error": "turnstile unsolved"}
 
-                # Navigate back to the REAL page so its scripts are available
-                await page.goto(challenge_url, wait_until="networkidle",
+                # Navigate back to the REAL page and wait for verified()
+                await page.goto(challenge_url, wait_until="domcontentloaded",
                                 timeout=15000)
-                await asyncio.sleep(1)
+                await page.wait_for_function(
+                    "typeof verified === 'function'", timeout=10000)
+                logger.debug("verified() found, calling it")
 
                 # Call the page's own verified() function, intercepting
                 # location.replace() to capture the redirect URL
