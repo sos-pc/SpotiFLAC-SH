@@ -216,10 +216,16 @@ class GrantSolverServer:
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
-                result = await resp.json()
+                body = await resp.text()
+                try:
+                    result = json.loads(body)
+                except Exception:
+                    raise Exception(
+                        f"verify returned HTTP {resp.status}: {body[:200]}")
                 if not result.get("success"):
                     raise Exception(
-                        result.get("error", f"verify returned HTTP {resp.status}"))
+                        f"{result.get('error', 'unknown')} "
+                        f"(HTTP {resp.status}, body: {body[:200]})")
                 return result.get("callback_url", "")
 
     @staticmethod
