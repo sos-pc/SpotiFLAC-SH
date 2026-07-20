@@ -23,10 +23,24 @@ import json
 import logging
 import asyncio
 import argparse
+import shutil
 from urllib.parse import urlparse, parse_qs
 
 from quart import Quart, request, jsonify
 from patchright.async_api import async_playwright
+
+# Chromium executable path — the Debian package installs to /usr/bin/chromium.
+# Patchright's channel detection doesn't always find it; we pass the path
+# explicitly so the container starts without `patchright install chromium`.
+_CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "")
+if not _CHROMIUM_PATH:
+    for candidate in ["/usr/bin/chromium", "/usr/bin/chromium-browser",
+                       "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"]:
+        if shutil.which(candidate) or os.path.exists(candidate):
+            _CHROMIUM_PATH = candidate
+            break
+if not _CHROMIUM_PATH:
+    raise RuntimeError("chromium not found — install chromium or set CHROMIUM_PATH")
 
 
 # ── Logging (same style as upstream) ────────────────────────────────────────
@@ -85,7 +99,7 @@ class GrantSolverServer:
         self._playwright = await async_playwright().start()
         for i in range(self.thread_count):
             browser = await self._playwright.chromium.launch(
-                channel=self.browser_type,
+                executable_path=_CHROMIUM_PATH,
                 headless=self.headless,
                 args=self.browser_args,
             )
