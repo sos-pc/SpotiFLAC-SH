@@ -203,8 +203,39 @@ class GrantSolverServer:
             if browser:
                 await self.browser_pool.put((index, browser))
 
+    async def _post_verify_via_browser(self, page, challenge_jwt, callback_url, token):
+        """POST /verify using the browser's fetch(), so cookies are included."""
+        result = await page.evaluate(f"""
+            (async () => {{
+                const resp = await fetch('/verify', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{
+                        challenge: '{challenge_jwt}',
+                        callback: '{callback_url}',
+                        token: '{token}'
+                    }})
+                }});
+                const body = await resp.text();
+                return JSON.stringify({{
+                    status: resp.status,
+                    body: body
+                }});
+            }})()
+        """)
+        data = json.loads(result)
+        if data['status'] != 200:
+            raise Exception(
+                f"verify HTTP {data['status']}: {data['body'][:200]}")
+        parsed = json.loads(data['body'])
+        if not parsed.get('success'):
+            raise Exception(
+                f"{parsed.get('error', 'unknown')} "
+                f"(HTTP {data['status']})")
+        return parsed.get('callback_url', '')
+
     async def _post_verify(self, challenge_jwt, callback_url, token):
-        """POST to /verify with the solved Turnstile token to get the grant."""
+        """POST to /verify (fallback when no browser context is available)."""
         async with aiohttp.ClientSession() as session:
             payload = {
                 "challenge": challenge_jwt,
@@ -227,6 +258,53 @@ class GrantSolverServer:
                         f"{result.get('error', 'unknown')} "
                         f"(HTTP {resp.status}, body: {body[:200]})")
                 return result.get("callback_url", "")
+
+    async def _solve_fake_page_turnstile_in_context(
+        self, context, challenge_url, sitekey, action, index):
+        """Solve Turnstile on a fake page using the given browser context."""
+        page = await context.new_page()
+        try:
+            action_attr = f' data-action="{action}"' if action else ''
+            turnstile_div = (
+                f'<div class="cf-turnstile" style="background:white;"'
+                f' data-sitekey="{sitekey}"{action_attr}></div>'
+            )
+            page_data = self.HTML_TEMPLATE.replace(
+                "<!-- cf turnstile -->", turnstile_div)
+            url_with_slash = challenge_url.rstrip("/") + "/"
+            await page.route(url_with_slash,
+                lambda route: route.fulfill(
+                    body=page_data, status=200,
+                    content_type="text/html"))
+            await page.goto(url_with_slash, wait_until="domcontentloaded",
+                            timeout=15000)
+            await page.eval_on_selector(
+                "//div[@class='cf-turnstile']",
+                "el => el.style.width = '70px'")
+            if self.debug:
+                logger.debug(f"Browser {index}: solving Turnstile (in-context)")
+            for attempt in range(30):
+                try:
+                    token = await page.input_value(
+                        "[name=cf-turnstile-response]", timeout=2000)
+                    if token:
+                        if self.debug:
+                            logger.debug(
+                                f"Browser {index}: solved attempt {attempt+1} "
+                                f"({token[:12]}...)")
+                        return token
+                except Exception:
+                    pass
+                try:
+                    await page.locator(
+                        "//div[@class='cf-turnstile']").click(timeout=1000)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
+            logger.error(f"Browser {index}: could not solve Turnstile")
+            return None
+        finally:
+            await page.close()
 
     @staticmethod
     def _extract_grant(grant_url, start):
@@ -266,29 +344,81 @@ class GrantSolverServer:
         except Exception as e:
             logger.info(f"Real page failed ({e}), trying fake page...")
 
-        # ── Strategy B: Fake page ──────────────────────────────────────
+        # ── Strategy B: Fake page (with browser cookies) ─────────────────
         try:
-            # Parse page for metadata
-            sitekey, challenge_jwt, callback_url, action = \
-                await self._parse_challenge_page(challenge_url)
-            if not all([sitekey, challenge_jwt, callback_url]):
-                return {"grant": "", "elapsed": round(time.time()-start,3),
-                        "error": "missing page metadata"}
+            index, browser = await self.browser_pool.get()
+            context = None
+            page = None
+            try:
+                context = await browser.new_context(
+                    viewport={"width": 1920, "height": 1080})
+                page = await context.new_page()
 
-            token = await self._solve_fake_page_turnstile(
-                challenge_url, sitekey, action)
-            if not token:
-                return {"grant": "", "elapsed": round(time.time()-start,3),
-                        "error": "turnstile unsolved"}
+                # Load the real page first to get session cookies
+                logger.debug(f"Browser {index}: loading real page for cookies")
+                await page.goto(challenge_url, wait_until="domcontentloaded",
+                                timeout=30000)
+                await asyncio.sleep(1)
 
-            logger.debug("Calling /verify")
-            grant_url = await self._post_verify(
-                challenge_jwt, callback_url, token)
+                # Parse metadata from the loaded page
+                content = await page.content()
+                sitekey = None
+                challenge_jwt = None
+                callback_url = None
+                action = None
+                for pattern in [
+                    r'data-sitekey=["\']([^"\']+)["\']',
+                    r'["\']sitekey["\']\s*[:=]\s*["\']([^"\']{10,})["\']',
+                ]:
+                    m = re.search(pattern, content)
+                    if m:
+                        sitekey = m.group(1)
+                        break
+                m = re.search(r'data-action=["\']([^"\']+)["\']', content)
+                if m:
+                    action = m.group(1)
+                m = re.search(
+                    r'const\s+challenge\s*=\s*["\']([^"\']+)["\']',
+                    content)
+                if m:
+                    challenge_jwt = m.group(1)
+                m = re.search(
+                    r'const\s+callback\s*=\s*["\']([^"\']+)["\']',
+                    content)
+                if m:
+                    callback_url = m.group(1)
 
-            return self._extract_grant(grant_url, start)
+                if not all([sitekey, challenge_jwt, callback_url]):
+                    return {"grant": "", "elapsed": round(time.time()-start,3),
+                            "error": "missing page metadata"}
+
+                # Solve Turnstile on fake page (same browser context =
+                # shares cookies)
+                token = await self._solve_fake_page_turnstile_in_context(
+                    context, challenge_url, sitekey, action, index)
+                if not token:
+                    return {"grant": "", "elapsed": round(time.time()-start,3),
+                            "error": "turnstile unsolved"}
+
+                # Navigate back to the real page and POST /verify via browser
+                await page.goto(challenge_url, wait_until="domcontentloaded",
+                                timeout=15000)
+                await asyncio.sleep(0.5)
+
+                logger.debug("Calling /verify via browser")
+                grant_url = await self._post_verify_via_browser(
+                    page, challenge_jwt, callback_url, token)
+
+                return self._extract_grant(grant_url, start)
+            finally:
+                if page:
+                    await page.close()
+                if context:
+                    await context.close()
+                await self.browser_pool.put((index, browser))
         except Exception as exc:
             elapsed = round(time.time() - start, 3)
-            logger.error(f"{exc}")
+            logger.error(f"Fake page fallback: {exc}")
             return {"grant": "", "elapsed": elapsed, "error": str(exc)}
 
     async def _solve_on_real_page(self, challenge_url, start):
