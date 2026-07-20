@@ -124,16 +124,23 @@ class GrantSolverServer:
             await page.close()
 
     async def _solve_and_capture(self, challenge_url, task_id):
-        """Full pipeline: extract sitekey, solve Turnstile, inject, capture grant."""
+        """Full pipeline: extract sitekey, solve Turnstile, inject, capture grant.
+
+        Uses page.route() to intercept the real challenge URL and serve a fake
+        Turnstile page instead. This way the widget sees the REAL domain as its
+        origin, which satisfies Cloudflare's domain validation. The solved token
+        is then injected into the real page via JavaScript, triggering the
+        callback that causes the redirect to the grant URL.
+        """
         index, browser = await self.browser_pool.get()
         context = await browser.new_context()
         page = await context.new_page()
         start = time.time()
 
         try:
-            # Step 1 — Load challenge page, extract sitekey
+            # Step 1 — Load challenge page briefly to extract sitekey
             if self.debug:
-                logger.debug(f"Browser {index}: loading challenge page")
+                logger.debug(f"Browser {index}: loading challenge page for sitekey")
             await page.goto(challenge_url, wait_until="domcontentloaded",
                             timeout=30000)
             await asyncio.sleep(1)
@@ -162,17 +169,77 @@ class GrantSolverServer:
                         "error": "no sitekey"}
 
             if self.debug:
-                logger.debug(
-                    f"Browser {index}: sitekey={sitekey[:20]}...")
+                logger.debug(f"Browser {index}: sitekey={sitekey[:20]}...")
 
-            # Step 2 — Solve Turnstile on a fake page
-            token = await self._solve_turnstile_on_fake_page(
-                context, sitekey, index)
+            # Step 2 — Solve Turnstile by intercepting the real URL and serving
+            # a fake page. The widget runs with the REAL domain as its origin,
+            # so Cloudflare accepts the token as domain-valid.
+            turnstile_div = (
+                f'<div class="cf-turnstile" data-sitekey="{sitekey}"' +
+                f' style="background:white;width:70px"></div>'
+            )
+            fake_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+            <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+                    async defer></script></head>
+            <body style="background:white">{turnstile_div}</body></html>"""
+
+            # Intercept: navigating to the challenge URL returns our fake page
+            url_with_slash = challenge_url.rstrip("/") + "/"
+            await page.route(url_with_slash,
+                lambda route: route.fulfill(
+                    body=fake_html, status=200,
+                    content_type="text/html"))
+            await page.route(challenge_url,
+                lambda route: route.fulfill(
+                    body=fake_html, status=200,
+                    content_type="text/html"))
+
+            # Navigate to the real URL → gets our fake page with real origin
+            await page.goto(challenge_url, wait_until="domcontentloaded",
+                            timeout=15000)
+            await asyncio.sleep(2)
+
+            # Click the widget repeatedly until the response appears
+            if self.debug:
+                logger.debug(f"Browser {index}: solving Turnstile")
+            token = None
+            widget = page.locator(".cf-turnstile")
+            for attempt in range(20):
+                try:
+                    t = await page.input_value(
+                        "[name=cf-turnstile-response]", timeout=2000)
+                    if t:
+                        token = t
+                        if self.debug:
+                            logger.debug(
+                                f"Browser {index}: solved on attempt "
+                                f"{attempt+1} ({t[:12]}...)")
+                        break
+                except Exception:
+                    pass
+                try:
+                    await widget.click(timeout=1000)
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+
+            # Remove the route so we can navigate to the real page
+            await page.unroute(url_with_slash)
+            await page.unroute(challenge_url)
+
             if not token:
+                logger.error(f"Browser {index}: could not solve Turnstile")
                 return {"grant": "", "elapsed": round(time.time()-start,3),
                         "error": "turnstile unsolved"}
 
-            # Step 3 — Inject token into real page, trigger callback
+            # Step 3 — Navigate to the REAL page and inject the token
+            if self.debug:
+                logger.debug(f"Browser {index}: loading real page, injecting token")
+            await page.goto(challenge_url, wait_until="domcontentloaded",
+                            timeout=15000)
+            await asyncio.sleep(0.5)
+
+            # Inject the solved token
             await page.evaluate(f"""
                 (() => {{
                     const inp = document.querySelector(
@@ -193,7 +260,7 @@ class GrantSolverServer:
                 }})()
             """)
             if self.debug:
-                logger.debug(f"Browser {index}: token injected")
+                logger.debug(f"Browser {index}: token injected, waiting redirect")
 
             # Step 4 — Wait for redirect with grant
             for attempt in range(60):
@@ -205,8 +272,8 @@ class GrantSolverServer:
                 if grant:
                     elapsed = round(time.time() - start, 3)
                     logger.success(
-                        f"Browser {index}: grant captured "
-                        f"({grant[:12]}...) in {elapsed}s")
+                        f"Browser {index}: grant captured ({grant[:12]}...) "
+                        f"in {elapsed}s")
                     return {"grant": grant, "elapsed": elapsed}
                 if 'grant=' in current:
                     for part in current.split('?',1)[-1].split('&'):
@@ -218,8 +285,7 @@ class GrantSolverServer:
                                 f"({g[:12]}...) in {elapsed}s")
                             return {"grant": g, "elapsed": elapsed}
                 if self.debug and attempt % 10 == 0:
-                    logger.debug(
-                        f"Browser {index}: waiting {attempt+1}/60")
+                    logger.debug(f"Browser {index}: waiting {attempt+1}/60")
 
             elapsed = round(time.time() - start, 3)
             try:
