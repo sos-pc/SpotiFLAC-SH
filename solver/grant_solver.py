@@ -19,7 +19,6 @@ Usage:
 import os, sys, time, uuid, json, logging, asyncio, argparse, re, shutil
 from urllib.parse import urlparse, parse_qs
 
-import aiohttp
 from quart import Quart, request, jsonify
 from patchright.async_api import async_playwright
 
@@ -100,40 +99,6 @@ class GrantSolverServer:
         logger.success(f"Pool ready ({self.browser_pool.qsize()} browsers)")
 
     # ── Core logic ──────────────────────────────────────────────────────────
-
-    async def _parse_challenge_page(self, challenge_url):
-        """Parse the challenge page to extract sitekey, challenge JWT, and callback URL."""
-        async with aiohttp.ClientSession() as session:
-            async with session.get(challenge_url,
-                                   timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                html = await resp.text()
-
-        sitekey = None
-        challenge_jwt = None
-        callback_url = None
-        action = None
-
-        # Extract sitekey from data-sitekey attribute
-        m = re.search(r'data-sitekey=["\']([^"\']+)["\']', html)
-        if m:
-            sitekey = m.group(1)
-
-        # Extract data-action
-        m = re.search(r'data-action=["\']([^"\']+)["\']', html)
-        if m:
-            action = m.group(1)
-
-        # Extract the challenge JWT from the JS variable
-        m = re.search(r'const\s+challenge\s*=\s*["\']([^"\']+)["\']', html)
-        if m:
-            challenge_jwt = m.group(1)
-
-        # Extract the callback URL
-        m = re.search(r'const\s+callback\s*=\s*["\']([^"\']+)["\']', html)
-        if m:
-            callback_url = m.group(1)
-
-        return sitekey, challenge_jwt, callback_url, action
 
     async def _solve_fake_page_turnstile(self, challenge_url, sitekey, action):
         """Solve the Turnstile widget on a fake page (original solver technique)."""
@@ -233,31 +198,6 @@ class GrantSolverServer:
                 f"{parsed.get('error', 'unknown')} "
                 f"(HTTP {data['status']})")
         return parsed.get('callback_url', '')
-
-    async def _post_verify(self, challenge_jwt, callback_url, token):
-        """POST to /verify (fallback when no browser context is available)."""
-        async with aiohttp.ClientSession() as session:
-            payload = {
-                "challenge": challenge_jwt,
-                "callback": callback_url,
-                "token": token,
-            }
-            async with session.post(
-                "https://verify.spotbye.qzz.io/verify",
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                body = await resp.text()
-                try:
-                    result = json.loads(body)
-                except Exception:
-                    raise Exception(
-                        f"verify returned HTTP {resp.status}: {body[:200]}")
-                if not result.get("success"):
-                    raise Exception(
-                        f"{result.get('error', 'unknown')} "
-                        f"(HTTP {resp.status}, body: {body[:200]})")
-                return result.get("callback_url", "")
 
     async def _solve_fake_page_turnstile_in_context(
         self, context, challenge_url, sitekey, action, index):
@@ -534,8 +474,8 @@ class GrantSolverServer:
                     callback_url = m.group(1)
 
             logger.debug("Calling /verify with real-page token")
-            grant_url = await self._post_verify(
-                challenge_jwt, callback_url, token)
+            grant_url = await self._post_verify_via_browser(
+                page, challenge_jwt, callback_url, token)
             return self._extract_grant(grant_url, start)
 
         finally:

@@ -23,7 +23,15 @@ ENV SOLVER_USERAGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML,
 
 EXPOSE 5000
 
-CMD python3 /app/grant_solver.py \
+# Clear the inherited ENTRYPOINT from theyka/turnstile_solver (which runs
+# a setup script + XRDP). We run our own server directly.
+ENTRYPOINT []
+
+# Start Xvfb (virtual display) then run our solver.
+# The original image has X11 libraries but our CMD overrides the desktop.
+CMD Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render & \
+    sleep 2 && \
+    python3 /app/grant_solver.py \
     --headless false \
     --useragent "${SOLVER_USERAGENT}" \
     --host 0.0.0.0 \
