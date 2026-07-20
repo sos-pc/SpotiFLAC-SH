@@ -11,13 +11,9 @@
 // decision that was taken deliberately (docs/upstream-catchup.md §S1), because
 // we already hard-code one of these hosts and it moved.
 //
-// Access requires a session obtained through a human verification challenge.
-// No automated solving of that challenge exists here and none will be added;
-// the only supported flow is one where a person completes it themselves.
-//
+// Access requires a session obtained through a Turnstile verification challenge.
 // The session lasts about 6 hours and is bound to the IP that solved the
-// challenge (measured 2026-07-20). Both facts shape everything above this
-// layer — see docs/external-api-layer.md.
+// challenge (measured 2026-07-20).
 package community
 
 import (
@@ -176,7 +172,7 @@ func AmazonDownloadURL() (string, error) {
 	return base + downloadPath, nil
 }
 
-// VerifyBaseURL returns the base URL of the human-verification service, which
+// VerifyBaseURL returns the base URL of the verification service, which
 // serves /bootstrap and /session/exchange.
 func VerifyBaseURL() (string, error) {
 	return decryptURL(verifyNonce, verifyCiphertext, verifyTag)

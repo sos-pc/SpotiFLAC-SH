@@ -46,7 +46,7 @@ func TestCooldownIsTypedAndCarriesTheDelay(t *testing.T) {
 
 // 401 must clear the stored credentials — leaving them would produce the same
 // rejection on every later request — and must NOT retry: re-verification needs
-// a human, so an immediate retry only repeats the rejection.
+// a fresh Turnstile challenge, so an immediate retry only repeats the rejection.
 func TestAuthFailureClearsCredentialsAndDoesNotRetry(t *testing.T) {
 	newTestStore(t)
 	if err := Save(&Session{

@@ -22,7 +22,7 @@ const signatureVersion = "SPOTIFLAC-HMAC-V1"
 //
 // This is the answer to "how can a 6-hour download survive a 5-minute window":
 // the key rotates on its own, computed locally from the session secret, with no
-// interaction of any kind. Only the *session* expiry needs a human.
+// interaction of any kind.
 const rollingWindowSeconds = 300
 
 // timestampLayout is Go's reference time in the format the server expects.

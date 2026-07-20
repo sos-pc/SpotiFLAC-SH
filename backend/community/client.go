@@ -108,9 +108,8 @@ func IsAuth(err error) bool {
 // signed twice: the body has been consumed and the nonce must be new.
 //
 // On 401/428 the stored credentials are cleared and an AuthError is returned
-// without retrying. Upstream retries once after clearing, which only works
-// because it can pop a browser open; here re-verification needs a human, so
-// retrying immediately would just produce a second identical rejection.
+// without retrying. Re-verification requires a new Turnstile challenge,
+// so retrying immediately would just produce a second identical rejection.
 func Do(client *http.Client, service string, signer Signer, buildRequest func() (*http.Request, error)) (*http.Response, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 60 * time.Second}

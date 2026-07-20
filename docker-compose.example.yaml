@@ -8,6 +8,10 @@ services:
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
+      # Turnstile solver for community proxy access (Qobuz/Amazon).
+      # Comment out or remove to disable automatic session refresh.
+      - TURNSTILE_SOLVER_URL=http://turnstile-solver:5000
+      - APP_VERSION=latest
     # L'image tourne en non-root, uid/gid 1000.
     # Le dossier musique ci-dessous est un chemin choisi sur l'hôte (pour que
     # Jellyfin puisse y accéder directement) : il doit appartenir à cet uid
@@ -26,6 +30,26 @@ services:
       - /path/to/music:/home/nonroot/Music
       # Configuration et base de données — volume Docker géré
       - spotiflac_config:/home/nonroot/.SpotiFLAC
+
+  # ── Turnstile Solver (companion container) ──────────────────────────────
+  # Required for automatic community proxy session renewal (Qobuz/Amazon).
+  # This container runs a headless Chromium browser that solves Cloudflare
+  # Turnstile challenges on behalf of SpotiFLAC. It does not need to be
+  # exposed to the host — communication happens over the internal Docker
+  # network.
+  #
+  # Resource note: Chromium headless needs ~300-500 MB RAM. If your host is
+  # tight, increase the Docker memory limit or remove this service and disable
+  # TURNSTILE_SOLVER_URL in the spotiflac container above (Qobuz/Amazon
+  # downloads will stop working without a manual session grant).
+  turnstile-solver:
+    build: ./solver
+    container_name: spotiflac-turnstile
+    restart: unless-stopped
+    # No ports exposed — internal Docker network only.
+    # Uncomment the line below if you need to debug the solver API directly:
+    # ports:
+    #   - "5000:5000"
 
 volumes:
   # Option A (par défaut, recommandée) — Docker choisit où stocker les

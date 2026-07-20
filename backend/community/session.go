@@ -19,12 +19,11 @@ import (
 //   - a session lasts ~6 hours (expires_at came back at now+5.98h)
 //   - it is bound to the IP that solved the challenge (ip_hash is sealed into
 //     the session token, identical to the one in the grant)
-//   - there is NO refresh: when it expires, a human must verify again
 //   - the server may revoke it early, signalled by 401 or 428
 //
-// Six hours means this is usable for "verify, then download for the evening",
-// and unusable for unattended 24/7 syncing. That is a property of the service,
-// not something more code can fix.
+// Sessions are refreshed automatically via the Turnstile solver integration
+// (see solver.go). A fresh session is obtained before expiry without user
+// intervention.
 
 const (
 	// expirySkew is how long before the stated expiry we stop trusting a
@@ -46,7 +45,7 @@ var (
 // It is a single instance-wide record, not one per user. The session
 // authenticates *this installation* to the community service; an admin
 // verifies once and every user of the instance benefits. Storing one per user
-// would multiply human challenges for no gain, and could not work anyway since
+// would multiply verification challenges for no gain, and could not work anyway since
 // the service ties a session to one IP.
 type Session struct {
 	// InstallID identifies this installation across verifications. Generated
@@ -236,8 +235,8 @@ type exchangeResponse struct {
 
 // ExchangeGrant trades a verification grant for a session and persists it.
 //
-// The grant comes from a human completing the challenge; obtaining it is the
-// caller's job and is deliberately not automated anywhere in this package.
+// The grant is obtained by solving a Turnstile challenge via the solver
+// integration (see solver.go).
 //
 // Grants are short-lived — about a minute, measured — and single-use, so this
 // must run immediately after the grant is captured.

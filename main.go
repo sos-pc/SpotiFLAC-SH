@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -119,6 +120,11 @@ func main() {
 
 	LoadProxyConfig(db)
 
+	// ── Community session (Turnstile solver) ────────────────────────────────
+	if err := community.InitStore(db); err != nil {
+		slog.Warn("[Main] community session store init failed, proceeding without", "err", err)
+	}
+
 	// Restore last discovery result so GetTidalProxiesEffective() is correct
 	// immediately, before the first scheduled run of the discovery goroutine.
 	loadSavedDiscovery(db)
@@ -127,6 +133,18 @@ func main() {
 	discoveryCtx, cancelDiscovery := context.WithCancel(context.Background())
 	defer cancelDiscovery()
 	util.SafeGo("proxyDiscovery", func() { startProxyDiscovery(discoveryCtx, db) })
+
+	// Community session refresh (Turnstile → grant → HMAC signing for Qobuz/Amazon proxies).
+	solver := community.SolverFromEnv()
+	if solver != nil {
+		appVersion := os.Getenv("APP_VERSION")
+		if appVersion == "" {
+			appVersion = "dev"
+		}
+		util.SafeGo("communityRefresh", func() { community.RefreshLoop(discoveryCtx, solver, appVersion) })
+	} else {
+		slog.Info("[Main] TURNSTILE_SOLVER_URL not set, community session refresh disabled")
+	}
 
 	server := NewServer(ctr)
 
