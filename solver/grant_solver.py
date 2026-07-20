@@ -400,16 +400,36 @@ class GrantSolverServer:
                     return {"grant": "", "elapsed": round(time.time()-start,3),
                             "error": "turnstile unsolved"}
 
-                # Navigate back to the real page and POST /verify via browser
-                await page.goto(challenge_url, wait_until="domcontentloaded",
+                # Navigate back to the REAL page so its scripts are available
+                await page.goto(challenge_url, wait_until="networkidle",
                                 timeout=15000)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
 
-                logger.debug("Calling /verify via browser")
-                grant_url = await self._post_verify_via_browser(
-                    page, challenge_jwt, callback_url, token)
-
-                return self._extract_grant(grant_url, start)
+                # Call the page's own verified() function, intercepting
+                # location.replace() to capture the redirect URL
+                logger.debug("Calling page's verified() via browser")
+                result = await page.evaluate(f"""
+                    (async () => {{
+                        let capturedUrl = null;
+                        const origReplace = location.replace.bind(location);
+                        location.replace = function(url) {{
+                            capturedUrl = url;
+                        }};
+                        try {{
+                            await verified('{token}');
+                        }} catch(e) {{
+                            return JSON.stringify({{error: e.message}});
+                        }}
+                        location.replace = origReplace;
+                        return JSON.stringify({{capturedUrl: capturedUrl}});
+                    }})()
+                """)
+                data = json.loads(result)
+                if data.get('error'):
+                    raise Exception(data['error'])
+                if data.get('capturedUrl'):
+                    return self._extract_grant(data['capturedUrl'], start)
+                raise Exception('verified() did not redirect')
             finally:
                 if page:
                     await page.close()
