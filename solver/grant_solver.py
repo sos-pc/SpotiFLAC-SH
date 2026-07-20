@@ -89,102 +89,151 @@ class GrantSolverServer:
             logger.success(f"Browser {i + 1} ready")
         logger.success(f"Pool ready ({self.browser_pool.qsize()} browsers)")
 
-    # ── Turnstile solving ───────────────────────────────────────────────────
-    async def _solve_turnstile_on_fake_page(self, context, sitekey, index):
-        """Create a fake page with the Turnstile widget, solve it, return token."""
-        page = await context.new_page()
-        try:
-            turnstile_div = (
-                f'<div class="cf-turnstile" data-sitekey="{sitekey}"'
-                f' style="background:white"></div>'
-            )
-            html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-            <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-                    async defer></script></head>
-            <body>{turnstile_div}</body></html>"""
-
-            await page.set_content(html, wait_until="domcontentloaded")
-            await asyncio.sleep(2)
-
-            # Click the widget repeatedly until the response appears
-            widget = page.locator(".cf-turnstile")
-            for attempt in range(15):
-                try:
-                    token = await page.input_value(
-                        "[name=cf-turnstile-response]", timeout=2000)
-                    if token:
-                        if self.debug:
-                            logger.debug(
-                                f"Browser {index}: Turnstile solved "
-                                f"({token[:12]}...) on attempt {attempt+1}")
-                        return token
-                except Exception:
-                    pass
-                try:
-                    await widget.click(timeout=1000)
-                except Exception:
-                    pass
-                await asyncio.sleep(1)
-
-            logger.error(f"Browser {index}: could not solve Turnstile")
-            return None
-        finally:
-            await page.close()
+    HTML_TEMPLATE = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Turnstile Solver</title>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>
+    </head>
+    <body>
+        <!-- cf turnstile -->
+    </body>
+    </html>
+    """
 
     async def _solve_and_capture(self, challenge_url, task_id):
-        """Navigate to the REAL challenge page, wait for Turnstile to solve
-        (auto or user-assisted via anti-detection browser), then wait for the
-        redirect to the grant URL.
+        """Solve Turnstile using the same technique as the original
+        Turnstile-Solver: intercept the real URL, serve a fake page with
+        the Turnstile widget, solve it there.
 
-        Uses Patchright's stealth features + anti-detection flags to appear as
-        a real browser so Cloudflare gives a non-interactive challenge.
+        The solved token is then injected into the real page to trigger
+        the redirect that returns the grant.
         """
         index, browser = await self.browser_pool.get()
         context = await browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent=self.useragent if hasattr(self, 'useragent') and self.useragent else None,
         )
         page = await context.new_page()
         start = time.time()
 
         try:
+            # Step 1 — Extract sitekey from the real page
             if self.debug:
-                logger.debug(f"Browser {index}: navigating to challenge page")
-
-            await page.goto(challenge_url, wait_until="networkidle",
+                logger.debug(f"Browser {index}: extracting sitekey")
+            await page.goto(challenge_url, wait_until="domcontentloaded",
                             timeout=30000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
-            # Try to find and click the Turnstile widget to activate it.
-            # Cloudflare may give a non-interactive challenge (auto-solve)
-            # if the browser fingerprint is clean enough.
-            try:
-                # Look for the Turnstile iframe (most common)
-                frame = page.frame_locator(
-                    "iframe[src*='challenges.cloudflare.com']")
-                checkbox = frame.locator("#checkbox, .cb-i, .challenge-stage")
-                await checkbox.first.wait_for(state="visible", timeout=10000)
-                await checkbox.first.click()
-                if self.debug:
-                    logger.debug(f"Browser {index}: Turnstile iframe clicked")
-            except Exception:
-                # Fallback: inline widget
+            sitekey = None
+            content = await page.content()
+            for pattern in [
+                r'data-sitekey=["\']([^"\']+)["\']',
+                r'["\']sitekey["\']\s*[:=]\s*["\']([^"\']{10,})["\']',
+            ]:
+                m = re.search(pattern, content)
+                if m:
+                    sitekey = m.group(1)
+                    break
+
+            if not sitekey:
+                logger.error(f"Browser {index}: no sitekey found")
+                return {"grant": "", "elapsed": round(time.time()-start,3),
+                        "error": "no sitekey"}
+
+            if self.debug:
+                logger.debug(f"Browser {index}: sitekey={sitekey[:30]}")
+
+            # Step 2 — Solve Turnstile the same way as the original solver
+            # Intercept the URL and serve a fake page with the real sitekey
+            url_with_slash = challenge_url.rstrip("/") + "/"
+            turnstile_div = (
+                f'<div class="cf-turnstile" style="background: white;"'
+                f' data-sitekey="{sitekey}"></div>'
+            )
+            page_data = self.HTML_TEMPLATE.replace(
+                "<!-- cf turnstile -->", turnstile_div)
+
+            await page.route(url_with_slash,
+                lambda route: route.fulfill(
+                    body=page_data, status=200,
+                    content_type="text/html"))
+
+            await page.goto(url_with_slash, wait_until="domcontentloaded",
+                            timeout=15000)
+
+            # Make the widget visible — the original solver does this
+            await page.eval_on_selector(
+                "//div[@class='cf-turnstile']",
+                "el => el.style.width = '70px'")
+
+            if self.debug:
+                logger.debug(f"Browser {index}: solving Turnstile on fake page")
+
+            turnstile_token = None
+            for attempt in range(30):
                 try:
-                    widget = page.locator(".cf-turnstile")
-                    await widget.first.click(timeout=5000)
-                    if self.debug:
-                        logger.debug(f"Browser {index}: inline widget clicked")
+                    token = await page.input_value(
+                        "[name=cf-turnstile-response]", timeout=2000)
+                    if token:
+                        turnstile_token = token
+                        if self.debug:
+                            logger.debug(
+                                f"Browser {index}: solved on attempt "
+                                f"{attempt+1} ({token[:12]}...)")
+                        break
                 except Exception:
-                    if self.debug:
-                        logger.debug(f"Browser {index}: no clickable widget found")
+                    pass
+                try:
+                    await page.locator(
+                        "//div[@class='cf-turnstile']").click(timeout=1000)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
 
-            # Wait for redirect. The Turnstile may auto-solve (non-interactive)
-            # or the page may redirect after a timeout. We poll the page URL.
+            # Remove the route
+            await page.unroute(url_with_slash)
+
+            if not turnstile_token:
+                logger.error(f"Browser {index}: could not solve Turnstile")
+                return {"grant": "", "elapsed": round(time.time()-start,3),
+                        "error": "turnstile unsolved"}
+
+            # Step 3 — Navigate to the real page and inject the token
+            if self.debug:
+                logger.debug(f"Browser {index}: injecting token into real page")
+            await page.goto(challenge_url, wait_until="domcontentloaded",
+                            timeout=15000)
+            await asyncio.sleep(0.5)
+
+            await page.evaluate(f"""
+                (() => {{
+                    const inp = document.querySelector(
+                        '[name=cf-turnstile-response]');
+                    if (inp) {{
+                        inp.value = '{turnstile_token}';
+                        inp.dispatchEvent(new Event('input',
+                            {{bubbles: true}}));
+                        inp.dispatchEvent(new Event('change',
+                            {{bubbles: true}}));
+                    }}
+                    // Trigger any registered callback
+                    const cb = window._turnstileCb
+                        || window.turnstileCallback
+                        || window.onTurnstileCallback;
+                    if (typeof cb === 'function') cb('{turnstile_token}');
+                }})()
+            """)
+
+            # Step 4 — Wait for redirect with grant
+            if self.debug:
+                logger.debug(f"Browser {index}: waiting for grant redirect")
+
             for attempt in range(60):
                 await asyncio.sleep(1.5)
                 current = page.url
-
-                # Check for grant in query string
                 parsed = urlparse(current)
                 qs = parse_qs(parsed.query)
                 grant = qs.get('grant', [None])[0]
@@ -194,8 +243,6 @@ class GrantSolverServer:
                         f"Browser {index}: grant captured ({grant[:12]}...) "
                         f"in {elapsed}s")
                     return {"grant": grant, "elapsed": elapsed}
-
-                # Also check for grant= anywhere in URL
                 if 'grant=' in current:
                     for part in current.split('?',1)[-1].split('&'):
                         if part.startswith('grant='):
@@ -205,21 +252,6 @@ class GrantSolverServer:
                                 f"Browser {index}: grant via parse "
                                 f"({g[:12]}...) in {elapsed}s")
                             return {"grant": g, "elapsed": elapsed}
-
-                # Check if Turnstile solved (non-interactive mode fills
-                # cf-turnstile-response automatically)
-                if attempt % 3 == 0:
-                    try:
-                        token = await page.evaluate(
-                            "document.querySelector('[name=cf-turnstile-response]')?.value || ''"
-                        )
-                        if token and self.debug:
-                            logger.debug(
-                                f"Browser {index}: Turnstile response "
-                                f"present ({token[:12]}...)")
-                    except Exception:
-                        pass
-
                 if self.debug and attempt % 10 == 0:
                     logger.debug(f"Browser {index}: waiting {attempt+1}/60")
 
