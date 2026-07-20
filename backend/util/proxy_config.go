@@ -37,25 +37,42 @@ var tidalProxies = []string{
 }
 
 // Amazon Music proxy (requires X-Debug-Key header — handled by the downloader).
-// Updated from amzn.afkarxyz.fun → amazon.spotbye.qzz.io (domain change, May 2026).
-var amazonProxies = []string{"https://amazon.spotbye.qzz.io"}
+//
+// EMPTY since 2026-07-20, and that is a measurement, not an oversight.
+// amzn.afkarxyz.fun → amazon.spotbye.qzz.io (May 2026) → both dead: the host
+// no longer resolves at all. Upstream moved to amz-oss.spotbye.qzz.io, which
+// is alive but only answers signed community-session requests (see
+// docs/external-api-layer.md). Keeping a dead URL here bought nothing but a
+// misleading "configured" list and one failed request per download attempt.
+var amazonProxies = []string{}
 
 // Deezer proxies (tried in order, first success wins)
 var deezerProxies = []string{"https://api.deezmate.com"}
 
-// qobuzMusicDLURL is the PRIMARY Qobuz provider introduced by upstream in May 2026.
-// It uses a POST endpoint with an X-Debug-Key header (AES-GCM derived key).
-// Handled separately from the standard GET-based provider list — see qobuz/client.go.
-var qobuzMusicDLURL = "https://www.musicdl.me/api/qobuz/download"
-
-// qobuzProviders holds legacy GET-based Qobuz stream API base URLs (user-configurable).
-// The primary provider musicdl.me is accessed via GetQobuzMusicDLURL().
-// As of May 2026:
-//   - dab.yeet.su    → network unreachable (DNS down)
-//   - dabmusic.xyz   → Cloudflare bot protection (inaccessible to API clients)
-//   - qbz.afkarxyz.qzz.io → removed by upstream, presumed down
+// qobuzMusicDLURL was the PRIMARY Qobuz provider (POST + AES-GCM derived
+// X-Debug-Key), introduced by upstream in May 2026.
 //
-// Add working self-hosted instances via Settings → APIs → Proxy Configuration.
+// EMPTY since 2026-07-20. Measured against the live service with a correctly
+// derived key and a real Qobuz track id (8767428): HTTP 500, encrypted body.
+// Without a key it answers 400 — so the endpoint does parse requests, it just
+// never serves one. The probe that established this is kept as
+// qobuz/musicdl_live_probe_test.go; set QOBUZ_LIVE_PROBE=<track id> to re-run
+// it before ever putting this URL back.
+var qobuzMusicDLURL = ""
+
+// qobuzProviders holds GET-based Qobuz stream API base URLs, of the shape
+//
+//	{base}{trackID}&quality={q}   e.g. https://host/api/stream?trackId=
+//
+// Empty, and every known public instance is down — re-measured 2026-07-20:
+//   - dab.yeet.su          → unreachable
+//   - dabmusic.xyz         → 503, Cloudflare bot protection
+//   - qbz.afkarxyz.qzz.io  → unreachable
+//   - musicdl.me           → 500 (see above)
+//
+// The format is trivial, so ANY working instance revives Qobuz with zero code
+// changes: add it via Settings → APIs → Proxy Configuration. That is currently
+// the only path to Qobuz that does not require the community session.
 var qobuzProviders = []string{}
 
 // ─── Getters (used by downloaders) ───────────────────────────────────────────

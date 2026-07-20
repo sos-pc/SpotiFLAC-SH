@@ -204,6 +204,13 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 		slog.Debug("[Amazon] Proxy failed, trying next", "proxy", proxy, "err", err)
 	}
 	if apiResp == nil {
+		// "All proxies failed" with no proxies configured reads as a network
+		// problem and sends the reader hunting for one. Since 2026-07-20 the
+		// default list is empty on purpose (every known host is dead), so this
+		// is now the common case and must say what it actually is.
+		if lastErr == nil {
+			return "", fmt.Errorf("no Amazon proxy is configured — add one in Settings → APIs → Proxy Configuration")
+		}
 		return "", fmt.Errorf("all Amazon proxies failed: %v", lastErr)
 	}
 

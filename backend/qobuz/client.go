@@ -387,7 +387,7 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 		if lastErr != nil {
 			return "", lastErr
 		}
-		return "", fmt.Errorf("no Qobuz providers configured")
+		return "", fmt.Errorf("no Qobuz provider is configured — add one in Settings → APIs → Proxy Configuration")
 	}
 
 	url, err := downloadFunc(qualityCode)
