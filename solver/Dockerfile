@@ -39,6 +39,7 @@ RUN apt-get update && \
 RUN pip install --no-cache-dir \
     quart==0.20.0 \
     patchright==1.61.2 \
+    aiohttp==3.11.0 \
     hypercorn==0.18.0
 
 # Tell Patchright where to find Chromium (the Debian package installs

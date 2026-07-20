@@ -1,10 +1,16 @@
 """
 grant_solver.py — Turnstile challenge solver that captures the grant token.
 
-Navigates to the real Cloudflare Turnstile challenge URL, extracts the
-sitekey, solves the Turnstile widget on a fake page (the same technique
-as the original Turnstile-Solver), injects the token back into the real
-page, and captures the grant from the redirect URL.
+Flow:
+1. Parse the challenge page to extract sitekey + challenge JWT + callback URL.
+2. Solve the Turnstile widget on a fake page (same technique as the original
+   Turnstile-Solver: route the real URL, serve fake page, click widget).
+3. POST the solved token + challenge JWT + callback URL to /verify.
+4. The verify endpoint returns {success: true, callback_url: "..."}.
+5. Parse the grant from callback_url.
+
+This bypasses the 5-second countdown, the inline widget, and the redirect
+chain — we talk to /verify directly with a pre-solved Turnstile token.
 
 Usage:
     python3 grant_solver.py --headless true --host 0.0.0.0 --port 5000
@@ -13,6 +19,7 @@ Usage:
 import os, sys, time, uuid, json, logging, asyncio, argparse, re, shutil
 from urllib.parse import urlparse, parse_qs
 
+import aiohttp
 from quart import Quart, request, jsonify
 from patchright.async_api import async_playwright
 
@@ -52,6 +59,12 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 
 # ── Server ──────────────────────────────────────────────────────────────────
 class GrantSolverServer:
+    HTML_TEMPLATE = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Turnstile Solver</title>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>
+    </head><body><!-- cf turnstile --></body></html>"""
+
     def __init__(self, headless, useragent, debug, browser_type, thread):
         self.app = Quart(__name__)
         self.debug = debug
@@ -62,10 +75,8 @@ class GrantSolverServer:
         self.browser_args = [
             "--disable-blink-features=AutomationControlled",
             "--disable-features=IsolateOrigins,site-per-process",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
+            "--no-sandbox", "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage", "--disable-gpu",
             "--window-size=1920,1080",
         ]
         if useragent:
@@ -76,8 +87,7 @@ class GrantSolverServer:
         self.app.route('/health')(self.health)
 
     async def _startup(self):
-        logger.info("Starting browser pool (%d threads, %s)",
-                     self.thread_count, self.browser_type)
+        logger.info("Starting browser pool (%d threads)", self.thread_count)
         self._playwright = await async_playwright().start()
         for i in range(self.thread_count):
             browser = await self._playwright.chromium.launch(
@@ -89,73 +99,58 @@ class GrantSolverServer:
             logger.success(f"Browser {i + 1} ready")
         logger.success(f"Pool ready ({self.browser_pool.qsize()} browsers)")
 
-    HTML_TEMPLATE = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Turnstile Solver</title>
-        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>
-    </head>
-    <body>
-        <!-- cf turnstile -->
-    </body>
-    </html>
-    """
+    # ── Core logic ──────────────────────────────────────────────────────────
 
-    async def _solve_and_capture(self, challenge_url, task_id):
-        """Solve Turnstile using the same technique as the original
-        Turnstile-Solver: intercept the real URL, serve a fake page with
-        the Turnstile widget, solve it there.
+    async def _parse_challenge_page(self, challenge_url):
+        """Parse the challenge page to extract sitekey, challenge JWT, and callback URL."""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(challenge_url,
+                                   timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                html = await resp.text()
 
-        The solved token is then injected into the real page to trigger
-        the redirect that returns the grant.
-        """
-        index, browser = await self.browser_pool.get()
-        context = await browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-        )
-        page = await context.new_page()
-        start = time.time()
+        sitekey = None
+        challenge_jwt = None
+        callback_url = None
 
+        # Extract sitekey from data-sitekey attribute
+        m = re.search(r'data-sitekey=["\']([^"\']+)["\']', html)
+        if m:
+            sitekey = m.group(1)
+
+        # Extract the challenge JWT from the JS variable
+        m = re.search(r'const\s+challenge\s*=\s*["\']([^"\']+)["\']', html)
+        if m:
+            challenge_jwt = m.group(1)
+
+        # Extract the callback URL
+        m = re.search(r'const\s+callback\s*=\s*["\']([^"\']+)["\']', html)
+        if m:
+            callback_url = m.group(1)
+
+        return sitekey, challenge_jwt, callback_url
+
+    async def _solve_turnstile(self, challenge_url, sitekey, index):
+        """Solve the Turnstile widget on a fake page (original solver technique)."""
+        browser = None
+        context = None
+        page = None
         try:
-            # Step 1 — Extract sitekey from the real page
-            if self.debug:
-                logger.debug(f"Browser {index}: extracting sitekey")
-            await page.goto(challenge_url, wait_until="domcontentloaded",
-                            timeout=30000)
-            await asyncio.sleep(1)
+            _, browser = await self.browser_pool.get()
+            context = await browser.new_context(
+                viewport={"width": 1920, "height": 1080})
+            page = await context.new_page()
 
-            sitekey = None
-            content = await page.content()
-            for pattern in [
-                r'data-sitekey=["\']([^"\']+)["\']',
-                r'["\']sitekey["\']\s*[:=]\s*["\']([^"\']{10,})["\']',
-            ]:
-                m = re.search(pattern, content)
-                if m:
-                    sitekey = m.group(1)
-                    break
-
-            if not sitekey:
-                logger.error(f"Browser {index}: no sitekey found")
-                return {"grant": "", "elapsed": round(time.time()-start,3),
-                        "error": "no sitekey"}
-
-            if self.debug:
-                logger.debug(f"Browser {index}: sitekey={sitekey[:30]}")
-
-            # Step 2 — Solve Turnstile the same way as the original solver
-            # Intercept the URL and serve a fake page with the real sitekey
-            url_with_slash = challenge_url.rstrip("/") + "/"
+            # Build fake page with the real sitekey
             turnstile_div = (
-                f'<div class="cf-turnstile" style="background: white;"'
+                f'<div class="cf-turnstile" style="background:white;"'
                 f' data-sitekey="{sitekey}"></div>'
             )
             page_data = self.HTML_TEMPLATE.replace(
                 "<!-- cf turnstile -->", turnstile_div)
 
+            # Intercept the real URL and serve our fake page, so the widget
+            # runs with the correct origin for domain validation.
+            url_with_slash = challenge_url.rstrip("/") + "/"
             await page.route(url_with_slash,
                 lambda route: route.fulfill(
                     body=page_data, status=200,
@@ -164,26 +159,24 @@ class GrantSolverServer:
             await page.goto(url_with_slash, wait_until="domcontentloaded",
                             timeout=15000)
 
-            # Make the widget visible — the original solver does this
+            # Make the widget visible
             await page.eval_on_selector(
                 "//div[@class='cf-turnstile']",
                 "el => el.style.width = '70px'")
 
+            # Click the widget repeatedly until the response is filled
             if self.debug:
-                logger.debug(f"Browser {index}: solving Turnstile on fake page")
-
-            turnstile_token = None
+                logger.debug(f"Browser {index}: solving Turnstile")
             for attempt in range(30):
                 try:
                     token = await page.input_value(
                         "[name=cf-turnstile-response]", timeout=2000)
                     if token:
-                        turnstile_token = token
                         if self.debug:
                             logger.debug(
-                                f"Browser {index}: solved on attempt "
-                                f"{attempt+1} ({token[:12]}...)")
-                        break
+                                f"Browser {index}: solved attempt {attempt+1} "
+                                f"({token[:12]}...)")
+                        return token
                 except Exception:
                     pass
                 try:
@@ -193,111 +186,101 @@ class GrantSolverServer:
                     pass
                 await asyncio.sleep(0.5)
 
-            # Remove the route
-            await page.unroute(url_with_slash)
+            logger.error(f"Browser {index}: could not solve Turnstile")
+            return None
+        finally:
+            if page:
+                await page.close()
+            if context:
+                await context.close()
+            if browser:
+                await self.browser_pool.put((index, browser))
 
-            if not turnstile_token:
-                logger.error(f"Browser {index}: could not solve Turnstile")
+    async def _post_verify(self, challenge_jwt, callback_url, token):
+        """POST to /verify with the solved Turnstile token to get the grant."""
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "challenge": challenge_jwt,
+                "callback": callback_url,
+                "token": token,
+            }
+            async with session.post(
+                "https://verify.spotbye.qzz.io/verify",
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                result = await resp.json()
+                if not result.get("success"):
+                    raise Exception(
+                        result.get("error", f"verify returned HTTP {resp.status}"))
+                return result.get("callback_url", "")
+
+    async def _solve_and_capture(self, challenge_url, task_id):
+        """Full pipeline: parse page, solve Turnstile, POST /verify, extract grant."""
+        start = time.time()
+
+        try:
+            # Step 1 — Parse the challenge page (HTTP, no browser needed)
+            if self.debug:
+                logger.debug("Parsing challenge page")
+            sitekey, challenge_jwt, callback_url = \
+                await self._parse_challenge_page(challenge_url)
+
+            if not sitekey:
+                return {"grant": "", "elapsed": round(time.time()-start,3),
+                        "error": "no sitekey"}
+            if not challenge_jwt:
+                return {"grant": "", "elapsed": round(time.time()-start,3),
+                        "error": "no challenge JWT"}
+            if not callback_url:
+                return {"grant": "", "elapsed": round(time.time()-start,3),
+                        "error": "no callback URL"}
+
+            if self.debug:
+                logger.debug(
+                    f"sitekey={sitekey[:25]}... "
+                    f"callback={callback_url[:40]}...")
+
+            # Step 2 — Solve Turnstile on fake page
+            token = await self._solve_turnstile(
+                challenge_url, sitekey, 1)
+            if not token:
                 return {"grant": "", "elapsed": round(time.time()-start,3),
                         "error": "turnstile unsolved"}
 
-            # Step 3 — Navigate to the real page and inject the token
+            # Step 3 — POST /verify to get the grant URL
             if self.debug:
-                logger.debug(f"Browser {index}: injecting token into real page")
-            await page.goto(challenge_url, wait_until="domcontentloaded",
-                            timeout=15000)
-            await asyncio.sleep(0.5)
+                logger.debug("Calling /verify")
+            grant_url = await self._post_verify(
+                challenge_jwt, callback_url, token)
 
-            await page.evaluate(f"""
-                (() => {{
-                    const inp = document.querySelector(
-                        '[name=cf-turnstile-response]');
-                    if (inp) {{
-                        inp.value = '{turnstile_token}';
-                        inp.dispatchEvent(new Event('input',
-                            {{bubbles: true}}));
-                        inp.dispatchEvent(new Event('change',
-                            {{bubbles: true}}));
-                    }}
-                    // Trigger any registered callback
-                    const cb = window._turnstileCb
-                        || window.turnstileCallback
-                        || window.onTurnstileCallback;
-                    if (typeof cb === 'function') cb('{turnstile_token}');
-                }})()
-            """)
+            # Step 4 — Extract grant from the callback_url
+            parsed = urlparse(grant_url)
+            qs = parse_qs(parsed.query)
+            grant = qs.get('grant', [None])[0]
+            if grant:
+                elapsed = round(time.time() - start, 3)
+                logger.success(
+                    f"grant captured ({grant[:12]}...) in {elapsed}s")
+                return {"grant": grant, "elapsed": elapsed}
 
-            # Step 4 — Wait for redirect with grant
-            if self.debug:
-                logger.debug(f"Browser {index}: waiting for grant redirect")
+            # Fallback: parse grant= from URL directly
+            if 'grant=' in grant_url:
+                for part in grant_url.split('?',1)[-1].split('&'):
+                    if part.startswith('grant='):
+                        g = part.split('=',1)[1]
+                        elapsed = round(time.time()-start,3)
+                        logger.success(
+                            f"grant via parse ({g[:12]}...) in {elapsed}s")
+                        return {"grant": g, "elapsed": elapsed}
 
-            for attempt in range(60):
-                await asyncio.sleep(1.5)
-                current = page.url
-                parsed = urlparse(current)
-                qs = parse_qs(parsed.query)
-                grant = qs.get('grant', [None])[0]
-                if grant:
-                    elapsed = round(time.time() - start, 3)
-                    logger.success(
-                        f"Browser {index}: grant captured ({grant[:12]}...) "
-                        f"in {elapsed}s")
-                    return {"grant": grant, "elapsed": elapsed}
-                if 'grant=' in current:
-                    for part in current.split('?',1)[-1].split('&'):
-                        if part.startswith('grant='):
-                            g = part.split('=',1)[1]
-                            elapsed = round(time.time()-start,3)
-                            logger.success(
-                                f"Browser {index}: grant via parse "
-                                f"({g[:12]}...) in {elapsed}s")
-                            return {"grant": g, "elapsed": elapsed}
-                if self.debug and attempt % 10 == 0:
-                    logger.debug(f"Browser {index}: waiting {attempt+1}/60")
-
-            # Step 4 — Wait for redirect with grant
-            for attempt in range(60):
-                await asyncio.sleep(1.5)
-                current = page.url
-                parsed = urlparse(current)
-                qs = parse_qs(parsed.query)
-                grant = qs.get('grant', [None])[0]
-                if grant:
-                    elapsed = round(time.time() - start, 3)
-                    logger.success(
-                        f"Browser {index}: grant captured ({grant[:12]}...) "
-                        f"in {elapsed}s")
-                    return {"grant": grant, "elapsed": elapsed}
-                if 'grant=' in current:
-                    for part in current.split('?',1)[-1].split('&'):
-                        if part.startswith('grant='):
-                            g = part.split('=',1)[1]
-                            elapsed = round(time.time()-start,3)
-                            logger.success(
-                                f"Browser {index}: grant via parse "
-                                f"({g[:12]}...) in {elapsed}s")
-                            return {"grant": g, "elapsed": elapsed}
-                if self.debug and attempt % 10 == 0:
-                    logger.debug(f"Browser {index}: waiting {attempt+1}/60")
-
-            elapsed = round(time.time() - start, 3)
-            try:
-                title = await page.title()
-                body = await page.locator("body").inner_text()
-                logger.error(
-                    f"Browser {index}: timeout (title='{title}', "
-                    f"body='{body[:200]}')")
-            except Exception:
-                logger.error(f"Browser {index}: timeout")
-            return {"grant": "", "elapsed": elapsed, "error": "timeout"}
+            return {"grant": "", "elapsed": round(time.time()-start,3),
+                    "error": f"no grant in callback_url: {grant_url[:100]}"}
 
         except Exception as exc:
             elapsed = round(time.time() - start, 3)
-            logger.error(f"Browser {index}: {exc}")
+            logger.error(f"{exc}")
             return {"grant": "", "elapsed": elapsed, "error": str(exc)}
-        finally:
-            await context.close()
-            await self.browser_pool.put((index, browser))
 
     # ── HTTP endpoints ─────────────────────────────────────────────────────
     async def process_grant(self):
@@ -308,13 +291,8 @@ class GrantSolverServer:
         challenge_url = body.get('challenge_url', '').strip()
         if not challenge_url:
             return jsonify({"error": "challenge_url is required"}), 400
-        task_id = str(uuid.uuid4())
-        logger.info(f"Grant {task_id[:8]}: {challenge_url[:120]}")
-        try:
-            result = await self._solve_and_capture(challenge_url, task_id)
-        except Exception as exc:
-            logger.error(f"Grant {task_id[:8]}: fatal: {exc}")
-            return jsonify({"error": str(exc)}), 500
+        logger.info(f"Grant {uuid.uuid4().hex[:8]}: {challenge_url[:120]}")
+        result = await self._solve_and_capture(challenge_url, "")
         if result.get('error'):
             return jsonify(result), 422
         if not result.get('grant'):
@@ -330,11 +308,9 @@ class GrantSolverServer:
 # ── CLI ─────────────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Grant Solver")
-    p.add_argument('--headless', type=lambda x: x.lower()=='true',
-                   default=False)
+    p.add_argument('--headless', type=lambda x: x.lower()=='true', default=False)
     p.add_argument('--useragent', type=str, default=None)
-    p.add_argument('--debug', type=lambda x: x.lower()=='true',
-                   default=False)
+    p.add_argument('--debug', type=lambda x: x.lower()=='true', default=False)
     p.add_argument('--browser_type', type=str, default='chromium')
     p.add_argument('--thread', type=int, default=1)
     p.add_argument('--host', type=str, default='127.0.0.1')
