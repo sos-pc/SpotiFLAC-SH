@@ -1,34 +1,44 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Turnstile Grant Solver — companion container for SpotiFLAC
-#
-# Based on theyka/turnstile_solver which provides X11 desktop + Chromium +
-# Patchright in headed mode (not headless). Headed Chrome with a real display
-# receives easier (non-interactive) Turnstile challenges from Cloudflare.
-#
-# Our grant_solver.py extends this with a /grant endpoint that captures the
-# verification grant token by parsing the challenge page, solving Turnstile,
-# and POSTing to /verify via the browser's own fetch().
-# ─────────────────────────────────────────────────────────────────────────────
-FROM theyka/turnstile_solver:latest
+FROM python:3.12-slim-bookworm
 
-# The original image starts XRDP + desktop. We don't need RDP — we run our
-# Quart server directly, relying on the existing X11 display for Chrome.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        chromium \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libcups2 \
+        libdrm2 \
+        libgbm1 \
+        libgtk-3-0 \
+        libnspr4 \
+        libnss3 \
+        libu2f-udev \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+        xdg-utils \
+        xvfb && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    quart==0.20.0 \
+    patchright==1.61.2 \
+    hypercorn==0.18.0
+
+ENV PATCHRIGHT_BROWSER_PATH=/usr/bin/chromium
+ENV SOLVER_USERAGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+ENV DISPLAY=:99
+
 COPY grant_solver.py /app/grant_solver.py
 WORKDIR /app
 
-# Override the original CMD (which starts XRDP). We start our server.
-# Chrome runs in headed mode (--headless false) with the existing X11 display.
-ENV DISPLAY=:1
-ENV SOLVER_USERAGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
 EXPOSE 5000
 
-# Clear the inherited ENTRYPOINT from theyka/turnstile_solver (which runs
-# a setup script + XRDP). We run our own server directly.
-ENTRYPOINT []
-
-# Start Xvfb (virtual display) then run our solver.
-# The original image has X11 libraries but our CMD overrides the desktop.
+# Xvfb virtual display + headed Chrome for better Turnstile challenge difficulty
 CMD Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render & \
     sleep 2 && \
     python3 /app/grant_solver.py \
