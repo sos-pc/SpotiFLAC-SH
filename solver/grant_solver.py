@@ -402,51 +402,51 @@ class GrantSolverServer:
             await page.goto(challenge_url, wait_until="networkidle",
                             timeout=30000)
 
-            # Wait for the 5-second countdown + Turnstile API to load
+            # Wait for the countdown + Turnstile API to load
             logger.debug(f"Browser {index}: waiting for Turnstile to load")
             await asyncio.sleep(7)
 
-            # Poll for the Turnstile response to be filled (auto-solve)
-            # with detailed DOM inspection for debugging
-            token = None
-            for attempt in range(20):
-                await asyncio.sleep(1)
+            # Try clicking the widget and waiting for auto-solve.
+            # Managed challenges sometimes need an initial click to start.
+            for click in range(3):
                 try:
-                    t = await page.input_value(
-                        "[name=cf-turnstile-response]", timeout=3000)
-                    if t:
+                    w = page.locator(".cf-turnstile")
+                    await w.click(timeout=2000)
+                    logger.debug(f"Browser {index}: widget clicked ({click+1})")
+                except Exception:
+                    pass
+                await asyncio.sleep(3)
+
+            # Now poll for the Turnstile response AND check for iframes
+            token = None
+            for attempt in range(30):
+                await asyncio.sleep(2)
+                # Try getting the response via multiple methods
+                try:
+                    t = await page.evaluate("""
+                        (() => {
+                            const inp = document.querySelector('[name=cf-turnstile-response]');
+                            if (inp && inp.value) return inp.value;
+                            const frames = document.querySelectorAll('iframe');
+                            for (const f of frames) {
+                                try {
+                                    const doc = f.contentDocument || f.contentWindow.document;
+                                    const inp2 = doc.querySelector('[name=cf-turnstile-response]');
+                                    if (inp2 && inp2.value) return inp2.value;
+                                } catch(e) {}
+                            }
+                            return '';
+                        })()
+                    """)
+                    if t and len(t) > 5:
                         token = t
-                        logger.debug(
-                            f"Browser {index}: Turnstile auto-solved "
-                            f"({t[:12]}...)")
+                        logger.debug(f"Browser {index}: auto-solved! ({t[:15]}...)")
                         break
                 except Exception:
                     pass
 
-                # On first and last attempt, dump DOM state
-                if attempt == 0 or attempt == 18:
-                    try:
-                        state = await page.evaluate("""
-                            (() => {
-                                const w = document.querySelector('.cf-turnstile');
-                                const inp = document.querySelector('[name=cf-turnstile-response]');
-                                const iframes = document.querySelectorAll('iframe');
-                                const tw = typeof turnstile !== 'undefined';
-                                return JSON.stringify({
-                                    has_widget: !!w,
-                                    widget_html: w ? w.outerHTML.substring(0,200) : 'none',
-                                    has_input: !!inp,
-                                    input_value: inp ? (inp.value ? inp.value.substring(0,20)+'...' : '(empty)') : 'none',
-                                    iframe_count: iframes.length,
-                                    iframe_srcs: Array.from(iframes).map(function(f){return f.src.substring(0,80)}),
-                                    turnstile_defined: tw,
-                                    body_preview: document.body ? document.body.innerText.substring(0,200) : 'no body',
-                                });
-                            })()
-                        """)
-                        logger.debug(f"Browser {index}: DOM @{attempt}s: {state}")
-                    except Exception:
-                        pass
+                if attempt % 5 == 0:
+                    logger.debug(f"Browser {index}: poll {attempt+1}/30")
 
             if not token:
                 logger.debug(
