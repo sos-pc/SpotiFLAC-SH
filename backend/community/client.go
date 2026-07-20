@@ -55,6 +55,23 @@ func (e *CooldownError) Error() string {
 }
 
 // IsCooldown reports whether err is a service cooldown.
+//
+// Two things must consult this when the community path is wired in, both
+// learned from reading upstream:
+//
+//  1. The quality fallback chain must STOP on a cooldown. Upstream's
+//     qobuz.go tries 27 → 7 → 6 and only short-circuits on a cancelled
+//     download, so a paused service costs three identical 503s instead of
+//     one. Our qobuz/client.go has the same shape and the same trap waiting.
+//
+//  2. A cooldown deserves to be announced instance-wide, not just to the job
+//     that met it: it closes the service for everyone, and another user should
+//     not queue a whole playlist against a door that is shut for 108 minutes.
+//     Upstream does this with a global progress field feeding CooldownBanner;
+//     the equivalent here is an SSE event — a notification, not the mutable
+//     process state removed in v3.4.0. Worth reusing their event-id trick: the
+//     banner is dismissible, and a NEW cooldown bumps the id so it reappears
+//     instead of staying hidden.
 func IsCooldown(err error) bool {
 	var c *CooldownError
 	return errors.As(err, &c)
