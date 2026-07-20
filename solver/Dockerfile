@@ -31,7 +31,8 @@ RUN apt-get update && \
         libxfixes3 \
         libxkbcommon0 \
         libxrandr2 \
-        xdg-utils && \
+        xdg-utils \
+        xvfb && \
     rm -rf /var/lib/apt/lists/*
 
 # Python deps — pinned versions from Turnstile-Solver's requirements.txt
@@ -53,11 +54,17 @@ WORKDIR /app
 # Headless mode requires a User-Agent. Bump periodically if Cloudflare
 # starts fingerprinting the old one.
 ENV SOLVER_USERAGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+ENV DISPLAY=:99
 
+# Start Xvfb (virtual display) so Chrome thinks it has a real screen.
+# Cloudflare gives easier (non-interactive) challenges when the browser
+# has a display attached, even a virtual one.
 EXPOSE 5000
 
-CMD python3 /app/grant_solver.py \
-    --headless true \
+CMD Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render & \
+    sleep 1 && \
+    python3 /app/grant_solver.py \
+    --headless false \
     --useragent "${SOLVER_USERAGENT}" \
     --host 0.0.0.0 \
     --port 5000 \
