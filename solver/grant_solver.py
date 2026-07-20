@@ -111,11 +111,17 @@ class GrantSolverServer:
         sitekey = None
         challenge_jwt = None
         callback_url = None
+        action = None
 
         # Extract sitekey from data-sitekey attribute
         m = re.search(r'data-sitekey=["\']([^"\']+)["\']', html)
         if m:
             sitekey = m.group(1)
+
+        # Extract data-action
+        m = re.search(r'data-action=["\']([^"\']+)["\']', html)
+        if m:
+            action = m.group(1)
 
         # Extract the challenge JWT from the JS variable
         m = re.search(r'const\s+challenge\s*=\s*["\']([^"\']+)["\']', html)
@@ -127,9 +133,9 @@ class GrantSolverServer:
         if m:
             callback_url = m.group(1)
 
-        return sitekey, challenge_jwt, callback_url
+        return sitekey, challenge_jwt, callback_url, action
 
-    async def _solve_turnstile(self, challenge_url, sitekey, index):
+    async def _solve_turnstile(self, challenge_url, sitekey, action, index):
         """Solve the Turnstile widget on a fake page (original solver technique)."""
         browser = None
         context = None
@@ -140,10 +146,11 @@ class GrantSolverServer:
                 viewport={"width": 1920, "height": 1080})
             page = await context.new_page()
 
-            # Build fake page with the real sitekey
+            # Build fake page with the real sitekey (and action if present)
+            action_attr = f' data-action="{action}"' if action else ''
             turnstile_div = (
                 f'<div class="cf-turnstile" style="background:white;"'
-                f' data-sitekey="{sitekey}"></div>'
+                f' data-sitekey="{sitekey}"{action_attr}></div>'
             )
             page_data = self.HTML_TEMPLATE.replace(
                 "<!-- cf turnstile -->", turnstile_div)
@@ -223,7 +230,7 @@ class GrantSolverServer:
             # Step 1 — Parse the challenge page (HTTP, no browser needed)
             if self.debug:
                 logger.debug("Parsing challenge page")
-            sitekey, challenge_jwt, callback_url = \
+            sitekey, challenge_jwt, callback_url, action = \
                 await self._parse_challenge_page(challenge_url)
 
             if not sitekey:
@@ -239,11 +246,12 @@ class GrantSolverServer:
             if self.debug:
                 logger.debug(
                     f"sitekey={sitekey[:25]}... "
+                    f"action={action} "
                     f"callback={callback_url[:40]}...")
 
             # Step 2 — Solve Turnstile on fake page
             token = await self._solve_turnstile(
-                challenge_url, sitekey, 1)
+                challenge_url, sitekey, action, 1)
             if not token:
                 return {"grant": "", "elapsed": round(time.time()-start,3),
                         "error": "turnstile unsolved"}
