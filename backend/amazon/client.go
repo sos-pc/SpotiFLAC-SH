@@ -189,7 +189,7 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	if path, err := a.downloadFromCommunity(amazonURL, outputDir, quality); err == nil {
 		return path, nil
 	} else {
-		slog.Debug("[Amazon] Community path failed, trying legacy proxies", "err", err)
+		slog.Warn("[Amazon] Community path failed, falling back to legacy", "err", err)
 	}
 
 	asinRegex := regexp.MustCompile(`(B[0-9A-Z]{9})`)
