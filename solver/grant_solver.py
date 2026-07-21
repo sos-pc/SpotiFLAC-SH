@@ -337,20 +337,14 @@ def lookup_track(query: str) -> dict:
         for item in items[:5]:  # limit to top 5
             entry = {
                 "name": item.get("name"),
-                "artist_name": item.get("artistName"),
-                "isrc": item.get("isrc"),
-                "duration": item.get("duration"),
-                "release_year": item.get("releaseYear"),
+                "link": item.get("link"),  # internal/external link
+                "artists": item.get("artists"),
                 "image": item.get("image"),
-                "platforms": {},
             }
-            # Extract platform links from services
-            services = item.get("services", {})
-            for platform, info in services.items():
-                if isinstance(info, dict):
-                    entry["platforms"][platform] = info.get("link", "")
-                elif isinstance(info, str):
-                    entry["platforms"][platform] = info
+            # Also capture any other fields we haven't seen
+            for k, v in item.items():
+                if k not in entry:
+                    entry[k] = str(v)[:200] if not isinstance(v, (dict, list, str, type(None))) else v
             results.append(entry)
 
         return {"results": results, "elapsed": elapsed}
