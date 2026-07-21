@@ -10,9 +10,8 @@ Usage:
     python3 grant_solver.py --host 0.0.0.0 --port 5000
 """
 
-import os, sys, time, uuid, json, logging, asyncio, argparse, re, shutil
+import os, sys, time, uuid, json, logging, asyncio, argparse, re, shutil, subprocess
 from urllib.parse import urlparse, parse_qs
-from threading import Thread
 
 from quart import Quart, request, jsonify
 import undetected_chromedriver as uc
@@ -30,139 +29,208 @@ class CustomLogger(logging.Logger):
     @staticmethod
     def fmt(level, color, msg):
         ts = time.strftime('%H:%M:%S')
-        return f"[{ts}] [{COLORS[color]}{level}{COLORS['RESET']}] -> {msg}"
-    def debug(self, msg, *a, **kw):   super().debug(self.fmt('DEBUG','MAGENTA',msg),*a,**kw)
-    def info(self, msg, *a, **kw):    super().info(self.fmt('INFO','BLUE',msg),*a,**kw)
-    def success(self, msg, *a, **kw): super().info(self.fmt('SUCCESS','GREEN',msg),*a,**kw)
-    def warning(self, msg, *a, **kw): super().warning(self.fmt('WARNING','YELLOW',msg),*a,**kw)
-    def error(self, msg, *a, **kw):   super().error(self.fmt('ERROR','RED',msg),*a,**kw)
+        return (f"[{ts}] [{COLORS[color]}{level}{COLORS['RESET']}] -> {msg}")
+    def debug(self, msg, *a, **kw):
+        super().debug(self.fmt('DEBUG', 'MAGENTA', msg), *a, **kw)
+    def info(self, msg, *a, **kw):
+        super().info(self.fmt('INFO', 'BLUE', msg), *a, **kw)
+    def success(self, msg, *a, **kw):
+        super().info(self.fmt('SUCCESS', 'GREEN', msg), *a, **kw)
+    def warning(self, msg, *a, **kw):
+        super().warning(self.fmt('WARNING', 'YELLOW', msg), *a, **kw)
+    def error(self, msg, *a, **kw):
+        super().error(self.fmt('ERROR', 'RED', msg), *a, **kw)
 logging.setLoggerClass(CustomLogger)
 logger = logging.getLogger("GrantSolver")
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
+# ── Chrome lifecycle helpers ────────────────────────────────────────────────
+
+def _kill_leftover_chrome():
+    """Kill any leftover Chromium processes from previous crashed sessions."""
+    try:
+        subprocess.run(
+            ["pkill", "-f", "chromium"],
+            timeout=3, capture_output=True)
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+
+def _clean_chrome_dirs():
+    """Remove stale Chrome user data and lock files left by crashed sessions."""
+    for pattern in [
+        "/tmp/.com.google.Chrome*",
+        "/tmp/.org.chromium.Chromium*",
+    ]:
+        try:
+            subprocess.run(
+                ["sh", "-c", f"rm -rf {pattern}"],
+                timeout=3, capture_output=True)
+        except Exception:
+            pass
+
+
+def _get_chromium_version():
+    """Detect installed Chromium major version. Returns 150 as fallback."""
+    try:
+        out = subprocess.check_output(
+            ["/usr/bin/chromium", "--version"],
+            stderr=subprocess.STDOUT, timeout=5).decode()
+        match = re.search(r'Chromium\s+(\d+)', out)
+        return int(match.group(1)) if match else 150
+    except Exception:
+        return 150
+
+
 # ── Solver ──────────────────────────────────────────────────────────────────
-def solve_challenge(challenge_url: str) -> dict:
-    """Navigate to the challenge URL with undetected Chrome, wait for Turnstile
-    to auto-solve and redirect, extract the grant token."""
-    start = time.time()
+
+def solve_challenge(challenge_url, max_retries=3):
+    """Navigate to the challenge URL with undetected Chrome, wait for
+    Turnstile to auto-solve and redirect, extract the grant token.
+
+    Retries up to max_retries times with cleanup between attempts,
+    handling the "chrome not reachable" error that occurs after the
+    container has been running for a while (zombie Chrome processes,
+    stale lock files, Xvfb backpressure)."""
 
     options = uc.ChromeOptions()
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    # The display is provided by Xvfb (ENV DISPLAY=:99)
     options.add_argument("--disable-gpu")
+    # Prevent Chrome crash handler from spawning persistent processes
+    options.add_argument("--disable-crashpad")
+    options.add_argument("--disable-breakpad")
+    options.add_argument("--disable-crash-reporter")
+    # Reduce resource footprint
+    options.add_argument("--disable-features=TranslateUI")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-background-networking")
+    # The display is provided by Xvfb (ENV DISPLAY=:99)
 
-    driver = None
-    try:
-        logger.debug("Launching undetected Chrome")
-        # Auto-detect Chromium major version to match ChromeDriver
-        import subprocess, re
-        version_out = subprocess.check_output(
-            ["/usr/bin/chromium", "--version"], stderr=subprocess.STDOUT,
-            timeout=5).decode()
-        # Output: "Chromium 150.0.7871.124 built on Debian bookworm"
-        match = re.search(r'Chromium\s+(\d+)', version_out)
-        version_main = int(match.group(1)) if match else 150
-        logger.debug(f"Chromium version: {version_main}")
-        driver = uc.Chrome(
-            options=options,
-            headless=False,
-            use_subprocess=False,
-            version_main=version_main,
-        )
+    version_main = _get_chromium_version()
+    logger.debug(f"Chromium version: {version_main}")
 
-        logger.debug("Navigating to challenge URL")
-        driver.get(challenge_url)
+    last_error = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            wait = 2 ** attempt  # 2s, 4s, 8s
+            logger.warning(
+                f"Retry {attempt + 1}/{max_retries} after {wait}s "
+                f"(previous: {str(last_error)[:120]})")
+            _kill_leftover_chrome()
+            _clean_chrome_dirs()
+            time.sleep(wait)
+        else:
+            # First attempt: clean any leftovers from previous sessions
+            _kill_leftover_chrome()
+            _clean_chrome_dirs()
 
-        # Wait for the page to process: 5s countdown + Turnstile load + solve.
-        # With undetected Chrome, Turnstile should auto-solve in < 30s.
-        logger.debug("Waiting for Turnstile to solve and redirect")
-
-        # The Turnstile widget is managed (needs clicking). Try to find and
-        # click the iframe checkbox. undetected Chrome makes us appear human
-        # enough that Cloudflare may give a simple checkbox (not image grid).
-        time.sleep(8)  # wait for countdown + Turnstile to load
+        driver = None
+        start = time.time()
         try:
-            # Try clicking the Turnstile checkbox inside the iframe
-            iframe = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "iframe[src*='challenges.cloudflare.com']")))
-            driver.switch_to.frame(iframe)
-            checkbox = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "#checkbox")))
-            checkbox.click()
-            driver.switch_to.default_content()
-            logger.debug("Turnstile checkbox clicked")
-        except Exception:
-            # No iframe checkbox — try inline widget
+            logger.debug("Launching undetected Chrome")
+            driver = uc.Chrome(
+                options=options,
+                headless=False,
+                use_subprocess=True,  # easier to kill cleanly than in-process
+                version_main=version_main,
+            )
+
+            logger.debug("Navigating to challenge URL")
+            driver.get(challenge_url)
+
+            logger.debug("Waiting for Turnstile to solve and redirect")
+
+            # Wait for countdown + Turnstile to load, then try to click
+            time.sleep(8)
             try:
-                widget = driver.find_element(By.CSS_SELECTOR, ".cf-turnstile")
-                widget.click()
-                logger.debug("Turnstile inline widget clicked")
+                iframe = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR,
+                         "iframe[src*='challenges.cloudflare.com']")))
+                driver.switch_to.frame(iframe)
+                checkbox = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable(
+                        (By.CSS_SELECTOR, "#checkbox")))
+                checkbox.click()
+                driver.switch_to.default_content()
+                logger.debug("Turnstile checkbox clicked")
             except Exception:
-                logger.debug("No clickable Turnstile element found")
+                try:
+                    widget = driver.find_element(
+                        By.CSS_SELECTOR, ".cf-turnstile")
+                    widget.click()
+                    logger.debug("Turnstile inline widget clicked")
+                except Exception:
+                    logger.debug("No clickable Turnstile element found")
 
-        # Poll the URL for up to 90 seconds
-        for attempt in range(90):
-            time.sleep(1)
-            current_url = driver.current_url
+            # Poll the URL for up to 90 seconds
+            for poll in range(90):
+                time.sleep(1)
+                current_url = driver.current_url
 
-            # Check for grant in query string (redirect happened)
-            parsed = urlparse(current_url)
-            qs = parse_qs(parsed.query)
-            grant = qs.get('grant', [None])[0]
-            if grant:
-                elapsed = round(time.time() - start, 3)
-                logger.success(
-                    f"grant captured ({grant[:15]}...) in {elapsed}s")
-                return {"grant": grant, "elapsed": elapsed}
+                parsed = urlparse(current_url)
+                grant = parse_qs(parsed.query).get('grant', [None])[0]
+                if grant:
+                    elapsed = round(time.time() - start, 3)
+                    logger.success(
+                        f"grant captured ({grant[:15]}...) in {elapsed}s")
+                    return {"grant": grant, "elapsed": elapsed}
 
-            # Also check for grant= anywhere in the URL
-            if 'grant=' in current_url:
-                for part in current_url.split('?', 1)[-1].split('&'):
-                    if part.startswith('grant='):
-                        g = part.split('=', 1)[1]
-                        elapsed = round(time.time() - start, 3)
-                        logger.success(
-                            f"grant via parse ({g[:15]}...) in {elapsed}s")
-                        return {"grant": g, "elapsed": elapsed}
+                if 'grant=' in current_url:
+                    for part in current_url.split('?', 1)[-1].split('&'):
+                        if part.startswith('grant='):
+                            g = part.split('=', 1)[1]
+                            elapsed = round(time.time() - start, 3)
+                            logger.success(
+                                f"grant via parse ({g[:15]}...) "
+                                f"in {elapsed}s")
+                            return {"grant": g, "elapsed": elapsed}
 
-            # Log progress
-            if attempt % 15 == 0 and attempt > 0:
-                logger.debug(
-                    f"waiting {attempt}s, current URL: "
-                    f"{current_url[:100]}")
+                if poll % 15 == 0 and poll > 0:
+                    logger.debug(
+                        f"waiting {poll}s, "
+                        f"current URL: {current_url[:100]}")
 
-        # Timeout — try to extract any useful info
-        elapsed = round(time.time() - start, 3)
-        try:
-            page_title = driver.title
-            body = driver.find_element(By.TAG_NAME, "body").text[:300]
+            # Timeout
+            elapsed = round(time.time() - start, 3)
+            try:
+                title = driver.title
+                body = driver.find_element(By.TAG_NAME, "body").text[:300]
+                logger.error(
+                    f"timeout after {elapsed}s "
+                    f"(title='{title}', body='{body}')")
+            except Exception:
+                logger.error(f"timeout after {elapsed}s")
+            return {"grant": "", "elapsed": elapsed, "error": "timeout"}
+
+        except Exception as exc:
+            last_error = exc
             logger.error(
-                f"timeout after {elapsed}s "
-                f"(title='{page_title}', body='{body}')")
-        except Exception:
-            logger.error(f"timeout after {elapsed}s")
+                f"error (attempt {attempt + 1}/{max_retries}): {exc}")
+            # Fall through to retry
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            # Always clean up between sessions
+            _kill_leftover_chrome()
+            _clean_chrome_dirs()
 
-        return {"grant": "", "elapsed": elapsed, "error": "timeout"}
-
-    except Exception as exc:
-        elapsed = round(time.time() - start, 3)
-        logger.error(f"error: {exc}")
-        return {"grant": "", "elapsed": elapsed, "error": str(exc)}
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+    # All retries exhausted
+    return {"grant": "", "elapsed": 0,
+            "error": f"all {max_retries} attempts failed: {last_error}"}
 
 
 # ── HTTP API ────────────────────────────────────────────────────────────────
 app = Quart(__name__)
+
 
 @app.route('/grant', methods=['POST'])
 async def process_grant():
@@ -176,16 +244,19 @@ async def process_grant():
 
     logger.info(f"Grant {uuid.uuid4().hex[:8]}: {challenge_url[:120]}")
 
-    # Run the blocking Selenium code in a thread
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, solve_challenge, challenge_url)
+    result = await loop.run_in_executor(
+        None, solve_challenge, challenge_url)
 
     if result.get('error'):
         return jsonify(result), 422
     if not result.get('grant'):
-        return jsonify({"error": "grant not captured",
-                        "elapsed": result.get('elapsed', 0)}), 422
+        return jsonify({
+            "error": "grant not captured",
+            "elapsed": result.get('elapsed', 0),
+        }), 422
     return jsonify(result), 200
+
 
 @app.route('/health')
 async def health():
@@ -194,7 +265,8 @@ async def health():
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Grant Solver (undetected-chromedriver)")
+    parser = argparse.ArgumentParser(
+        description="Grant Solver (undetected-chromedriver)")
     parser.add_argument('--host', type=str, default='127.0.0.1')
     parser.add_argument('--port', type=str, default='5000')
     args = parser.parse_args()
