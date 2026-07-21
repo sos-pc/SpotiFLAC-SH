@@ -3,6 +3,7 @@ FROM python:3.11-slim-bookworm
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         chromium \
+        chromium-driver \
         fonts-liberation \
         libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 \
         libgbm1 libgtk-3-0 libnspr4 libnss3 libu2f-udev \

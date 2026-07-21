@@ -58,10 +58,18 @@ def solve_challenge(challenge_url: str) -> dict:
     driver = None
     try:
         logger.debug("Launching undetected Chrome")
+        # Auto-detect Chromium major version to match ChromeDriver
+        import subprocess
+        version_out = subprocess.check_output(
+            ["/usr/bin/chromium", "--version"], stderr=subprocess.STDOUT,
+            timeout=5).decode()
+        version_main = int(version_out.strip().split()[-1].split(".")[0])
+        logger.debug(f"Chromium version: {version_main}")
         driver = uc.Chrome(
             options=options,
             headless=False,
             use_subprocess=False,
+            version_main=version_main,
         )
 
         logger.debug("Navigating to challenge URL")
