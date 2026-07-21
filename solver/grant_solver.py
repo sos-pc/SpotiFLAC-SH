@@ -59,11 +59,13 @@ def solve_challenge(challenge_url: str) -> dict:
     try:
         logger.debug("Launching undetected Chrome")
         # Auto-detect Chromium major version to match ChromeDriver
-        import subprocess
+        import subprocess, re
         version_out = subprocess.check_output(
             ["/usr/bin/chromium", "--version"], stderr=subprocess.STDOUT,
             timeout=5).decode()
-        version_main = int(version_out.strip().split()[-1].split(".")[0])
+        # Output: "Chromium 150.0.7871.124 built on Debian bookworm"
+        match = re.search(r'Chromium\s+(\d+)', version_out)
+        version_main = int(match.group(1)) if match else 150
         logger.debug(f"Chromium version: {version_main}")
         driver = uc.Chrome(
             options=options,
