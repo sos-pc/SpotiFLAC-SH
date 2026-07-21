@@ -81,6 +81,30 @@ def solve_challenge(challenge_url: str) -> dict:
         # With undetected Chrome, Turnstile should auto-solve in < 30s.
         logger.debug("Waiting for Turnstile to solve and redirect")
 
+        # The Turnstile widget is managed (needs clicking). Try to find and
+        # click the iframe checkbox. undetected Chrome makes us appear human
+        # enough that Cloudflare may give a simple checkbox (not image grid).
+        time.sleep(8)  # wait for countdown + Turnstile to load
+        try:
+            # Try clicking the Turnstile checkbox inside the iframe
+            iframe = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "iframe[src*='challenges.cloudflare.com']")))
+            driver.switch_to.frame(iframe)
+            checkbox = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "#checkbox")))
+            checkbox.click()
+            driver.switch_to.default_content()
+            logger.debug("Turnstile checkbox clicked")
+        except Exception:
+            # No iframe checkbox — try inline widget
+            try:
+                widget = driver.find_element(By.CSS_SELECTOR, ".cf-turnstile")
+                widget.click()
+                logger.debug("Turnstile inline widget clicked")
+            except Exception:
+                logger.debug("No clickable Turnstile element found")
+
         # Poll the URL for up to 90 seconds
         for attempt in range(90):
             time.sleep(1)
