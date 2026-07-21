@@ -302,11 +302,32 @@ def lookup_track(query: str) -> dict:
                 else:
                     logger.debug(f"  {k}: {type(v).__name__}")
 
-        # Extract results
-        items = data.get("data", [])
+        # Extract results - response is {status, data: {tracks: [...]}}
+        items = []
+        inner = data.get("data", {})
+        if isinstance(inner, dict):
+            # Try common keys: tracks, items, results
+            for key in ("tracks", "items", "results"):
+                candidate = inner.get(key)
+                if isinstance(candidate, list):
+                    items = candidate
+                    break
+            # If no list found, treat inner values as items
+            if not items:
+                for v in inner.values():
+                    if isinstance(v, list):
+                        items = v
+                        break
+        elif isinstance(inner, list):
+            items = inner
         if not items:
-            logger.warning(f"No results for query: {query}")
+            logger.warning(f"No tracks in response. data keys: {list(inner.keys()) if isinstance(inner, dict) else 'N/A'}")
             return {"results": [], "elapsed": elapsed}
+
+        # Log first item structure for debugging
+        if items:
+            first = items[0]
+            logger.debug(f"First track keys: {list(first.keys()) if isinstance(first, dict) else type(first)}")
 
         logger.success(
             f"Musicfetch returned {len(items)} result(s) in {elapsed}s")
