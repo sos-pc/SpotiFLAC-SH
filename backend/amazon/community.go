@@ -1,5 +1,7 @@
 package amazon
 
+//nolint:unused // called from client.go cross-file
+
 import (
 	"bytes"
 	"encoding/json"
@@ -165,6 +167,8 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 }
 
 // extractASIN pulls the Amazon Standard Identification Number from a URL.
+//
+//nolint:unused // called cross-file, golangci-lint v2 false positive
 func extractASIN(url string) string {
 	re := regexp.MustCompile(`(B[0-9A-Z]{9})`)
 	return re.FindString(url)

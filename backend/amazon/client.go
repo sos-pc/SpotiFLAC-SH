@@ -185,6 +185,13 @@ func (a *AmazonDownloader) getStreamResponse(base, asin string) (*AmazonStreamRe
 
 func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality string) (string, error) {
 
+	// Try the community signed path first (multi-key CENC, mp4ff decryption).
+	if path, err := a.downloadFromCommunity(amazonURL, outputDir, quality); err == nil {
+		return path, nil
+	} else {
+		slog.Debug("[Amazon] Community path failed, trying legacy proxies", "err", err)
+	}
+
 	asinRegex := regexp.MustCompile(`(B[0-9A-Z]{9})`)
 	asin := asinRegex.FindString(amazonURL)
 	if asin == "" {

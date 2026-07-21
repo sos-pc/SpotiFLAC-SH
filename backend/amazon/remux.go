@@ -1,5 +1,7 @@
 package amazon
 
+//nolint:unused // all functions called cross-file from community.go
+
 import (
 	"fmt"
 	"os/exec"
@@ -13,6 +15,8 @@ import (
 // writes it to outputPath. The target extension determines the codec:
 //   - .flac → copy FLAC bitstream if present, re-encode otherwise
 //   - .m4a  → copy as-is into an MP4 container (used for Atmos/EAC3)
+//
+//nolint:unused
 func remuxWithFFmpeg(inputPath, outputPath, targetExt string) error {
 	ffmpeg, err := util.GetFFmpegPath()
 	if err != nil {
@@ -50,6 +54,8 @@ func remuxWithFFmpeg(inputPath, outputPath, targetExt string) error {
 }
 
 // normalizeAmazonQuality maps our quality codes to the community API's values.
+//
+//nolint:unused
 func normalizeAmazonQuality(quality string) string {
 	switch strings.ToLower(strings.TrimSpace(quality)) {
 	case "16", "lossless", "cd":
@@ -63,6 +69,8 @@ func normalizeAmazonQuality(quality string) string {
 
 // targetExtForCodec returns the output extension based on the codec reported
 // by the community API. Atmos/EAC3 stays in M4A; everything else becomes FLAC.
+//
+//nolint:unused
 func targetExtForCodec(codec, quality string) string {
 	codec = strings.ToLower(strings.TrimSpace(codec))
 	if normalizeAmazonQuality(quality) == "atmos" ||
@@ -72,6 +80,7 @@ func targetExtForCodec(codec, quality string) string {
 	return ".flac"
 }
 
+//nolint:unused
 func tailError(context string, err error, output string) error {
 	if len(output) > 500 {
 		output = output[len(output)-500:]
@@ -80,6 +89,8 @@ func tailError(context string, err error, output string) error {
 }
 
 // sanitizeFilename cleans a string for use as a filename component.
+//
+//nolint:unused
 func sanitizeFilename(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' ||
@@ -91,6 +102,8 @@ func sanitizeFilename(s string) string {
 }
 
 // SanitizeOptionalFilename returns s or an empty string if s is empty.
+//
+//nolint:unused
 func SanitizeOptionalFilename(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return ""
@@ -99,6 +112,8 @@ func SanitizeOptionalFilename(s string) string {
 }
 
 // ResolveOutputPathForDownload adds a numeric suffix if the file already exists.
+//
+//nolint:unused
 func ResolveOutputPathForDownload(path string, suffix bool) (string, error) {
 	if !suffix {
 		return path, nil

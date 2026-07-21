@@ -1,5 +1,7 @@
 package amazon
 
+//nolint:unused // all functions called cross-file from community.go
+
 import (
 	"encoding/hex"
 	"fmt"
@@ -57,6 +59,8 @@ func decryptWithMP4FF(keySpecs []string, inputPath, outputPath string) error {
 }
 
 // parseKeySpecs normalises and classifies a key spec list.
+//
+//nolint:unused
 func parseKeySpecs(keySpecs []string) (key []byte, keysByKID map[string][]byte, strict bool, err error) {
 	normalized := make([]string, 0, len(keySpecs))
 	seen := make(map[string]struct{}, len(keySpecs))
@@ -130,6 +134,8 @@ func parseKeySpecs(keySpecs []string) (key []byte, keysByKID map[string][]byte, 
 //
 // initR is an optional separate init segment. When the file contains its own
 // init (moov box), initR is ignored.
+//
+//nolint:unused
 func decryptFile(r io.Reader, initR io.Reader, w io.Writer,
 	key []byte, keysByKID map[string][]byte, strictKIDMode bool,
 ) error {
@@ -183,6 +189,8 @@ func decryptFile(r io.Reader, initR io.Reader, w io.Writer,
 }
 
 // decryptSegment decrypts every fragment in a segment that carries a senc box.
+//
+//nolint:unused
 func decryptSegment(seg *mp4.MediaSegment, info mp4.DecryptInfo,
 	key []byte, keysByKID map[string][]byte, strictKIDMode bool,
 ) error {
@@ -202,6 +210,7 @@ func decryptSegment(seg *mp4.MediaSegment, info mp4.DecryptInfo,
 	return nil
 }
 
+//nolint:unused
 func fragmentHasSenc(frag *mp4.Fragment) bool {
 	if frag == nil || frag.Moof == nil {
 		return false
