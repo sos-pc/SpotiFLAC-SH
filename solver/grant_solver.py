@@ -275,24 +275,24 @@ def lookup_track(query: str) -> dict:
             json_btn.click()
             time.sleep(1)
             logger.debug("Clicked Show JSON")
-        except Exception:
-            logger.debug("No Show JSON button, trying raw extraction")
 
-        # Extract JSON from the page
-        try:
-            json_text = driver.execute_script(
-                "var lines = document.querySelectorAll('.jsonCodeLine, code');"
-                "var text = '';"
-                "lines.forEach(l => text += (l.textContent || l.innerText || ''));"
-                "return text;"
+            # Click all collapsed nodes to expand them ({ N items } -> real data)
+            driver.execute_script(
+                "document.querySelectorAll('.jsonCodeLine').forEach(el => el.click());"
             )
-            if not json_text or len(json_text) < 20:
-                json_text = driver.execute_script(
-                    "var el = document.querySelector('code, pre');"
-                    "return el ? (el.textContent || el.innerText) : '';"
-                )
+            time.sleep(0.5)
 
-            if json_text and len(json_text) > 20:
+            # Extract all text from jsonCodeLine spans (each line of the JSON)
+            lines = driver.execute_script(
+                "var spans = document.querySelectorAll('.jsonCodeLine');"
+                "var texts = [];"
+                "spans.forEach(s => texts.push(s.textContent || ''));"
+                "return texts;"
+            )
+            json_text = ''.join(lines) if lines else ''
+            logger.debug(f"Extracted {len(lines)} JSON lines, total {len(json_text)} chars")
+
+            if json_text and len(json_text) > 50:
                 data = json.loads(json_text)
                 elapsed = round(time.time() - start, 3)
                 logger.success(f"Musicfetch extracted JSON in {elapsed}s")
