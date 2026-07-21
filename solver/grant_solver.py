@@ -231,10 +231,9 @@ def solve_challenge(challenge_url, max_retries=3):
 # ── Musicfetch lookup (uses browser to bypass Vercel WAF) ─────────────────
 
 def lookup_track(query: str) -> dict:
-    """Query musicfetch.io from a real browser (bypasses Vercel WAF)
-    and return platform links including Qobuz track URL."""
+    """Search musicfetch.io via real browser: types into search box,
+    clicks 'Show JSON', and extracts platform links from the DOM."""
     start = time.time()
-
     options = uc.ChromeOptions()
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--no-sandbox")
@@ -243,124 +242,112 @@ def lookup_track(query: str) -> dict:
     options.add_argument("--disable-crashpad")
     options.add_argument("--disable-breakpad")
     options.add_argument("--disable-crash-reporter")
-
     version_main = _get_chromium_version()
 
     driver = None
     try:
         _kill_leftover_chrome()
         _clean_chrome_dirs()
-
         logger.debug("Launching Chrome for Musicfetch lookup")
-        driver = uc.Chrome(
-            options=options,
-            headless=False,
-            use_subprocess=True,
-            version_main=version_main,
-        )
-
-        # Navigate to musicfetch.io to establish origin and pass WAF
-        logger.debug("Loading musicfetch.io to establish session")
+        driver = uc.Chrome(options=options, headless=False,
+                          use_subprocess=True, version_main=version_main)
         driver.get("https://musicfetch.io/")
-        time.sleep(3)  # let the page initialize
+        time.sleep(4)
 
-        # Call the internal search API from the browser's JS context.
-        # Uses execute_async_script because fetch() returns a Promise
-        # (execute_script is synchronous and would return undefined).
-        encoded_query = quote(query)
-        js = (
-            "var done = arguments[arguments.length - 1];"
-            f"fetch('/api/musicfetch/search?query={encoded_query}&types=track')"
-            "  .then(r => r.json())"
-            "  .then(d => done(JSON.stringify(d)))"
-            "  .catch(e => done(JSON.stringify({error: e.message})));"
-        )
-        logger.debug(f"Calling /api/musicfetch/search?query={query}")
-        result_json = driver.execute_async_script(js)
-        elapsed = round(time.time() - start, 3)
-
+        # Type query into the search input on the page
+        logger.debug(f"Typing search query: {query}")
         try:
-            data = json.loads(result_json)
+            search_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "input[type='text']")))
+            search_input.clear()
+            search_input.send_keys(query)
+            time.sleep(3)
         except Exception:
-            logger.error(f"Failed to parse Musicfetch response: {str(result_json)[:300]}")
-            return {"error": "invalid response", "elapsed": elapsed}
+            logger.warning("Could not type into search, falling back to API")
+            return _lookup_via_api(driver, query, start)
 
-        if "error" in data:
-            logger.error(f"Musicfetch error: {data}")
-            return {"error": str(data.get("error")), "elapsed": elapsed}
+        # Click 'Show JSON' to reveal raw data
+        try:
+            json_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//*[contains(text(),'Show JSON')]")))
+            json_btn.click()
+            time.sleep(1)
+            logger.debug("Clicked Show JSON")
+        except Exception:
+            logger.debug("No Show JSON button, trying raw extraction")
 
-        # Debug: log raw response structure
-        logger.debug(f"Raw response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if isinstance(v, list):
-                    logger.debug(f"  {k}: list of {len(v)}")
-                    if v:
-                        logger.debug(f"    first item keys: {list(v[0].keys()) if isinstance(v[0], dict) else type(v[0])}")
-                elif isinstance(v, dict):
-                    logger.debug(f"  {k}: dict with keys {list(v.keys())[:10]}")
-                else:
-                    logger.debug(f"  {k}: {type(v).__name__}")
+        # Extract JSON from the page
+        try:
+            json_text = driver.execute_script(
+                "var lines = document.querySelectorAll('.jsonCodeLine, code');"
+                "var text = '';"
+                "lines.forEach(l => text += (l.textContent || l.innerText || ''));"
+                "return text;"
+            )
+            if not json_text or len(json_text) < 20:
+                json_text = driver.execute_script(
+                    "var el = document.querySelector('code, pre');"
+                    "return el ? (el.textContent || el.innerText) : '';"
+                )
 
-        # Extract results - response is {status, data: {tracks: [...]}}
-        items = []
-        inner = data.get("data", {})
-        if isinstance(inner, dict):
-            # Try common keys: tracks, items, results
-            for key in ("tracks", "items", "results"):
-                candidate = inner.get(key)
-                if isinstance(candidate, list):
-                    items = candidate
-                    break
-            # If no list found, treat inner values as items
-            if not items:
-                for v in inner.values():
-                    if isinstance(v, list):
-                        items = v
-                        break
-        elif isinstance(inner, list):
-            items = inner
-        if not items:
-            logger.warning(f"No tracks in response. data keys: {list(inner.keys()) if isinstance(inner, dict) else 'N/A'}")
-            return {"results": [], "elapsed": elapsed}
+            if json_text and len(json_text) > 20:
+                data = json.loads(json_text)
+                elapsed = round(time.time() - start, 3)
+                logger.success(f"Musicfetch extracted JSON in {elapsed}s")
+                return {"result": data, "elapsed": elapsed}
+        except Exception as e:
+            logger.warning(f"DOM extraction failed ({e}), falling back to API")
 
-        # Log first item structure for debugging
-        if items:
-            first = items[0]
-            logger.debug(f"First track keys: {list(first.keys()) if isinstance(first, dict) else type(first)}")
-
-        logger.success(
-            f"Musicfetch returned {len(items)} result(s) in {elapsed}s")
-
-        # Extract platform links for each result
-        results = []
-        for item in items[:5]:  # limit to top 5
-            entry = {
-                "name": item.get("name"),
-                "link": item.get("link"),  # internal/external link
-                "artists": item.get("artists"),
-                "image": item.get("image"),
-            }
-            # Also capture any other fields we haven't seen
-            for k, v in item.items():
-                if k not in entry:
-                    entry[k] = str(v)[:200] if not isinstance(v, (dict, list, str, type(None))) else v
-            results.append(entry)
-
-        return {"results": results, "elapsed": elapsed}
+        return _lookup_via_api(driver, query, start)
 
     except Exception as exc:
         elapsed = round(time.time() - start, 3)
-        logger.error(f"Musicfetch lookup error: {exc}")
+        logger.error(f"Musicfetch error: {exc}")
         return {"error": str(exc), "elapsed": elapsed}
     finally:
         if driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+            try: driver.quit()
+            except Exception: pass
             _kill_leftover_chrome()
             _clean_chrome_dirs()
+
+
+def _lookup_via_api(driver, query, start):
+    """Fallback: call /api/musicfetch/search via browser fetch()."""
+    encoded_query = quote(query)
+    js = (
+        "var done = arguments[arguments.length - 1];"
+        f"fetch('/api/musicfetch/search?query={encoded_query}&types=track')"
+        "  .then(r => r.json())"
+        "  .then(d => done(JSON.stringify(d)))"
+        "  .catch(e => done(JSON.stringify({error: e.message})));"
+    )
+    logger.debug(f"API fallback: {query}")
+    result_json = driver.execute_async_script(js)
+    elapsed = round(time.time() - start, 3)
+    try:
+        data = json.loads(result_json)
+    except Exception:
+        return {"error": "invalid response", "elapsed": elapsed}
+    if "error" in data:
+        return {"error": str(data.get("error")), "elapsed": elapsed}
+    items = []
+    inner = data.get("data", {})
+    if isinstance(inner, dict):
+        for key in ("tracks", "items", "results"):
+            c = inner.get(key)
+            if isinstance(c, list): items = c; break
+        if not items:
+            for v in inner.values():
+                if isinstance(v, list): items = v; break
+    elif isinstance(inner, list):
+        items = inner
+    results = [{"name": i.get("name"), "link": i.get("link"),
+                "artists": i.get("artists"), "image": i.get("image")}
+               for i in items[:5]]
+    return {"results": results, "elapsed": elapsed}
 
 
 # ── HTTP API ────────────────────────────────────────────────────────────────
