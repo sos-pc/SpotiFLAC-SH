@@ -11,7 +11,7 @@ Usage:
 """
 
 import os, sys, time, uuid, json, logging, asyncio, argparse, re, shutil, subprocess
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 from quart import Quart, request, jsonify
 import undetected_chromedriver as uc
@@ -228,6 +228,112 @@ def solve_challenge(challenge_url, max_retries=3):
             "error": f"all {max_retries} attempts failed: {last_error}"}
 
 
+# ── Musicfetch lookup (uses browser to bypass Vercel WAF) ─────────────────
+
+def lookup_track(query: str) -> dict:
+    """Query musicfetch.io from a real browser (bypasses Vercel WAF)
+    and return platform links including Qobuz track URL."""
+    start = time.time()
+
+    options = uc.ChromeOptions()
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-crashpad")
+    options.add_argument("--disable-breakpad")
+    options.add_argument("--disable-crash-reporter")
+
+    version_main = _get_chromium_version()
+
+    driver = None
+    try:
+        _kill_leftover_chrome()
+        _clean_chrome_dirs()
+
+        logger.debug("Launching Chrome for Musicfetch lookup")
+        driver = uc.Chrome(
+            options=options,
+            headless=False,
+            use_subprocess=True,
+            version_main=version_main,
+        )
+
+        # Navigate to musicfetch.io to establish origin and pass WAF
+        logger.debug("Loading musicfetch.io to establish session")
+        driver.get("https://musicfetch.io/")
+        time.sleep(3)  # let the page initialize
+
+        # Call the internal search API from the browser's JS context.
+        # This works because the browser has a real TLS fingerprint and
+        # the request is same-origin (musicfetch.io → /api/musicfetch/search).
+        encoded_query = quote(query)
+        js = (
+            f"return fetch('/api/musicfetch/search?query={encoded_query}&types=track')"
+            f"  .then(r => r.json())"
+            f"  .then(d => JSON.stringify(d))"
+            f"  .catch(e => JSON.stringify({{error: e.message}}));"
+        )
+        logger.debug(f"Calling /api/musicfetch/search?query={query}")
+        result_json = driver.execute_script(js)
+        elapsed = round(time.time() - start, 3)
+
+        try:
+            data = json.loads(result_json)
+        except Exception:
+            logger.error(f"Failed to parse Musicfetch response: {str(result_json)[:300]}")
+            return {"error": "invalid response", "elapsed": elapsed}
+
+        if "error" in data:
+            logger.error(f"Musicfetch error: {data}")
+            return {"error": str(data.get("error")), "elapsed": elapsed}
+
+        # Extract results
+        items = data.get("data", [])
+        if not items:
+            logger.warning(f"No results for query: {query}")
+            return {"results": [], "elapsed": elapsed}
+
+        logger.success(
+            f"Musicfetch returned {len(items)} result(s) in {elapsed}s")
+
+        # Extract platform links for each result
+        results = []
+        for item in items[:5]:  # limit to top 5
+            entry = {
+                "name": item.get("name"),
+                "artist_name": item.get("artistName"),
+                "isrc": item.get("isrc"),
+                "duration": item.get("duration"),
+                "release_year": item.get("releaseYear"),
+                "image": item.get("image"),
+                "platforms": {},
+            }
+            # Extract platform links from services
+            services = item.get("services", {})
+            for platform, info in services.items():
+                if isinstance(info, dict):
+                    entry["platforms"][platform] = info.get("link", "")
+                elif isinstance(info, str):
+                    entry["platforms"][platform] = info
+            results.append(entry)
+
+        return {"results": results, "elapsed": elapsed}
+
+    except Exception as exc:
+        elapsed = round(time.time() - start, 3)
+        logger.error(f"Musicfetch lookup error: {exc}")
+        return {"error": str(exc), "elapsed": elapsed}
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+            _kill_leftover_chrome()
+            _clean_chrome_dirs()
+
+
 # ── HTTP API ────────────────────────────────────────────────────────────────
 app = Quart(__name__)
 
@@ -261,6 +367,27 @@ async def process_grant():
 @app.route('/health')
 async def health():
     return jsonify({"status": "ok"}), 200
+
+
+@app.route('/lookup', methods=['POST'])
+async def musicfetch_lookup():
+    """Query musicfetch.io via a real browser to get platform links."""
+    try:
+        body = await request.get_json(force=True, silent=True) or {}
+    except Exception:
+        body = {}
+    query = body.get('query', '').strip()
+    if not query:
+        return jsonify({"error": "query is required"}), 400
+
+    logger.info(f"Musicfetch lookup {uuid.uuid4().hex[:8]}: {query[:80]}")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lookup_track, query)
+
+    if result.get('error'):
+        return jsonify(result), 422
+    return jsonify(result), 200
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
