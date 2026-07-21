@@ -1,7 +1,5 @@
 package amazon
 
-//nolint:unused // all functions called cross-file from community.go
-
 import (
 	"encoding/hex"
 	"fmt"
@@ -12,13 +10,6 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 )
 
-// decryptWithMP4FF decrypts an encrypted fragmented MP4 using per-KID keys.
-//
-// keySpecs supports two formats:
-//   - Legacy:   ["hexkey"]                          → single global key
-//   - Strict:   ["KID_HEX:KEY_HEX", ...]            → per-KID key map
-//
-// The two formats are mutually exclusive within a single call.
 func decryptWithMP4FF(keySpecs []string, inputPath, outputPath string) error {
 	key, keysByKID, strictKIDMode, err := parseKeySpecs(keySpecs)
 	if err != nil {
@@ -58,9 +49,6 @@ func decryptWithMP4FF(keySpecs []string, inputPath, outputPath string) error {
 	return nil
 }
 
-// parseKeySpecs normalises and classifies a key spec list.
-//
-//nolint:unused
 func parseKeySpecs(keySpecs []string) (key []byte, keysByKID map[string][]byte, strict bool, err error) {
 	normalized := make([]string, 0, len(keySpecs))
 	seen := make(map[string]struct{}, len(keySpecs))
@@ -112,7 +100,6 @@ func parseKeySpecs(keySpecs []string) (key []byte, keysByKID map[string][]byte, 
 		}
 		kidRaw := strings.TrimSpace(parts[0])
 		keyRaw := strings.TrimSpace(parts[1])
-
 		kid, err := mp4.UnpackKey(kidRaw)
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("mp4ff: unpack KID %s: %w", kidRaw, err)
@@ -130,12 +117,6 @@ func parseKeySpecs(keySpecs []string) (key []byte, keysByKID map[string][]byte, 
 	return nil, keysByKID, true, nil
 }
 
-// decryptFile reads a fragmented MP4, decrypts it, and writes the result.
-//
-// initR is an optional separate init segment. When the file contains its own
-// init (moov box), initR is ignored.
-//
-//nolint:unused
 func decryptFile(r io.Reader, initR io.Reader, w io.Writer,
 	key []byte, keysByKID map[string][]byte, strictKIDMode bool,
 ) error {
@@ -164,7 +145,6 @@ func decryptFile(r io.Reader, initR io.Reader, w io.Writer,
 		return fmt.Errorf("mp4ff: decrypt init: %w", err)
 	}
 
-	// Write init segment first.
 	if inMp4.Init != nil {
 		if err := inMp4.Init.Encode(w); err != nil {
 			return fmt.Errorf("mp4ff: encode init: %w", err)
@@ -172,7 +152,6 @@ func decryptFile(r io.Reader, initR io.Reader, w io.Writer,
 	}
 
 	for _, seg := range inMp4.Segments {
-		// Parse senc from init if the file didn't include its own init.
 		if inMp4.Init == nil {
 			if err := seg.ParseSenc(init); err != nil {
 				return fmt.Errorf("mp4ff: parse senc: %w", err)
@@ -188,9 +167,6 @@ func decryptFile(r io.Reader, initR io.Reader, w io.Writer,
 	return nil
 }
 
-// decryptSegment decrypts every fragment in a segment that carries a senc box.
-//
-//nolint:unused
 func decryptSegment(seg *mp4.MediaSegment, info mp4.DecryptInfo,
 	key []byte, keysByKID map[string][]byte, strictKIDMode bool,
 ) error {
@@ -202,7 +178,6 @@ func decryptSegment(seg *mp4.MediaSegment, info mp4.DecryptInfo,
 			return err
 		}
 	}
-	// Remove sidx boxes — they become stale after decryption.
 	if len(seg.Sidxs) > 0 {
 		seg.Sidx = nil
 		seg.Sidxs = nil
@@ -210,7 +185,6 @@ func decryptSegment(seg *mp4.MediaSegment, info mp4.DecryptInfo,
 	return nil
 }
 
-//nolint:unused
 func fragmentHasSenc(frag *mp4.Fragment) bool {
 	if frag == nil || frag.Moof == nil {
 		return false

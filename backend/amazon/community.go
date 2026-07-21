@@ -1,7 +1,5 @@
 package amazon
 
-//nolint:unused // called from client.go cross-file
-
 import (
 	"bytes"
 	"encoding/json"
@@ -18,8 +16,6 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 )
 
-// amazonCommunityResponse is the JSON shape returned by the community Amazon
-// download endpoint (POST /api/dl).
 type amazonCommunityResponse struct {
 	ASIN      string   `json:"asin"`
 	Codec     string   `json:"codec"`
@@ -30,8 +26,6 @@ type amazonCommunityResponse struct {
 	Captcha   string   `json:"captcha"`
 }
 
-// downloadFromCommunity fetches keys from the signed community proxy,
-// downloads the encrypted stream, decrypts with mp4ff, and remuxes.
 func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality string) (string, error) {
 	asin := extractASIN(amazonURL)
 	if asin == "" {
@@ -101,7 +95,6 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 		}
 	}
 
-	// Download encrypted stream.
 	encPath := filepath.Join(outputDir, fmt.Sprintf("%s.encrypted.mp4", asin))
 	f, err := os.Create(encPath)
 	if err != nil {
@@ -137,7 +130,6 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 	}
 	slog.Debug("[Amazon] Encrypted stream downloaded", "mb", float64(written)/(1024*1024))
 
-	// Decrypt.
 	decPath := filepath.Join(outputDir, fmt.Sprintf("%s.decrypted.mp4", asin))
 	if len(keySpecs) > 0 {
 		slog.Debug("[Amazon] Decrypting with mp4ff", "keys", len(keySpecs))
@@ -150,7 +142,6 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 		decPath = encPath
 	}
 
-	// Remux.
 	targetExt := targetExtForCodec(apiResp.Codec, quality)
 	finalPath := filepath.Join(outputDir, asin+targetExt)
 	slog.Debug("[Amazon] Remuxing", "ext", targetExt)
@@ -166,9 +157,6 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 	return finalPath, nil
 }
 
-// extractASIN pulls the Amazon Standard Identification Number from a URL.
-//
-//nolint:unused // called cross-file, golangci-lint v2 false positive
 func extractASIN(url string) string {
 	re := regexp.MustCompile(`(B[0-9A-Z]{9})`)
 	return re.FindString(url)

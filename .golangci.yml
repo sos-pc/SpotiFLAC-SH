@@ -8,7 +8,7 @@ linters:
   enable:
     - govet
     - ineffassign
-    - unused
+    - staticcheck
 
   exclusions:
     paths:
