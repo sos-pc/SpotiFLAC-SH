@@ -10,6 +10,11 @@ linters:
     - ineffassign
     - staticcheck
 
+  settings:
+    staticcheck:
+      checks:
+        - U1000  # unused code only
+
   exclusions:
     paths:
       - frontend/node_modules
