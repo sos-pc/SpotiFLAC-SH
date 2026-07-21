@@ -102,7 +102,6 @@ func getQobuzMusicDLDebugKey() (string, error) {
 
 type QobuzDownloader struct {
 	client        *http.Client
-	appID         string
 	SpeedCallback func(mbDownloaded, speedMBps float64)
 }
 
@@ -175,13 +174,14 @@ type qobuzMusicDLResponse struct {
 func NewQobuzDownloader() *QobuzDownloader {
 	return &QobuzDownloader{
 		client: util.NewHTTPClient(60 * time.Second),
-		appID:  "798273057",
 	}
 }
 
 func (q *QobuzDownloader) searchByISRC(isrc string) (*QobuzTrack, error) {
-	apiBase := "https://www.qobuz.com/api.json/0.2/track/search?query="
-	url := fmt.Sprintf("%s%s&limit=1&app_id=%s", apiBase, isrc, q.appID)
+	url := signedQobuzURL("track/search", map[string]string{
+		"query": isrc,
+		"limit": "1",
+	})
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -196,11 +196,11 @@ func (q *QobuzDownloader) searchByISRC(isrc string) (*QobuzTrack, error) {
 
 	if resp.StatusCode != 200 {
 		// Names the exact call so this can't be confused with the identically
-		// worded songlink errors — the mix-up that produced R12's misattribution
-		// and that blocks validating the S6 Qobuz-signing fix. A 401 here means
-		// the unsigned public app_id was rejected (see docs/upstream-catchup.md
-		// §S6), which is a different failure from a download-URL 401 downstream.
-		return nil, fmt.Errorf("qobuz: unsigned ISRC search returned status %d", resp.StatusCode)
+		// worded songlink errors — the mix-up that produced R12's misattribution.
+		// A 401 here now means the *signed* search was rejected (the web-player
+		// credential rotated, see signed_search.go), a distinct failure from a
+		// download-URL 401 downstream.
+		return nil, fmt.Errorf("qobuz: signed ISRC search returned status %d", resp.StatusCode)
 	}
 
 	var searchResp QobuzSearchResponse
