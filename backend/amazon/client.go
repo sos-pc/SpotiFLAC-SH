@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
@@ -188,6 +189,10 @@ func (a *AmazonDownloader) DownloadFromAfkarXYZ(amazonURL, outputDir, quality st
 	// Try the community signed path first (multi-key CENC, mp4ff decryption).
 	if path, err := a.downloadFromCommunity(amazonURL, outputDir, quality); err == nil {
 		return path, nil
+	} else if community.IsCooldown(err) || community.IsAuth(err) {
+		// Cooldown/auth errors are actionable: tell the user what happened
+		// instead of falling through to a misleading legacy error.
+		return "", err
 	} else {
 		slog.Warn("[Amazon] Community path failed, falling back to legacy", "err", err)
 	}
