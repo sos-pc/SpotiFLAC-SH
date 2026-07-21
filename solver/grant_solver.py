@@ -265,17 +265,18 @@ def lookup_track(query: str) -> dict:
         time.sleep(3)  # let the page initialize
 
         # Call the internal search API from the browser's JS context.
-        # This works because the browser has a real TLS fingerprint and
-        # the request is same-origin (musicfetch.io → /api/musicfetch/search).
+        # Uses execute_async_script because fetch() returns a Promise
+        # (execute_script is synchronous and would return undefined).
         encoded_query = quote(query)
         js = (
-            f"return fetch('/api/musicfetch/search?query={encoded_query}&types=track')"
-            f"  .then(r => r.json())"
-            f"  .then(d => JSON.stringify(d))"
-            f"  .catch(e => JSON.stringify({{error: e.message}}));"
+            "var done = arguments[arguments.length - 1];"
+            f"fetch('/api/musicfetch/search?query={encoded_query}&types=track')"
+            "  .then(r => r.json())"
+            "  .then(d => done(JSON.stringify(d)))"
+            "  .catch(e => done(JSON.stringify({error: e.message})));"
         )
         logger.debug(f"Calling /api/musicfetch/search?query={query}")
-        result_json = driver.execute_script(js)
+        result_json = driver.execute_async_script(js)
         elapsed = round(time.time() - start, 3)
 
         try:
@@ -287,6 +288,19 @@ def lookup_track(query: str) -> dict:
         if "error" in data:
             logger.error(f"Musicfetch error: {data}")
             return {"error": str(data.get("error")), "elapsed": elapsed}
+
+        # Debug: log raw response structure
+        logger.debug(f"Raw response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, list):
+                    logger.debug(f"  {k}: list of {len(v)}")
+                    if v:
+                        logger.debug(f"    first item keys: {list(v[0].keys()) if isinstance(v[0], dict) else type(v[0])}")
+                elif isinstance(v, dict):
+                    logger.debug(f"  {k}: dict with keys {list(v.keys())[:10]}")
+                else:
+                    logger.debug(f"  {k}: {type(v).__name__}")
 
         # Extract results
         items = data.get("data", [])
