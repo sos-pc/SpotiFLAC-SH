@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -366,8 +367,7 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 }
 
 // pingQobuzProxy performs a real track-endpoint request to validate a
-// community Qobuz proxy (standard GET-based providers).
-// For the musicdl.me primary provider, see pingQobuzMusicDL instead.
+// user-configured standard GET-based Qobuz provider.
 func pingQobuzProxy(name, baseURL string) ServiceStatus {
 	// Qobuz track ID 20882393 — "Get Lucky" by Daft Punk.
 	const testTrackID = "20882393"
@@ -409,33 +409,6 @@ func pingQobuzProxy(name, baseURL string) ServiceStatus {
 			Error: "Reply was not valid JSON — proxy may be incompatible", CheckedAt: time.Now().Unix()}
 	}
 
-	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-}
-
-// pingQobuzMusicDL checks whether the musicdl.me Qobuz API is reachable.
-// The endpoint only accepts POST requests; a GET returns 404 "Cannot GET ..."
-// from Express.js, which confirms the server IS running and the POST route exists.
-func pingQobuzMusicDL(name, baseURL string) ServiceStatus {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-
-	resp, elapsed, err := doRequest(ctx, http.MethodGet, baseURL)
-	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
-	}
-	defer resp.Body.Close()
-
-	latency := int(elapsed.Milliseconds())
-
-	if resp.StatusCode == 429 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-	}
-	if resp.StatusCode >= 500 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	}
-	// 404 "Cannot GET" from Express = server up, POST-only endpoint (expected)
-	// Any 2xx/3xx/4xx = server is alive
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 }
 
@@ -618,9 +591,11 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 		all = append(all, serviceEntry{name, proxyURL, pingDeezerProxy})
 	}
 
-	// Qobuz musicdl.me — primary provider (POST endpoint, always shown in status).
-	if musicDLURL := util.GetQobuzMusicDLURL(); musicDLURL != "" {
-		all = append(all, serviceEntry{"Qobuz · musicdl.me", musicDLURL, pingQobuzMusicDL})
+	// Qobuz community service — the session-authenticated download provider that
+	// replaced the dead musicdl.me. Its /health answers without a session, so it
+	// is a real liveness signal even before verification.
+	if healthURL, err := community.QobuzHealthURL(); err == nil {
+		all = append(all, serviceEntry{"Qobuz · community", healthURL, pingURL})
 	}
 
 	if jellyfinURL != "" {

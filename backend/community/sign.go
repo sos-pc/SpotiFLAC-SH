@@ -31,6 +31,12 @@ const rollingWindowSeconds = 300
 // timestamp the server may hash differently than we do.
 const timestampLayout = "2006-01-02T15:04:05.000Z"
 
+// AppVersion is sent in the bootstrap, the exchange and every signature. Set
+// once at startup from the build's version; it defaults to "unknown", which the
+// service accepts. A package-level var rather than a parameter threaded through
+// every provider, mirroring meta.AppVersion.
+var AppVersion = "unknown"
+
 // Platform is what we declare ourselves as, in the bootstrap, the grant
 // exchange and every signature — the three must agree or the server refuses.
 //

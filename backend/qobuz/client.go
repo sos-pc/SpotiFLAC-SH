@@ -1,10 +1,6 @@
 package qobuz
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,91 +10,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
-
-// ─── musicdl.me X-Debug-Key derivation (AES-256-GCM) ─────────────────────────
-// Ported from spotbye/SpotiFLAC backend/qobuz.go.
-
-var (
-	qobuzMusicDLKeyOnce sync.Once
-	qobuzMusicDLKey     string
-	qobuzMusicDLKeyErr  error
-)
-
-var qobuzMusicDLKeySeedParts = [][]byte{
-	{0x73, 0x70, 0x6f, 0x74, 0x69, 0x66},
-	{0x6c, 0x61, 0x63, 0x3a, 0x71, 0x6f},
-	{0x62, 0x75, 0x7a, 0x3a, 0x6d, 0x75, 0x73, 0x69, 0x63, 0x64, 0x6c, 0x3a, 0x76, 0x31},
-}
-
-var qobuzMusicDLKeyAAD = []byte{
-	0x71, 0x6f, 0x62, 0x75, 0x7a, 0x7c, 0x6d, 0x75, 0x73, 0x69, 0x63, 0x64,
-	0x6c, 0x7c, 0x64, 0x65, 0x62, 0x75, 0x67, 0x7c, 0x76, 0x31,
-}
-
-var qobuzMusicDLKeyNonce = []byte{
-	0x91, 0x2a, 0x5c, 0x77, 0x0f, 0x33, 0xa8, 0x14, 0x62, 0x9d, 0xce, 0x41,
-}
-
-var qobuzMusicDLKeyCiphertext = []byte{
-	0xf3, 0x4a, 0x83, 0x45, 0x24, 0xb6, 0x22, 0xaf, 0xd6, 0xc3, 0x6e, 0x2d,
-	0x56, 0xd1, 0xbb, 0x0b, 0xe9, 0x1b, 0x4f, 0x1c, 0x5f, 0x41, 0x55, 0xc2,
-	0xc6, 0xdf, 0xad, 0x21, 0x58, 0xfe, 0xd5, 0xb8, 0x2d, 0x29, 0xf9, 0x9e,
-	0x6f, 0xd6,
-}
-
-var qobuzMusicDLKeyTag = []byte{
-	0x69, 0x0c, 0x42, 0x70, 0x14, 0x83, 0xff, 0x14, 0xc8, 0xbe, 0x17, 0x00,
-	0x69, 0xb1, 0xfe, 0xbb,
-}
-
-// deriveAESGCMKey derives a plaintext key by hashing seedParts with SHA-256
-// and decrypting ciphertext+tag with AES-256-GCM using the given nonce and aad.
-func deriveAESGCMKey(seedParts [][]byte, nonce, ciphertext, tag, aad []byte) (string, error) {
-	hasher := sha256.New()
-	for _, part := range seedParts {
-		hasher.Write(part)
-	}
-	block, err := aes.NewCipher(hasher.Sum(nil))
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	sealed := make([]byte, 0, len(ciphertext)+len(tag))
-	sealed = append(sealed, ciphertext...)
-	sealed = append(sealed, tag...)
-	plaintext, err := gcm.Open(nil, nonce, sealed, aad)
-	if err != nil {
-		return "", err
-	}
-	return string(plaintext), nil
-}
-
-func getQobuzMusicDLDebugKey() (string, error) {
-	qobuzMusicDLKeyOnce.Do(func() {
-		qobuzMusicDLKey, qobuzMusicDLKeyErr = deriveAESGCMKey(
-			qobuzMusicDLKeySeedParts,
-			qobuzMusicDLKeyNonce,
-			qobuzMusicDLKeyCiphertext,
-			qobuzMusicDLKeyTag,
-			qobuzMusicDLKeyAAD,
-		)
-	})
-	if qobuzMusicDLKeyErr != nil {
-		return "", qobuzMusicDLKeyErr
-	}
-	return qobuzMusicDLKey, nil
-}
 
 type QobuzDownloader struct {
 	client        *http.Client
@@ -153,22 +72,6 @@ type QobuzTrack struct {
 
 type QobuzStreamResponse struct {
 	URL string `json:"url"`
-}
-
-type qobuzMusicDLRequest struct {
-	URL     string `json:"url"`
-	Quality string `json:"quality"`
-}
-
-type qobuzMusicDLResponse struct {
-	Success     bool   `json:"success"`
-	Type        string `json:"type"`
-	URLType     string `json:"url_type"`
-	TrackID     string `json:"track_id"`
-	Quality     string `json:"quality_label"`
-	DownloadURL string `json:"download_url"`
-	Message     string `json:"message"`
-	Error       string `json:"error"`
 }
 
 func NewQobuzDownloader() *QobuzDownloader {
@@ -277,79 +180,6 @@ func (q *QobuzDownloader) DownloadFromStandard(apiBase string, trackID int64, qu
 	return "", fmt.Errorf("invalid response")
 }
 
-// DownloadFromMusicDL fetches a Qobuz download URL from the musicdl.me API
-// using a POST request with X-Debug-Key authentication.
-// quality: "6" (FLAC 16-bit), "7" (Hi-Res 24-bit), "27" (Hi-Res Max)
-func (q *QobuzDownloader) DownloadFromMusicDL(trackID int64, quality string) (string, error) {
-	if strings.TrimSpace(quality) == "" {
-		quality = "6"
-	}
-
-	debugKey, err := getQobuzMusicDLDebugKey()
-	if err != nil {
-		return "", fmt.Errorf("failed to derive musicdl.me debug key: %w", err)
-	}
-
-	openURL := fmt.Sprintf("https://open.qobuz.com/track/%d", trackID)
-	payload, err := json.Marshal(qobuzMusicDLRequest{
-		URL:     openURL,
-		Quality: strings.TrimSpace(quality),
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to encode musicdl.me request: %w", err)
-	}
-
-	apiURL := util.GetQobuzMusicDLURL()
-	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("failed to create musicdl.me request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
-	req.Header.Set("X-Debug-Key", debugKey)
-
-	resp, err := q.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to reach musicdl.me: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read musicdl.me response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		preview := strings.TrimSpace(string(body))
-		if len(preview) > 256 {
-			preview = preview[:256] + "..."
-		}
-		return "", fmt.Errorf("musicdl.me returned status %d: %s", resp.StatusCode, preview)
-	}
-
-	var dlResp qobuzMusicDLResponse
-	if err := json.Unmarshal(body, &dlResp); err != nil {
-		return "", fmt.Errorf("failed to decode musicdl.me response: %w", err)
-	}
-
-	if !dlResp.Success {
-		msg := strings.TrimSpace(dlResp.Error)
-		if msg == "" {
-			msg = strings.TrimSpace(dlResp.Message)
-		}
-		if msg == "" {
-			msg = "musicdl.me reported failure"
-		}
-		return "", fmt.Errorf("%s", msg)
-	}
-
-	downloadURL := strings.TrimSpace(dlResp.DownloadURL)
-	if downloadURL == "" {
-		return "", fmt.Errorf("musicdl.me response missing download_url")
-	}
-	return downloadURL, nil
-}
-
 func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFallback bool) (string, error) {
 	qualityCode := quality
 	if qualityCode == "" || qualityCode == "5" {
@@ -359,40 +189,47 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 	slog.Debug("[Qobuz] Getting download URL", "track_id", trackID, "quality", qualityCode)
 
 	downloadFunc := func(qual string) (string, error) {
-		// 1. Try musicdl.me first (primary provider — POST + X-Debug-Key)
-		if musicDLURL := util.GetQobuzMusicDLURL(); musicDLURL != "" {
-			slog.Debug("[Qobuz] Trying provider", "provider", "musicdl.me", "quality", qual)
-			u, err := q.DownloadFromMusicDL(trackID, qual)
-			if err == nil {
-				slog.Debug("[Qobuz] Provider succeeded", "provider", "musicdl.me")
-				return u, nil
-			}
-			slog.Debug("[Qobuz] musicdl.me failed", "err", err)
+		// 1. Community service (session-authenticated). The only path that
+		//    works out of the box, since every public Qobuz proxy is dead.
+		u, err := q.getCommunityDownloadURL(trackID, qual)
+		if err == nil {
+			slog.Debug("[Qobuz] Provider succeeded", "provider", "community")
+			return u, nil
 		}
+		communityErr := err
+		slog.Debug("[Qobuz] community failed", "err", err)
 
-		// 2. Fall back to standard GET-based providers (user-configurable)
+		// 2. User-configured standard GET providers. Independent of the
+		//    community service, so worth trying even if it is on cooldown.
 		var lastErr error
 		for _, api := range util.GetQobuzProviders() {
-			currentAPI := api
-			slog.Debug("[Qobuz] Trying provider", "provider", currentAPI, "quality", qual)
-			u, err := q.DownloadFromStandard(currentAPI, trackID, qual)
+			slog.Debug("[Qobuz] Trying provider", "provider", api, "quality", qual)
+			u, err := q.DownloadFromStandard(api, trackID, qual)
 			if err == nil {
-				slog.Debug("[Qobuz] Provider succeeded", "provider", currentAPI)
+				slog.Debug("[Qobuz] Provider succeeded", "provider", api)
 				return u, nil
 			}
-			slog.Debug("[Qobuz] Provider failed", "provider", currentAPI, "err", err)
+			slog.Debug("[Qobuz] Provider failed", "provider", api, "err", err)
 			lastErr = err
 		}
-
 		if lastErr != nil {
 			return "", lastErr
 		}
-		return "", fmt.Errorf("no Qobuz provider is configured — add one in Settings → APIs → Proxy Configuration")
+		// Community was the only path; surface its error (which may be a typed
+		// cooldown the quality loop below must respect).
+		return "", communityErr
 	}
 
 	url, err := downloadFunc(qualityCode)
 	if err == nil {
 		return url, nil
+	}
+
+	// A cooldown closes the service for every quality alike. Retrying at 7 then
+	// 6 would just spend two more 503s on a door that is shut — upstream's chain
+	// makes exactly that mistake by only short-circuiting on cancellation.
+	if community.IsCooldown(err) {
+		return "", err
 	}
 
 	currentQuality := qualityCode
@@ -404,7 +241,9 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 			slog.Debug("[Qobuz] Success with fallback quality 7")
 			return url, nil
 		}
-
+		if community.IsCooldown(err) {
+			return "", err
+		}
 		currentQuality = "7"
 	}
 

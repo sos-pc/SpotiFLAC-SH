@@ -222,6 +222,22 @@ func ClearCredentials() error {
 	return Save(session)
 }
 
+// SignerFromStore loads the current session and builds a Signer from it, using
+// the package AppVersion.
+//
+// The error path is the common one, not the exception: with no valid session
+// there is simply nothing to sign, and callers are expected to fall through to
+// another provider rather than treat it as a failure. It says "verification
+// required" so a caller can tell "the community path is unavailable" apart from
+// "the community path errored".
+func SignerFromStore() (Signer, error) {
+	session, err := Load()
+	if err != nil {
+		return Signer{}, err
+	}
+	return session.Signer(AppVersion)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Grant exchange
 // ─────────────────────────────────────────────────────────────────────────────

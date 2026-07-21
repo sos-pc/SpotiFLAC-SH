@@ -124,6 +124,12 @@ func main() {
 	if err := community.InitStore(db); err != nil {
 		slog.Warn("[Main] community session store init failed, proceeding without", "err", err)
 	}
+	// Version declared when signing community download requests (Qobuz). Kept in
+	// step with the "dev" fallback the refresh loop below uses, so a request and
+	// the session it rides on never disagree on app version.
+	if community.AppVersion = os.Getenv("APP_VERSION"); community.AppVersion == "" {
+		community.AppVersion = "dev"
+	}
 
 	// Restore last discovery result so GetTidalProxiesEffective() is correct
 	// immediately, before the first scheduled run of the discovery goroutine.

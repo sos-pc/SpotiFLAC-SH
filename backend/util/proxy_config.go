@@ -49,17 +49,6 @@ var amazonProxies = []string{}
 // Deezer proxies (tried in order, first success wins)
 var deezerProxies = []string{"https://api.deezmate.com"}
 
-// qobuzMusicDLURL was the PRIMARY Qobuz provider (POST + AES-GCM derived
-// X-Debug-Key), introduced by upstream in May 2026.
-//
-// EMPTY since 2026-07-20. Measured against the live service with a correctly
-// derived key and a real Qobuz track id (8767428): HTTP 500, encrypted body.
-// Without a key it answers 400 — so the endpoint does parse requests, it just
-// never serves one. The probe that established this is kept as
-// qobuz/musicdl_live_probe_test.go; set QOBUZ_LIVE_PROBE=<track id> to re-run
-// it before ever putting this URL back.
-var qobuzMusicDLURL = ""
-
 // qobuzProviders holds GET-based Qobuz stream API base URLs, of the shape
 //
 //	{base}{trackID}&quality={q}   e.g. https://host/api/stream?trackId=
@@ -212,22 +201,6 @@ func SetQobuzProviders(providers []string) {
 	qobuzProviders = cp
 }
 
-// GetQobuzMusicDLURL returns the musicdl.me primary Qobuz provider URL.
-func GetQobuzMusicDLURL() string {
-	proxyMu.RLock()
-	defer proxyMu.RUnlock()
-	return qobuzMusicDLURL
-}
-
-// SetQobuzMusicDLURL updates the musicdl.me URL at runtime (applied immediately).
-func SetQobuzMusicDLURL(u string) {
-	proxyMu.Lock()
-	defer proxyMu.Unlock()
-	if u != "" {
-		qobuzMusicDLURL = u
-	}
-}
-
 // ─── Factory defaults (immutable hardcoded values) ────────────────────────────
 // Used by defaultProxyConfig() in api_proxies.go to enable true "reset to
 // defaults" behaviour — independent of the current in-memory state which may
@@ -244,8 +217,8 @@ func GetDefaultTidalProxies() []string {
 }
 
 func GetDefaultQobuzProviders() []string {
-	// No working GET-based providers as of May 2026.
-	// Primary provider musicdl.me is hardcoded — see GetQobuzMusicDLURL().
+	// No working public GET-based providers as of 2026-07-20. Qobuz downloads
+	// go through the community service instead (backend/qobuz/community.go).
 	return []string{}
 }
 
