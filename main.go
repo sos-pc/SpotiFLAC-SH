@@ -163,6 +163,13 @@ func main() {
 		ReadHeaderTimeout: 30 * time.Second, // borne la lecture des headers (Slowloris) sans affecter les gros transferts de body
 	}
 
+	// Close live SSE streams when Shutdown starts. Without this, an open Debug
+	// Logs or download-queue page keeps a streaming connection that never goes
+	// idle, so Shutdown waits the full 30 s timeout every restart. Registered
+	// here (not called inline) so it runs after the listeners are closed — no
+	// new stream can subscribe in the gap.
+	httpServer.RegisterOnShutdown(ctr.Jobs.hub.closeAll)
+
 	// ── Graceful shutdown ─────────────────────────────────────────────────
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

@@ -108,3 +108,67 @@ func TestSSEHubSubscribeReturnsIndependentChannels(t *testing.T) {
 		t.Error("ch2 should have received the event")
 	}
 }
+
+// closeAll must make every subscriber's read loop terminate: the SSE handler
+// blocks on `event, ok := <-ch` and only returns when ok is false, so closeAll
+// closing the channels is what unblocks it and lets httpServer.Shutdown finish
+// instead of waiting its 30s timeout.
+func TestSSEHubCloseAllTerminatesEverySubscriber(t *testing.T) {
+	h := newSSEHub()
+	ch1 := h.subscribe()
+	ch2 := h.subscribe()
+
+	h.closeAll()
+
+	for i, ch := range []chan JobEvent{ch1, ch2} {
+		select {
+		case _, ok := <-ch:
+			if ok {
+				t.Errorf("subscriber %d received a value, want a closed channel", i)
+			}
+		case <-time.After(time.Second):
+			t.Errorf("subscriber %d channel was not closed by closeAll", i)
+		}
+	}
+
+	// The hub must forget them too, or a later publish would iterate closed chans.
+	h.mu.RLock()
+	n := len(h.subs)
+	h.mu.RUnlock()
+	if n != 0 {
+		t.Errorf("closeAll left %d subscribers registered", n)
+	}
+}
+
+// The SSE handler's defer calls unsubscribe(ch) precisely because closeAll just
+// closed ch. That must NOT close it a second time — the real bug this guards is
+// a "close of closed channel" panic during every shutdown.
+func TestUnsubscribeAfterCloseAllDoesNotPanic(t *testing.T) {
+	h := newSSEHub()
+	ch := h.subscribe()
+
+	h.closeAll()
+	// Mirrors the handler's `defer h.unsubscribe(ch)` running after !ok.
+	h.unsubscribe(ch) // must be a no-op, not a panic
+}
+
+// publish after closeAll must be safe: closeAll empties the map under the same
+// lock publish takes, so there is no send on a closed channel and nothing to
+// iterate.
+func TestPublishAfterCloseAllIsSafe(t *testing.T) {
+	h := newSSEHub()
+	_ = h.subscribe()
+	h.closeAll()
+	h.publish(JobEvent{Type: "job_update", Job: &Job{ID: "after-close"}}) // must not panic
+}
+
+// Ordinary unsubscribe still closes the channel — the idempotence guard must
+// not break the normal path.
+func TestUnsubscribeStillClosesOnNormalPath(t *testing.T) {
+	h := newSSEHub()
+	ch := h.subscribe()
+	h.unsubscribe(ch)
+	if _, ok := <-ch; ok {
+		t.Error("unsubscribe did not close the channel on the normal path")
+	}
+}

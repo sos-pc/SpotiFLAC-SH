@@ -57,11 +57,38 @@ func (h *SSEHub) subscribe() chan JobEvent {
 }
 
 // unsubscribe retire le canal du hub et le ferme.
+//
+// Idempotent vis-à-vis de closeAll : un canal déjà retiré (donc déjà fermé par
+// closeAll pendant l'arrêt) n'est pas re-fermé. Sans ce garde, le defer
+// unsubscribe du handler SSE, qui se déclenche justement parce que closeAll a
+// fermé le canal, provoquerait un "close of closed channel".
 func (h *SSEHub) unsubscribe(ch chan JobEvent) {
 	h.mu.Lock()
+	_, present := h.subs[ch]
 	delete(h.subs, ch)
 	h.mu.Unlock()
-	close(ch)
+	if present {
+		close(ch)
+	}
+}
+
+// closeAll ferme tous les abonnements d'un coup, sous le même verrou que
+// publish. Utilisé au shutdown : le handler SSE boucle jusqu'à ce que son canal
+// soit fermé (ou le contexte annulé), et httpServer.Shutdown n'annule pas le
+// contexte d'une requête en cours — il attend qu'elle devienne inactive, ce
+// qu'un flux SSE n'est jamais. Fermer les canaux fait sortir chaque handler
+// (case !ok → return), ce qui libère les connexions et laisse Shutdown se
+// terminer tout de suite au lieu d'atteindre son timeout de 30 s.
+//
+// Enregistré via httpServer.RegisterOnShutdown, donc appelé après la fermeture
+// des listeners : aucune nouvelle connexion ne peut s'abonner entre-temps.
+func (h *SSEHub) closeAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for ch := range h.subs {
+		delete(h.subs, ch)
+		close(ch)
+	}
 }
 
 // publish diffuse un événement à tous les abonnés.
