@@ -154,21 +154,25 @@ Recherches : "ISRC to Qobuz", "Spotify ID to Qobuz", "Qobuz API search by ISRC"
 
 ### 4.2 Pistes explorées
 
-| Approche | Statut |
-|---|---|
-| Song.link API | ❌ pas de Qobuz |
-| Song.link HTML | ❌ page erreur |
-| Songstats | ❌ pas de Qobuz |
-| Qobuz ISRC search | ❌ index lacunaire |
-| Qobuz text search | ✅ fonctionne |
-| Odesli (song.link) | déjà testé |
-| Soundiiz | à tester |
-| TuneMyMusic | à tester |
-| MusicBrainz URL relationships | à tester |
+| Approche | Statut | Détail |
+|---|---|---|
+| Song.link API | ❌ | Pas de Qobuz dans `linksByPlatform` |
+| Song.link HTML | ❌ | Page erreur 400 |
+| Songstats | ✅ | Utile pour Tidal/Amazon (JSON-LD `sameAs`), pas Qobuz |
+| Musicfetch gratuit | ❌ | WAF Vercel + free tier = Spotify only |
+| Musicfetch payant | ❌ | $50/mois |
+| Qobuz ISRC search | ❌ | Index ISRC lacunaire (testé Mohawk, Bloomdido) |
+| Qobuz text search | ✅ | Fonctionne mais nécessite filtrage artiste |
+| Qobuz album/get (unsigned) | ✅ | Découverte #418 : pas de signature, juste `app_id` |
+| MusicBrainz → Qobuz album | ✅ | Testé Daft Punk ✅, Billie Eilish ✅, Godspeed ❌ |
 
-### 4.3 Résultats
+### 4.3 Résultats des tests
 
-(à compléter)
+| Artiste | ISRC | MusicBrainz | album/get | Track ID | Qualité |
+|---|---|---|---|---|---|
+| Daft Punk | USQX91300108 | ✅ `apk748lfvcgxb` | ✅ 22 tracks | 209446467 | 24-bit |
+| Billie Eilish | USUM71900764 | ✅ `wo456u01fehgc` | ✅ 14 tracks | 77469835 | 24-bit |
+| Godspeed You! BE | — | ❌ Pas d'URL Qobuz | ❌ Artiste introuvable | ❌ | — |
 
 ## 5. Questions ouvertes
 
@@ -181,6 +185,127 @@ Recherches : "ISRC to Qobuz", "Spotify ID to Qobuz", "Qobuz API search by ISRC"
 - [x] ~~Utiliser Song.link pour les liens Qobuz~~ — **ABANDONNÉ** : Song.link n'indexe pas Qobuz
 - [x] ~~Utiliser le scrape HTML Song.link~~ — **ABANDONNÉ** : page erreur 400
 - [x] ~~Utiliser Songstats pour Qobuz~~ — **ABANDONNÉ** : pas de Qobuz non plus
-- [ ] Implémenter `searchByName(trackTitle, artistName)` signé sur l'API Qobuz avec filtrage par artiste
+- [x] ~~Utiliser Musicfetch (gratuit) pour Qobuz~~ — **ABANDONNÉ** : free tier = Spotify only, payé = $50/mois
+- [ ] Implémenter le pipeline MusicBrainz → Qobuz avec fallback texte
 - [ ] Ajouter un scoring simple (match artiste → premier résultat)
-- [ ] Investiguer Soundiiz / TuneMyMusic / MusicBrainz comme alternatives
+
+## 7. Plan d'intégration : MusicBrainz → Qobuz
+
+### 7.1 Architecture
+
+```
+Spotify ID
+  → GetISRCDirect(spotifyID) → ISRC
+  → Pipeline Qobuz (voir §7.2)
+  → Proxy communauté /api/dl → FLAC
+```
+
+Le pipeline remplace l'actuel `searchByISRC(isrc)` dans `DownloadTrackWithISRC`.
+
+### 7.2 Pipeline principal (3 étages)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Étage 1 : MusicBrainz ISRC → Recording → Releases       │
+│ GET /ws/2/recording?query=isrc:{ISRC}&inc=releases      │
+│                                                          │
+│ Pour chaque release :                                    │
+│   GET /ws/2/release/{id}?inc=url-rels                   │
+│   Filtrer les relations contenant "qobuz.com/album/"    │
+│   ou "open.qobuz.com/album/"                            │
+│   → Extraire l'album ID (dernier segment après /)       │
+│                                                          │
+│ ⚠️ Rate-limit MusicBrainz : 1 req/sec max               │
+│ ⚠️ Limiter à 20 releases parcourues (sinon trop lent)   │
+│ ⚠️ Arrêter dès qu'un release avec Qobuz est trouvé      │
+│                                                          │
+│ Si trouvé → Étage 3                                      │
+│ Si pas trouvé → Étage 2                                  │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│ Étage 2 : Qobuz album/search → artiste → discographie   │
+│ GET album/search?query={album+titre+artiste} (signé)     │
+│                                                          │
+│ Si un album correspond (titre + artiste match) :         │
+│   → Utiliser son ID pour l'Étage 3                       │
+│                                                          │
+│ Sinon, chercher l'artiste :                              │
+│   GET artist/search?query={artiste} (signé)              │
+│   → Récupérer artist_id                                  │
+│   → GET artist/get?artist_id={id}&extra=albums           │
+│   → Chercher l'album dans les résultats                  │
+│                                                          │
+│ Si trouvé → Étage 3                                      │
+│ Si pas trouvé → Étage 3 avec fallback texte              │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│ Étage 3 : Qobuz album/get → tracklist → match ISRC      │
+│ GET album/get?album_id={ID}&app_id=712109809 (UNSIGNED!) │
+│                                                          │
+│ ⚠️ Géo-gaté : ne fonctionne que depuis un pays          │
+│    servi par Qobuz (FR, UK, US, DE, etc.)               │
+│    → Si 404 : retourner une erreur explicite             │
+│                                                          │
+│ Parcourir la tracklist :                                 │
+│   → Match exact par ISRC → Qobuz Track ID               │
+│   → Si pas de match ISRC : match par track_number        │
+│     + titre (fuzzy)                                      │
+│                                                          │
+│ Si match → ✅ Track ID                                   │
+│ Si pas de match → ❌ Échec                               │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 7.3 Fallback texte direct (dernier recours)
+
+```
+Qobuz track/search?query={titre}+{artiste} (signé)
+  → Filtrer par nom d'artiste (contains, case-insensitive)
+  → Prendre le premier match
+  → Si plusieurs : scorer par durée si disponible
+```
+
+Utilisé uniquement si les étages 1 et 2 n'ont pas trouvé d'album.
+
+### 7.4 Gestion des cas limites
+
+| Cas | Probabilité | Stratégie |
+|---|---|---|
+| MusicBrainz ne retourne aucun release | Faible | Passer à l'étage 2 |
+| Aucun release n'a d'URL Qobuz | Moyenne (indés, petits labels) | Passer à l'étage 2 |
+| album/search ne trouve pas l'album | Élevée pour artistes avec noms communs | Chercher l'artiste → discographie |
+| artist/get ne retourne pas tous les albums | Élevée (limitation API Qobuz) | Fallback texte direct |
+| album/get retourne 404 (géo-blocage) | Si serveur hors zone Qobuz | Erreur explicite : "Serveur dans un pays non servi par Qobuz" |
+| ISRC absent de la tracklist | Très faible (testé 2/2) | Match par track_number + fuzzy title |
+| Aucun résultat (piste absente de Qobuz) | Variable | Échec normal → le provider auto passe au suivant |
+
+### 7.5 Performance
+
+| Étape | Appels HTTP | Latence estimée |
+|---|---|---|
+| Spotify → ISRC | 1 (cache) | < 100ms |
+| MusicBrainz ISRC → releases | 1 + N (N ≤ 20) | 1-10s |
+| Qobuz album/get | 1 | < 500ms |
+| **Total (succès MusicBrainz)** | **~3-6** | **~2-11s** |
+| Fallback album/search + artist/get | +2-5 | +2-5s |
+| Fallback texte | +1 | +1s |
+| **Total (pire cas)** | **~8** | **~15s** |
+
+### 7.6 Fichiers à modifier
+
+| Fichier | Modification |
+|---|---|
+| `backend/qobuz/client.go` | Remplacer `searchByISRC` → nouveau `resolveQobuzTrackID` avec le pipeline à 3 étages |
+| `backend/qobuz/client.go` | Modifier `DownloadTrackWithISRC` pour utiliser `resolveQobuzTrackID` |
+| `backend/qobuz/signed_search.go` | Ajouter `SignedAlbumSearch`, `SignedArtistSearch` |
+| `backend/qobuz/musicbrainz.go` (nouveau) | Fonctions d'interaction avec l'API MusicBrainz |
+
+### 7.7 Ce qui ne change pas
+
+- `GetISRCDirect` : inchangé, déjà fiable
+- `GetDownloadURL` et le proxy communauté : inchangés, prennent un track ID
+- Le téléchargement et les métadonnées : inchangés
+- La signature MD5 pour `track/search` et `album/search` : déjà implémentée dans `signed_search.go`
+- `album/get` n'a PAS besoin de signature (découverte #418) — juste `app_id=712109809`
