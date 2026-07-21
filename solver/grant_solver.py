@@ -11,7 +11,7 @@ Usage:
 """
 
 import os, sys, time, uuid, json, logging, asyncio, argparse, re, shutil, subprocess
-from urllib.parse import urlparse, parse_qs, quote
+from urllib.parse import urlparse, parse_qs
 
 from quart import Quart, request, jsonify
 import undetected_chromedriver as uc
@@ -228,132 +228,6 @@ def solve_challenge(challenge_url, max_retries=3):
             "error": f"all {max_retries} attempts failed: {last_error}"}
 
 
-# ── Musicfetch lookup (uses browser to bypass Vercel WAF) ─────────────────
-
-def lookup_track(query: str) -> dict:
-    """Search musicfetch.io via real browser: types into search box,
-    clicks 'Show JSON', and extracts platform links from the DOM."""
-    start = time.time()
-    options = uc.ChromeOptions()
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-crashpad")
-    options.add_argument("--disable-breakpad")
-    options.add_argument("--disable-crash-reporter")
-    version_main = _get_chromium_version()
-
-    driver = None
-    try:
-        _kill_leftover_chrome()
-        _clean_chrome_dirs()
-        logger.debug("Launching Chrome for Musicfetch lookup")
-        driver = uc.Chrome(options=options, headless=False,
-                          use_subprocess=True, version_main=version_main)
-        driver.get("https://musicfetch.io/")
-        time.sleep(4)
-
-        # Type query into the search input on the page
-        logger.debug(f"Typing search query: {query}")
-        try:
-            search_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "input[type='text']")))
-            search_input.clear()
-            search_input.send_keys(query)
-        except Exception:
-            logger.warning("Could not type into search, falling back to API")
-            return _lookup_via_api(driver, query, start)
-
-        # Intercept the /api/hero network response to get full platform links.
-        # The page calls /api/hero after debounce (~2s). We use JS to monkey-
-        # patch fetch() so we capture the response before the page renders it.
-        logger.debug(f"Waiting for /api/hero response via fetch interception")
-        js_intercept = (
-            "var captured = null;"
-            "var origFetch = window.fetch;"
-            "window.fetch = function(...args) {"
-            "  return origFetch.apply(this, args).then(r => {"
-            "    var clone = r.clone();"
-            "    if (args[0] && typeof args[0] === 'string' && args[0].includes('/api/hero')) {"
-            "      clone.json().then(d => captured = d);"
-            "    }"
-            "    return r;"
-            "  });"
-            "};"
-            "var done = arguments[arguments.length - 1];"
-            "var waited = 0;"
-            "var iv = setInterval(function() {"
-            "  waited += 300;"
-            "  if (captured) { clearInterval(iv); done(JSON.stringify(captured)); }"
-            "  else if (waited >= 15000) { clearInterval(iv); done(JSON.stringify({error: 'timeout'})); }"
-            "}, 300);"
-        )
-        result_json = driver.execute_async_script(js_intercept)
-
-        try:
-            data = json.loads(result_json)
-        except Exception:
-            logger.error(f"Failed to parse intercepted response: {str(result_json)[:300]}")
-            return _lookup_via_api(driver, query, start)
-
-        if "error" in data:
-            logger.warning(f"Hero interception failed: {data}, falling back to API")
-            return _lookup_via_api(driver, query, start)
-
-        elapsed = round(time.time() - start, 3)
-        logger.success(f"Musicfetch hero result intercepted in {elapsed}s")
-        return {"result": data, "elapsed": elapsed}
-
-    except Exception as exc:
-        elapsed = round(time.time() - start, 3)
-        logger.error(f"Musicfetch error: {exc}")
-        return {"error": str(exc), "elapsed": elapsed}
-    finally:
-        if driver:
-            try: driver.quit()
-            except Exception: pass
-            _kill_leftover_chrome()
-            _clean_chrome_dirs()
-
-
-def _lookup_via_api(driver, query, start):
-    """Fallback: call /api/musicfetch/search via browser fetch()."""
-    encoded_query = quote(query)
-    js = (
-        "var done = arguments[arguments.length - 1];"
-        f"fetch('/api/musicfetch/search?query={encoded_query}&types=track')"
-        "  .then(r => r.json())"
-        "  .then(d => done(JSON.stringify(d)))"
-        "  .catch(e => done(JSON.stringify({error: e.message})));"
-    )
-    logger.debug(f"API fallback: {query}")
-    result_json = driver.execute_async_script(js)
-    elapsed = round(time.time() - start, 3)
-    try:
-        data = json.loads(result_json)
-    except Exception:
-        return {"error": "invalid response", "elapsed": elapsed}
-    if "error" in data:
-        return {"error": str(data.get("error")), "elapsed": elapsed}
-    items = []
-    inner = data.get("data", {})
-    if isinstance(inner, dict):
-        for key in ("tracks", "items", "results"):
-            c = inner.get(key)
-            if isinstance(c, list): items = c; break
-        if not items:
-            for v in inner.values():
-                if isinstance(v, list): items = v; break
-    elif isinstance(inner, list):
-        items = inner
-    results = [{"name": i.get("name"), "link": i.get("link"),
-                "artists": i.get("artists"), "image": i.get("image")}
-               for i in items[:5]]
-    return {"results": results, "elapsed": elapsed}
-
-
 # ── HTTP API ────────────────────────────────────────────────────────────────
 app = Quart(__name__)
 
@@ -387,27 +261,6 @@ async def process_grant():
 @app.route('/health')
 async def health():
     return jsonify({"status": "ok"}), 200
-
-
-@app.route('/lookup', methods=['POST'])
-async def musicfetch_lookup():
-    """Query musicfetch.io via a real browser to get platform links."""
-    try:
-        body = await request.get_json(force=True, silent=True) or {}
-    except Exception:
-        body = {}
-    query = body.get('query', '').strip()
-    if not query:
-        return jsonify({"error": "query is required"}), 400
-
-    logger.info(f"Musicfetch lookup {uuid.uuid4().hex[:8]}: {query[:80]}")
-
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, lookup_track, query)
-
-    if result.get('error'):
-        return jsonify(result), 422
-    return jsonify(result), 200
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
