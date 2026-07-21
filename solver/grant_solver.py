@@ -262,45 +262,49 @@ def lookup_track(query: str) -> dict:
                     (By.CSS_SELECTOR, "input[type='text']")))
             search_input.clear()
             search_input.send_keys(query)
-            time.sleep(3)
         except Exception:
             logger.warning("Could not type into search, falling back to API")
             return _lookup_via_api(driver, query, start)
 
-        # Click 'Show JSON' to reveal raw data
+        # Intercept the /api/hero network response to get full platform links.
+        # The page calls /api/hero after debounce (~2s). We use JS to monkey-
+        # patch fetch() so we capture the response before the page renders it.
+        logger.debug(f"Waiting for /api/hero response via fetch interception")
+        js_intercept = (
+            "var captured = null;"
+            "var origFetch = window.fetch;"
+            "window.fetch = function(...args) {"
+            "  return origFetch.apply(this, args).then(r => {"
+            "    var clone = r.clone();"
+            "    if (args[0] && typeof args[0] === 'string' && args[0].includes('/api/hero')) {"
+            "      clone.json().then(d => captured = d);"
+            "    }"
+            "    return r;"
+            "  });"
+            "};"
+            "var done = arguments[arguments.length - 1];"
+            "var waited = 0;"
+            "var iv = setInterval(function() {"
+            "  waited += 300;"
+            "  if (captured) { clearInterval(iv); done(JSON.stringify(captured)); }"
+            "  else if (waited >= 15000) { clearInterval(iv); done(JSON.stringify({error: 'timeout'})); }"
+            "}, 300);"
+        )
+        result_json = driver.execute_async_script(js_intercept)
+
         try:
-            json_btn = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//*[contains(text(),'Show JSON')]")))
-            json_btn.click()
-            time.sleep(1)
-            logger.debug("Clicked Show JSON")
+            data = json.loads(result_json)
+        except Exception:
+            logger.error(f"Failed to parse intercepted response: {str(result_json)[:300]}")
+            return _lookup_via_api(driver, query, start)
 
-            # Click all collapsed nodes to expand them ({ N items } -> real data)
-            driver.execute_script(
-                "document.querySelectorAll('.jsonCodeLine').forEach(el => el.click());"
-            )
-            time.sleep(0.5)
+        if "error" in data:
+            logger.warning(f"Hero interception failed: {data}, falling back to API")
+            return _lookup_via_api(driver, query, start)
 
-            # Extract all text from jsonCodeLine spans (each line of the JSON)
-            lines = driver.execute_script(
-                "var spans = document.querySelectorAll('.jsonCodeLine');"
-                "var texts = [];"
-                "spans.forEach(s => texts.push(s.textContent || ''));"
-                "return texts;"
-            )
-            json_text = ''.join(lines) if lines else ''
-            logger.debug(f"Extracted {len(lines)} JSON lines, total {len(json_text)} chars")
-
-            if json_text and len(json_text) > 50:
-                data = json.loads(json_text)
-                elapsed = round(time.time() - start, 3)
-                logger.success(f"Musicfetch extracted JSON in {elapsed}s")
-                return {"result": data, "elapsed": elapsed}
-        except Exception as e:
-            logger.warning(f"DOM extraction failed ({e}), falling back to API")
-
-        return _lookup_via_api(driver, query, start)
+        elapsed = round(time.time() - start, 3)
+        logger.success(f"Musicfetch hero result intercepted in {elapsed}s")
+        return {"result": data, "elapsed": elapsed}
 
     except Exception as exc:
         elapsed = round(time.time() - start, 3)
