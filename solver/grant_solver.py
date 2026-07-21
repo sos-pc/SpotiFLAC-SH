@@ -60,9 +60,8 @@ def solve_challenge(challenge_url: str) -> dict:
         logger.debug("Launching undetected Chrome")
         driver = uc.Chrome(
             options=options,
-            headless=False,  # headed with Xvfb for better fingerprint
+            headless=False,
             use_subprocess=False,
-            version_main=None,  # auto-detect
         )
 
         logger.debug("Navigating to challenge URL")

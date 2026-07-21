@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir \
     selenium
 
 ENV DISPLAY=:99
+ENV CHROMIUM_PATH=/usr/bin/chromium
 
 COPY grant_solver.py /app/grant_solver.py
 WORKDIR /app
