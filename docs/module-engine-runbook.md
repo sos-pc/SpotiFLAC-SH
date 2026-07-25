@@ -52,16 +52,28 @@ foundation works. If not, the failure is cheap and nothing else has been built.
 
 ---
 
-## Phase 1 — Wire into the Go app  🤖  *(I do this on your green)*
+## Phase 1 — Wire into the Go app  *(download path: DONE, inert until enabled)*
 
-- ✅ `backend/engine/client.go` — Go HTTP client to the shim. **Done.**
-- 🤖 Wire it into the worker: route the target provider → `engine.Client.Download`, then
-  **ingest** the returned file (move from `/staging` → library, our tags + `SPOTIFY_ID`,
-  catalog, SSE, clean the job dir).
-- 🤖 Add the `spotiflac-engine` service to your real dev2 compose (+ `/staging` volume,
-  `ENGINE_URL`), **keeping** the `turnstile-solver` service until everything is validated.
-- 🤖 Add engine `/health` to `api_status.go`; set the anonymous auto-order to
-  `qobuz,deezer,amazon`.
+- ✅ `backend/engine/client.go` — Go HTTP client to the shim (4 tests).
+- ✅ `backend/engine_ingest.go` — the engine route + ingestion: `/staging` → library via the
+  atomic writer (cross-volume safe), then **our** cover, genre and tags incl. `SPOTIFY_ID`.
+- ✅ Wired at `runService` in `backend/downloader.go` — one insertion point covering both the
+  explicit-service and `auto` paths.
+- ✅ **Opt-in gate** (9 tests): needs **both** `ENGINE_URL` and the provider listed in
+  `ENGINE_SERVICES`. Unset ⇒ every provider keeps its native Go path, byte-for-byte.
+
+**Enabling it (once Phase 0 is green):**
+```bash
+ENGINE_URL=http://spotiflac-engine:8080
+ENGINE_SERVICES=deezer          # then deezer,qobuz — one provider at a time, after each is proven
+```
+Rollback = drop the provider from `ENGINE_SERVICES`. No redeploy of logic, no code change.
+
+Still to do (🤖, small): add the `spotiflac-engine` service to your real dev2 compose
+(+ shared `/staging` volume mounted at the **same path in both containers**, `ENGINE_URL`),
+**keeping** `turnstile-solver` until everything is validated; engine `/health` in
+`api_status.go`; and lead the anonymous chain with real-FLAC sources (today's
+`defaultAutoOrder` is still tidal-first).
 
 ---
 

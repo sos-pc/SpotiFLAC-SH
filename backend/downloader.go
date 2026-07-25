@@ -418,6 +418,14 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	// the specific proxy); it's ignored for the other providers. Returns the
 	// downloaded filename and error from the underlying client.
 	runService := func(svc, tidalApiURL string) (string, error) {
+		// Engine route, opt-in per provider (ENGINE_SERVICES). Placed here rather
+		// than in the switch below so it covers every entry point at once —
+		// explicit service and the auto chain — and so an unset env var leaves
+		// the native paths byte-for-byte unchanged.
+		if engineHandles(svc) {
+			slog.Info("[Engine] Delegating", "service", svc, "track", req.TrackName)
+			return downloadViaEngine(req, svc, spotifyURL)
+		}
 		switch svc {
 		case "amazon":
 			dl := amazon.NewAmazonDownloader()
