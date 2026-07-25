@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import logging
 import pathlib
+import shutil
 import uuid
 from contextlib import redirect_stdout, redirect_stderr
 
@@ -69,13 +70,27 @@ async def download(req: DownloadRequest) -> DownloadResponse:
         with redirect_stdout(log), redirect_stderr(log):
             await _run_download(req, out)
     except Exception as e:  # noqa: BLE001 — surface ANY engine failure to Go
+        _discard(out)
         return DownloadResponse(status="error", error=repr(e), log=log.getvalue())
 
     audio = _first_audio(out)
     if audio is None:
+        _discard(out)
         return DownloadResponse(status="error", error="engine produced no audio file",
                                 log=log.getvalue())
     return DownloadResponse(status="ok", file=str(audio), log=log.getvalue())
+
+
+def _discard(out: pathlib.Path) -> None:
+    """Delete a failed job's directory.
+
+    On success the Go side removes it after ingesting the file, but a failure
+    response carries no path, so Go never learns which directory to clean. Without
+    this, every failed download leaks its directory — and whatever partial or
+    invalid payload it holds — on the shared volume forever. (Observed: two
+    orphaned dirs after two failed tracks, 2026-07-23.)
+    """
+    shutil.rmtree(out, ignore_errors=True)
 
 
 async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
