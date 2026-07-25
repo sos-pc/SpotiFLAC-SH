@@ -118,7 +118,7 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 	// turns those from a lost track into a normal download, mirroring the ladder
 	// the native Qobuz path already walks (27→7→6). Gated on the user's own
 	// AllowFallback so "hi-res or nothing" stays expressible.
-	if err != nil && req.AllowFallback && isHiResRequest(req.AudioFormat) {
+	if err != nil && req.AllowFallback && isHiResRequest(req.AudioFormat) && providerHasQualityTiers(svc) {
 		slog.Info("[Engine] hi-res failed, retrying at CD quality", "service", svc, "err", err, "track", req.TrackName)
 		res, err = client.Download(context.Background(), spotifyURL, []string{svc}, "LOSSLESS", engineStagingDir(), req.AllowFallback)
 	}
@@ -184,10 +184,31 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 		SpotifyID:   req.SpotifyID, // what meta.BuildSpotifyIDIndex reads to rebuild M3U8s
 	}
 	if err := meta.EmbedMetadata(finalPath, metadata, coverPath); err != nil {
-		return "", fmt.Errorf("failed to embed metadata: %w", err)
+		// Delete what we just wrote. Tagging parses the container, so a failure
+		// here usually means the payload is not the audio file it claims to be —
+		// observed when a Deezer route answered 502 and the engine still produced
+		// a ".flac" mutagen refused to open. Returning an error alone would leave
+		// that garbage in the library: ExecuteDownload's own cleanup keys off the
+		// filename we return, and on the error path we return "".
+		if rmErr := os.Remove(finalPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			slog.Warn("[Engine] could not remove unusable file", "path", finalPath, "err", rmErr)
+		}
+		return "", fmt.Errorf("failed to embed metadata (file discarded): %w", err)
 	}
 
 	return finalPath, nil
+}
+
+// providerHasQualityTiers reports whether asking svc for a different quality can
+// change the outcome. Deezer serves one tier ("FLAC Best Available"), so a
+// hi-res retry there re-runs the exact same request — pure latency on a download
+// that is already failing (observed: a 502 retried at LOSSLESS, failing again).
+func providerHasQualityTiers(svc string) bool {
+	switch strings.ToLower(strings.TrimSpace(svc)) {
+	case "qobuz", "tidal", "amazon":
+		return true
+	}
+	return false
 }
 
 // isHiResRequest reports whether the caller asked for better-than-CD audio, in

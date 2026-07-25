@@ -57,7 +57,9 @@ class DownloadResponse(BaseModel):
     log: str = ""
 
 
-@app.get("/health")
+# HEAD as well as GET: the Go status probe tries HEAD first (cheaper) and only
+# falls back to GET, so a GET-only route answers its liveness check with a 405.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
