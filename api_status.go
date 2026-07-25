@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
@@ -596,6 +597,15 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	// is a real liveness signal even before verification.
 	if healthURL, err := community.QobuzHealthURL(); err == nil {
 		all = append(all, serviceEntry{"Qobuz · community", healthURL, pingURL})
+	}
+
+	// Download engine sidecar. Listed only when configured, so an install without
+	// the engine doesn't show a phantom service that is always down. Its /health
+	// answers 200 with no auth, so the generic pingURL is a real liveness signal
+	// — and it's the one probe that says whether delegated providers can run at
+	// all, since every ENGINE_SERVICES download goes through it.
+	if engineURL := backend.EngineBaseURL(); engineURL != "" {
+		all = append(all, serviceEntry{"Engine", strings.TrimRight(engineURL, "/") + "/health", pingURL})
 	}
 
 	if jellyfinURL != "" {

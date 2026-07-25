@@ -28,9 +28,12 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
-// engineBaseURL is where the shim lives on the internal compose network
+// EngineBaseURL is where the shim lives on the internal compose network
 // (e.g. http://spotiflac-engine:8080). Empty disables the engine entirely.
-func engineBaseURL() string { return strings.TrimSpace(os.Getenv("ENGINE_URL")) }
+// Exported so the status probe (api_status.go) reads the engine's location from
+// the same place the download path does — one definition of ENGINE_URL, so the
+// two can't drift apart.
+func EngineBaseURL() string { return strings.TrimSpace(os.Getenv("ENGINE_URL")) }
 
 // engineStagingDir is the shared volume the engine writes into. It must be
 // mounted at the SAME path in both containers, since the path the engine
@@ -49,7 +52,7 @@ func engineStagingDir() string {
 // the staged cutover in docs/module-engine-runbook.md. Unset = nothing
 // delegated, every provider keeps its native Go path.
 func engineHandles(svc string) bool {
-	if engineBaseURL() == "" {
+	if EngineBaseURL() == "" {
 		return false
 	}
 	for _, s := range strings.Split(os.Getenv("ENGINE_SERVICES"), ",") {
@@ -104,7 +107,7 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 		return (<-metaChan).Metadata
 	}
 
-	client := engine.NewClient(engineBaseURL())
+	client := engine.NewClient(EngineBaseURL())
 	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, req.AudioFormat, engineStagingDir())
 	if err != nil {
 		drainGenre() // never leave the genre goroutine's send blocked

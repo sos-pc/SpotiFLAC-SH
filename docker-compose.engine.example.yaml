@@ -1,0 +1,85 @@
+# SpotiFLAC + download engine (two services).
+#
+# The engine is a fork of the SpotiFLAC Python module (see engine/FORK-MAINTENANCE.md
+# in that repo) wrapped in our HTTP shim. Our Go app sends it "download this Spotify
+# URL" and ingests the resulting FLAC — naming, tags and catalog stay ours.
+#
+# This file shows only the engine wiring. If you already run SpotiFLAC, add the
+# marked pieces to your existing compose rather than replacing it — in particular
+# KEEP your turnstile-solver service until every provider is proven through the
+# engine in prod.
+
+services:
+  spotiflac:
+    image: ghcr.io/sos-pc/spotiflac-sh:latest
+    container_name: spotiflac
+    restart: unless-stopped
+    ports:
+      - "6890:6890"
+    environment:
+      - JELLYFIN_URL=http://your-jellyfin-host:8096
+      - JWT_SECRET=change-me-to-a-random-32-char-string
+      # ── ADD: where the engine lives (internal network name, not the host) ──
+      - ENGINE_URL=http://spotiflac-engine:8080
+      # ── ADD: which providers are delegated. Opt-in, comma-separated.
+      # Empty/absent = nothing delegated, every provider keeps its native Go path.
+      # Add one at a time, only after each is proven in prod. Removing a name here
+      # is the full rollback — no code change, no rebuild.
+      - ENGINE_SERVICES=qobuz
+    user: "1000:1000"
+    volumes:
+      - /path/to/music:/home/nonroot/Music
+      - spotiflac_config:/home/nonroot/.SpotiFLAC
+      # ── ADD: hand-off volume. MUST be mounted at the same path in both
+      # services: the engine returns an absolute path that we open as-is.
+      - spotiflac_staging:/staging
+    networks: [spotiflac_net]
+    depends_on:
+      spotiflac-engine:
+        condition: service_healthy
+
+  # ── ADD: the engine ────────────────────────────────────────────────────────
+  spotiflac-engine:
+    build:
+      # The fork, cloned next to this file (git clone …/SpotiFLAC-Module-Version engine-src)
+      context: ./engine-src
+      dockerfile: engine/Dockerfile
+    container_name: spotiflac-engine
+    restart: unless-stopped
+    # Same uid as the app, so the FLACs it writes to /staging are readable and
+    # movable by us (its own image defaults to root otherwise).
+    user: "1000:1000"
+    # NOT published on the host: only our app talks to it, over the compose
+    # network. It runs third-party code, so it gets no inbound exposure.
+    expose:
+      - "8080"
+    # Never give it a TTY. One engine route falls back to prompting on stdin for
+    # a manually pasted grant; with no TTY that fails fast on EOF, with one it
+    # would hang the download waiting for a human. (Observed 2026-07-23.)
+    stdin_open: false
+    tty: false
+    volumes:
+      - spotiflac_staging:/staging
+      - engine_cache:/home/nonroot/.cache
+    networks: [spotiflac_net]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  spotiflac_net:
+    name: spotiflac_net
+
+volumes:
+  spotiflac_config:
+    name: spotiflac_config
+  # Transient hand-off only — the engine writes here, we move the file into the
+  # library and delete the job dir. Nothing here needs backing up.
+  spotiflac_staging:
+    name: spotiflac_staging
+  engine_cache:
+    name: engine_cache
