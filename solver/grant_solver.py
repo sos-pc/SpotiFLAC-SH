@@ -191,26 +191,6 @@ def solve_challenge(challenge_url, max_retries=3):
     Retries up to max_retries times with cleanup between attempts."""
     is_zarz = _is_zarz_url(challenge_url)
 
-    options = uc.ChromeOptions()
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    # Prevent Chrome crash handler from spawning persistent processes
-    options.add_argument("--disable-crashpad")
-    options.add_argument("--disable-breakpad")
-    options.add_argument("--disable-crash-reporter")
-    # Reduce resource footprint
-    options.add_argument("--disable-features=TranslateUI")
-    options.add_argument("--disable-sync")
-    options.add_argument("--disable-background-networking")
-    # The display is provided by Xvfb (ENV DISPLAY=:99)
-
-    # Enable performance logging for zarz-v2 flow (capture /verify response)
-    if is_zarz:
-        options.set_capability(
-            'goog:loggingPrefs', {'performance': 'ALL'})
-
     version_main = _get_chromium_version()
     logger.debug(f"Chromium version: {version_main}")
 
@@ -234,6 +214,22 @@ def solve_challenge(challenge_url, max_retries=3):
         driver = None
         start = time.time()
         try:
+            # Fresh options each attempt (ChromeOptions cannot be reused)
+            options = uc.ChromeOptions()
+            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--disable-crashpad")
+            options.add_argument("--disable-breakpad")
+            options.add_argument("--disable-crash-reporter")
+            options.add_argument("--disable-features=TranslateUI")
+            options.add_argument("--disable-sync")
+            options.add_argument("--disable-background-networking")
+            if is_zarz:
+                options.set_capability(
+                    'goog:loggingPrefs', {'performance': 'ALL'})
+
             logger.debug("Launching undetected Chrome")
             driver = uc.Chrome(
                 options=options,
@@ -272,7 +268,7 @@ def solve_challenge(challenge_url, max_retries=3):
 
             # ── Grant extraction ──────────────────────────────────────────
 
-            if is_jarz:
+            if is_zarz:
                 # zarz-v2: poll performance logs for up to 40s, then fall back
                 # to URL polling for another 50s
                 logger.debug("Scanning performance logs for /verify grant")
