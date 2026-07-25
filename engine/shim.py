@@ -44,6 +44,10 @@ class DownloadRequest(BaseModel):
     services: list[str] = ["qobuz", "deezer", "amazon"]
     quality: str = "LOSSLESS"
     out_dir: str
+    # Mirrors the app's "Allow Quality Fallback" setting: whether a hi-res request
+    # may settle for CD quality. Sent explicitly so a user who turned it OFF gets
+    # a hi-res-or-nothing download instead of the engine's permissive default.
+    allow_fallback: bool = True
 
 
 class DownloadResponse(BaseModel):
@@ -109,6 +113,7 @@ async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
         output_dir=str(out),
         services=req.services,
         quality=req.quality,
+        allow_fallback=req.allow_fallback,
         enrich_metadata=False,   # tagging owned by Go ingestion
         embed_lyrics=False,
         log_level=logging.INFO,  # default is WARNING — too quiet for the Debug Logs bridge

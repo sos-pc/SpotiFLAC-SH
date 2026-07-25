@@ -108,7 +108,20 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 	}
 
 	client := engine.NewClient(EngineBaseURL())
-	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, req.AudioFormat, engineStagingDir())
+	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, req.AudioFormat, engineStagingDir(), req.AllowFallback)
+
+	// Hi-res is a request the catalogue often cannot honour: most older material
+	// exists only in 16/44.1, and asking a stream endpoint for strict 24-bit on
+	// such a track fails outright — observed as a bare HTTP 500, retried six
+	// times, on Qobuz track 1930534 (hires=false, maximum_bit_depth=16) even
+	// though the track is streamable at CD quality. Retrying once at LOSSLESS
+	// turns those from a lost track into a normal download, mirroring the ladder
+	// the native Qobuz path already walks (27→7→6). Gated on the user's own
+	// AllowFallback so "hi-res or nothing" stays expressible.
+	if err != nil && req.AllowFallback && isHiResRequest(req.AudioFormat) {
+		slog.Info("[Engine] hi-res failed, retrying at CD quality", "service", svc, "err", err, "track", req.TrackName)
+		res, err = client.Download(context.Background(), spotifyURL, []string{svc}, "LOSSLESS", engineStagingDir(), req.AllowFallback)
+	}
 	if err != nil {
 		drainGenre() // never leave the genre goroutine's send blocked
 		return "", err
@@ -175,6 +188,17 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 	}
 
 	return finalPath, nil
+}
+
+// isHiResRequest reports whether the caller asked for better-than-CD audio, in
+// any of the vocabularies AudioFormat carries (the canonical names the UI uses
+// and the numeric Qobuz codes that reach us from older call sites).
+func isHiResRequest(format string) bool {
+	switch strings.ToUpper(strings.TrimSpace(format)) {
+	case "HI_RES_LOSSLESS", "HI_RES", "27", "7":
+		return true
+	}
+	return false
 }
 
 // logEngineOutput surfaces the engine's own output in our logs (and therefore in

@@ -40,10 +40,11 @@ func NewClient(baseURL string) *Client {
 }
 
 type downloadRequest struct {
-	SpotifyURL string   `json:"spotify_url"`
-	Services   []string `json:"services"`
-	Quality    string   `json:"quality"`
-	OutDir     string   `json:"out_dir"`
+	SpotifyURL    string   `json:"spotify_url"`
+	Services      []string `json:"services"`
+	Quality       string   `json:"quality"`
+	OutDir        string   `json:"out_dir"`
+	AllowFallback bool     `json:"allow_fallback"`
 }
 
 type downloadResponse struct {
@@ -63,12 +64,13 @@ type Result struct {
 // priority. For the anonymous path, services must lead with real-FLAC sources
 // (qobuz/deezer/amazon) — never tidal-first, which is previews-only without a
 // token. Tidal is handled by the Go BYOT path before the engine is ever called.
-func (c *Client) Download(ctx context.Context, spotifyURL string, services []string, quality, outDir string) (*Result, error) {
+func (c *Client) Download(ctx context.Context, spotifyURL string, services []string, quality, outDir string, allowFallback bool) (*Result, error) {
 	payload, err := json.Marshal(downloadRequest{
-		SpotifyURL: spotifyURL,
-		Services:   services,
-		Quality:    quality,
-		OutDir:     outDir,
+		SpotifyURL:    spotifyURL,
+		Services:      services,
+		Quality:       quality,
+		OutDir:        outDir,
+		AllowFallback: allowFallback,
 	})
 	if err != nil {
 		return nil, err

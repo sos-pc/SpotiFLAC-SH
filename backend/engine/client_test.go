@@ -18,7 +18,7 @@ func TestDownloadTreatsStatusErrorAsFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := NewClient(srv.URL).Download(context.Background(), "https://open.spotify.com/track/x", []string{"deezer"}, "LOSSLESS", "/staging")
+	_, err := NewClient(srv.URL).Download(context.Background(), "https://open.spotify.com/track/x", []string{"deezer"}, "LOSSLESS", "/staging", true)
 	if err == nil {
 		t.Fatal("status:error must be an error, got nil")
 	}
@@ -35,7 +35,7 @@ func TestDownloadRejectsOkWithoutFile(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := NewClient(srv.URL).Download(context.Background(), "u", []string{"deezer"}, "LOSSLESS", "/staging"); err == nil {
+	if _, err := NewClient(srv.URL).Download(context.Background(), "u", []string{"deezer"}, "LOSSLESS", "/staging", true); err == nil {
 		t.Fatal("ok with no file path must be an error")
 	}
 }
@@ -48,7 +48,7 @@ func TestDownloadSendsContractAndReturnsFile(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := NewClient(srv.URL).Download(context.Background(), "spurl", []string{"deezer", "qobuz"}, "LOSSLESS", "/staging")
+	res, err := NewClient(srv.URL).Download(context.Background(), "spurl", []string{"deezer", "qobuz"}, "LOSSLESS", "/staging", true)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -65,13 +65,36 @@ func TestDownloadSendsContractAndReturnsFile(t *testing.T) {
 	}
 }
 
+// allow_fallback carries the user's "Allow Quality Fallback" setting. Because
+// the engine defaults it to true, dropping the field would silently ignore a
+// user who turned it OFF and hand them a CD-quality file they explicitly
+// refused — a wrong result that looks like a success, so nothing would surface it.
+func TestDownloadForwardsAllowFallbackWhenDisabled(t *testing.T) {
+	var got downloadRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		json.NewEncoder(w).Encode(downloadResponse{Status: "ok", File: "/staging/ab/t.flac"})
+	}))
+	defer srv.Close()
+
+	if _, err := NewClient(srv.URL).Download(context.Background(), "u", []string{"qobuz"}, "HI_RES_LOSSLESS", "/staging", false); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if got.AllowFallback {
+		t.Error("allow_fallback=false was not forwarded; the engine would silently downgrade the quality")
+	}
+	if got.Quality != "HI_RES_LOSSLESS" {
+		t.Errorf("quality not forwarded verbatim: %q", got.Quality)
+	}
+}
+
 func TestDownloadSurfacesHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
-	if _, err := NewClient(srv.URL).Download(context.Background(), "u", nil, "LOSSLESS", "/staging"); err == nil {
+	if _, err := NewClient(srv.URL).Download(context.Background(), "u", nil, "LOSSLESS", "/staging", true); err == nil {
 		t.Fatal("HTTP 500 must be an error")
 	}
 }
