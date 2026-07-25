@@ -27,7 +27,14 @@ RUN pip install --no-cache-dir . \
 
 # Non-root, same uid as the Go service so FLACs written to the shared /staging
 # volume are readable/movable by it. HOME set explicitly (numeric uid, no passwd).
-RUN mkdir -p /home/nonroot/.cache && chown -R 1000:1000 /home/nonroot /app
+#
+# /staging is created and chowned here on purpose, even though it is always a
+# mount point: when Docker first populates an EMPTY named volume it copies the
+# image directory's ownership at that path. Without this the volume is born
+# root:root and this container (uid 1000) cannot write the downloaded file into
+# it — and neither can the Go app, which has to move the file out and delete the
+# job dir. A bind mount hides the problem only because you chown it by hand.
+RUN mkdir -p /home/nonroot/.cache /staging && chown -R 1000:1000 /home/nonroot /app /staging
 USER 1000:1000
 ENV HOME=/home/nonroot
 ENV ENGINE_PORT=8080
