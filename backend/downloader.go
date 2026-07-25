@@ -424,7 +424,19 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		// the native paths byte-for-byte unchanged.
 		if engineHandles(svc) {
 			slog.Info("[Engine] Delegating", "service", svc, "track", req.TrackName)
-			return downloadViaEngine(req, svc, spotifyURL)
+			filename, err := downloadViaEngine(req, svc, spotifyURL)
+			if err == nil {
+				return filename, nil
+			}
+			// Fall through to this provider's native path instead of giving up on
+			// it. The two reach genuinely different routes, and their strengths are
+			// complementary: the engine matches far better (text+score, duration
+			// validation) but cannot answer the community challenge headlessly — it
+			// prompts for a grant on stdin and dies on EOF — whereas our native path
+			// matches poorly but rides a real community session obtained by the
+			// solver. Returning here would skip to the NEXT provider in the auto
+			// chain and waste the one credential we actually hold.
+			slog.Info("[Engine] Failed, retrying on the native path", "service", svc, "err", err, "track", req.TrackName)
 		}
 		switch svc {
 		case "amazon":
