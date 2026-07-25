@@ -15,8 +15,9 @@ full download engine behind our existing Go service.
 > so the two-service design needs a thin HTTP shim we author around `AsyncSpotiFLAC`.
 > Locked: (1) form = **C3** (two-service compose: module + shim); (2) **Tidal BYOT**
 > credential-override (native path wins when a valid token is present, else delegate);
-> (3) delegating the community-proxy providers **retires our Selenium/Turnstile solver**
-> (the module solves its own challenges in code — ALTCHA PoW / token exchange, no browser);
+> (3) delegating the community-proxy providers **may retire our Selenium/Turnstile solver** —
+> ⚠️ *downgraded from "retires" on 2026-07-23: one engine route still prompts for a manual grant,
+> see §6;*
 > (4) workspace = **new long-lived branch `feat/module-engine`**, not a new repo.
 
 Related: [EXTERNAL_APIS.md](EXTERNAL_APIS.md) · [CREDITS.md](../CREDITS.md) · [tidal-auth.md](tidal-auth.md)
@@ -174,13 +175,28 @@ Recommended sidecar form: **C3** (two-service compose) — Phase 0 confirmed the
 has no HTTP server, so service B is the module image **plus a thin FastAPI shim** around
 `AsyncSpotiFLAC` (see Phase 0 below).
 
-**Bonus benefit — retires Selenium.** The module's download path solves its own challenges
-in code (ALTCHA proof-of-work, `/prepare` token exchange) across a multi-host fallback chain
-(gdstudio, wjhe.top, squid.wtf, flacdownloader, antra, community, musicdl), with **no
-Cloudflare/Turnstile, no browser, and no session grant**. Delegating the community-proxy
-providers therefore lets us **delete the Selenium/Turnstile solver entirely** — turning our
-most fragile, security-sensitive component from a maintenance burden into removed code.
-Trade: more anonymous third-party hosts in the download path (§7.2), but with fallback
+**Possible benefit — MAY retire Selenium (downgraded 2026-07-23, was overstated).** The engine's
+download path solves *some* challenges in code (ALTCHA proof-of-work, `/prepare` token exchange)
+across a multi-host fallback chain (gdstudio, wjhe.top, squid.wtf, flacdownloader, antra,
+community, musicdl).
+
+⚠️ **An earlier revision claimed "no browser, no session grant, so we can delete the solver
+entirely." That was wrong** — observed on the first live run: `core/signed_session_mobile`
+falls back to an **interactive stdin prompt asking a human to paste a grant**
+(`api.zarz.moe/v2/challenge`), i.e. the same class of challenge our Turnstile solver answers.
+Some routes are code-solved, **not all**.
+
+Revised position:
+- Whether the solver can be deleted **depends on which routes actually carry our traffic**, and is
+  decided by prod evidence, not by this doc. First evidence is encouraging: **Qobuz succeeded in
+  6 s without any grant** (2026-07-23).
+- The solver may turn out to be an **asset rather than dead weight**: it produces exactly the kind
+  of grant this path asks for, so feeding it to the engine is an option worth exploring before
+  deleting anything.
+- **Operational rule:** never give the engine container a TTY (`stdin_open`/`tty` off). Without one
+  the prompt fails fast on EOF; with one, a download could hang waiting for human input.
+
+Trade unchanged: more anonymous third-party hosts in the download path (§7.2), but with fallback
 resilience our single musicdl.me lacks.
 
 **Foundation reframe — the project must work with NO account (no BYOT).** Anonymous Tidal is
