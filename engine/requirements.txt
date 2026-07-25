@@ -1,6 +1,15 @@
-# Shim-only deps. The download engine itself is installed separately and PINNED
-# via the MODULE_VERSION build arg in the Dockerfile (never auto-update).
-# TODO(pin): lock these to exact versions before prod once the pilot image builds.
+# Shim deps + gap-fillers for the engine's own packaging.
+# The engine itself is installed from the fork's source by the Dockerfile.
+
 fastapi
 uvicorn[standard]
 pydantic>=2
+
+# ── Undeclared upstream dependency ───────────────────────────────────────────
+# SpotiFLAC/core/signed_session_desktop.py imports `requests`, but it appears in
+# NEITHER pyproject.toml's [project] dependencies NOR the repo's root
+# requirements.txt. Importing the package therefore fails with
+# ModuleNotFoundError: No module named 'requests' (observed on the first
+# container run, 2026-07-23). Declared here rather than patched into their
+# pyproject, so our diff stays additive and upstream merges cleanly.
+requests>=2.31.0

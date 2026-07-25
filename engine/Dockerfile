@@ -12,11 +12,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install the fork's own package from source.
-# VERIFY on first build: the repo ships a pyproject.toml/setup so `pip install .`
-# works (it does upstream). If it needs extras, add them here.
+# Install the fork's own package from source, then its root requirements.txt,
+# then ours.
+#
+# All three are needed: `pip install .` only pulls pyproject's [project]
+# dependencies, which are NOT the engine's full runtime set — the root
+# requirements.txt additionally lists `nodriver`, and `requests` is missing from
+# both (our engine/requirements.txt fills that gap; see the note there).
+# Installing only the package fails at import time.
 COPY . .
 RUN pip install --no-cache-dir . \
+    && pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir -r engine/requirements.txt
 
 # Non-root, same uid as the Go service so FLACs written to the shared /staging
