@@ -35,4 +35,9 @@ A route dies → upstream usually fixes it → you `git merge` and rebuild. You 
 only when a flag can't get you there.
 
 ## Core edits (log every non-additive change here)
-- (none yet)
+- **2026-07-25** — `signed_session_mobile.py`: added `_solver_grant_async()` and
+  patched `authenticate_with_manual_grant()` to call the external solver
+  (`TURNSTILE_SOLVER_URL/grant`) when `stdin` is not a TTY (Docker container
+  without `stdin_open`). Interactive behaviour preserved when TTY is available.
+- **2026-07-25** — `signed_session_desktop.py`: same solver fallback added to
+  `_run_manual_terminal_verification()` for the community-session path.

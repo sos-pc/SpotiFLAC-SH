@@ -1,10 +1,16 @@
 """
-grant_solver.py — Turnstile challenge solver using undetected-chromedriver.
+grant_solver.py — Turnstile + zarz-v2 challenge solver using undetected-chromedriver.
 
 undetected-chromedriver patches Chrome to remove automation flags
 (navigator.webdriver, etc.) so Cloudflare gives a non-interactive
 Turnstile challenge that auto-solves. This produces a valid token
 accepted by verify.spotbye.qzz.io/verify.
+
+Two strategies:
+  - Turnstile redirect: grant appears in the final URL query string.
+    Used for community challenges (spotbye/qobuz native).
+  - zarz-v2 (api.zarz.moe): the page calls /verify internally; the grant
+    is in the JSON response. Captured via Chrome performance logs + CDP.
 
 Usage:
     python3 grant_solver.py --host 0.0.0.0 --port 5000
@@ -85,16 +91,105 @@ def _get_chromium_version():
         return 150
 
 
+def _is_zarz_url(url: str) -> bool:
+    """Detect zarz-v2 challenge URLs (api.zarz.moe/v2/challenge)."""
+    return bool(re.search(r'api\.zarz\.moe/v\d+/challenge', url))
+
+
+# ── Grant extraction from performance logs (zarz-v2 flow) ───────────────────
+
+def _extract_grant_from_perf_logs(driver, start_time: float) -> str | None:
+    """Scan Chrome performance logs for a /verify response containing a grant.
+
+    The zarz challenge page calls POST .../challenge/verify internally after
+    Turnstile is solved. The JSON response is `{"grant":"gr_...","expires_in":60}`.
+    Since the callback URL points to 127.0.0.1:1 (dummy), we can't rely on URL
+    redirect — we capture the grant from the network response body via CDP.
+
+    Returns the grant string, or None if not found.
+    """
+    try:
+        logs = driver.get_log('performance')
+    except Exception:
+        return None
+
+    for entry in logs:
+        try:
+            msg = json.loads(entry.get('message', '{}'))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        method = msg.get('message', {}).get('method', '')
+        if method != 'Network.responseReceived':
+            continue
+
+        params = msg.get('message', {}).get('params', {})
+        resp = params.get('response', {})
+        resp_url = resp.get('url', '')
+
+        # Match the /verify endpoint (e.g. /v2/challenge/verify or /challenge/verify)
+        if '/verify' not in resp_url:
+            continue
+
+        mime = resp.get('mimeType', '').lower()
+        if 'json' not in mime:
+            continue
+
+        request_id = params.get('requestId', '')
+        if not request_id:
+            continue
+
+        # Fetch the response body via CDP
+        try:
+            body_result = driver.execute_cdp_cmd(
+                'Network.getResponseBody',
+                {'requestId': request_id},
+            )
+        except Exception:
+            # Response body may have been discarded by Chrome already
+            continue
+
+        body_text = body_result.get('body', '')
+        if body_result.get('base64Encoded'):
+            try:
+                import base64
+                body_text = base64.b64decode(body_text).decode('utf-8', errors='ignore')
+            except Exception:
+                continue
+
+        if not body_text:
+            continue
+
+        try:
+            data = json.loads(body_text)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        grant = data.get('grant')
+        if isinstance(grant, str) and grant.strip():
+            elapsed = round(time.time() - start_time, 3)
+            logger.success(
+                f"grant captured via CDP ({grant[:15]}...) in {elapsed}s "
+                f"from {resp_url[:80]}")
+            return grant.strip()
+
+    return None
+
+
 # ── Solver ──────────────────────────────────────────────────────────────────
 
 def solve_challenge(challenge_url, max_retries=3):
-    """Navigate to the challenge URL with undetected Chrome, wait for
-    Turnstile to auto-solve and redirect, extract the grant token.
+    """Navigate to the challenge URL with undetected Chrome, extract the grant.
 
-    Retries up to max_retries times with cleanup between attempts,
-    handling the "chrome not reachable" error that occurs after the
-    container has been running for a while (zombie Chrome processes,
-    stale lock files, Xvfb backpressure)."""
+    Two strategies depending on the challenge type:
+      - zarz-v2 (api.zarz.moe): capture grant from /verify response via CDP
+      - Turnstile redirect (legacy): extract grant from final URL query string
+
+    Retries up to max_retries times with cleanup between attempts."""
+    is_zarz = _is_zarz_url(challenge_url)
 
     options = uc.ChromeOptions()
     options.add_argument("--window-size=1920,1080")
@@ -111,8 +206,16 @@ def solve_challenge(challenge_url, max_retries=3):
     options.add_argument("--disable-background-networking")
     # The display is provided by Xvfb (ENV DISPLAY=:99)
 
+    # Enable performance logging for zarz-v2 flow (capture /verify response)
+    if is_zarz:
+        options.set_capability(
+            'goog:loggingPrefs', {'performance': 'ALL'})
+
     version_main = _get_chromium_version()
     logger.debug(f"Chromium version: {version_main}")
+
+    if is_zarz:
+        logger.info("zarz-v2 challenge detected, will capture grant from network")
 
     last_error = None
     for attempt in range(max_retries):
@@ -125,7 +228,6 @@ def solve_challenge(challenge_url, max_retries=3):
             _clean_chrome_dirs()
             time.sleep(wait)
         else:
-            # First attempt: clean any leftovers from previous sessions
             _kill_leftover_chrome()
             _clean_chrome_dirs()
 
@@ -136,14 +238,14 @@ def solve_challenge(challenge_url, max_retries=3):
             driver = uc.Chrome(
                 options=options,
                 headless=False,
-                use_subprocess=True,  # easier to kill cleanly than in-process
+                use_subprocess=True,
                 version_main=version_main,
             )
 
             logger.debug("Navigating to challenge URL")
             driver.get(challenge_url)
 
-            logger.debug("Waiting for Turnstile to solve and redirect")
+            logger.debug("Waiting for Turnstile to load")
 
             # Wait for countdown + Turnstile to load, then try to click
             time.sleep(8)
@@ -168,33 +270,69 @@ def solve_challenge(challenge_url, max_retries=3):
                 except Exception:
                     logger.debug("No clickable Turnstile element found")
 
-            # Poll the URL for up to 90 seconds
-            for poll in range(90):
-                time.sleep(1)
-                current_url = driver.current_url
+            # ── Grant extraction ──────────────────────────────────────────
 
-                parsed = urlparse(current_url)
-                grant = parse_qs(parsed.query).get('grant', [None])[0]
-                if grant:
-                    elapsed = round(time.time() - start, 3)
-                    logger.success(
-                        f"grant captured ({grant[:15]}...) in {elapsed}s")
-                    return {"grant": grant, "elapsed": elapsed}
+            if is_jarz:
+                # zarz-v2: poll performance logs for up to 40s, then fall back
+                # to URL polling for another 50s
+                logger.debug("Scanning performance logs for /verify grant")
 
-                if 'grant=' in current_url:
-                    for part in current_url.split('?', 1)[-1].split('&'):
-                        if part.startswith('grant='):
-                            g = part.split('=', 1)[1]
-                            elapsed = round(time.time() - start, 3)
-                            logger.success(
-                                f"grant via parse ({g[:15]}...) "
-                                f"in {elapsed}s")
-                            return {"grant": g, "elapsed": elapsed}
+                for poll in range(40):
+                    time.sleep(1)
+                    grant = _extract_grant_from_perf_logs(driver, start)
+                    if grant:
+                        return {"grant": grant,
+                                "elapsed": round(time.time() - start, 3)}
 
-                if poll % 15 == 0 and poll > 0:
-                    logger.debug(
-                        f"waiting {poll}s, "
-                        f"current URL: {current_url[:100]}")
+                    if poll % 10 == 0 and poll > 0:
+                        logger.debug(
+                            f"CDP scan {poll}s, "
+                            f"current URL: {driver.current_url[:100]}")
+
+                # Fallback: try URL polling (the redirect to 127.0.0.1:1 may
+                # still briefly set grant= in the URL before the error page)
+                logger.debug(
+                    "CDP scan exhausted, falling back to URL polling")
+                for poll in range(50):
+                    time.sleep(1)
+                    current_url = driver.current_url
+
+                    parsed = urlparse(current_url)
+                    grant = parse_qs(parsed.query).get('grant', [None])[0]
+                    if grant:
+                        elapsed = round(time.time() - start, 3)
+                        logger.success(
+                            f"grant via URL fallback ({grant[:15]}...) "
+                            f"in {elapsed}s")
+                        return {"grant": grant, "elapsed": elapsed}
+            else:
+                # Legacy Turnstile redirect: poll URL for grant=
+                for poll in range(90):
+                    time.sleep(1)
+                    current_url = driver.current_url
+
+                    parsed = urlparse(current_url)
+                    grant = parse_qs(parsed.query).get('grant', [None])[0]
+                    if grant:
+                        elapsed = round(time.time() - start, 3)
+                        logger.success(
+                            f"grant captured ({grant[:15]}...) in {elapsed}s")
+                        return {"grant": grant, "elapsed": elapsed}
+
+                    if 'grant=' in current_url:
+                        for part in current_url.split('?', 1)[-1].split('&'):
+                            if part.startswith('grant='):
+                                g = part.split('=', 1)[1]
+                                elapsed = round(time.time() - start, 3)
+                                logger.success(
+                                    f"grant via parse ({g[:15]}...) "
+                                    f"in {elapsed}s")
+                                return {"grant": g, "elapsed": elapsed}
+
+                    if poll % 15 == 0 and poll > 0:
+                        logger.debug(
+                            f"waiting {poll}s, "
+                            f"current URL: {current_url[:100]}")
 
             # Timeout
             elapsed = round(time.time() - start, 3)
@@ -212,14 +350,12 @@ def solve_challenge(challenge_url, max_retries=3):
             last_error = exc
             logger.error(
                 f"error (attempt {attempt + 1}/{max_retries}): {exc}")
-            # Fall through to retry
         finally:
             if driver:
                 try:
                     driver.quit()
                 except Exception:
                     pass
-            # Always clean up between sessions
             _kill_leftover_chrome()
             _clean_chrome_dirs()
 
