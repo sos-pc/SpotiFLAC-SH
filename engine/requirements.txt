@@ -1,0 +1,6 @@
+# Shim-only deps. The download engine itself is installed separately and PINNED
+# via the MODULE_VERSION build arg in the Dockerfile (never auto-update).
+# TODO(pin): lock these to exact versions before prod once the pilot image builds.
+fastapi
+uvicorn[standard]
+pydantic>=2
