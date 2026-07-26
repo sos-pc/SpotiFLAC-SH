@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import pathlib
 import shutil
 import uuid
@@ -34,6 +35,53 @@ from SpotiFLAC import AsyncSpotiFLAC  # noqa: E402
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".opus"}
 
 app = FastAPI(title="spotiflac-engine-shim")
+
+
+class _QuietEngineErrors(logging.Filter):
+    """Collapse the engine's error logging to one line per distinct problem.
+
+    A single failing route produces a ~30-line traceback, and the engine logs it
+    again at every retry — one unreachable Deezer host filled the container log
+    with five identical mutagen stack traces. The exception *message* already
+    says everything actionable ("... is not a valid FLAC file"); the frames below
+    it are library internals that never change.
+
+    So: drop the traceback, and drop a message identical to the previous one.
+    Set ENGINE_LOG_TRACEBACKS=1 to get the full output back when debugging.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._last: str | None = None
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        key = f"{record.name}:{record.getMessage()}"
+        if key == self._last:
+            return False
+        self._last = key
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+_LOG_FILTER = _QuietEngineErrors()
+
+
+def _quiet_engine_logs() -> None:
+    """Attach the filter to whatever handlers currently exist.
+
+    Called before each download rather than once at import: the engine
+    configures logging when a client is constructed, so handlers installed after
+    us would otherwise bypass the filter. Adding it twice is harmless — the
+    membership check keeps it idempotent.
+    """
+    if os.environ.get("ENGINE_LOG_TRACEBACKS") == "1":
+        return
+    handlers = list(logging.root.handlers)
+    handlers += list(logging.getLogger("SpotiFLAC").handlers)
+    for h in handlers:
+        if _LOG_FILTER not in h.filters:
+            h.addFilter(_LOG_FILTER)
 
 
 class DownloadRequest(BaseModel):
@@ -120,6 +168,9 @@ async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
         embed_lyrics=False,
         log_level=logging.INFO,  # default is WARNING — too quiet for the Debug Logs bridge
     ) as client:
+        # After construction, not before: the client installs its own logging
+        # handlers, and a filter attached earlier would not cover them.
+        _quiet_engine_logs()
         await client.download_track(req.spotify_url)
 
 
