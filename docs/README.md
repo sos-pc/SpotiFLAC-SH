@@ -24,7 +24,6 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 | Chantier | Docs | Où ça en est | Prochain pas |
 |---|---|---|---|
-| **⭐ Moteur de download (fork engine)** | [module-version-integration.md](module-version-integration.md) (pourquoi + décision + risques) · [module-engine-migration.md](module-engine-migration.md) (ce qui meurt de dev2) · [module-engine-runbook.md](module-engine-runbook.md) (les étapes) | 🧭 planifié, docs prêts, **rien de codé**. Remplace la couche providers par une **fork** du repo de Bartholomeo, tournant sous notre app. **Supersede** l'ancien plan « couche API externe » et le pipeline MusicBrainz→Qobuz (tous deux archivés). | **Phase 0 (toi)** : forker, builder, prouver 1 titre — voir le runbook. |
 | **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; 3 points ouverts | `grep memory /proc/cgroups` ; logs nginx SWAG (502 `stream-token`) ; rotations d'identifiants |
 | **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | 🟢 phases 1-4 faites+vérifiées prod ; audit 76 routes (1 élévation corrigée) | 2 décisions posées, non tranchées (catalogue `admin`→`read`, explorateur BoltDB) |
 
@@ -32,6 +31,7 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 | Doc | Type | Statut |
 |---|---|---|
+| **⭐ [module-engine.md](module-engine.md)** | 📘 | **vérifié en prod 07-25/26** — le moteur de download en sidecar : archi, contrat, activation, flux, limites, exploitation. Inclut §8 « ce qu'on a eu faux », car les plans archivés affirment encore le contraire. |
 | [api-reference.md](api-reference.md) | 📘 | ⚠️ `/downloads/track`, `/files/exists`, `/files/m3u8` corrigés 07-18 ; le reste non re-vérifié |
 | [authentication.md](authentication.md) | 📘 | ❔ non re-vérifié — JWT, clés API, Jellyfin |
 | [settings-reference.md](settings-reference.md) | 📘 | ⚠️ à relire après la migration backend-autoritaire |
@@ -49,11 +49,15 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 ### D. Archive — [archive/](archive/)
 
-Tout ce qui est **fait** ou **superseded par l'engine** est déplacé dans [archive/](archive/)
-(voir son index). N'y cherche pas l'état courant — seulement le « pourquoi ». 8 docs : refontes
-terminées (sélection de service, réglages, rattrapage amont), constats clos (ffmpeg, audit couche 2,
-carte de sélection historique), et les deux plans que l'engine remplace (couche API externe,
-MusicBrainz→Qobuz).
+Tout ce qui est **fait** ou **superseded** est déplacé dans [archive/](archive/) (voir son index).
+N'y cherche pas l'état courant — seulement le « pourquoi ». **11 docs** : refontes terminées
+(sélection de service, réglages, rattrapage amont), constats clos (ffmpeg, audit couche 2, carte de
+sélection historique), les deux plans que l'engine remplace (couche API externe, MusicBrainz→Qobuz),
+et les **trois plans du moteur** eux-mêmes — livrés, donc remplacés par la référence
+[module-engine.md](module-engine.md).
+
+⚠️ Ces trois-là contiennent des affirmations que la prod a **démenties** (solver supprimable, Deezer
+mort, Qobuz natif devenu inutile). Le tableau §8 de la référence les corrige une par une.
 
 ## L'en-tête à mettre sur un doc 🌍 ou 🔍
 

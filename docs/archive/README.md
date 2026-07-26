@@ -12,6 +12,9 @@ Nothing here describes the current or intended state of the code. For that, star
 
 | Doc | Why archived |
 |---|---|
+| [module-version-integration.md](module-version-integration.md) | ✅ Done — the decision to fork a third-party downloader and run it as a sidecar. Shipped; see [../module-engine.md](../module-engine.md) for what was actually built. ⚠️ Its risk section still claims the Turnstile solver becomes removable — production disproved that. |
+| [module-engine-migration.md](module-engine-migration.md) | ✅ Superseded — the "what dies from dev2" map. Written before the native fallback existed, so it lists the Qobuz downloader and the solver as removable; both are load-bearing today. |
+| [module-engine-runbook.md](module-engine-runbook.md) | ✅ Done — the phased bring-up. Phase 0 (fork, build, prove one track) and Phase 1 (wire into the app) are complete and verified in prod. |
 | [override-rework-plan.md](override-rework-plan.md) | ✅ Done — service-selection refonte shipped + verified (phases 1/2a/2b/3). **Still the record of how `ExecuteDownload`'s fallback chain works — the engine plugs into it.** |
 | [settings-source-of-truth.md](settings-source-of-truth.md) | ✅ Done — settings made backend-authoritative, single override, verified prod. |
 | [upstream-catchup.md](upstream-catchup.md) | ✅ Done for the independent parts (S8, S2). The remainder (S6/S7/S4/S1 = external provider layer) is superseded by the engine. |

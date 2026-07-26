@@ -2,19 +2,20 @@
 SpotiFLAC engine shim — a thin, engine-AGNOSTIC HTTP front for the download engine.
 
 Stable contract (does NOT name the underlying engine):
-    POST /download  {spotify_url, services[], quality, out_dir}  -> {status, file, error, log}
-    GET  /health                                                 -> {status: "ok"}
+    POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
+                 -> {status, file, error, log}
+    GET|HEAD /health -> {status: "ok"}
 
 Our Go service talks ONLY to this contract. The concrete engine
 (BartolomeoRusso9/SpotiFLAC-Module-Version today) is named in exactly one place
 below. If that upstream dies, we rewrite `_run_download()` to call a different
 engine (spotbye, another downloader) and the Go side never changes. That
 swappability is the durability insurance for putting the anonymous foundation on
-a third-party upstream (see docs/module-version-integration.md §6).
+a third-party upstream (see docs/module-engine.md §2).
 
 Tagging is deliberately OFF (enrich_metadata / embed_lyrics = False): the Go
 service re-tags at ingestion so it owns SPOTIFY_ID / genre / naming for catalog +
-M3U8 consistency (see docs/module-engine-migration.md Q2).
+M3U8 consistency (see docs/module-engine.md §4).
 """
 from __future__ import annotations
 

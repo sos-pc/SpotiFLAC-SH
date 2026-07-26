@@ -1,6 +1,6 @@
 // Package engine is the Go app's client to the download engine's HTTP shim
 // (the forked SpotiFLAC module, run as a sidecar — see engine/shim.py and
-// docs/module-engine-runbook.md).
+// docs/module-engine.md).
 //
 // From the Go app's point of view the engine "downloads": we POST a Spotify URL
 // and a service priority, the engine resolves + fetches the FLAC into a per-job
@@ -9,7 +9,7 @@
 //
 // The contract here is engine-AGNOSTIC on purpose: nothing names the underlying
 // engine, so swapping the fork for another downloader is a shim change only
-// (docs/module-version-integration.md §6).
+// (docs/module-engine.md §2).
 package engine
 
 import (

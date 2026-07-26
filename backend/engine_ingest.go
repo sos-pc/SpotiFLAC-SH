@@ -8,7 +8,7 @@ package backend
 // Spotify track and fetches the audio through its multi-route provider chain.
 // It deliberately does NOT tag: naming, tags (incl. SPOTIFY_ID, which M3U8
 // regeneration depends on), cover and genre stay ours — applied here at
-// ingestion. See docs/module-engine-migration.md Q2.
+// ingestion. See docs/module-engine.md §4.
 //
 // Opt-in per provider via ENGINE_SERVICES, so this is inert until explicitly
 // enabled and a single env var rolls it back.
@@ -49,7 +49,7 @@ func engineStagingDir() string {
 //
 // Opt-in and comma-separated (ENGINE_SERVICES=deezer, then deezer,qobuz, …), so
 // providers move over one at a time and only after each is proven in prod —
-// the staged cutover in docs/module-engine-runbook.md. Unset = nothing
+// the staged cutover in docs/module-engine.md §3. Unset = nothing
 // delegated, every provider keeps its native Go path.
 func engineHandles(svc string) bool {
 	if EngineBaseURL() == "" {
