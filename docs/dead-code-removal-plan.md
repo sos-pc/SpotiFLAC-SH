@@ -216,6 +216,39 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
     MusicBrainz is last. Prod files carry Apple-style genres (`Jazz`,
     `Electronic, Hip-Hop/Rap, Rap, Dance, House`), so the 503 changes nothing.
 
+### Redundancy items — detail in §6
+
+Independent of the provider cut. 12 and 13 are the cheapest changes in this
+document and can be done at any time.
+
+12. **Deduplicate `buildCoverFilename` / `buildLyricsFilename`** — ✅ go, trivial
+    Byte-identical except the function name (§6.1). Have one call the other, or extract
+    a shared helper in `backend/meta/`. ~33 lines.
+    *No behaviour change*, so it needs no measurement — verify by test, not in prod.
+
+13. **Point `genremeta.go:104` at `GetISRCDirect`** — ✅ go, small
+    It currently calls `songlink.GetISRC` (via Song.link) where the rest of the app uses
+    the Spotify-direct + cached path (§6.2). After this, `GetISRC` has no callers and
+    goes with the Song.link half in item 7.
+    *Side benefit:* genre lookups start hitting the ISRC cache instead of a third-party
+    aggregator, so they get faster and stop depending on Song.link being up.
+
+14. **Close the `buildTidalFilename` divergence** — ⚠️ **before any template change**
+    `util.BuildExpectedFilename` substitutes `{playlist}`/`{creator}`;
+    `buildTidalFilename` never does (§6.1). The on-disk check uses the first, the Tidal
+    download the second — so a template using either placeholder re-downloads the track
+    on every pass.
+    Latent today (`{title} - {artist}`), which is exactly why it is easy to forget.
+    Fix by making Tidal call the canonical builder, and add a test asserting the two
+    agree for a template containing `{playlist}`.
+    **Ordering: do this before touching `filenameTemplate`, not after.**
+
+15. **Collapse the Tidal `DownloadParams` translation** — 🔍 judgment call
+    Three of the four structs die with their providers (§6.3), leaving one translation
+    layer for a single consumer. Whether to pass `DownloadRequest` into
+    `backend/tidal` directly is a taste question about package coupling, not a
+    correctness one. Decide when items 3–5 are done and the shape is visible.
+
 ## 6. Redundancy — live code, duplicated
 
 Not dead code: every line below runs. It is duplication of something that already
@@ -280,11 +313,11 @@ Checked and cleared, so nobody removes them later on a hunch:
 `deriveCatalogQuality` / `actualCatalogQuality` (intended vs measured quality),
 `defaultQualityForExt` (admin retag). Different questions, not copies.
 
-### Sequencing note
+### Sequencing
 
-6.1 (the cover/lyrics twins) and 6.2 are independent of everything else and are the
-cheapest wins in this document. The `buildTidalFilename` divergence should be closed
-**before** anyone changes the filename template, not after.
+Scheduled as items **12–15** in §5. The cover/lyrics twins and the genremeta
+repointing are the cheapest changes here; the `buildTidalFilename` divergence carries
+an ordering constraint (close it **before** touching the filename template).
 
 ## 7. Open questions
 
