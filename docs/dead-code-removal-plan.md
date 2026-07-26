@@ -4,7 +4,10 @@
 > (import graph + LOC), not estimated. Reference for what replaced this code:
 > [module-engine.md](module-engine.md).
 
-## 1. The dividing line
+## 1. The dividing line — dead code vs redundancy
+
+Two different reasons to delete, both in scope: code whose counterpart no longer
+exists (§2–5), and live code duplicating something the codebase already has (§6).
 
 Not "native vs engine". The distinction that matters:
 
@@ -214,7 +217,77 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
     MusicBrainz is last. Prod files carry Apple-style genres (`Jazz`,
     `Electronic, Hip-Hop/Rap, Rap, Dance, House`), so the 503 changes nothing.
 
-## 6. Open questions
+## 6. Redundancy — live code, duplicated
+
+Not dead code: every line below runs. It is duplication of something that already
+exists elsewhere, which makes it removable for a different reason — and in one case
+the two copies **disagree**, which is worse than either.
+
+### 6.1 Five filename builders, two of which diverge
+
+| Builder | Fate |
+|---|---|
+| `util.BuildExpectedFilename` | canonical — used for the already-on-disk check and by the engine ingestion |
+| `buildQobuzFilename` (`qobuz/client.go:300`) | dies with the package |
+| `buildTidalFilename` (`tidal/client.go:947`) | **survives the provider cut** |
+| `buildCoverFilename` (`meta/cover.go:68`) | duplicate — see below |
+| `buildLyricsFilename` (`meta/lyrics.go:365`) | duplicate — see below |
+
+**`buildCoverFilename` and `buildLyricsFilename` are byte-identical except the
+function name** (verified by diff: only line 1 differs). ~33 lines copy-pasted.
+One of them should call the other, or both should call a shared helper.
+
+**⚠️ `BuildExpectedFilename` and `buildTidalFilename` are NOT equivalent:**
+
+| | `BuildExpectedFilename` | `buildTidalFilename` |
+|---|---|---|
+| `{playlist}` / `{creator}` | substituted | **never replaced** |
+| sanitising | internal | expected of the caller |
+| track number | receives it resolved | resolves it itself |
+
+The already-on-disk check uses the first; the native Tidal download uses the second.
+With a template containing `{playlist}`, the check would look for a substituted name
+while the download writes one with the literal `{playlist}` left in — so the file
+would be re-downloaded on every pass. Exactly the class of bug the comment inside
+`buildTidalFilename` already documents for track numbers.
+
+**Latent, not live:** prod's `filenameTemplate` is `{title} - {artist}`, which uses
+neither placeholder. It springs the moment someone adds one.
+
+### 6.2 Four ways to obtain an ISRC
+
+| Path | Nature |
+|---|---|
+| `spotify.GetTrackISRC` | authoritative — Spotify's own metadata service |
+| `songlink.GetISRCDirect` | the above **plus a BoltDB cache** — the one to keep |
+| `songlink.GetISRC` | via Song.link — strictly worse, and Song.link has no Qobuz coverage |
+| `songlink.GetDeezerSearchFallback` | name→ISRC via Deezer's API |
+
+`jobs_helpers.go:65` uses `GetISRCDirect`; `providerutil/genremeta.go:104` uses
+`GetISRC`. **Same goal, two sources, the worse one still wired.** Point genremeta at
+`GetISRCDirect` and `GetISRC` loses its last caller.
+
+### 6.3 Four `DownloadParams` structs translating one `DownloadRequest`
+
+`backend/{tidal,qobuz,amazon,deezer}/params.go` — 45/39/40/38 lines of near-identical
+fields, each filled by its own builder closure in `downloader.go`. Three die with
+their providers; **the Tidal one remains as a translation layer for a single
+consumer**, at which point passing `DownloadRequest` directly is worth considering.
+
+### 6.4 Not redundant, despite appearances
+
+Checked and cleared, so nobody removes them later on a hunch:
+`TidalQualityFor` / `QobuzQualityFor` (canonical → provider code),
+`deriveCatalogQuality` / `actualCatalogQuality` (intended vs measured quality),
+`defaultQualityForExt` (admin retag). Different questions, not copies.
+
+### Sequencing note
+
+6.1 (the cover/lyrics twins) and 6.2 are independent of everything else and are the
+cheapest wins in this document. The `buildTidalFilename` divergence should be closed
+**before** anyone changes the filename template, not after.
+
+## 7. Open questions
 
 - **Future BYOT for other providers**: the engine accepts `qobuz_token`,
   `qobuz_local_api_url`, `tidal_custom_api`. So a later Qobuz-account feature is
