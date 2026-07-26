@@ -125,10 +125,11 @@ Same error class, found by probing instead of reading imports:
 | `qobuzProviders` | listed for removal | already an **empty slice** — its getters/setters/API/UI manage nothing. |
 | MusicBrainz | assumed fine | answered **503** on one probe. One sample is not a verdict, and genre also comes from `genre_apple.go`/`genre_deezer.go` — worth watching, not concluding. |
 
-None of these block the provider removal; they are separate, smaller cleanups. They
-are recorded here because the reflex that missed them is the one this plan must not
-repeat: **judge code by whether the thing it talks to still answers, not by how many
-files import it.**
+None of these block the provider removal; they are separate, smaller cleanups,
+tracked as 🔍 **to examine** in §5 (items 7–11) with the question each one needs
+answered first. They are recorded because the reflex that missed them is the one
+this plan must not repeat: **judge code by whether the thing it talks to still
+answers, not by how many files import it.**
 
 **Scale:** ~2200 LOC deleted now (Qobuz + Deezer + community), ~1000 more when
 Amazon's gate passes, plus trims across 7 files.
@@ -160,6 +161,51 @@ Mitigations:
    once no provider references it.
 6. **Re-verify**: a full watchlist sync, an explicit download per remaining
    provider, and Tidal with its token (the BYOT path must be untouched).
+
+### Independent items — 🔍 **to examine**
+
+Not part of the provider cut, not scheduled, and **not yet decided**. Each is
+listed with the question that must be answered before touching it, because the
+reason they are here is that they were once classified without measuring.
+
+7. **Split `backend/songlink`** — 🔍 to examine
+   Keep `GetISRCDirect` + `isrc_cache.go`, drop the cross-platform link half, then
+   rename what remains (it has nothing to do with Song.link).
+   *Answer first:* does Tidal resolve as reliably through its own ISRC endpoint
+   (`api.tidal.com/v1/tracks?isrc=`) as through `GetAllURLsFromSpotify`? Measure on
+   real tracks before removing the Song.link path, or BYOT Tidal loses a working
+   route for a theory.
+
+8. **`proxy_discovery.go` + `tidal-uptime.geeked.wtf`** — 🔍 to examine
+   The feed is DNS-dead, so the 6-hourly goroutine, its BoltDB persistence and the
+   3-tier merge in `GetTidalProxiesEffective` operate on nothing (~230 LOC + a
+   goroutine + a stored blob).
+   *Answer first:* is the domain gone for good or moved? If a replacement feed
+   exists, point at it instead of deleting. If not, deleting the discovery leaves
+   the static list — which then needs its own maintenance story, since item 10 shows
+   it goes stale.
+
+9. **SpotFetch (`spotify.afkarxyz.fun`)** — 🔍 to examine
+   Unreachable, yet still wired through a user setting, a fallback code path and a
+   status probe.
+   *Answer first:* has our native Spotify scraper ever needed it? If the fallback
+   has never fired successfully, it is a setting that promises something it cannot
+   deliver. Check before removing — a dead fallback that used to save us is
+   different from one that never worked.
+
+10. **Tidal default proxy list** — 🔍 to examine
+    `hifi-api.kennyy.com.br` unreachable; the two monochrome hosts answer 200.
+    *Answer first:* with item 8's discovery gone or dead, who prunes this list?
+    Removing one dead host is trivial; the real question is whether a hand-curated
+    list is viable at all, or whether Tidal should also lean on the engine when no
+    token is present.
+
+11. **MusicBrainz** — 🔍 watch, do not act
+    Answered 503 on a single probe (2026-07-26). One sample is not a verdict, and
+    genre also comes from `genre_apple.go` / `genre_deezer.go` — prod files do carry
+    genre tags.
+    *Answer first:* over several days, does genre enrichment actually degrade? Only
+    then is there something to fix.
 
 ## 6. Open questions
 
