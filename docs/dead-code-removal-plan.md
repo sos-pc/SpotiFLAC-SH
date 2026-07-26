@@ -78,12 +78,57 @@ What disappears is the **Go-side** session plumbing, not the solver.
 ### 3.4 Survives — and why
 
 - **`backend/tidal/`** (1499 LOC) — the BYOT path. Untouched.
-- **`backend/songlink/`** (1360 LOC) — still used by `backend/tidal`,
-  `providerutil/genremeta.go`, `jobs.go`, `jobs_helpers.go`, `api_status.go`.
-  **Not deletable**, contrary to earlier plans.
-  *Shrink opportunity, separate work:* Tidal resolves via Song.link's ISRC;
-  `spotify.GetTrackISRC` is more authoritative (Spotify's own metadata service).
-  Switching would reduce Song.link to genre lookup — a change of source, not a deletion.
+- **`backend/tidal/`** (1499 LOC) — the BYOT path. Kept, minus `GetTidalURLFromSpotify` (see below).
+
+### `backend/songlink/` — one name, two unrelated jobs
+
+An earlier revision of this plan called it "not deletable" because five files import
+it. That judged the import graph instead of the behaviour, and it was wrong.
+
+```go
+func (s *SongLinkClient) GetISRCDirect(spotifyTrackID string) (string, error) {
+    if cached, err := GetCachedISRC(spotifyTrackID); ...        // BoltDB cache
+    isrc, err := s.getSpotifyClient().GetTrackISRC(spotifyTrackID)   // Spotify, direct
+```
+
+**`GetISRCDirect` never touches Song.link.** It wraps `spotify.GetTrackISRC` — the
+authoritative source — behind a persistent cache. It is the primary ISRC path
+(`jobs_helpers.go:65`). The package therefore holds:
+
+| Part | Sort | Why |
+|---|---|---|
+| `GetISRCDirect` + `isrc_cache.go` | ✅ keep | Spotify-direct + cache. Needed by **BYOT Tidal** (ISRC → Tidal id) and genre lookup — neither goes through the engine. |
+| `GetAllURLsFromSpotify` | ❌ dies | supplied `amazon_url` (native gone) and `tidal_url` — and Tidal has two better paths of its own: its ISRC endpoint and name search |
+| `ScrapeSongLinkHTML`, `ScrapeSongLinkViaAppleMusic` | ❌ die | fallbacks for the above |
+| `GetISRC` (via Song.link) | ❌ dies | `genremeta.go:104` calls it where `GetISRCDirect` is strictly better — a leftover |
+| `GetDeezerSearchFallback` | ❓ decide | name→ISRC via Deezer's API; only earns its place if `GetTrackISRC` proves insufficient |
+| `tidal.GetTidalURLFromSpotify` | ❌ dies | its only caller is `tidal/client.go:766`, and it exists only to consume Song.link URLs |
+
+**Why Song.link is superseded — the accurate reason.** Not because it is down: the
+API answered HTTP 200 on 2026-07-26. Because **we no longer need cross-platform
+links at all** — the engine resolves internally from the Spotify URL. (The archived
+investigation also found it never returns Qobuz links.)
+
+After the cut, what remains is an ISRC provider with a cache and nothing to do with
+Song.link. **Rename/move it** (e.g. into `backend/spotify` or a small `isrc`
+package), or the misleading name will cause this same mistake again.
+
+### Other code I classified without measuring
+
+Same error class, found by probing instead of reading imports:
+
+| Item | I said | Measured 2026-07-26 |
+|---|---|---|
+| `proxy_discovery.go` + `tidal-uptime.geeked.wtf` | "keep — BYOT rides on it" | **feed is DNS-dead.** A goroutine wakes every 6 h to fail, plus BoltDB persistence and a 3-tier merge in `GetTidalProxiesEffective` that now merges nothing. Prod logs have shown `no such host` for days. |
+| SpotFetch (`spotify.afkarxyz.fun`) | never examined | **unreachable.** A silent fallback for the Spotify scraper, still wired through a setting, a code path and a status probe. |
+| Tidal default proxy list | "keep" | `hifi-api.kennyy.com.br` unreachable; the two monochrome hosts answer 200. List is partly stale. |
+| `qobuzProviders` | listed for removal | already an **empty slice** — its getters/setters/API/UI manage nothing. |
+| MusicBrainz | assumed fine | answered **503** on one probe. One sample is not a verdict, and genre also comes from `genre_apple.go`/`genre_deezer.go` — worth watching, not concluding. |
+
+None of these block the provider removal; they are separate, smaller cleanups. They
+are recorded here because the reflex that missed them is the one this plan must not
+repeat: **judge code by whether the thing it talks to still answers, not by how many
+files import it.**
 
 **Scale:** ~2200 LOC deleted now (Qobuz + Deezer + community), ~1000 more when
 Amazon's gate passes, plus trims across 7 files.
