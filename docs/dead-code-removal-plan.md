@@ -162,50 +162,57 @@ Mitigations:
 6. **Re-verify**: a full watchlist sync, an explicit download per remaining
    provider, and Tidal with its token (the BYOT path must be untouched).
 
-### Independent items — 🔍 **to examine**
+### Independent items — examined 2026-07-26
 
-Not part of the provider cut, not scheduled, and **not yet decided**. Each is
-listed with the question that must be answered before touching it, because the
-reason they are here is that they were once classified without measuring.
+Each question below was answered from the code and from live probes, not from the
+import graph. Verdicts differ per item; two turned out to be non-issues.
 
-7. **Split `backend/songlink`** — 🔍 to examine
-   Keep `GetISRCDirect` + `isrc_cache.go`, drop the cross-platform link half, then
-   rename what remains (it has nothing to do with Song.link).
-   *Answer first:* does Tidal resolve as reliably through its own ISRC endpoint
-   (`api.tidal.com/v1/tracks?isrc=`) as through `GetAllURLsFromSpotify`? Measure on
-   real tracks before removing the Song.link path, or BYOT Tidal loses a working
-   route for a theory.
+7. **Split `backend/songlink`** — ✅ **go, low risk**
+   Tidal's Song.link path is **third-tier**, not primary:
+   ```
+   1. jobs_helpers.go:278  tidal.GetTidalIDFromISRC   → Tidal's own official API, by ISRC
+   2. tidal/client.go:759  SearchTidalByName          → direct search, ~200 ms, no rate-limit
+   3. tidal/client.go:766  GetTidalURLFromSpotify     → Song.link, only if 1 AND 2 failed
+   ```
+   `downloader.go:406` (`ensureTidalServiceURL`) also pre-resolves by name, so most
+   downloads take `DownloadByURLWithFallback` and never reach `Download()` — the only
+   function that touches Song.link at all. Removing it costs the residual case where
+   both the ISRC lookup and the name search fail, i.e. where the track is probably not
+   on Tidal. Keep `GetISRCDirect` + `isrc_cache.go`, then rename the package.
 
-8. **`proxy_discovery.go` + `tidal-uptime.geeked.wtf`** — 🔍 to examine
-   The feed is DNS-dead, so the 6-hourly goroutine, its BoltDB persistence and the
-   3-tier merge in `GetTidalProxiesEffective` operate on nothing (~230 LOC + a
-   goroutine + a stored blob).
-   *Answer first:* is the domain gone for good or moved? If a replacement feed
-   exists, point at it instead of deleting. If not, deleting the discovery leaves
-   the static list — which then needs its own maintenance story, since item 10 shows
-   it goes stale.
+8. **`proxy_discovery.go` + `tidal-uptime.geeked.wtf`** — ✅ **go (contributes nothing)**
+   **305 LOC** plus a goroutine and a BoltDB blob. The feed is DNS-dead, and
+   `GetTidalProxiesEffective()` explicitly falls back to the static list when there is
+   no discovery data — which is now always. Prod confirms it never even restores:
+   `[Discovery] Cached result is stale, skipping restore age=70h32m0s`.
+   Consumers (`api_status.go:568`, `tidal/client.go:239`) would behave identically off
+   the static list. No replacement feed known; if one appears, repoint instead.
 
-9. **SpotFetch (`spotify.afkarxyz.fun`)** — 🔍 to examine
-   Unreachable, yet still wired through a user setting, a fallback code path and a
-   status probe.
-   *Answer first:* has our native Spotify scraper ever needed it? If the fallback
-   has never fired successfully, it is a setting that promises something it cannot
-   deliver. Check before removing — a dead fallback that used to save us is
-   different from one that never worked.
+9. **SpotFetch** — ❌ **non-issue. Leave it.**
+   ⚠️ *An earlier revision of this item called it a "hard switch" that "fails outright",
+   from reading `spotify/api.go` without its caller. Wrong* — `metadata_service.go:163`
+   runs the **native scraper first** and only falls back when it errors:
+   ```go
+   data, nativeErr := spotify.GetFilteredSpotifyData(...)   // native first
+   if nativeErr == nil { return ... }
+   if spotFetchAPIURL != "" { ... GetSpotifyDataWithAPI(..., true, ...) }
+   ```
+   The hardcoded `useAPI=true` is reached only inside that fallback branch. The host is
+   unreachable and prod has the default URL set, so the fallback cannot help — but it
+   cannot hurt either, and its failure message reports both errors, which is good
+   diagnostics. Removing it buys nothing; repointing it at a live mirror would.
 
-10. **Tidal default proxy list** — 🔍 to examine
-    `hifi-api.kennyy.com.br` unreachable; the two monochrome hosts answer 200.
-    *Answer first:* with item 8's discovery gone or dead, who prunes this list?
-    Removing one dead host is trivial; the real question is whether a hand-curated
-    list is viable at all, or whether Tidal should also lean on the engine when no
-    token is present.
+10. **Tidal default proxy list** — 🔍 **still open, but not urgent**
+    `hifi-api.kennyy.com.br` unreachable; both monochrome hosts answer 200, and they
+    are what the personal token rides on. It works today. With item 8's discovery gone,
+    nothing prunes it — the real question is whether a hand-curated list is viable, or
+    whether tokenless Tidal should lean on the engine. Drop the dead host meanwhile.
 
-11. **MusicBrainz** — 🔍 watch, do not act
-    Answered 503 on a single probe (2026-07-26). One sample is not a verdict, and
-    genre also comes from `genre_apple.go` / `genre_deezer.go` — prod files do carry
-    genre tags.
-    *Answer first:* over several days, does genre enrichment actually degrade? Only
-    then is there something to fix.
+11. **MusicBrainz** — ✅ **no action, confirmed**
+    `genre.go` documents a three-tier chain: **Apple Music** (per-track, curated — "the
+    precise answer") → **Deezer** (per-album) → **MusicBrainz** (free-form folksonomy).
+    MusicBrainz is last. Prod files carry Apple-style genres (`Jazz`,
+    `Electronic, Hip-Hop/Rap, Rap, Dance, House`), so the 503 changes nothing.
 
 ## 6. Open questions
 
