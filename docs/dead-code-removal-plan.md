@@ -80,7 +80,6 @@ What disappears is the **Go-side** session plumbing, not the solver.
 
 ### 3.4 Survives — and why
 
-- **`backend/tidal/`** (1499 LOC) — the BYOT path. Untouched.
 - **`backend/tidal/`** (1499 LOC) — the BYOT path. Kept, minus `GetTidalURLFromSpotify` (see below).
 
 ### `backend/songlink/` — one name, two unrelated jobs
