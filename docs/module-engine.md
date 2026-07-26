@@ -102,12 +102,28 @@ ExecuteDownload walks the user's autoOrder chain
   └─ ingestion (ours): /staging → library, our tags, catalog, SSE
 ```
 
-**Why the native fallback exists.** The two paths are complementary, not
-redundant: the engine matches far better but cannot answer the community
+**Why the native fallback exists — and why it has never paid off.** The intent was
+complementarity: the engine matches far better but could not answer the community
 challenge headlessly, while our native path matches poorly yet rides a real
-session obtained by the solver. Trying both covers the union. Without it, a
-failed engine attempt skipped to the *next* provider and wasted the one
-credential we actually hold.
+session obtained by the solver.
+
+⚠️ **Measured, 2026-07-26: it has never produced a file.** Across every download
+since the engine went live — ~10 Qobuz successes through the engine — the native
+path was reached 3 times and failed all 3, always at the same place:
+
+```
+[Engine] Failed, retrying on the native path service=qobuz
+[Auto] Service failed, trying next service=qobuz err=track not found for ISRC: …
+```
+
+It dies at *resolution*, in `searchByISRC` — the very ~80%-broken mechanism the
+engine was adopted to escape. It never reaches the point where its session would
+matter, so it currently buys latency and nothing else.
+
+Two things must be true for it to earn its place: its resolution has to work
+(text search + scoring, or the archived MusicBrainz pipeline), **and** the engine
+has to still be grant-blocked. The second is going away as the engine gains its
+own grant path. Decide its fate on evidence, not on the original intent.
 
 **Ingestion is ours** (`backend/engine_ingest.go`):
 - filename and folders come from the same helpers the native downloaders use
@@ -147,9 +163,10 @@ tracks those are.
 ## 6. Known limits
 
 - **Some engine routes need an interactive grant** and fail on EOF in a
-  container. Others succeed, so most downloads go through — but this is why the
-  **solver cannot be removed**: it is what makes the native fallback able to
-  rescue those tracks.
+  container. Others succeed, so most downloads go through. The solver supplies
+  the community session for the **native** paths — but since native Qobuz never
+  resolves (§4), that value currently reduces to **Amazon**. An earlier revision
+  claimed the solver was load-bearing for Qobuz; it is not.
 - The engine and our Go path use **different community endpoints**, so a session
   obtained by one does not serve the other.
 - **Do not delegate Tidal.** The engine's Tidal is anonymous — previews only —
@@ -195,7 +212,7 @@ falsified by production rather than by argument:
 |---|---|
 | "Delegating retires the Selenium/Turnstile solver" | **False.** Some routes still require a manual grant; the solver became load-bearing for the native fallback. |
 | "Deezer is dead on both sides, drop it" | **False.** Deezer works through the engine — one route is down, the rest carry it. Judged on a single track and generalised. |
-| "Qobuz native becomes dead code" | **False.** It is the fallback for engine-blocked tracks, and holds the session the engine lacks. |
+| "Qobuz native becomes dead code" | **Half-wrong twice.** It is wired as the fallback — but measurement shows it has never succeeded (3 invocations, 3 failures at ISRC resolution), so calling it "load-bearing" was itself an unmeasured claim. See §4. |
 | "The anonymous chain must be reordered away from tidal-first" | Was called moot at one point; it is not — `defaultAutoOrder` is still tidal-first. Unresolved, low impact while a token is present. |
 | Spotify carries no ISRC | **False.** `spotify.GetTrackISRC` fetches it from Spotify's own metadata service. |
 
