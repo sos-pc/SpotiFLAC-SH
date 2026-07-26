@@ -24,6 +24,7 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 | Chantier | Docs | Où ça en est | Prochain pas |
 |---|---|---|---|
+| **Retrait de la couche provider superseded** | [dead-code-removal-plan.md](dead-code-removal-plan.md) | 🧭 **planifié, rien de supprimé** — analyse de dépendances mesurée. ~2200 LOC retirables (Qobuz, Deezer, community), ~1000 de plus quand Amazon sera prouvé. Tidal **conservé** (BYOT). | Étape 2 du plan : retirer l'appel au repli natif (0 succès en 3 invocations) |
 | **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; 3 points ouverts | `grep memory /proc/cgroups` ; logs nginx SWAG (502 `stream-token`) ; rotations d'identifiants |
 | **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | 🟢 phases 1-4 faites+vérifiées prod ; audit 76 routes (1 élévation corrigée) | 2 décisions posées, non tranchées (catalogue `admin`→`read`, explorateur BoltDB) |
 
