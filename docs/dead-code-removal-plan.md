@@ -226,7 +226,7 @@ document and can be done at any time.
     a shared helper in `backend/meta/`. ~33 lines.
     *No behaviour change*, so it needs no measurement — verify by test, not in prod.
 
-13. **Point `genremeta.go:104` at `GetISRCDirect`** — ✅ go, small
+13. **Point `genremeta.go` at `GetISRCDirect`** — ✅ **DONE 2026-07-26.** `GetISRC` now has one caller left (`backend/qobuz`), which goes at item 3.
     It currently calls `songlink.GetISRC` (via Song.link) where the rest of the app uses
     the Spotify-direct + cached path (§6.2). After this, `GetISRC` has no callers and
     goes with the Song.link half in item 7.

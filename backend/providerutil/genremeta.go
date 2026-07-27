@@ -89,9 +89,15 @@ func genreForWriting(got meta.GenreResult) string {
 }
 
 // resolveISRCFromSpotifyURL extracts the Spotify track ID from a Spotify
-// track URL (the last path segment, query string stripped) and resolves
-// its ISRC via the shared Songlink client. Returns "" if the URL can't be
-// parsed or Songlink has no ISRC for it.
+// track URL (the last path segment, query string stripped) and resolves its
+// ISRC. Returns "" if the URL can't be parsed or no ISRC is found.
+//
+// Uses GetISRCDirect, which reads Spotify's own catalog record for this exact
+// track and caches it, rather than GetISRC, which asks Song.link. Both answer
+// the same question; the direct one is authoritative instead of relying on a
+// third-party aggregator being up, and it shares the ISRC cache the rest of the
+// job pipeline already fills (jobs_helpers.go), so a genre lookup for a track
+// just downloaded is usually a cache hit rather than a network call.
 func resolveISRCFromSpotifyURL(spotifyURL string) string {
 	parts := strings.Split(spotifyURL, "/")
 	if len(parts) == 0 {
@@ -102,7 +108,7 @@ func resolveISRCFromSpotifyURL(spotifyURL string) string {
 		return ""
 	}
 	client := songlink.GetSongLinkClient()
-	isrc, err := client.GetISRC(spotifyID)
+	isrc, err := client.GetISRCDirect(spotifyID)
 	if err != nil {
 		return ""
 	}
