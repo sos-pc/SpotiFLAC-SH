@@ -221,7 +221,7 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
 Independent of the provider cut. 12 and 13 are the cheapest changes in this
 document and can be done at any time.
 
-12. **Deduplicate `buildCoverFilename` / `buildLyricsFilename`** — ✅ go, trivial
+12. **Deduplicate `buildCoverFilename` / `buildLyricsFilename`** — ✅ **DONE** (see §6.1)
     Byte-identical except the function name (§6.1). Have one call the other, or extract
     a shared helper in `backend/meta/`. ~33 lines.
     *No behaviour change*, so it needs no measurement — verify by test, not in prod.
@@ -265,9 +265,27 @@ the two copies **disagree**, which is worse than either.
 | `buildCoverFilename` (`meta/cover.go:68`) | duplicate — see below |
 | `buildLyricsFilename` (`meta/lyrics.go:365`) | duplicate — see below |
 
-**`buildCoverFilename` and `buildLyricsFilename` are byte-identical except the
-function name** (verified by diff: only line 1 differs). ~33 lines copy-pasted.
-One of them should call the other, or both should call a shared helper.
+**`buildCoverFilename` and `buildLyricsFilename`** — ✅ **DONE 2026-07-26**, merged into
+`backend/meta/sidecar_filename.go`.
+
+⚠️ *An earlier revision called them "byte-identical except the function name". Wrong:
+that diff covered only the first 33 lines of a 56- and a 54-line function.* The full
+diff showed three differences, and one is behavioural:
+
+| Difference | Verdict |
+|---|---|
+| `case "title-artist"` present in cover, absent in lyrics | **harmless** — lyrics' `default:` produces exactly the same string (asserted by test) |
+| track-number separator: `"%02d - %s"` vs `"%02d. %s"` | ⚠️ **real divergence** — `01 - Title.jpg` vs `01. Title.lrc` |
+| `.jpg` vs `.lrc` | legitimate |
+
+So this was **not** the trivial win advertised. Merging naively would have renamed every
+sidecar already on disk. Both differing details are parameters instead, output unchanged
+for either caller, with tests pinning the separators so a later "harmonisation" has to be
+a deliberate migration rather than a tidy-up.
+
+Left open: lyrics number as `01. ` (matching the audio file) while cover uses `01 - `.
+Nobody chose that; it is inconsistency, not design. Harmonising means renaming existing
+covers — a migration question, out of scope here.
 
 **⚠️ `BuildExpectedFilename` and `buildTidalFilename` are NOT equivalent:**
 
@@ -369,8 +387,13 @@ removes its data source.
 
 Bitter detail: the archived investigation found Song.link **never returns Qobuz links**,
 so the Qobuz dot is presumably always red — the feature already misinforms for the
-provider that now works best. Decide deliberately: drop the feature, or re-source it
-(the engine resolves per provider, so a real availability check is possible).
+provider that now works best.
+
+> **✅ Decided 2026-07-26 (operator):** delete Song.link anyway and let the availability
+> dots **break temporarily**. `GET /api/v1/tracks/{id}/availability` is flagged
+> **to rework** on a non-Song.link source — the engine resolves per provider, so a real
+> availability check is possible and would be *more* accurate than what it replaces.
+> Breaking a feature that already lies about Qobuz is an acceptable trade.
 
 ### 7.5 Test coverage disappears without being counted
 

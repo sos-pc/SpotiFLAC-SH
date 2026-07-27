@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -65,62 +64,6 @@ func NewCoverClient() *CoverClient {
 	}
 }
 
-func buildCoverFilename(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat string, includeTrackNumber bool, position, discNumber int) string {
-	safeTitle := util.SanitizeFilename(trackName)
-	safeArtist := util.SanitizeFilename(artistName)
-	safeAlbum := util.SanitizeFilename(albumName)
-	safeAlbumArtist := util.SanitizeFilename(albumArtist)
-
-	year := ""
-	if len(releaseDate) >= 4 {
-		year = releaseDate[:4]
-	}
-
-	var filename string
-
-	if strings.Contains(filenameFormat, "{") {
-		filename = filenameFormat
-		filename = strings.ReplaceAll(filename, "{title}", safeTitle)
-		filename = strings.ReplaceAll(filename, "{artist}", safeArtist)
-		filename = strings.ReplaceAll(filename, "{album}", safeAlbum)
-		filename = strings.ReplaceAll(filename, "{album_artist}", safeAlbumArtist)
-		filename = strings.ReplaceAll(filename, "{year}", year)
-		filename = strings.ReplaceAll(filename, "{date}", util.SanitizeFilename(releaseDate))
-
-		if discNumber > 0 {
-			filename = strings.ReplaceAll(filename, "{disc}", fmt.Sprintf("%d", discNumber))
-		} else {
-			filename = strings.ReplaceAll(filename, "{disc}", "")
-		}
-
-		if position > 0 {
-			filename = strings.ReplaceAll(filename, "{track}", fmt.Sprintf("%02d", position))
-		} else {
-
-			filename = regexp.MustCompile(`\{track\}\.\s*`).ReplaceAllString(filename, "")
-			filename = regexp.MustCompile(`\{track\}\s*-\s*`).ReplaceAllString(filename, "")
-			filename = regexp.MustCompile(`\{track\}\s*`).ReplaceAllString(filename, "")
-		}
-	} else {
-
-		switch filenameFormat {
-		case "artist-title":
-			filename = fmt.Sprintf("%s - %s", safeArtist, safeTitle)
-		case "title-artist":
-			filename = fmt.Sprintf("%s - %s", safeTitle, safeArtist)
-		case "title":
-			filename = safeTitle
-		default:
-			filename = fmt.Sprintf("%s - %s", safeTitle, safeArtist)
-		}
-
-		if includeTrackNumber && position > 0 {
-			filename = fmt.Sprintf("%02d - %s", position, filename)
-		}
-	}
-
-	return filename + ".jpg"
-}
 
 func convertSmallToMedium(imageURL string) string {
 	if strings.Contains(imageURL, spotifySize300) {
@@ -202,7 +145,7 @@ func (c *CoverClient) DownloadCover(req CoverDownloadRequest) (*CoverDownloadRes
 	if filenameFormat == "" {
 		filenameFormat = "title-artist"
 	}
-	filename := buildCoverFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, filenameFormat, req.TrackNumber, req.Position, req.DiscNumber)
+	filename := buildSidecarFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, filenameFormat, req.TrackNumber, req.Position, req.DiscNumber, coverTrackSeparator, ".jpg")
 	filePath := filepath.Join(outputDir, filename)
 
 	if fileInfo, err := os.Stat(filePath); err == nil && fileInfo.Size() > 0 {
