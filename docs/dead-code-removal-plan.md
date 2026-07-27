@@ -319,7 +319,93 @@ Scheduled as items **12–15** in §5. The cover/lyrics twins and the genremeta
 repointing are the cheapest changes here; the `buildTidalFilename` divergence carries
 an ordering constraint (close it **before** touching the filename template).
 
-## 7. Open questions
+## 7. What the inventory missed
+
+§3 claimed `backend/{qobuz,amazon,deezer}` are "imported by `downloader.go` only". True
+for **package imports**, false for **provider logic** — a second sweep found it spread
+much wider. Recorded because each item changes the size or the risk of the work.
+
+### 7.1 The enrichment chain runs for engine downloads, and its output is discarded
+
+`jobs_helpers.go:getStreamingURLs` runs a cascade **per job** — Deezer API → Song.link →
+Apple Music scrape → HTML scrape — producing `tidal_url`, `amazon_url`, `isrc`.
+
+A delegated provider needs **only the Spotify URL**. Of that cascade the engine path
+consumes just `isrc` (for genre); the URLs go nowhere. So every delegated download pays
+several third-party round-trips for a result largely thrown away.
+
+**This is a per-download cost, not dead lines** — arguably the most valuable item in this
+document, and it needs no deletion: skip the URL resolution when the target provider is
+engine-delegated.
+
+### 7.2 Provider logic outside `downloader.go`
+
+| Location | What it does |
+|---|---|
+| `jobs_helpers.go:36` | `if s.Service == "deezer" { return nil }` — skips enrichment entirely |
+| `jobs_helpers.go:81` | `if s.Service == "amazon"` — Amazon URLs come only from Song.link |
+| `jobs_helpers.go:347` | `resolveAudioFormat` — per-service quality vocabulary |
+| `jobs_catalog.go:321` | `deriveCatalogQuality` — per-service → catalog quality label |
+| `backend/meta/genre.go:66` | `{"deezer", deezerGenreNames}` — ⚠️ **genre source, keep** (see §6.4's warning) |
+
+### 7.3 Our per-provider quality vocabulary leaks into the engine call
+
+`resolveAudioFormat` returns `"6"` for Qobuz and `"flac"` for Deezer; `downloadViaEngine`
+forwards that verbatim as the engine's `quality`. It happens to work — the engine accepted
+`27` and produced hi-res, accepted `flac` and produced "FLAC Best Available" — but that is
+**accidental compatibility, not a contract**. The delegated path should send the canonical
+vocabulary (`LOSSLESS` / `HI_RES_LOSSLESS`) and let one translation layer own the mapping.
+
+### 7.4 The frontend surface is 8 files, not 2
+
+`ApisTab.tsx`, `GeneralTab.tsx`, `TrackList.tsx`, `TrackInfo.tsx`, `WatchlistPage.tsx`,
+`lib/rpc.ts`, `lib/settings.ts`, `types/api.ts`.
+
+**⚠️ And one is a user-visible feature this plan would have silently broken:**
+`GET /api/v1/tracks/{id}/availability` returns `songlink.TrackAvailability`, built from
+Song.link's `linksByPlatform`; `TrackList.tsx:332` and `TrackInfo.tsx:144` render it as
+green/red per-provider dots. Deleting the cross-platform half of Song.link (item 7)
+removes its data source.
+
+Bitter detail: the archived investigation found Song.link **never returns Qobuz links**,
+so the Qobuz dot is presumably always red — the feature already misinforms for the
+provider that now works best. Decide deliberately: drop the feature, or re-source it
+(the engine resolves per provider, so a real availability check is possible).
+
+### 7.5 Test coverage disappears without being counted
+
+`backend/community` 21 tests, `backend/qobuz` 7. (`amazon` and `deezer` have **none** — a
+statement in itself.) The plan counts deleted lines and never counted lost coverage.
+
+### 7.6 `check-upstream.sh` will flag the deletions forever
+
+It **auto-discovers** upstream files (`git ls-tree -r upstream/main -- backend/`) rather
+than reading a fixed list. Once our packages are gone it reports them as diverged on every
+run. It needs an ignore list, or it cries wolf permanently.
+
+### 7.7 Accepted: the engine becomes a hard dependency
+
+Removing the native fallback means an engine outage fails every delegated provider.
+**Confirmed as intended** — this plan makes the fork the core of the app, dependency
+included. Recorded so it is a decision, not a discovery.
+
+### 7.8 Smaller consequences
+
+- Catalog rows keep `provider=qobuz` etc. Nothing breaks; the data references a path
+  that no longer exists.
+- Debug Logs loses diagnostic value: engine logs reach `docker logs`, not our SSE feed,
+  so diagnosing a provider failure moves to the second container.
+- The frontend Source selector could offer a provider with neither a native nor a
+  delegated path → `unknown service`.
+
+### 7.9 Resolved: keep the one-provider-at-a-time call
+
+§5 item 2 removes one of the two reasons for walking the chain ourselves rather than
+handing `services: [a,b,c]` to the engine in a single call. The remaining reasons hold:
+per-provider log attribution, the per-provider quality retry, and — decisively — **the
+user's `autoOrder` drives the order, not the engine's**. No change.
+
+## 8. Open questions
 
 - **Future BYOT for other providers**: the engine accepts `qobuz_token`,
   `qobuz_local_api_url`, `tidal_custom_api`. So a later Qobuz-account feature is
