@@ -1,10 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Download, FolderOpen, CheckCircle, XCircle, FileText, FileCheck, Globe, ImageDown, Play, Pause } from "lucide-react";
+import { Download, FolderOpen, CheckCircle, XCircle, FileText, FileCheck, ImageDown, Play, Pause } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import type { TrackMetadata, TrackAvailability } from "@/types/api";
-import { TidalIcon, QobuzIcon, AmazonIcon, DeezerIcon } from "./PlatformIcons";
+import type { TrackMetadata } from "@/types/api";
 import { usePreview } from "@/hooks/usePreview";
 interface TrackInfoProps {
     track: TrackMetadata & {
@@ -20,20 +19,17 @@ interface TrackInfoProps {
     downloadedLyrics?: boolean;
     failedLyrics?: boolean;
     skippedLyrics?: boolean;
-    checkingAvailability?: boolean;
-    availability?: TrackAvailability;
     downloadingCover?: boolean;
     downloadedCover?: boolean;
     failedCover?: boolean;
     skippedCover?: boolean;
     onDownload: (id: string, name: string, artists: string, albumName?: string, spotifyId?: string, playlistName?: string, durationMs?: number, position?: number, albumArtist?: string, releaseDate?: string, coverUrl?: string, spotifyTrackNumber?: number, spotifyDiscNumber?: number, spotifyTotalTracks?: number, spotifyTotalDiscs?: number, copyright?: string, publisher?: string) => void;
     onDownloadLyrics?: (spotifyId: string, name: string, artists: string, albumName?: string, albumArtist?: string, releaseDate?: string, discNumber?: number) => void;
-    onCheckAvailability?: (spotifyId: string) => void;
     onDownloadCover?: (coverUrl: string, trackName: string, artistName: string, albumName?: string, playlistName?: string, position?: number, trackId?: string, albumArtist?: string, releaseDate?: string, discNumber?: number) => void;
     onOpenFolder: () => void;
     onBack?: () => void;
 }
-export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded, isFailed, isSkipped, downloadingLyricsTrack, downloadedLyrics, failedLyrics, skippedLyrics, checkingAvailability, availability, downloadingCover, downloadedCover, failedCover, skippedCover, onDownload, onDownloadLyrics, onCheckAvailability, onDownloadCover, onOpenFolder, onBack, }: TrackInfoProps) {
+export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded, isFailed, isSkipped, downloadingLyricsTrack, downloadedLyrics, failedLyrics, skippedLyrics, downloadingCover, downloadedCover, failedCover, skippedCover, onDownload, onDownloadLyrics, onDownloadCover, onOpenFolder, onBack, }: TrackInfoProps) {
     const { playPreview, loadingPreview, playingTrack } = usePreview();
     const formatDuration = (ms: number) => {
         const minutes = Math.floor(ms / 60000);
@@ -130,21 +126,6 @@ export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded
               </TooltipTrigger>
               <TooltipContent>
                 <p>Download Cover</p>
-              </TooltipContent>
-            </Tooltip>)}
-            {track.spotify_id && onCheckAvailability && (<Tooltip>
-              <TooltipTrigger asChild>
-                <Button onClick={() => onCheckAvailability(track.spotify_id!)} variant="outline" size="icon" disabled={checkingAvailability}>
-                  {checkingAvailability ? (<Spinner />) : availability ? (<CheckCircle className="h-4 w-4 text-green-500"/>) : (<Globe className="h-4 w-4"/>)}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {availability ? (<div className="flex items-center gap-2">
-                  <TidalIcon className={`w-4 h-4 ${availability.tidal ? "text-green-500" : "text-red-500"}`}/>
-                  <QobuzIcon className={`w-4 h-4 ${availability.qobuz ? "text-green-500" : "text-red-500"}`}/>
-                  <AmazonIcon className={`w-4 h-4 ${availability.amazon ? "text-green-500" : "text-red-500"}`}/>
-                  <DeezerIcon className={`w-4 h-4 ${availability.deezer ? "text-green-500" : "text-red-500"}`}/>
-                </div>) : (<p>Check Availability</p>)}
               </TooltipContent>
             </Tooltip>)}
             {isDownloaded && (<Button onClick={onOpenFolder} variant="outline">

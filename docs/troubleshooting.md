@@ -42,16 +42,21 @@ This is the "current state" of the community Tidal proxies (May 2026). Without a
 - The status dashboard flags this as `ratelimited` with the message `PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)`.
 - To get full FLAC, authenticate with a Premium account: **Settings → Tidal Account → Connect with Tidal**. See [tidal-auth.md](tidal-auth.md).
 
-### "Song.link rate limited" / no Tidal/Qobuz link found
+### No Tidal link found
 
-Song.link's free API is heavily rate-limited. SpotiFLAC has multiple layers of fallback (in `getStreamingURLs`):
+Song.link and its rate limit are gone (2026-07-28) — nothing calls it. Resolution
+for a **native Tidal** download is now two steps, in `resolveTrackISRC`:
 
-1. Deezer public search (no rate limit) — fast, gives ISRC.
-2. Apple Music scraping via iTunes Search → `song.link/i/<id>` (different quota from `/s/<spotifyID>`).
-3. HTML scraping of `song.link/s/<spotifyID>` (`__NEXT_DATA__`).
-4. Direct Tidal search by name (`tidal.NewTidalDownloader().SearchTidalByName`).
+1. `GetISRCDirect` — Spotify's own catalog record for that exact track, cached.
+2. `GetDeezerSearchFallback` — Deezer's public search, by name. A name match, so
+   it can land on the wrong remaster; it only runs when step 1 came up empty.
 
-If all fail, the job is marked failed. Wait a few minutes and retry — the in-memory rate-limit cache clears automatically.
+The ISRC then reaches Tidal's own API through `GetTidalIDFromISRC`, and
+`SearchTidalByName` is the last resort. If all fail the job is marked failed —
+usually meaning the track genuinely isn't on Tidal under that name.
+
+Providers other than Tidal never enter this path: the engine is handed the
+Spotify URL and resolves internally.
 
 ### Downloaded file is 0 bytes or corrupt
 

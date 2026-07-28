@@ -182,11 +182,11 @@ Mitigations:
 Each question below was answered from the code and from live probes, not from the
 import graph. Verdicts differ per item; two turned out to be non-issues.
 
-7. **Split `backend/songlink`** — ✅ **7a DONE 2026-07-28**, 7b pending
-   Split on execution, because the two halves are not the same size: **7a** removes
-   Song.link from the *download* path (backend only, no UI impact); **7b** removes the
-   *availability* feature, which the inventory said was 2 frontend files and is
-   actually 6 (see §7.4). 7a shipped:
+7. **Split `backend/songlink`** — ✅ **DONE 2026-07-28** (7a + 7b)
+   Split on execution, because the two halves are not the same size: **7a** removed
+   Song.link from the *download* path (backend only, no UI impact); **7b** removed the
+   *availability* feature, which the inventory said was 2 frontend files and was
+   actually 7 (see §7.4). 7a shipped:
 
    | removed | LOC | why it was safe |
    |---|---|---|
@@ -198,10 +198,36 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
    | `songlink/client_test.go` | 198 | 8 tests, all of `searchITunes` — they died with their subject, not with a behaviour |
 
    Net: `client.go` 967 → 526 lines, and **`backend/tidal` no longer imports
-   `backend/songlink`** — the dependency edge is gone, not just the calls. What stays
-   until 7b: `GetAllURLsFromSpotify`, `CheckTrackAvailability`, `checkQobuzAvailability`
-   and the rate-limit machinery, all reachable only from `metadata_service.go`.
-   The package rename waits for 7b too — renaming now would touch files 7b deletes.
+   `backend/songlink`** — the dependency edge is gone, not just the calls.
+
+   **7b** then removed the availability feature and everything it was the last caller of:
+
+   | removed | why |
+   |---|---|
+   | `GET /tracks/{id}/availability`, `GET /tracks/{id}/links` (`api_files.go`) | the two routes the feature was reachable through |
+   | `MetadataService.CheckTrackAvailability`, `.GetStreamingURLs` | their only callers |
+   | `MetadataService.jobs` + a parameter of `NewMetadataService` | the JobManager was held **only** to borrow its SongLinkClient |
+   | `songlink.GetAllURLsFromSpotify`, `CheckTrackAvailability`, `TrackAvailability`, `checkQobuzAvailability` | the last code in the package that spoke to Song.link |
+   | the whole rate-limit machinery (`acquireSlot`, `IsRateLimited`, `RateLimitedUntil`, `markRateLimited`, 4 struct fields) | a 9-calls/min + 7-s-apart throttle for an API we no longer call |
+   | the `{"SongLink", ...}` status probe + its rate-limit override (`api_status.go`) | nothing left to report on |
+   | `songlink/retry_test.go` (3 tests) | all three exercised `GetAllURLsFromSpotify` |
+   | `frontend/src/hooks/useAvailability.ts`, `PlatformIcons.tsx` | the hook, and a **duplicate** of `settings/providerIcons.tsx` that only the availability dots imported |
+   | `TrackAvailability` type, `CheckTrackAvailability`/`GetStreamingURLs` RPCs, and the props/JSX in `App.tsx`, `TrackInfo`, `TrackList`, `AlbumInfo`, `ArtistInfo`, `PlaylistInfo` | the UI |
+
+   **What 7b found that the inventory did not.** `GetDeezerSearchFallback` returns a
+   `*SongLinkURLs` whose `TidalURL` and `AmazonURL` fields it **never sets** — only
+   `ISRC`. So `getStreamingURLs`' map had exactly one live key: the `tidal_url` branch in
+   `buildDownloadRequest` was already unreachable, and `amazon_url` died with native
+   Amazon. The map is now a plain `string` (`resolveTrackISRC`), `SongLinkURLs` is gone,
+   and `needsNativeProviderURLs` — which no longer gates any URL — is
+   `tidalMayRunNatively`. Its 14-case test survived the rename unchanged: the gate's
+   semantics never moved, only its name and its subject.
+
+   `client.go`: 967 → **189** lines, and the package has one job left — resolving an
+   ISRC. **It still needs the rename** (§3.4): nothing in it talks to Song.link any more,
+   so `SongLinkClient`/`GetSongLinkClient` are now actively misleading names. Deferred
+   only because it is pure churn across `jobs.go`, `genremeta.go` and `main.go`, with no
+   behaviour attached.
 
    Tidal's Song.link path was **third-tier**, not primary:
    ```
@@ -383,6 +409,9 @@ much wider. Recorded because each item changes the size or the risk of the work.
 
 ### 7.1 The enrichment chain runs for engine downloads, and its output is discarded — ✅ **DONE 2026-07-26**
 
+> Superseded by item 7: the cascade itself is gone, and with it the last two of the three
+> keys below. `getStreamingURLs` is now `resolveTrackISRC` and returns a string.
+
 `jobs_helpers.go:getStreamingURLs` runs a cascade **per job** — Deezer API → Song.link →
 Apple Music scrape → HTML scrape — producing `tidal_url`, `amazon_url`, `isrc`.
 
@@ -398,8 +427,8 @@ engine-delegated.
 
 | Location | What it does |
 |---|---|
-| `jobs_helpers.go:36` | `if s.Service == "deezer" { return nil }` — skips enrichment entirely |
-| `jobs_helpers.go:81` | `if s.Service == "amazon"` — Amazon URLs come only from Song.link |
+| ~~`jobs_helpers.go:36`~~ | ~~`if s.Service == "deezer" { return nil }`~~ — ✅ gone (item 2) |
+| ~~`jobs_helpers.go:81`~~ | ~~`if s.Service == "amazon"`~~ — ✅ gone (item 2) |
 | `jobs_helpers.go:347` | `resolveAudioFormat` — per-service quality vocabulary |
 | `jobs_catalog.go:321` | `deriveCatalogQuality` — per-service → catalog quality label |
 | `backend/meta/genre.go:66` | `{"deezer", deezerGenreNames}` — ⚠️ **genre source, keep** (see §6.4's warning) |
@@ -433,10 +462,28 @@ provider that now works best.
 > availability check is possible and would be *more* accurate than what it replaces.
 > Breaking a feature that already lies about Qobuz is an acceptable trade.
 
+**Executed 2026-07-28 (7b).** The feature was removed rather than left broken — a button
+that always fails is worse than no button. The count was 7 frontend files, not 2 and not
+the 8 estimated here: `App.tsx`, `TrackInfo`, `TrackList`, `AlbumInfo`, `ArtistInfo`,
+`PlaylistInfo`, `lib/rpc.ts` + `types/api.ts` + the `useAvailability` hook, and
+`PlatformIcons.tsx` fell out as an unreferenced duplicate. `ApisTab.tsx`,
+`WatchlistPage.tsx` and `lib/settings.ts` were **not** touched by this item after all.
+
+**Still open:** an availability check built on the engine. The API surface is free, and
+the engine could answer it per provider for real. Not scoped here.
+
 ### 7.5 Test coverage disappears without being counted
 
 `backend/community` 21 tests, `backend/qobuz` 7. (`amazon` and `deezer` have **none** — a
 statement in itself.) The plan counts deleted lines and never counted lost coverage.
+
+**Item 7 tally, counted honestly.** 11 tests deleted from `backend/songlink` — 8 for
+`searchITunes`, 3 for `GetAllURLsFromSpotify`. Every one covered code that was deleted in
+the same commit, so no surviving behaviour lost its guard: `GetISRCDirect` and
+`GetDeezerSearchFallback` had **zero** dedicated tests before item 7 as well. That is a
+gap the deletions exposed rather than caused, and `getDeezerISRC`'s parse — now on the
+BYOT critical path — got one (`client_test.go`). `tidalMayRunNatively` kept all 14 of its
+cases through the rename.
 
 ### 7.6 `check-upstream.sh` will flag the deletions forever
 

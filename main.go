@@ -109,7 +109,7 @@ func main() {
 		Media:    &MediaService{},
 		History:  NewHistoryService(jobs),
 		Audio:    &AudioService{},
-		Metadata: NewMetadataService(jobs, auth),
+		Metadata: NewMetadataService(auth),
 		Download: NewDownloadService(jobs, auth),
 	}
 	// FileService needs the container itself (its rename methods coordinate

@@ -121,9 +121,9 @@ func (jm *JobManager) processJob(jobID string) {
 		return
 	}
 
-	streamingURLs := jm.getStreamingURLs(job)
+	isrc := jm.resolveTrackISRC(job)
 
-	req := jm.buildDownloadRequest(job, outputDir, streamingURLs)
+	req := jm.buildDownloadRequest(job, outputDir, isrc)
 	lastPersisted := time.Now()
 	req.SpeedCallback = func(mbDownloaded, speedMBps float64) {
 		job.Speed = speedMBps

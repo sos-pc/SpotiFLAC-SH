@@ -190,17 +190,6 @@ export interface LyricsDownloadResponse {
     error?: string;
     already_exists?: boolean;
 }
-export interface TrackAvailability {
-    spotify_id: string;
-    tidal: boolean;
-    amazon: boolean;
-    qobuz: boolean;
-    deezer: boolean;
-    tidal_url?: string;
-    amazon_url?: string;
-    qobuz_url?: string;
-    deezer_url?: string;
-}
 // Same contract as LyricsDownloadRequest (D4).
 export interface CoverDownloadRequest {
     cover_url: string;

@@ -21,85 +21,72 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Streaming URL resolution
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// ISRC resolution
+// -----------------------------------------------------------------------------
 
-// getStreamingURLs resolves the ISRC, and a Tidal URL when the BYOT path may
-// run. ISRC-direct (Spotify's own catalog record, cached) comes first and wins;
-// the Deezer lookup only fills what it leaves empty.
-func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
-	s := job.Settings
-
-	result := make(map[string]string)
-
-	// Cheapest and most authoritative first: Spotify's own catalog record for
-	// this exact track, cached. Hoisted above the chain because it no longer
-	// merely overrides the chain's ISRC — when the chain is skipped it is the
-	// only source.
-	if directISRC := jm.resolveISRCDirect(job); directISRC != "" {
-		result["isrc"] = directISRC
+// resolveTrackISRC resolves the track's ISRC, the one piece of cross-provider
+// identity the download path still needs.
+//
+// This used to be getStreamingURLs and returned a map of tidal_url/amazon_url/isrc.
+// Two of those three keys were already impossible to populate: amazon_url died
+// with the native Amazon downloader, and tidal_url only ever came from Song.link
+// - GetDeezerSearchFallback, despite its SongLinkURLs return type, never set it.
+// Removing Song.link (item 7) left the map with exactly one live key, so it is a
+// string now, and the dead branches reading the other two are gone with it.
+func (jm *JobManager) resolveTrackISRC(job *Job) string {
+	// Cheapest and most authoritative: Spotify's own catalog record for this
+	// exact track, cached.
+	if isrc := jm.resolveISRCDirect(job); isrc != "" {
+		return isrc
 	}
 
-	// The lookup below produces tidal_url, which only the NATIVE Tidal downloader
-	// reads. A delegated provider is handed the Spotify URL and resolves
-	// internally, so running it for a job whose candidates are all delegated
-	// spends a third-party round-trip on a result nobody reads.
-	if !needsNativeProviderURLs(s) {
-		slog.Debug("[Jobs] Skipping URL resolution — every candidate provider is delegated",
-			"track", job.TrackName, "service", s.Service)
-		if len(result) == 0 {
-			return nil
-		}
-		return result
+	// Deezer's public API as a name-search fallback - one call, no rate-limit,
+	// but a name match, so it can land on the wrong edition/remaster. Gated on
+	// Tidal being a live candidate: it is the only consumer that needs an ISRC
+	// before the download starts (GetTidalIDFromISRC below). A delegated provider
+	// is handed the Spotify URL and resolves internally.
+	if !tidalMayRunNatively(job.Settings) {
+		slog.Debug("[Jobs] Skipping the ISRC fallback - no native Tidal candidate",
+			"track", job.TrackName, "service", job.Settings.Service)
+		return ""
+	}
+	if job.TrackName == "" || job.ArtistName == "" {
+		return ""
 	}
 
-	for k, v := range jm.getStreamingURLsViaFallbackChain(job) {
-		// ISRC-direct is name-match-free, so it still outranks what the Deezer
-		// name search finds — same precedence as before, expressed as
-		// "don't overwrite" now that it is resolved first.
-		if k == "isrc" && result["isrc"] != "" {
-			continue
-		}
-		if v != "" {
-			result[k] = v
-		}
+	isrc, err := songlink.GetDeezerSearchFallback(job.TrackName, job.ArtistName)
+	if err != nil {
+		slog.Debug("[Jobs] Deezer ISRC fallback failed", "track", job.TrackName, "err", err)
+		return ""
 	}
-
-	if len(result) == 0 {
-		return nil
-	}
-	return result
+	slog.Debug("[Jobs] Deezer ISRC fallback OK", "track", job.TrackName, "isrc", isrc)
+	return isrc
 }
 
-// needsNativeProviderURLs reports whether any provider that could run for this
-// job still needs a pre-resolved stream URL — that is, runs natively rather than
-// through the engine.
-//
-// Tidal is now the only consumer: Amazon used to read amazon_url, but its native
-// downloader is gone, so nothing reads that key any more. Qobuz and Deezer never
-// did. Tidal's URL is itself only a shortcut — given an ISRC it reaches its own
-// API through GetTidalIDFromISRC.
+// tidalMayRunNatively reports whether Tidal - the only provider left with a
+// native path - could run for this job. Qobuz, Amazon and Deezer are engine-only,
+// and the engine needs no ISRC from us.
 //
 // When the chain cannot be known here (auto with no configured order, which
 // ExecuteDownload fills in later) the answer is yes: guessing wrong would
-// silently strip a URL a native download depends on, and the cost of being
-// wrong in that direction is only the round-trips we pay today.
-func needsNativeProviderURLs(s JobSettings) bool {
-	needsURL := func(svc string) bool {
+// silently strip an ISRC a native Tidal download depends on, and the cost of
+// being wrong in that direction is only the round-trip we pay today.
+func tidalMayRunNatively(s JobSettings) bool {
+	isNativeTidal := func(svc string) bool {
 		return strings.EqualFold(strings.TrimSpace(svc), "tidal") && !backend.EngineHandles("tidal")
 	}
 
 	svc := strings.TrimSpace(strings.ToLower(s.Service))
 	if svc != "" && svc != "auto" {
-		return needsURL(svc)
+		return isNativeTidal(svc)
 	}
 
 	if strings.TrimSpace(s.AutoOrder) == "" {
 		return true
 	}
 	for _, candidate := range strings.Split(s.AutoOrder, "-") {
-		if needsURL(candidate) {
+		if isNativeTidal(candidate) {
 			return true
 		}
 	}
@@ -107,7 +94,7 @@ func needsNativeProviderURLs(s JobSettings) bool {
 }
 
 // resolveISRCDirect resolves job.SpotifyID's ISRC straight from Spotify's
-// metadata, independent of the Deezer lookup. Cached (see
+// metadata, independent of the Deezer name search. Cached (see
 // songlink.GetISRCDirect), so repeat downloads/retags of the same track
 // don't pay for a fresh lookup.
 func (jm *JobManager) resolveISRCDirect(job *Job) string {
@@ -121,38 +108,6 @@ func (jm *JobManager) resolveISRCDirect(job *Job) string {
 		return ""
 	}
 	return isrc
-}
-
-// getStreamingURLsViaFallbackChain resolves a Tidal URL for the BYOT path.
-//
-// It used to continue into Song.link and two HTML scrapes when Deezer came up
-// empty. Those are gone: Song.link exists to translate a Spotify ID into links
-// on other platforms, and the engine resolves from the Spotify URL itself, so
-// the only consumer left is Tidal — which reaches its own API by ISRC anyway
-// (GetTidalIDFromISRC in buildDownloadRequest). One cheap lookup, no cascade.
-func (jm *JobManager) getStreamingURLsViaFallbackChain(job *Job) map[string]string {
-	// Deezer's public API: no rate-limit, one call, gives ISRC + a Tidal link.
-	if job.TrackName != "" && job.ArtistName != "" {
-		if fallback, ferr := songlink.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil && fallback != nil {
-			result := make(map[string]string)
-			if fallback.ISRC != "" {
-				result["isrc"] = fallback.ISRC
-			}
-			if fallback.TidalURL != "" {
-				result["tidal_url"] = fallback.TidalURL
-			}
-			if fallback.AmazonURL != "" {
-				result["amazon_url"] = fallback.AmazonURL
-			}
-			if len(result) > 0 {
-				slog.Debug("[Jobs] Deezer OK", "track", job.TrackName, "isrc", result["isrc"])
-				return result
-			}
-		} else if ferr != nil {
-			slog.Debug("[Jobs] Deezer lookup failed", "track", job.TrackName, "err", ferr)
-		}
-	}
-	return nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,7 +181,7 @@ func outputSubfolder(folderTemplate string, createPlaylistFolder, useFirstArtist
 // Download request assembly
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streamingURLs map[string]string) DownloadRequest {
+func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc string) DownloadRequest {
 	s := job.Settings
 
 	service := s.Service
@@ -243,21 +198,13 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 	// backend.ExecuteDownload dispatches — an explicit service runs alone, `auto`
 	// iterates the AutoOrder chain. The Tidal name-search fallback is not
 	// duplicated here; ExecuteDownload's ensureTidalServiceURL owns it.
+	// Only resolve Tidal's URL when Tidal can actually run — no point paying for
+	// a Tidal ISRC lookup on an explicit qobuz/deezer/amazon download.
 	tidalURL := ""
-	isrc := ""
-	if streamingURLs != nil {
-		isrc = streamingURLs["isrc"]
-
-		// Only resolve Tidal's URL when Tidal can actually run — no point paying
-		// for a Tidal ISRC lookup on an explicit qobuz/deezer/amazon download.
-		if service == "tidal" || service == "auto" {
-			tidalURL = streamingURLs["tidal_url"]
-			if tidalURL == "" && isrc != "" {
-				if tidalID, _, err := tidal.GetTidalIDFromISRC(job.TrackName, job.ArtistName, isrc); err == nil && tidalID > 0 {
-					tidalURL = fmt.Sprintf("https://tidal.com/track/%d", tidalID)
-					slog.Debug("[Jobs] Tidal found via ISRC", "track", job.TrackName, "tidal_id", tidalID)
-				}
-			}
+	if isrc != "" && (service == "tidal" || service == "auto") {
+		if tidalID, _, err := tidal.GetTidalIDFromISRC(job.TrackName, job.ArtistName, isrc); err == nil && tidalID > 0 {
+			tidalURL = fmt.Sprintf("https://tidal.com/track/%d", tidalID)
+			slog.Debug("[Jobs] Tidal found via ISRC", "track", job.TrackName, "tidal_id", tidalID)
 		}
 	}
 

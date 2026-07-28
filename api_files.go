@@ -210,32 +210,12 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, map[string]string{"url": url})
 	}))
 
-	s.mux.Handle("GET /api/v1/tracks/{id}/availability", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		if !v1RequirePermission(w, r, "read") {
-			return
-		}
-		id := r.PathValue("id")
-		result, err := s.ctr.Metadata.CheckTrackAvailability(id)
-		if err != nil {
-			writeV1Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeV1JSON(w, http.StatusOK, json.RawMessage(result))
-	}))
-
-	s.mux.Handle("GET /api/v1/tracks/{id}/links", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
-		if !v1RequirePermission(w, r, "read") {
-			return
-		}
-		id := r.PathValue("id")
-		region := r.URL.Query().Get("region")
-		result, err := s.ctr.Metadata.GetStreamingURLs(id, region)
-		if err != nil {
-			writeV1Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeV1JSON(w, http.StatusOK, map[string]json.RawMessage{"urls": json.RawMessage(result)})
-	}))
+	// GET /tracks/{id}/availability and GET /tracks/{id}/links used to live here.
+	// Both answered from Song.link's linksByPlatform — "which platforms carry this
+	// track" — which stopped being a question we can answer once the engine took
+	// over resolution: it resolves per provider, internally, at download time.
+	// Song.link also never returned Qobuz links, so the answer was already partly
+	// fiction. See docs/dead-code-removal-plan.md item 7b.
 
 	// ── Settings ──────────────────────────────────────────────────────────
 	s.mux.Handle("GET /api/v1/settings", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {

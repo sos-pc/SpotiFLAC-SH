@@ -1,11 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Download, CheckCircle, XCircle, FileCheck, FileText, Globe, ImageDown, Play, Pause } from "lucide-react";
+import { Download, CheckCircle, XCircle, FileCheck, FileText, ImageDown, Play, Pause } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, } from "@/components/ui/pagination";
-import type { TrackMetadata, TrackAvailability } from "@/types/api";
-import { TidalIcon, QobuzIcon, AmazonIcon, DeezerIcon } from "./PlatformIcons";
+import type { TrackMetadata } from "@/types/api";
 import { usePreview } from "@/hooks/usePreview";
 interface TrackListProps {
     tracks: TrackMetadata[];
@@ -27,8 +26,6 @@ interface TrackListProps {
     failedLyrics?: Set<string>;
     skippedLyrics?: Set<string>;
     downloadingLyricsTrack?: string | null;
-    checkingAvailabilityTrack?: string | null;
-    availabilityMap?: Map<string, TrackAvailability>;
     downloadedCovers?: Set<string>;
     failedCovers?: Set<string>;
     skippedCovers?: Set<string>;
@@ -37,7 +34,6 @@ interface TrackListProps {
     onToggleSelectAll: (tracks: TrackMetadata[]) => void;
     onDownloadTrack: (id: string, name: string, artists: string, albumName: string, spotifyId?: string, folderName?: string, durationMs?: number, position?: number, albumArtist?: string, releaseDate?: string, coverUrl?: string, spotifyTrackNumber?: number, spotifyDiscNumber?: number, spotifyTotalTracks?: number, spotifyTotalDiscs?: number, copyright?: string, publisher?: string) => void;
     onDownloadLyrics?: (spotifyId: string, name: string, artists: string, albumName: string, folderName?: string, isArtistDiscography?: boolean, position?: number, albumArtist?: string, releaseDate?: string, discNumber?: number) => void;
-    onCheckAvailability?: (spotifyId: string) => void;
     onDownloadCover?: (coverUrl: string, trackName: string, artistName: string, albumName: string, folderName?: string, isArtistDiscography?: boolean, position?: number, trackId?: string, albumArtist?: string, releaseDate?: string, discNumber?: number) => void;
     onPageChange: (page: number) => void;
     onAlbumClick?: (album: {
@@ -52,7 +48,7 @@ interface TrackListProps {
     }) => void;
     onTrackClick?: (track: TrackMetadata) => void;
 }
-export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, downloadingTrack, isDownloading, currentPage, itemsPerPage, showCheckboxes = false, hideAlbumColumn = false, folderName, isArtistDiscography = false, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, onToggleTrack, onToggleSelectAll, onDownloadTrack, onDownloadLyrics, onCheckAvailability, onDownloadCover, onPageChange, onAlbumClick, onArtistClick, onTrackClick, }: TrackListProps) {
+export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, downloadingTrack, isDownloading, currentPage, itemsPerPage, showCheckboxes = false, hideAlbumColumn = false, folderName, isArtistDiscography = false, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, onToggleTrack, onToggleSelectAll, onDownloadTrack, onDownloadLyrics, onDownloadCover, onPageChange, onAlbumClick, onArtistClick, onTrackClick, }: TrackListProps) {
     const { playPreview, loadingPreview, playingTrack } = usePreview();
     let filteredTracks = tracks.filter((track) => {
         if (!searchQuery)
@@ -318,21 +314,6 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>Download Cover</p>
-                    </TooltipContent>
-                  </Tooltip>)}
-                  {track.spotify_id && onCheckAvailability && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={() => onCheckAvailability(track.spotify_id!)} size="icon" variant="outline" disabled={checkingAvailabilityTrack === track.spotify_id}>
-                        {checkingAvailabilityTrack === track.spotify_id ? (<Spinner />) : availabilityMap?.has(track.spotify_id) ? (<CheckCircle className="h-4 w-4 text-green-500"/>) : (<Globe className="h-4 w-4"/>)}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {availabilityMap?.has(track.spotify_id) ? (<div className="flex items-center gap-2">
-                        <TidalIcon className={`w-4 h-4 ${availabilityMap.get(track.spotify_id)?.tidal ? "text-green-500" : "text-red-500"}`}/>
-                        <QobuzIcon className={`w-4 h-4 ${availabilityMap.get(track.spotify_id)?.qobuz ? "text-green-500" : "text-red-500"}`}/>
-                        <AmazonIcon className={`w-4 h-4 ${availabilityMap.get(track.spotify_id)?.amazon ? "text-green-500" : "text-red-500"}`}/>
-                        <DeezerIcon className={`w-4 h-4 ${availabilityMap.get(track.spotify_id)?.deezer ? "text-green-500" : "text-red-500"}`}/>
-                      </div>) : (<p>Check Availability</p>)}
                     </TooltipContent>
                   </Tooltip>)}
                 </div>

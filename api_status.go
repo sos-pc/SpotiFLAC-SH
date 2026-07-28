@@ -18,7 +18,6 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -436,7 +435,8 @@ type serviceEntry struct {
 }
 
 var coreServices = []serviceEntry{
-	{"SongLink", "https://api.song.link", nil},
+	// Song.link was probed here until item 7b removed the last call to it. Deezer
+	// stays: it is still the name-search ISRC fallback (GetDeezerSearchFallback).
 	{"Deezer", "https://api.deezer.com", pingDeezer},
 	// The genre chain's tiers, in the order it tries them (see meta/genre.go).
 	{"Apple Music · genre", "https://api.music.apple.com", pingAppleMusic},
@@ -520,17 +520,6 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 		}(i, svc)
 	}
 	wg.Wait()
-
-	// Override SongLink status if rate-limited in memory
-	sl := songlink.GetSongLinkClient()
-	if sl.IsRateLimited() {
-		for i, r := range results {
-			if r.Name == "SongLink" {
-				results[i].Status = "ratelimited"
-				results[i].Error = "Rate limited — retry after " + sl.RateLimitedUntil().Format("15:04:05")
-			}
-		}
-	}
 
 	return results
 }

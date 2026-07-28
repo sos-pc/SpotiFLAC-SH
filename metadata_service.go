@@ -1,35 +1,33 @@
 package main
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MetadataService — Spotify metadata, search, streaming-link resolution and
-// track-availability lookups carved out of the former App god-object (R3).
+// MetadataService — Spotify metadata and search, carved out of the former App
+// god-object (R3). Streaming-link resolution and track-availability lookups also
+// lived here until item 7b removed them with the rest of Song.link.
 //
-// Holds only its real dependencies: the JobManager (for its shared songlink
-// client) and AuthManager (for EffectiveDownloadSettings' per-user lookup —
-// see GetSpotifyMetadata / DownloadSettings, R8).
+// Holds only its real dependency: AuthManager, for EffectiveDownloadSettings'
+// per-user lookup (see GetSpotifyMetadata / DownloadSettings, R8).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
-	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 )
 
+// The JobManager dependency went with them: it was held only to borrow the
+// JobManager's shared SongLinkClient.
 type MetadataService struct {
-	jobs *JobManager
 	auth *AuthManager
 }
 
-func NewMetadataService(jobs *JobManager, auth *AuthManager) *MetadataService {
-	return &MetadataService{jobs: jobs, auth: auth}
+func NewMetadataService(auth *AuthManager) *MetadataService {
+	return &MetadataService{auth: auth}
 }
 
 type SpotifyMetadataRequest struct {
@@ -49,70 +47,6 @@ type SpotifySearchByTypeRequest struct {
 	SearchType string `json:"search_type"`
 	Limit      int    `json:"limit"`
 	Offset     int    `json:"offset"`
-}
-
-func (m *MetadataService) GetStreamingURLs(spotifyTrackID string, region string) (string, error) {
-	if spotifyTrackID == "" {
-		return "", fmt.Errorf("spotify track ID is required")
-	}
-	slog.Debug("[GetStreamingURLs] Called", "track_id", spotifyTrackID, "region", region)
-	jm := m.jobs
-	if jm == nil {
-		return "", fmt.Errorf("job manager not initialized")
-	}
-	urls, err := jm.songLinkClient.GetAllURLsFromSpotify(spotifyTrackID, region)
-
-	// Si Songlink échoue ou ne trouve rien (ex: 429), on tente une recherche directe sur l'API Tidal
-	if err != nil || urls == nil || (urls.TidalURL == "" && urls.AmazonURL == "") {
-		slog.Debug("[GetStreamingURLs] Songlink failed/empty, falling back to direct Tidal Search", "err", err, "track_id", spotifyTrackID)
-
-		// 1. Récupérer le nom de la piste et de l'artiste depuis Spotify via l'ID
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", spotifyTrackID)
-		trackData, sErr := spotify.GetFilteredSpotifyData(ctx, trackURL, false, 0)
-
-		if sErr == nil {
-			var trackResp struct {
-				Track struct {
-					Name    string `json:"name"`
-					Artists []struct {
-						Name string `json:"name"`
-					} `json:"artists"`
-				} `json:"track"`
-			}
-
-			if jsonData, jsonErr := json.Marshal(trackData); jsonErr == nil {
-				if json.Unmarshal(jsonData, &trackResp) == nil && trackResp.Track.Name != "" && len(trackResp.Track.Artists) > 0 {
-					artistName := trackResp.Track.Artists[0].Name
-					trackName := trackResp.Track.Name
-
-					// 2. Lancer la recherche sur l'API Tidal
-					dl := tidal.NewTidalDownloader("")
-					if tidalURL, tErr := dl.SearchTidalByName(trackName, artistName); tErr == nil && tidalURL != "" {
-						if urls == nil {
-							urls = &songlink.SongLinkURLs{}
-						}
-						urls.TidalURL = tidalURL
-						slog.Debug("[GetStreamingURLs] Fallback successful, found Tidal URL", "url", tidalURL)
-						err = nil // On efface l'erreur Songlink pour le frontend
-					} else {
-						slog.Debug("[GetStreamingURLs] Tidal direct search failed", "err", tErr)
-					}
-				}
-			}
-		}
-	}
-
-	if err != nil {
-		return "", err
-	}
-	jsonData, err := json.Marshal(urls)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode response: %v", err)
-	}
-	return string(jsonData), nil
 }
 
 // normalizeSpotifyURL supprime le préfixe intl-xx/ et le paramètre ?si=
@@ -210,25 +144,6 @@ func (m *MetadataService) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return spotify.SearchSpotifyByType(ctx, req.Query, req.SearchType, req.Limit, req.Offset)
-}
-
-func (m *MetadataService) CheckTrackAvailability(spotifyTrackID string) (string, error) {
-	if spotifyTrackID == "" {
-		return "", fmt.Errorf("spotify track ID is required")
-	}
-	jm := m.jobs
-	if jm == nil {
-		return "", fmt.Errorf("job manager not initialized")
-	}
-	availability, err := jm.songLinkClient.CheckTrackAvailability(spotifyTrackID)
-	if err != nil {
-		return "", err
-	}
-	jsonData, err := json.Marshal(availability)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode response: %v", err)
-	}
-	return string(jsonData), nil
 }
 
 func (m *MetadataService) GetPreviewURL(trackID string) (string, error) {

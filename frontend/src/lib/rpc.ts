@@ -12,7 +12,6 @@ import type {
   GalleryImageDownloadResponse,
   AvatarDownloadRequest,
   AvatarDownloadResponse,
-  TrackAvailability,
   SpotifySearchResults,
   SpotifySearchTrack,
   SpotifySearchAlbum,
@@ -126,15 +125,6 @@ export const GetSpotifyMetadata = (req: {
     `/search?url=${encodeURIComponent(url)}&batch=${batch}`,
   );
 };
-
-export const GetStreamingURLs = (id: string, region: string): Promise<TrackAvailability> =>
-  rest<{ urls: TrackAvailability }>(
-    "GET",
-    `/tracks/${encodeURIComponent(id)}/links?region=${encodeURIComponent(region)}`,
-  ).then((r) => r.urls);
-
-export const CheckTrackAvailability = (id: string): Promise<TrackAvailability> =>
-  rest<TrackAvailability>("GET", `/tracks/${encodeURIComponent(id)}/availability`);
 
 export const SearchSpotify = (req: {
   query: string;

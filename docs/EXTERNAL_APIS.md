@@ -30,17 +30,20 @@ When the native scraper fails, SpotiFLAC can transparently fall back to a SpotFe
 
 The Spotify track ID is **persisted into every downloaded audio file** as a `SPOTIFY_ID` tag (Vorbis comment / `TXXX` / iTunes atom). This tag is what `meta.BuildSpotifyIDIndex` later uses to regenerate M3U8 playlists straight from the filesystem, independent of BoltDB.
 
-### Odesli (Song.link)
-The primary matching engine used to convert a Spotify ID into a Tidal/Qobuz/Amazon link, or to extract the ISRC.
+### ~~Odesli (Song.link)~~ — removed 2026-07-28
 
-- **`https://api.song.link/v1-alpha.1/links`** — Official JSON API. *Heavily rate-limited (HTTP 429).*
-- **`https://song.link/s/{spotifyID}`** — HTML fallback. When the JSON API is rate-limited, SpotiFLAC scrapes the `__NEXT_DATA__` blob from the page.
-- **`https://song.link/i/{appleMusicID}`** — Apple Music quota path. SpotiFLAC reaches it via iTunes Search (`itunes.apple.com/search`) when the Spotify path is rate-limited; the two quotas are independent.
+Song.link used to be the matching engine: Spotify ID → a Tidal/Qobuz/Amazon link,
+or an ISRC. **No code calls it any more.** The download engine resolves each
+provider internally from the Spotify URL, so cross-platform links stopped being
+something we need. Its JSON API, its two HTML-scrape quota paths and the
+9-calls-per-minute guard that made them tolerable all went with it.
 
-All Song.link calls go through a singleton HTTP client (`backend/songlink/`), with a shared `acquireSlot` rate-limit guard, so the 429 cache is consistent across goroutines.
+`backend/songlink/` still exists and still carries the misleading name; what is
+left inside is an **ISRC resolver**: `GetISRCDirect` (Spotify's own catalog
+record, cached in BoltDB) with `GetDeezerSearchFallback` behind it.
 
 ### Deezer (public API)
-Used as ISRC fallback when Song.link is rate-limited, **and** as a download source.
+The ISRC fallback behind `GetISRCDirect`, **and** a download source.
 
 - **`https://api.deezer.com/search`** — Public search endpoint.
 - **`https://api.deezer.com/track/{id}`** — Track metadata endpoint.

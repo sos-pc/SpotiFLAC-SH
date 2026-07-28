@@ -2,11 +2,11 @@ package main
 
 import "testing"
 
-// needsNativeProviderURLs decides whether to SKIP resolving stream URLs. A wrong
+// tidalMayRunNatively decides whether to SKIP resolving stream URLs. A wrong
 // "false" is the dangerous direction: the job then runs without a URL its native
 // downloader needs, and fails for a reason that looks nothing like this function.
 // So the false cases are enumerated as carefully as the true ones.
-func TestNeedsNativeProviderURLs(t *testing.T) {
+func TestTidalMayRunNatively(t *testing.T) {
 	cases := []struct {
 		name     string
 		service  string
@@ -14,7 +14,7 @@ func TestNeedsNativeProviderURLs(t *testing.T) {
 		engineOn string // ENGINE_SERVICES
 		want     bool
 	}{
-		// Tidal is the only remaining consumer of the resolved URLs.
+		// Tidal is the only remaining consumer of a pre-resolved ISRC.
 		{"explicit tidal, native", "tidal", "", "", true},
 		{"explicit amazon has no native path left", "amazon", "", "", false},
 		{"explicit tidal, delegated", "tidal", "", "tidal", false},
@@ -31,7 +31,7 @@ func TestNeedsNativeProviderURLs(t *testing.T) {
 		{"auto, chain has no URL consumer", "auto", "qobuz-deezer", "", false},
 
 		// Conservative when the chain is not yet known: ExecuteDownload fills the
-		// default in later, so skipping here would strip URLs for an unknown chain.
+		// default in later, so skipping here would strip the ISRC for an unknown chain.
 		{"auto with empty order", "auto", "", "tidal,qobuz,amazon,deezer", true},
 		{"empty service behaves as auto", "", "", "tidal,qobuz,amazon,deezer", true},
 
@@ -44,9 +44,9 @@ func TestNeedsNativeProviderURLs(t *testing.T) {
 			t.Setenv("ENGINE_URL", "http://engine:8080")
 			t.Setenv("ENGINE_SERVICES", tc.engineOn)
 
-			got := needsNativeProviderURLs(JobSettings{Service: tc.service, AutoOrder: tc.order})
+			got := tidalMayRunNatively(JobSettings{Service: tc.service, AutoOrder: tc.order})
 			if got != tc.want {
-				t.Errorf("needsNativeProviderURLs(service=%q order=%q, ENGINE_SERVICES=%q) = %v, want %v",
+				t.Errorf("tidalMayRunNatively(service=%q order=%q, ENGINE_SERVICES=%q) = %v, want %v",
 					tc.service, tc.order, tc.engineOn, got, tc.want)
 			}
 		})
@@ -54,17 +54,17 @@ func TestNeedsNativeProviderURLs(t *testing.T) {
 }
 
 // With no engine configured nothing is delegated, so the answer must match the
-// behaviour that existed before the engine: resolve URLs whenever a consumer
-// could run. This is the regression guard for an install that never enables the
-// engine at all.
-func TestNeedsNativeProviderURLsWithoutEngine(t *testing.T) {
+// behaviour that existed before the engine: resolve whenever a consumer could
+// run. This is the regression guard for an install that never enables the engine
+// at all.
+func TestTidalMayRunNativelyWithoutEngine(t *testing.T) {
 	t.Setenv("ENGINE_URL", "")
 	t.Setenv("ENGINE_SERVICES", "tidal,qobuz,amazon,deezer")
 
-	if !needsNativeProviderURLs(JobSettings{Service: "tidal"}) {
-		t.Error("tidal must still resolve URLs when ENGINE_URL is unset")
+	if !tidalMayRunNatively(JobSettings{Service: "tidal"}) {
+		t.Error("tidal must still resolve an ISRC when ENGINE_URL is unset")
 	}
-	if !needsNativeProviderURLs(JobSettings{Service: "auto", AutoOrder: "tidal-qobuz"}) {
-		t.Error("auto chain containing tidal must resolve URLs when the engine is off")
+	if !tidalMayRunNatively(JobSettings{Service: "auto", AutoOrder: "tidal-qobuz"}) {
+		t.Error("auto chain containing tidal must resolve an ISRC when the engine is off")
 	}
 }

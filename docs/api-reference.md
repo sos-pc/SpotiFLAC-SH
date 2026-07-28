@@ -533,27 +533,13 @@ Returns the 30-second preview URL.
 { "url": "https://p.scdn.co/mp3-preview/..." }
 ```
 
-### `GET /api/v1/tracks/{id}/availability`
-Check which lossless platforms have this track. Calls Song.link.
-
-```json
-{ "tidal": true, "qobuz": false, "amazon": true, "deezer": true }
-```
-
-### `GET /api/v1/tracks/{id}/links?region={region}`
-Get streaming URLs on every supported platform (raw Song.link payload, plus a Tidal direct-search fallback if Song.link is rate-limited).
-
-```json
-{
-  "urls": {
-    "tidal_url": "https://tidal.com/track/...",
-    "amazon_url": "https://music.amazon.com/...",
-    "qobuz_url": "https://www.qobuz.com/...",
-    "deezer_url": "https://www.deezer.com/...",
-    "isrc": "GB-XYZ-..."
-  }
-}
-```
+> **Removed 2026-07-28.** `GET /tracks/{id}/availability` and
+> `GET /tracks/{id}/links` both answered from Song.link's `linksByPlatform`.
+> The download engine resolves each provider internally from the Spotify URL, so
+> there is no cross-platform link table to report any more — and Song.link never
+> returned Qobuz links, so the availability answer was already partly fiction.
+> A real per-provider availability check, asked of the engine, is possible and
+> unbuilt; the paths are free. See `docs/dead-code-removal-plan.md` item 7b.
 
 ---
 
@@ -1128,7 +1114,6 @@ Parallel health check of every external service (cached for 30 seconds, invalida
 [
   { "name": "Tidal · eu-central.monochrome.tf", "url": "https://eu-central.monochrome.tf", "status": "ok",          "latency_ms": 45,  "checked_at": 1753920000 },
   { "name": "Tidal · api.monochrome.tf",        "url": "https://api.monochrome.tf",        "status": "ratelimited", "latency_ms": 80,  "checked_at": 1753920000, "error": "PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)" },
-  { "name": "SongLink",                         "url": "https://api.song.link",            "status": "ratelimited",                      "checked_at": 1753920000, "error": "Rate limited — retry after 14:30:00" },
   { "name": "Amazon · amazon.spotbye.qzz.io",   "url": "https://amazon.spotbye.qzz.io",    "status": "down",                              "checked_at": 1753920000, "error": "connection refused" }
 ]
 ```

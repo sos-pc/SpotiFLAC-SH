@@ -250,17 +250,20 @@ Background goroutines (started in main.go):
 ├── ratelimit.go         # Login rate limiter (10/1min, 5min block)
 ├── proxy_discovery.go   # Auto-refresh Tidal proxy list from tidal-uptime.geeked.wtf
 ├── backend/
-│   ├── downloader.go    # Download dispatcher (auto fallback per autoOrder)
+│   ├── downloader.go    # Download dispatcher (BYOT first, then engine, per autoOrder)
+│   ├── engine_ingest.go # Engine route + ingestion into our tree/tags
 │   ├── filemanager.go   # File browser, rename, upload
 │   ├── history.go       # Download & fetch history
 │   ├── uploader.go      # Image upload helpers
+│   ├── engine/          # HTTP client for the download-engine sidecar
 │   ├── tidal/           # Tidal client (Device Code auth, download, DownloadParams)
-│   ├── qobuz/           # Qobuz client (musicdl.me POST primary)
-│   ├── amazon/          # Amazon Music client (X-Debug-Key)
-│   ├── deezer/          # Deezer client
+│   │                    #   the one native provider left — it carries a user token
 │   ├── spotify/         # Spotify metadata (GraphQL, TOTP auth)
-│   ├── songlink/        # Song.link / Odesli matching (singleton client)
+│   ├── songlink/        # ISRC resolver: Spotify-direct + cache, Deezer fallback
+│   │                    #   (name is historical — nothing calls Song.link any more)
+│   ├── providerutil/    # Shared download/genre/ISRC helpers
 │   ├── audio/           # FFmpeg, codec analysis, spectrum
+│   ├── db/              # SQLite catalog
 │   ├── meta/            # Lyrics (LRCLIB), cover art, MusicBrainz, tag embedding,
 │   │                    #   spotify_index.go (BuildSpotifyIDIndex / WriteSpotifyIDTag)
 │   └── util/            # Config, filenames, HTTP client, proxy config, system,
@@ -449,4 +452,4 @@ See [CREDITS.md](CREDITS.md) for the full list of community projects, libraries 
 - [afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC) — original project
 - [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal) — Tidal Device Code credentials
 - [tidal-uptime.geeked.wtf](https://tidal-uptime.geeked.wtf) — Tidal proxy auto-discovery feed
-- [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api)
+- [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [hifi-api](https://github.com/binimum/hifi-api)
