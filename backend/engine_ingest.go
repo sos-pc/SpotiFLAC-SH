@@ -113,7 +113,8 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 	}
 
 	client := engine.NewClient(EngineBaseURL())
-	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, req.AudioFormat, engineStagingDir(), req.AllowFallback)
+	quality := engineQualityFor(req.AudioFormat)
+	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, quality, engineStagingDir(), req.AllowFallback)
 
 	// Hi-res is a request the catalogue often cannot honour: most older material
 	// exists only in 16/44.1, and asking a stream endpoint for strict 24-bit on
@@ -123,7 +124,7 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 	// turns those from a lost track into a normal download, mirroring the ladder
 	// the native Qobuz path already walks (27→7→6). Gated on the user's own
 	// AllowFallback so "hi-res or nothing" stays expressible.
-	if err != nil && req.AllowFallback && isHiResRequest(req.AudioFormat) && providerHasQualityTiers(svc) {
+	if err != nil && req.AllowFallback && isHiResRequest(quality) && providerHasQualityTiers(svc) {
 		slog.Info("[Engine] hi-res failed, retrying at CD quality", "service", svc, "err", err, "track", req.TrackName)
 		res, err = client.Download(context.Background(), spotifyURL, []string{svc}, "LOSSLESS", engineStagingDir(), req.AllowFallback)
 	}
@@ -216,9 +217,56 @@ func providerHasQualityTiers(svc string) bool {
 	return false
 }
 
-// isHiResRequest reports whether the caller asked for better-than-CD audio, in
-// any of the vocabularies AudioFormat carries (the canonical names the UI uses
-// and the numeric Qobuz codes that reach us from older call sites).
+// engineQualityFor translates our per-provider quality vocabulary into the
+// canonical names the engine works in — the same job TidalQualityFor does for
+// the native Tidal path, done once, at the boundary.
+//
+// req.AudioFormat arrives in whichever dialect its provider speaks: Tidal's
+// LOSSLESS/HI_RES_LOSSLESS, Qobuz's numeric format IDs, and the literal "flac"
+// that resolveAudioFormat still returns for Deezer — a leftover from the native
+// Deezer downloader, which no longer exists.
+//
+// Read upstream (SpotiFLAC/core/quality.py, 2026-07-28) rather than assumed:
+// normalize_quality() maps every input to one of HI_RES_LOSSLESS / HI_RES /
+// LOSSLESS / HIGH / LOW / DOLBY_ATMOS. Two things that changes about the plan's
+// §7.3 diagnosis —
+//
+//   - The Qobuz numerics are NOT accidental compatibility. "27", "7", "6", "5"
+//     and "4" are listed aliases in that table, twice over (the alias lists and
+//     an isdigit() branch below them). They were always going to work.
+//   - "flac" IS accidental. It matches no alias, is not a digit, and contains
+//     none of the substrings the heuristics look for ("HI", "24", "96", "LOSS",
+//     "LOW", "MP3"), so it reaches the function's final `return "LOSSLESS"`.
+//     Right answer, reached by falling off the end.
+//
+// So this exists to stop depending on that table at all: it emits only the
+// canonical names, which are the keys of the mapping rather than entries in it.
+// Aliases upstream may add, rename or reinterpret; the canonical set is the
+// stable part of the contract. No download changes quality as a result — every
+// value below normalizes today to exactly what it normalized to before.
+func engineQualityFor(format string) string {
+	switch strings.ToUpper(strings.TrimSpace(format)) {
+	case "27", "HI_RES_LOSSLESS", "HIRES_LOSSLESS", "HI-RES-LOSSLESS":
+		return "HI_RES_LOSSLESS"
+	case "7", "HI_RES", "HIRES", "HI-RES":
+		return "HI_RES"
+	case "5", "HIGH":
+		return "HIGH"
+	case "4", "LOW":
+		return "LOW"
+	case "DOLBY_ATMOS", "ATMOS":
+		return "DOLBY_ATMOS"
+	default:
+		// "6", "LOSSLESS", "flac", "" and anything unrecognised. Matching
+		// upstream's own default: CD quality is the safe floor, not an error.
+		return "LOSSLESS"
+	}
+}
+
+// isHiResRequest reports whether the caller asked for better-than-CD audio.
+// Callers pass the canonical value from engineQualityFor; the numeric Qobuz
+// codes stay accepted because req.AudioFormat still reaches other call sites in
+// that dialect.
 func isHiResRequest(format string) bool {
 	switch strings.ToUpper(strings.TrimSpace(format)) {
 	case "HI_RES_LOSSLESS", "HI_RES", "27", "7":

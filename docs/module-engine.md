@@ -67,6 +67,22 @@ POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
 GET|HEAD /health → {status: "ok"}
 ```
 
+**`quality` is canonical, not per-provider.** One of:
+
+```
+HI_RES_LOSSLESS · HI_RES · LOSSLESS · HIGH · LOW · DOLBY_ATMOS
+```
+
+`backend.engineQualityFor` translates our per-provider dialects into that set —
+Tidal's own names, Qobuz's numeric format IDs, and the `"flac"` literal
+`resolveAudioFormat` still returns for Deezer. Sending canonical names is what
+keeps this contract independent of any one engine's alias table: an engine is
+free to accept `27` or `flac`, but it must understand the six names above.
+
+That mapping is the *only* place a provider's quality vocabulary is allowed to
+appear on the delegated path, the same way `TidalQualityFor` owns it for the
+native one.
+
 ---
 
 ## 3. Turning it on

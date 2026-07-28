@@ -511,13 +511,45 @@ engine-delegated.
 | `jobs_catalog.go:321` | `deriveCatalogQuality` — per-service → catalog quality label |
 | `backend/meta/genre.go:66` | `{"deezer", deezerGenreNames}` — ⚠️ **genre source, keep** (see §6.4's warning) |
 
-### 7.3 Our per-provider quality vocabulary leaks into the engine call
+### 7.3 Our per-provider quality vocabulary leaks into the engine call — ✅ **DONE 2026-07-28**
 
 `resolveAudioFormat` returns `"6"` for Qobuz and `"flac"` for Deezer; `downloadViaEngine`
-forwards that verbatim as the engine's `quality`. It happens to work — the engine accepted
-`27` and produced hi-res, accepted `flac` and produced "FLAC Best Available" — but that is
-**accidental compatibility, not a contract**. The delegated path should send the canonical
-vocabulary (`LOSSLESS` / `HI_RES_LOSSLESS`) and let one translation layer own the mapping.
+forwarded that verbatim as the engine's `quality`. ~~It happens to work — the engine
+accepted `27` and produced hi-res, accepted `flac` and produced "FLAC Best Available" — but
+that is **accidental compatibility, not a contract**.~~
+
+**Half of that was wrong, and the fix is smaller than it implies.** Before changing
+anything I read the engine's own `SpotiFLAC/core/quality.py` instead of inferring from
+observed behaviour:
+
+```python
+_CANONICAL = {
+    "HI_RES_LOSSLESS": ["27", "HI_RES_LOSSLESS", "HI-RES-LOSSLESS", "HIRES_LOSSLESS"],
+    "HI_RES":          ["7", "HI_RES", "HIRES", "HI-RES"],
+    "LOSSLESS":        ["6", "LOSSLESS"],
+    ...
+}
+```
+
+- **The Qobuz numerics were never accidental.** `27`, `7`, `6`, `5`, `4` are listed
+  aliases — twice over, since an `isdigit()` branch below the table repeats three of
+  them. `normalize_quality()` was always going to map them correctly.
+- **`"flac"` genuinely was.** It matches no alias, is not a digit, and contains none of
+  the substrings the heuristics test for (`HI`, `24`, `96`, `LOSS`, `LOW`, `MP3`) — so it
+  reaches the function's final `return "LOSSLESS"`. The right answer, arrived at by
+  falling off the end.
+
+**Fix:** `engineQualityFor` in `backend/engine_ingest.go`, mirroring what
+`TidalQualityFor` does for the native path — one translation, at the boundary. It emits
+only the canonical names, i.e. the **keys** of that table rather than entries in it.
+Aliases upstream may add, rename or reinterpret; the canonical set is the part of the
+contract that holds. The hi-res retry now keys off the translated value too.
+
+**No download changes quality.** `backend/engine_quality_test.go` carries a port of
+`normalize_quality()` and asserts, over every value `resolveAudioFormat` can emit, that
+the engine resolves each input identically before and after translation. Running both
+sides is the only honest way to make a claim about another repo's behaviour — and when
+upstream moves, that port is what goes stale visibly.
 
 ### 7.4 The frontend surface is 8 files, not 2
 
