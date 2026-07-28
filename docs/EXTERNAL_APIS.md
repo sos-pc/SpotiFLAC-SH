@@ -75,15 +75,19 @@ client_secret = oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik=
 
 These are public application credentials shared across the community. The previous TV `client_id` (`fX2JxdmntZWK0ixT`) was retired because it conflicts with the official Tidal desktop application's client ID, causing the desktop app to be forcibly disconnected. See [CREDITS.md](../CREDITS.md).
 
-**Community HiFi proxies (default Tidal list, May 2026)**
+**Community HiFi proxies (default Tidal list)**
 
-- `https://eu-central.monochrome.tf` — v2.10
-- `https://us-west.monochrome.tf` — v2.10
-- `https://hifi-api.kennyy.com.br` — v2.10
-- `https://api.monochrome.tf` — v2.5
-- `https://monochrome-api.samidy.com` — v2.3
+| Host | Version | Probed 2026-07-28 |
+|---|---|---|
+| `https://eu-central.monochrome.tf` | v2.10 | 200, 0.33 s |
+| `https://us-west.monochrome.tf` | v2.10 | 200, 0.42 s |
+| `https://api.monochrome.tf` | v2.5 | 200, 0.29 s |
+| `https://monochrome-api.samidy.com` | v2.3 | 200, 0.25 s |
+| ~~`https://hifi-api.kennyy.com.br`~~ | — | **removed** — DNS resolves, connection times out |
 
-> **Status, May 2026.** All community proxies are reachable as servers but Tidal returns `assetPresentation: "PREVIEW"` (30-second segments) for every request without a personal Premium token. **Full FLAC downloads require authentication via Settings → Tidal Account.** The proxies remain useful as the API layer that the personal token rides on top of.
+> **Status.** All four answer `assetPresentation: "PREVIEW"` (30-second segments) without a personal Premium token. **Full FLAC downloads require authentication via Settings → Tidal Account.** The proxies remain useful as the API layer that the personal token rides on top of.
+>
+> **Nothing prunes this list automatically** since the `tidal-uptime.geeked.wtf` client was removed (item 8). Probe by hand when editing it — use a real Tidal track ID, `441821360` is the app's own: `GET /track/?id=441821360&quality=HI_RES_LOSSLESS`.
 
 **~~Auto-discovery — `tidal-uptime.geeked.wtf`~~ — removed 2026-07-28**
 

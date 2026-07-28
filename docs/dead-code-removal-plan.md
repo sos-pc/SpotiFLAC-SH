@@ -128,7 +128,7 @@ Same error class, found by probing instead of reading imports:
 |---|---|---|
 | `proxy_discovery.go` + `tidal-uptime.geeked.wtf` | "keep — BYOT rides on it" | **feed is DNS-dead.** A goroutine wakes every 6 h to fail, plus BoltDB persistence and a 3-tier merge in `GetTidalProxiesEffective` that now merges nothing. Prod logs have shown `no such host` for days. ✅ removed in item 8. |
 | SpotFetch (`spotify.afkarxyz.fun`) | never examined | **unreachable.** A silent fallback for the Spotify scraper, still wired through a setting, a code path and a status probe. |
-| Tidal default proxy list | "keep" | `hifi-api.kennyy.com.br` unreachable; the two monochrome hosts answer 200. List is partly stale. |
+| Tidal default proxy list | "keep" | `hifi-api.kennyy.com.br` unreachable; the monochrome hosts answer 200. List is partly stale. ✅ dead host dropped in item 10. |
 | `qobuzProviders` | listed for removal | already an **empty slice** — its getters/setters/API/UI manage nothing. |
 | MusicBrainz | assumed fine | answered **503** on one probe. One sample is not a verdict, and genre also comes from `genre_apple.go`/`genre_deezer.go` — worth watching, not concluding. |
 
@@ -289,11 +289,28 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
    cannot hurt either, and its failure message reports both errors, which is good
    diagnostics. Removing it buys nothing; repointing it at a live mirror would.
 
-10. **Tidal default proxy list** — 🔍 **still open, but not urgent**
-    `hifi-api.kennyy.com.br` unreachable; both monochrome hosts answer 200, and they
-    are what the personal token rides on. It works today. With item 8's discovery gone,
-    nothing prunes it — the real question is whether a hand-curated list is viable, or
-    whether tokenless Tidal should lean on the engine. Drop the dead host meanwhile.
+10. **Tidal default proxy list** — ✅ **dead host dropped 2026-07-28**; the bigger
+    question stays open.
+    Re-probed all five with the app's own test track (`441821360`), not the plan's
+    memory — and the first probe was **my** error, a Qobuz ID against a Tidal endpoint,
+    which returned 404 everywhere and briefly looked like total collapse:
+
+    | Host | Version | Result |
+    |---|---|---|
+    | `eu-central.monochrome.tf` | v2.10 | 200, 0.33 s |
+    | `us-west.monochrome.tf` | v2.10 | 200, 0.42 s |
+    | `api.monochrome.tf` | v2.5 | 200, 0.29 s |
+    | `monochrome-api.samidy.com` | v2.3 | 200, 0.25 s |
+    | `hifi-api.kennyy.com.br` | — | DNS resolves, connection times out → **removed** |
+
+    Four healthy hosts, all returning `PREVIEW` as expected without a token. The dead
+    one cost a 5-second timeout on every tokenless fallback that reached it.
+
+    **Still open:** with item 8's discovery gone, nothing prunes this list — it is
+    hand-curated now, and this entry is the only thing that says so. The real question
+    is whether that is viable long-term, or whether tokenless Tidal should lean on the
+    engine like the other three providers do. Not urgent: the BYOT path goes to
+    `api.tidal.com` and never touches these.
 
 11. **MusicBrainz** — ✅ **no action, confirmed**
     `genre.go` documents a three-tier chain: **Apple Music** (per-track, curated — "the

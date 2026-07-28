@@ -16,11 +16,13 @@ The original desktop application that SpotiFLAC Web is based on. The core downlo
 These community-maintained services provide the "zero-account" FLAC streaming that powers SpotiFLAC's default mode.
 
 **Tidal HiFi Proxies**
-- **eu-central.monochrome.tf** — `https://eu-central.monochrome.tf` (v2.10, ✅ May 2026)
-- **us-west.monochrome.tf** — `https://us-west.monochrome.tf` (v2.10, ✅ May 2026)
-- **hifi-api.kennyy.com.br** — `https://hifi-api.kennyy.com.br` (v2.10, ✅ May 2026)
-- **api.monochrome.tf** — `https://api.monochrome.tf` (v2.5, ✅ May 2026)
-- **monochrome-api.samidy.com** — `https://monochrome-api.samidy.com` (v2.3, ✅ May 2026)
+- **eu-central.monochrome.tf** — `https://eu-central.monochrome.tf` (v2.10, ✅ Jul 2026)
+- **us-west.monochrome.tf** — `https://us-west.monochrome.tf` (v2.10, ✅ Jul 2026)
+- **api.monochrome.tf** — `https://api.monochrome.tf` (v2.5, ✅ Jul 2026)
+- **monochrome-api.samidy.com** — `https://monochrome-api.samidy.com` (v2.3, ✅ Jul 2026)
+
+*Thanks also to **hifi-api.kennyy.com.br**, dropped from the default list on 2026-07-28
+after its host stopped answering. The work it did while it was up still counts.*
 
 > ⚠️ All community Tidal proxies currently return preview-only content (30s). Full FLAC requires a personal Premium token (Device Code flow).
 

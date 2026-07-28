@@ -16,15 +16,26 @@ var proxyMu sync.RWMutex
 //
 //	GET {base}/track/?id={tidalID}&quality={quality}
 //
-// Status checked via tidal-uptime.geeked.wtf (May 2026).
-// NOTE: as of May 2026, ALL community proxies return assetPresentation="PREVIEW"
-// (30-second segments) without a valid personal Tidal Premium token (Device Code flow).
-// Full FLAC downloads require authentication via Settings → Tidal Account.
+// Verified by hand 2026-07-28 with the app's own probe track (441821360). The
+// tidal-uptime feed that used to do this is dead and its client was removed
+// (item 8 of docs/dead-code-removal-plan.md), so NOTHING PRUNES THIS LIST any
+// more — re-probe when you touch it:
+//
+//	curl -s -o /dev/null -w '%{http_code} %{time_total}s'
+//	  'https://<host>/track/?id=441821360&quality=HI_RES_LOSSLESS'
+//
+//	eu-central.monochrome.tf   200, v2.10, 0.33 s
+//	us-west.monochrome.tf      200, v2.10, 0.42 s
+//	api.monochrome.tf          200, v2.5,  0.29 s
+//	monochrome-api.samidy.com  200, v2.3,  0.25 s
+//	hifi-api.kennyy.com.br     dropped — DNS resolves, connection times out
+//
+// All four answer assetPresentation="PREVIEW" (30-second segments) without a
+// personal Tidal Premium token (Device Code flow). Full FLAC requires
+// authentication via Settings → Tidal Account; these are the API layer it rides on.
 var tidalProxies = []string{
-	// Monochrome instances — confirmed server-UP by tidal-uptime.geeked.wtf
 	"https://eu-central.monochrome.tf",
 	"https://us-west.monochrome.tf",
-	"https://hifi-api.kennyy.com.br",
 	"https://api.monochrome.tf",
 	"https://monochrome-api.samidy.com",
 }
@@ -65,7 +76,6 @@ func GetDefaultTidalProxies() []string {
 	return []string{
 		"https://eu-central.monochrome.tf",
 		"https://us-west.monochrome.tf",
-		"https://hifi-api.kennyy.com.br",
 		"https://api.monochrome.tf",
 		"https://monochrome-api.samidy.com",
 	}
