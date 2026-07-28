@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
@@ -31,7 +31,7 @@ import (
 // This used to be getStreamingURLs and returned a map of tidal_url/amazon_url/isrc.
 // Two of those three keys were already impossible to populate: amazon_url died
 // with the native Amazon downloader, and tidal_url only ever came from Song.link
-// - GetDeezerSearchFallback, despite its SongLinkURLs return type, never set it.
+// - ResolveByName, despite its then-SongLinkURLs return type, never set it.
 // Removing Song.link (item 7) left the map with exactly one live key, so it is a
 // string now, and the dead branches reading the other two are gone with it.
 func (jm *JobManager) resolveTrackISRC(job *Job) string {
@@ -55,7 +55,7 @@ func (jm *JobManager) resolveTrackISRC(job *Job) string {
 		return ""
 	}
 
-	isrc, err := songlink.GetDeezerSearchFallback(job.TrackName, job.ArtistName)
+	isrc, err := isrclookup.ResolveByName(job.TrackName, job.ArtistName)
 	if err != nil {
 		slog.Debug("[Jobs] Deezer ISRC fallback failed", "track", job.TrackName, "err", err)
 		return ""
@@ -95,14 +95,14 @@ func tidalMayRunNatively(s JobSettings) bool {
 
 // resolveISRCDirect resolves job.SpotifyID's ISRC straight from Spotify's
 // metadata, independent of the Deezer name search. Cached (see
-// songlink.GetISRCDirect), so repeat downloads/retags of the same track
+// isrclookup.Resolve), so repeat downloads/retags of the same track
 // don't pay for a fresh lookup.
 func (jm *JobManager) resolveISRCDirect(job *Job) string {
 	if job.SpotifyID == "" {
 		return ""
 	}
 
-	isrc, err := jm.songLinkClient.GetISRCDirect(job.SpotifyID)
+	isrc, err := jm.isrcClient.Resolve(job.SpotifyID)
 	if err != nil {
 		slog.Debug("[Jobs] ISRC-direct failed", "track", job.TrackName, "err", err)
 		return ""

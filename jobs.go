@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
+	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
@@ -195,17 +195,17 @@ type JobEventHandler interface {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type JobManager struct {
-	db             *bolt.DB
-	catalog        *sql.DB // SQLite catalog: tracks, library_files, download_attempts
-	queue          chan string
-	songLinkClient *songlink.SongLinkClient
-	eventHandler   JobEventHandler
-	hub            *SSEHub
-	wg             sync.WaitGroup
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.RWMutex
-	closedOnce     sync.Once
+	db           *bolt.DB
+	catalog      *sql.DB // SQLite catalog: tracks, library_files, download_attempts
+	queue        chan string
+	isrcClient   *isrclookup.Client
+	eventHandler JobEventHandler
+	hub          *SSEHub
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.RWMutex
+	closedOnce   sync.Once
 	// In-memory batch counters for O(1) batch-completion detection.
 	// Protected by mu.
 	batchTotals  map[string]int    // batchID → total jobs enqueued
@@ -259,17 +259,17 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 	ctx, cancel := context.WithCancel(context.Background())
 
 	jm := &JobManager{
-		db:             db,
-		catalog:        catalog,
-		queue:          make(chan string, 10000),
-		songLinkClient: songlink.GetSongLinkClient(),
-		hub:            newSSEHub(),
-		ctx:            ctx,
-		cancel:         cancel,
-		batchTotals:    make(map[string]int),
-		batchDone:      make(map[string]int),
-		batchWatchID:   make(map[string]string),
-		batchM3U8:      make(map[string]BatchM3U8Request),
+		db:           db,
+		catalog:      catalog,
+		queue:        make(chan string, 10000),
+		isrcClient:   isrclookup.Shared(),
+		hub:          newSSEHub(),
+		ctx:          ctx,
+		cancel:       cancel,
+		batchTotals:  make(map[string]int),
+		batchDone:    make(map[string]int),
+		batchWatchID: make(map[string]string),
+		batchM3U8:    make(map[string]BatchM3U8Request),
 	}
 
 	jm.recoverPendingJobs()

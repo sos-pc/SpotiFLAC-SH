@@ -256,8 +256,7 @@ Background goroutines (started in main.go):
 │   ├── tidal/           # Tidal client (Device Code auth, download, DownloadParams)
 │   │                    #   the one native provider left — it carries a user token
 │   ├── spotify/         # Spotify metadata (GraphQL, TOTP auth)
-│   ├── songlink/        # ISRC resolver: Spotify-direct + cache, Deezer fallback
-│   │                    #   (name is historical — nothing calls Song.link any more)
+│   ├── isrclookup/      # ISRC resolver: Spotify-direct + cache, Deezer fallback
 │   ├── providerutil/    # Shared download/genre/ISRC helpers
 │   ├── audio/           # FFmpeg, codec analysis, spectrum
 │   ├── db/              # SQLite catalog

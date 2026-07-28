@@ -1,4 +1,4 @@
-package songlink
+package isrclookup
 
 import "testing"
 

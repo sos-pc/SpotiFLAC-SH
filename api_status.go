@@ -436,7 +436,7 @@ type serviceEntry struct {
 
 var coreServices = []serviceEntry{
 	// Song.link was probed here until item 7b removed the last call to it. Deezer
-	// stays: it is still the name-search ISRC fallback (GetDeezerSearchFallback).
+	// stays: it is still the name-search ISRC fallback (ResolveByName).
 	{"Deezer", "https://api.deezer.com", pingDeezer},
 	// The genre chain's tiers, in the order it tries them (see meta/genre.go).
 	{"Apple Music · genre", "https://api.music.apple.com", pingAppleMusic},

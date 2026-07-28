@@ -21,7 +21,7 @@ import (
 )
 
 // The JobManager dependency went with them: it was held only to borrow the
-// JobManager's shared SongLinkClient.
+// JobManager's shared ISRC client.
 type MetadataService struct {
 	auth *AuthManager
 }

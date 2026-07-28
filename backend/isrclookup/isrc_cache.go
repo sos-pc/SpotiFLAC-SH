@@ -1,4 +1,4 @@
-package songlink
+package isrclookup
 
 import (
 	"encoding/json"
@@ -22,11 +22,11 @@ var (
 	isrcCacheMu sync.Mutex
 )
 
-// InitISRCCacheDBShared registers the ISRC cache bucket in the app's shared
+// InitCacheDB registers the ISRC cache bucket in the app's shared
 // BoltDB (same file as jobs/watchlists/users/history) instead of opening a
 // separate database file. Safe to skip: every reader/writer below treats an
 // uninitialized cache as a no-op rather than failing the lookup.
-func InitISRCCacheDBShared(db *bolt.DB) error {
+func InitCacheDB(db *bolt.DB) error {
 	isrcCacheMu.Lock()
 	defer isrcCacheMu.Unlock()
 

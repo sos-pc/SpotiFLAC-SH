@@ -115,10 +115,19 @@ links at all** — the engine resolves internally from the Spotify URL. (The arc
 investigation also found it never returns Qobuz links.)
 
 After the cut, what remains is an ISRC provider with a cache and nothing to do with
-Song.link. **Rename/move it** (e.g. into `backend/spotify` or a small `isrc`
-package), or the misleading name will cause this same mistake again. Deferred to
-**after 7b**: renaming now would churn `metadata_service.go` and `api_status.go`,
-which 7b edits anyway.
+Song.link. **Renamed 2026-07-28** to `backend/isrclookup/`, with the identifiers
+that named the dead dependency: `SongLinkClient`→`Client`,
+`GetSongLinkClient`→`Shared`, `GetISRCDirect`→`Resolve` (the `Direct` suffix
+distinguished it from a `GetISRC` that no longer exists),
+`GetDeezerSearchFallback`→`ResolveByName`, `InitISRCCacheDBShared`→`InitCacheDB`.
+
+**Not named `isrc`**, which was this document's own suggestion. `isrc` is the
+right name for the *value* — a variable in eight places in `jobs_helpers.go`
+alone, and a parameter of both `buildDownloadRequest` and
+`FetchGenreMetadataAsync`. A package by that name shadows it at every call site;
+the first attempt produced `isrc, err := isrc.Resolve(...)`, which compiles and
+is exactly the kind of line nobody should have to reason about. Renaming the
+variables instead would have been the tail wagging the dog.
 
 ### Other code I classified without measuring
 

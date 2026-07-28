@@ -38,9 +38,10 @@ provider internally from the Spotify URL, so cross-platform links stopped being
 something we need. Its JSON API, its two HTML-scrape quota paths and the
 9-calls-per-minute guard that made them tolerable all went with it.
 
-`backend/songlink/` still exists and still carries the misleading name; what is
-left inside is an **ISRC resolver**: `GetISRCDirect` (Spotify's own catalog
-record, cached in BoltDB) with `GetDeezerSearchFallback` behind it.
+What survived is an **ISRC resolver**, renamed `backend/isrclookup/` on
+2026-07-28 to stop the old name implying a dependency that no longer exists:
+`Resolve` (Spotify's own catalog record, cached in BoltDB) with `ResolveByName`
+(Deezer's public search, a name match) behind it.
 
 ### Deezer (public API)
 The ISRC fallback behind `GetISRCDirect`, **and** a download source.

@@ -577,7 +577,7 @@ func fileSizeOrZero(path string) int64 {
 // matter how many times it's rescanned. This pass instead re-fetches the
 // track's own metadata — a lightweight Spotify lookup (the same source
 // used for every download, just re-run per track instead of per playlist)
-// plus the existing ISRC/genre lookup (Deezer via Songlink, then
+// plus the existing ISRC/genre lookup (backend/isrclookup, then
 // MusicBrainz) already used at real download time — and fills in ONLY the
 // fields the file/catalog is currently missing, exactly like
 // WriteSpotifyIDTag/applyTrackOverrides do elsewhere: an already-present

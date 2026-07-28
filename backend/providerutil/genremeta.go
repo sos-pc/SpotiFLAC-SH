@@ -3,8 +3,8 @@ package providerutil
 import (
 	"strings"
 
+	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -27,16 +27,15 @@ type MBResult struct {
 // receives exactly one result. Every provider client used to hand-roll
 // this exact goroutine+channel+recover shape independently — three of them
 // (Tidal x2, Amazon) also independently re-derived the ISRC from
-// spotifyURL via their own Songlink call instead of reusing one already
-// known by the caller, which both duplicated the lookup logic and spent an
-// extra call against Songlink's shared, rate-limited client for a result
-// the caller may already have.
+// spotifyURL with their own lookup instead of reusing one already known by
+// the caller, which both duplicated the logic and spent an extra
+// third-party call for a result the caller may already have.
 //
 // If isrc is already known (e.g. Qobuz resolves it earlier via its own
 // ISRC-based search and has no need to re-derive it), pass it directly and
 // spotifyURL can be left empty. Otherwise pass spotifyURL and isrc empty;
 // the Spotify track ID is extracted from it and resolved to an ISRC via
-// Songlink.
+// backend/isrclookup.
 //
 // Returns a closed, empty channel immediately (no goroutine spawned) if
 // embedGenre is false or there's nothing to resolve from (isrc and
@@ -92,12 +91,12 @@ func genreForWriting(got meta.GenreResult) string {
 // track URL (the last path segment, query string stripped) and resolves its
 // ISRC. Returns "" if the URL can't be parsed or no ISRC is found.
 //
-// Uses GetISRCDirect, which reads Spotify's own catalog record for this exact
-// track and caches it, rather than GetISRC, which asks Song.link. Both answer
-// the same question; the direct one is authoritative instead of relying on a
-// third-party aggregator being up, and it shares the ISRC cache the rest of the
-// job pipeline already fills (jobs_helpers.go), so a genre lookup for a track
-// just downloaded is usually a cache hit rather than a network call.
+// Uses isrclookup.Resolve, which reads Spotify's own catalog record for this
+// exact track and caches it. It replaced a Song.link lookup here in item 13:
+// the direct one is authoritative instead of relying on a third-party
+// aggregator being up, and it shares the ISRC cache the rest of the job
+// pipeline already fills (jobs_helpers.go), so a genre lookup for a track just
+// downloaded is usually a cache hit rather than a network call.
 func resolveISRCFromSpotifyURL(spotifyURL string) string {
 	parts := strings.Split(spotifyURL, "/")
 	if len(parts) == 0 {
@@ -107,8 +106,7 @@ func resolveISRCFromSpotifyURL(spotifyURL string) string {
 	if spotifyID == "" {
 		return ""
 	}
-	client := songlink.GetSongLinkClient()
-	isrc, err := client.GetISRCDirect(spotifyID)
+	isrc, err := isrclookup.Shared().Resolve(spotifyID)
 	if err != nil {
 		return ""
 	}

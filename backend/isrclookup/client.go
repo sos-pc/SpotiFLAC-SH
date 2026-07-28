@@ -1,4 +1,23 @@
-package songlink
+// Package isrclookup resolves a track's ISRC — the one identifier that is stable
+// across Spotify, Tidal, Qobuz, Deezer and Amazon, and therefore the only thing
+// the download path needs in order to find the same recording somewhere else.
+//
+// Two ways in, in order of authority:
+//
+//	Resolve(spotifyTrackID)        Spotify's own catalog record. Exact, cached.
+//	ResolveByName(track, artist)   Deezer's public search. A name match, so it
+//	                               can land on the wrong edition or remaster.
+//
+// It was called `songlink` until 2026-07-28, after the Song.link/Odesli client it
+// was built around. Every call to that aggregator is gone (see item 7 of
+// docs/dead-code-removal-plan.md) and the name outlived it by long enough to
+// make the package look undeletable in an earlier audit — the import graph said
+// five files depended on "Song.link" when none of them did.
+//
+// The package name deliberately avoids the bare word `isrc`: that is the right
+// name for the *value*, used as a variable and a parameter throughout the
+// download path, and a package by that name would shadow it at every call site.
+package isrclookup
 
 import (
 	"encoding/json"
@@ -14,33 +33,35 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
-// SongLinkClient no longer talks to Song.link — item 7 removed every call. What
-// survives is the ISRC resolver it also happened to own: a cached, Spotify-direct
-// lookup. The nine-calls-per-minute / seven-seconds-apart throttle went with the
-// caller it existed for; Spotify's own client does its own token handling, and
-// the Deezer fallback is a single unmetered request.
-type SongLinkClient struct {
+// Client holds the HTTP client and the lazily-built Spotify client behind
+// Resolve. There is normally one, from Shared().
+//
+// It carried a nine-calls-per-minute / seven-seconds-apart throttle until item 7:
+// that existed for the Song.link API, which is no longer called. Spotify's client
+// handles its own tokens, and the Deezer fallback is a single unmetered request,
+// so neither needs pacing.
+type Client struct {
 	client *http.Client
 	mu     sync.Mutex // guards spotifyClient
 	// spotifyClient is lazily created on first ISRC-direct lookup and reused
 	// across all subsequent ones (see getSpotifyClient) so we pay the TOTP
-	// token handshake once per SongLinkClient instead of once per track. The
+	// token handshake once per Client instead of once per track. The
 	// client caches and auto-refreshes its own token internally.
 	spotifyClient *spotify.SpotifyClient
 }
 
-var globalSongLinkClient *SongLinkClient
+var sharedClient *Client
 
-// GetSongLinkClient retourne le singleton global (thread-safe via init)
-func GetSongLinkClient() *SongLinkClient {
-	if globalSongLinkClient == nil {
-		globalSongLinkClient = NewSongLinkClient()
+// Shared retourne le singleton global (thread-safe via init)
+func Shared() *Client {
+	if sharedClient == nil {
+		sharedClient = New()
 	}
-	return globalSongLinkClient
+	return sharedClient
 }
 
-func NewSongLinkClient() *SongLinkClient {
-	return &SongLinkClient{
+func New() *Client {
+	return &Client{
 		client: util.NewHTTPClient(30 * time.Second),
 	}
 }
@@ -86,15 +107,15 @@ func getDeezerISRC(deezerURL string) (string, error) {
 		return "", fmt.Errorf("ISRC not found in Deezer API response for track %s", trackID)
 	}
 
-	slog.Debug("[Songlink] Found ISRC from Deezer", "isrc", deezerTrack.ISRC, "track", deezerTrack.Title)
+	slog.Debug("[ISRC] Found ISRC from Deezer", "isrc", deezerTrack.ISRC, "track", deezerTrack.Title)
 	return deezerTrack.ISRC, nil
 }
 
-// GetISRCDirect resolves a Spotify track's ISRC straight from Spotify's own
-// metadata, bypassing the cross-provider name matching GetDeezerSearchFallback
+// Resolve resolves a Spotify track's ISRC straight from Spotify's own
+// metadata, bypassing the cross-provider name matching ResolveByName
 // relies on. Cached in the shared ISRC cache (see isrc_cache.go) to avoid
 // re-resolving the same track on every retag/redownload.
-func (s *SongLinkClient) GetISRCDirect(spotifyTrackID string) (string, error) {
+func (s *Client) Resolve(spotifyTrackID string) (string, error) {
 	spotifyTrackID = strings.TrimSpace(spotifyTrackID)
 	if spotifyTrackID == "" {
 		return "", fmt.Errorf("spotify track ID is required")
@@ -110,7 +131,7 @@ func (s *SongLinkClient) GetISRCDirect(spotifyTrackID string) (string, error) {
 	}
 
 	if err := PutCachedISRC(spotifyTrackID, isrc); err != nil {
-		slog.Debug("[Songlink] failed to cache direct ISRC", "err", err)
+		slog.Debug("[ISRC] failed to cache direct ISRC", "err", err)
 	}
 
 	return isrc, nil
@@ -120,7 +141,7 @@ func (s *SongLinkClient) GetISRCDirect(spotifyTrackID string) (string, error) {
 // for ISRC-direct lookups. Guarded by s.mu (a quick nil-check + assignment);
 // the returned client does its own token locking internally, so callers must
 // invoke it outside any network round-trip.
-func (s *SongLinkClient) getSpotifyClient() *spotify.SpotifyClient {
+func (s *Client) getSpotifyClient() *spotify.SpotifyClient {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.spotifyClient == nil {
@@ -129,11 +150,11 @@ func (s *SongLinkClient) getSpotifyClient() *spotify.SpotifyClient {
 	return s.spotifyClient
 }
 
-// GetDeezerSearchFallback resolves an ISRC by name search against Deezer's
+// ResolveByName resolves an ISRC by name search against Deezer's
 // public API (no key required). It used to return a *SongLinkURLs carrying
-// TidalURL and AmazonURL fields it never actually filled — the struct is gone
-// and so is the confusion; the ISRC was always the whole answer.
-func GetDeezerSearchFallback(trackName, artistName string) (string, error) {
+// TidalURL and AmazonURL fields it never actually filled — that struct is gone
+// along with the rest of Song.link; the ISRC was always the whole answer.
+func ResolveByName(trackName, artistName string) (string, error) {
 	// Premier artiste seulement pour Ã©viter les Ã©checs sur les collaborations
 	cleanArtist := artistName
 	for _, sep := range []string{", ", " & ", " feat.", " ft.", " featuring "} {
@@ -184,6 +205,6 @@ func GetDeezerSearchFallback(trackName, artistName string) (string, error) {
 		return "", fmt.Errorf("deezer: failed to get ISRC for track %d (%s - %s): %v", trackID, trackName, artistName, err)
 	}
 
-	slog.Debug("[Deezer fallback] Found ISRC", "isrc", isrc, "track", trackName, "artist", artistName)
+	slog.Debug("[ISRC] Found ISRC", "isrc", isrc, "track", trackName, "artist", artistName)
 	return isrc, nil
 }
