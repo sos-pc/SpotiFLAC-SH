@@ -17,6 +17,14 @@ type DownloadParams struct {
 	FilenameFormat string
 	Position       int
 
+	// PlaylistName/PlaylistOwner feed the {playlist} and {creator} placeholders.
+	// They were missing until 2026-07-28, which is what let this package's private
+	// filename builder drift from util.BuildExpectedFilename: the canonical builder
+	// substituted both, ours could not, so a template using either produced one
+	// name on the on-disk check and a different one on download.
+	PlaylistName  string
+	PlaylistOwner string
+
 	// Filename construction
 	IncludeTrackNumber  bool
 	UseAlbumTrackNumber bool

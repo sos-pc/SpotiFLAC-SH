@@ -224,6 +224,8 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			Quality:              quality,
 			FilenameFormat:       req.FilenameFormat,
 			Position:             req.Position,
+			PlaylistName:         req.PlaylistName,
+			PlaylistOwner:        req.PlaylistOwner,
 			IncludeTrackNumber:   req.TrackNumber,
 			UseAlbumTrackNumber:  req.UseAlbumTrackNumber,
 			UseFirstArtistOnly:   req.UseFirstArtistOnly,

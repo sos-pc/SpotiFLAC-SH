@@ -318,21 +318,46 @@ document and can be done at any time.
     *Side benefit:* genre lookups start hitting the ISRC cache instead of a third-party
     aggregator, so they get faster and stop depending on Song.link being up.
 
-14. **Close the `buildTidalFilename` divergence** — ⚠️ **before any template change**
+14. **Close the `buildTidalFilename` divergence** — ✅ **DONE 2026-07-28**
     `util.BuildExpectedFilename` substitutes `{playlist}`/`{creator}`;
-    `buildTidalFilename` never does (§6.1). The on-disk check uses the first, the Tidal
-    download the second — so a template using either placeholder re-downloads the track
-    on every pass.
-    Latent today (`{title} - {artist}`), which is exactly why it is easy to forget.
-    Fix by making Tidal call the canonical builder, and add a test asserting the two
-    agree for a template containing `{playlist}`.
-    **Ordering: do this before touching `filenameTemplate`, not after.**
+    `buildTidalFilename` never did (§6.1). The on-disk check used the first, the Tidal
+    download the second — so a template using either placeholder re-downloaded the
+    track on every pass. Latent today (`{title} - {artist}`), which is exactly why it
+    was easy to forget. **The blocker on `filenameTemplate` is lifted.**
 
-15. **Collapse the Tidal `DownloadParams` translation** — 🔍 judgment call
-    Three of the four structs die with their providers (§6.3), leaving one translation
-    layer for a single consumer. Whether to pass `DownloadRequest` into
-    `backend/tidal` directly is a taste question about package coupling, not a
-    correctness one. Decide when items 3–5 are done and the shape is visible.
+    `buildTidalFilename` deleted; `DownloadParams.buildFilename()` delegates to the
+    canonical builder. Two things fell out that the plan had not counted:
+
+    - **`DownloadParams` had no `PlaylistName`/`PlaylistOwner`.** That absence is
+      *why* the copy existed and could not be reconciled — the data never reached the
+      package. Both fields added and populated in `downloader.go`.
+    - **The 17-line prep block above each call was duplicated verbatim**, twice
+      (`DownloadByURL` and `DownloadByURLWithFallback`), and its `*ForFile` variables
+      were used for nothing but the filename. Both copies collapsed into the method.
+      The explicit `SanitizeFilename` passes went with them: the canonical builder
+      sanitizes its own inputs. Only the first-artist reduction stayed ours, because
+      the builder has no opinion about it.
+
+    Test: `backend/tidal/filename_test.go`. 11 templates × 2 `UseFirstArtistOnly`
+    values asserted equal to the canonical builder, `{playlist}`/`{creator}` first.
+    Plus two assertions the agreement test cannot make on its own — that the
+    placeholders carry real values (an implementation stripping them would pass an
+    agreement test, since both sides would strip) and that the printed track number is
+    the *resolved* one, not the raw list position.
+
+15. **Collapse the Tidal `DownloadParams` translation** — ❌ **decided: no** (2026-07-28)
+    Three of the four structs died with their providers (§6.3), leaving one translation
+    layer for a single consumer — which is what made this look like removable
+    duplication. **It is not a taste question.** `backend` imports `backend/tidal`, so
+    passing `backend.DownloadRequest` into `backend/tidal` is an **import cycle**. The
+    only way around it is moving `DownloadRequest` into a leaf package both can import:
+    a larger refactor, no behaviour change, and it would hand `backend/tidal` a struct
+    carrying fields for providers it never serves.
+
+    Measured while deciding: all **28** `DownloadParams` fields are read inside the
+    package. It is a translation layer, not a bag with dead weight in it. Leave it.
+
+    *Item 14 shrank it anyway* — the two 17-line prep blocks it fed are gone.
 
 ## 6. Redundancy — live code, duplicated
 
@@ -346,7 +371,7 @@ the two copies **disagree**, which is worse than either.
 |---|---|
 | `util.BuildExpectedFilename` | canonical — used for the already-on-disk check and by the engine ingestion |
 | `buildQobuzFilename` (`qobuz/client.go:300`) | dies with the package |
-| `buildTidalFilename` (`tidal/client.go:947`) | **survives the provider cut** |
+| `buildTidalFilename` (`tidal/client.go:929`) | ✅ **deleted, item 14** — replaced by `DownloadParams.buildFilename()`, which delegates to the canonical builder |
 | `buildCoverFilename` (`meta/cover.go:68`) | duplicate — see below |
 | `buildLyricsFilename` (`meta/lyrics.go:365`) | duplicate — see below |
 
@@ -372,7 +397,8 @@ Left open: lyrics number as `01. ` (matching the audio file) while cover uses `0
 Nobody chose that; it is inconsistency, not design. Harmonising means renaming existing
 covers — a migration question, out of scope here.
 
-**⚠️ `BuildExpectedFilename` and `buildTidalFilename` are NOT equivalent:**
+**⚠️ `BuildExpectedFilename` and `buildTidalFilename` were NOT equivalent** — ✅ closed
+by item 14:
 
 | | `BuildExpectedFilename` | `buildTidalFilename` |
 |---|---|---|
@@ -380,14 +406,19 @@ covers — a migration question, out of scope here.
 | sanitising | internal | expected of the caller |
 | track number | receives it resolved | resolves it itself |
 
-The already-on-disk check uses the first; the native Tidal download uses the second.
-With a template containing `{playlist}`, the check would look for a substituted name
-while the download writes one with the literal `{playlist}` left in — so the file
-would be re-downloaded on every pass. Exactly the class of bug the comment inside
-`buildTidalFilename` already documents for track numbers.
+The already-on-disk check used the first; the native Tidal download used the second.
+With a template containing `{playlist}`, the check looked for a substituted name while
+the download wrote one with the literal `{playlist}` left in — so the file was
+re-downloaded on every pass. Exactly the class of bug the comment inside
+`buildTidalFilename` already documented for track numbers.
 
-**Latent, not live:** prod's `filenameTemplate` is `{title} - {artist}`, which uses
-neither placeholder. It springs the moment someone adds one.
+**It was latent, not live:** prod's `filenameTemplate` is `{title} - {artist}`, which
+uses neither placeholder. It would have sprung the moment someone added one.
+
+**Root cause, found on the fix:** `tidal.DownloadParams` carried no
+`PlaylistName`/`PlaylistOwner`. The copy did not merely forget to substitute them — it
+had no way to. Reconciling meant adding the fields first, which is why "just call the
+canonical builder" had never been a one-line change.
 
 ### 6.2 Four ways to obtain an ISRC
 
@@ -418,9 +449,9 @@ Checked and cleared, so nobody removes them later on a hunch:
 
 ### Sequencing
 
-Scheduled as items **12–15** in §5. The cover/lyrics twins and the genremeta
-repointing are the cheapest changes here; the `buildTidalFilename` divergence carries
-an ordering constraint (close it **before** touching the filename template).
+Scheduled as items **12–15** in §5 — ✅ all four resolved (12, 13, 14 done; 15 decided
+against, see the import-cycle argument there). The `buildTidalFilename` ordering
+constraint is discharged: `filenameTemplate` is now safe to change.
 
 ## 7. What the inventory missed
 

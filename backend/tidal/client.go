@@ -513,18 +513,7 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 	trackTitle := p.SpotifyTrackName
 	albumTitle := p.SpotifyAlbumName
 
-	artistNameForFile := util.SanitizeFilename(artistName)
-	albumArtistForFile := util.SanitizeFilename(p.SpotifyAlbumArtist)
-
-	if p.UseFirstArtistOnly {
-		artistNameForFile = util.SanitizeFilename(util.GetFirstArtist(artistName))
-		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(p.SpotifyAlbumArtist))
-	}
-
-	trackTitleForFile := util.SanitizeFilename(trackTitle)
-	albumTitleForFile := util.SanitizeFilename(albumTitle)
-
-	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, p.SpotifyReleaseDate, p.SpotifyTrackNumber, p.SpotifyDiscNumber, p.FilenameFormat, p.IncludeTrackNumber, p.Position, p.UseAlbumTrackNumber)
+	filename := p.buildFilename()
 	outputFilename := filepath.Join(p.OutputDir, filename)
 
 	if fileInfo, err := os.Stat(outputFilename); err == nil && fileInfo.Size() > 0 {
@@ -636,18 +625,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 	trackTitle := p.SpotifyTrackName
 	albumTitle := p.SpotifyAlbumName
 
-	artistNameForFile := util.SanitizeFilename(artistName)
-	albumArtistForFile := util.SanitizeFilename(p.SpotifyAlbumArtist)
-
-	if p.UseFirstArtistOnly {
-		artistNameForFile = util.SanitizeFilename(util.GetFirstArtist(artistName))
-		albumArtistForFile = util.SanitizeFilename(util.GetFirstArtist(p.SpotifyAlbumArtist))
-	}
-
-	trackTitleForFile := util.SanitizeFilename(trackTitle)
-	albumTitleForFile := util.SanitizeFilename(albumTitle)
-
-	filename := buildTidalFilename(trackTitleForFile, artistNameForFile, albumTitleForFile, albumArtistForFile, p.SpotifyReleaseDate, p.SpotifyTrackNumber, p.SpotifyDiscNumber, p.FilenameFormat, p.IncludeTrackNumber, p.Position, p.UseAlbumTrackNumber)
+	filename := p.buildFilename()
 	outputFilename := filepath.Join(p.OutputDir, filename)
 
 	if fileInfo, err := os.Stat(outputFilename); err == nil && fileInfo.Size() > 0 {
@@ -926,61 +904,43 @@ func getDownloadURLRotated(apis []string, trackID int64, quality string) (string
 	return "https://api.tidal.com", url, nil
 }
 
-func buildTidalFilename(title, artist, album, albumArtist, releaseDate string, trackNumber, discNumber int, format string, includeTrackNumber bool, position int, useAlbumTrackNumber bool) string {
-	var filename string
-
-	// One resolved value, used for BOTH the guard and the printed number. They
-	// used to disagree: the guard tested the raw list position while the printed
-	// value was the resolved one, so a track with position 0 and a valid album
-	// number got no number at all — and the existence check, which resolved
-	// properly, then looked for a numbered filename that was never written.
-	numberToUse := util.ResolveTrackNumber(position, trackNumber, useAlbumTrackNumber)
-
-	year := ""
-	if len(releaseDate) >= 4 {
-		year = releaseDate[:4]
+// buildFilename produces the download's target filename through
+// util.BuildExpectedFilename — the same builder used by the "already on disk"
+// check (downloader.go), the library scan (file_service.go) and the engine
+// ingestion.
+//
+// It replaces buildTidalFilename, a near-copy of that builder which substituted
+// every placeholder except {playlist} and {creator}. Nothing broke, because the
+// default template is "{title} - {artist}" and neither appears in it — but a user
+// who put either one in filenameTemplate got a name from the on-disk check that
+// the download never wrote, so every pass saw the track as missing and fetched it
+// again. Sharing one builder is what makes that impossible rather than merely
+// currently-absent.
+//
+// util.BuildExpectedFilename sanitizes its inputs, so the callers' own
+// SanitizeFilename passes went with the copy; only the first-artist reduction is
+// still ours to apply, because the builder has no opinion about it.
+func (p DownloadParams) buildFilename() string {
+	artist := p.SpotifyArtistName
+	albumArtist := p.SpotifyAlbumArtist
+	if p.UseFirstArtistOnly {
+		artist = util.GetFirstArtist(artist)
+		albumArtist = util.GetFirstArtist(albumArtist)
 	}
 
-	if strings.Contains(format, "{") {
-		filename = format
-		filename = strings.ReplaceAll(filename, "{title}", title)
-		filename = strings.ReplaceAll(filename, "{artist}", artist)
-		filename = strings.ReplaceAll(filename, "{album}", album)
-		filename = strings.ReplaceAll(filename, "{album_artist}", albumArtist)
-		filename = strings.ReplaceAll(filename, "{year}", year)
-		filename = strings.ReplaceAll(filename, "{date}", util.SanitizeFilename(releaseDate))
+	// One resolved value for both the guard and the printed number. They used to
+	// disagree: the guard tested the raw list position while the printed value was
+	// the resolved one, so a track with position 0 and a valid album number got no
+	// number at all — and the existence check, which resolved properly, then looked
+	// for a numbered filename that was never written.
+	numberToPrint := util.ResolveTrackNumber(p.Position, p.SpotifyTrackNumber, p.UseAlbumTrackNumber)
 
-		if discNumber > 0 {
-			filename = strings.ReplaceAll(filename, "{disc}", fmt.Sprintf("%d", discNumber))
-		} else {
-			filename = strings.ReplaceAll(filename, "{disc}", "")
-		}
-
-		if numberToUse > 0 {
-			filename = strings.ReplaceAll(filename, "{track}", fmt.Sprintf("%02d", numberToUse))
-		} else {
-
-			filename = regexp.MustCompile(`\{track\}\.\s*`).ReplaceAllString(filename, "")
-			filename = regexp.MustCompile(`\{track\}\s*-\s*`).ReplaceAllString(filename, "")
-			filename = regexp.MustCompile(`\{track\}\s*`).ReplaceAllString(filename, "")
-		}
-	} else {
-
-		switch format {
-		case "artist-title":
-			filename = fmt.Sprintf("%s - %s", artist, title)
-		case "title":
-			filename = title
-		default:
-			filename = fmt.Sprintf("%s - %s", title, artist)
-		}
-
-		if includeTrackNumber && numberToUse > 0 {
-			filename = fmt.Sprintf("%02d. %s", numberToUse, filename)
-		}
-	}
-
-	return filename + ".flac"
+	return util.BuildExpectedFilename(
+		p.SpotifyTrackName, artist, p.SpotifyAlbumName, albumArtist,
+		p.SpotifyReleaseDate, p.FilenameFormat,
+		p.PlaylistName, p.PlaylistOwner,
+		p.IncludeTrackNumber, numberToPrint, p.SpotifyDiscNumber,
+	)
 }
 
 // GetTidalIDFromISRC cherche un track Tidal via ISRC sur l'API officielle
