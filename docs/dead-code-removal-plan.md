@@ -155,7 +155,15 @@ Mitigations:
 
 1. **Prove Amazon through the engine** (one successful download) — or accept it
    stays native indefinitely. Blocks step 4 only.
-2. ✅ **DONE 2026-07-28.** **Removed the native fallback call** in `runService` for engine-delegated
+2. ✅ **DONE 2026-07-28, then CORRECTED the same day.** Removed the blanket native fallback,
+   but that broke BYOT Tidal: the engine's Tidal is tokenless and answers
+   `proxy HTTP 401 / no Tidal APIs configured`, while our path refreshes the personal
+   token and succeeds on the same track (observed in prod). The "0 successes in 3
+   invocations" that justified the removal were **all Qobuz** — generalising them to
+   every provider was the same one-observation mistake this document keeps recording.
+   `runService` now implements the BYOT override the plan described from §1 but that
+   was never actually built: **credentials → native first, engine as backup**; no
+   credentials → engine owns it. Removed the native fallback call in `runService` for engine-delegated
    providers. Cheap, reversible, and stops paying latency for a path that has
    never produced a file. *Do this first — it is the measurement that justifies
    the rest.*

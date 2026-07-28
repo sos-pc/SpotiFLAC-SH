@@ -267,59 +267,67 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	// the specific proxy); it's ignored for the other providers. Returns the
 	// downloaded filename and error from the underlying client.
 	runService := func(svc, tidalApiURL string) (string, error) {
-		// Engine route, opt-in per provider (ENGINE_SERVICES). Placed here rather
-		// than in the switch below so it covers every entry point at once —
-		// explicit service and the auto chain — and so an unset env var leaves
-		// the native paths byte-for-byte unchanged.
-		if EngineHandles(svc) {
-			slog.Info("[Engine] Delegating", "service", svc, "track", req.TrackName)
-			// A delegated provider is the engine's, outcome included. There is no
-			// second attempt on the native path.
-			//
-			// That fallback existed to rescue tracks the engine could not fetch
-			// because it was blocked on a community challenge, using the session our
-			// solver holds. Both halves of that premise are gone: the engine now
-			// obtains its own grant, and the fallback never once succeeded —
-			// measured over every download since the engine went live, it was
-			// reached 3 times and died all 3 in searchByISRC, the ~80%-broken
-			// resolution the engine was adopted to escape. It cost latency on
-			// already-failing downloads and returned nothing.
-			//
-			// The auto chain still moves to the NEXT provider on failure, so a
-			// delegated provider failing is not the end of the job.
-			return downloadViaEngine(req, svc, spotifyURL)
-		}
 		// Only Tidal has a native path left. Qobuz, Amazon and Deezer were
 		// anonymous community-proxy wrappers the engine replaced; Tidal stays
 		// because it carries a personal token, which is the one thing the
 		// engine's anonymous access cannot provide.
-		//
-		// So an undelegated qobuz/amazon/deezer now falls to default and errors
-		// rather than silently doing nothing — the message names the variable to
-		// set, since "unknown service: qobuz" would otherwise read as a bug.
-		switch svc {
-		case "tidal":
-			if tidalApiURL == "" || tidalApiURL == "auto" {
-				dl := tidal.NewTidalDownloader("")
+		native := func() (string, error) {
+			switch svc {
+			case "tidal":
+				if tidalApiURL == "" || tidalApiURL == "auto" {
+					dl := tidal.NewTidalDownloader("")
+					dl.SpeedCallback = req.SpeedCallback
+					p := tidalParams(tidalFmt)
+					if req.ServiceURL != "" {
+						return dl.DownloadByURLWithFallback(p)
+					}
+					return dl.Download(p)
+				}
+				dl := tidal.NewTidalDownloader(tidalApiURL)
 				dl.SpeedCallback = req.SpeedCallback
 				p := tidalParams(tidalFmt)
 				if req.ServiceURL != "" {
-					return dl.DownloadByURLWithFallback(p)
+					return dl.DownloadByURL(p)
 				}
 				return dl.Download(p)
+			case "qobuz", "amazon", "deezer":
+				// The message names the variable to set: "unknown service: qobuz"
+				// would read as a bug rather than a configuration gap.
+				return "", fmt.Errorf("%s is only available through the download engine — add it to ENGINE_SERVICES", svc)
+			default:
+				return "", fmt.Errorf("unknown service: %s", svc)
 			}
-			dl := tidal.NewTidalDownloader(tidalApiURL)
-			dl.SpeedCallback = req.SpeedCallback
-			p := tidalParams(tidalFmt)
-			if req.ServiceURL != "" {
-				return dl.DownloadByURL(p)
-			}
-			return dl.Download(p)
-		case "qobuz", "amazon", "deezer":
-			return "", fmt.Errorf("%s is only available through the download engine — add it to ENGINE_SERVICES", svc)
-		default:
-			return "", fmt.Errorf("unknown service: %s", svc)
 		}
+
+		// BYOT takes priority over the engine, because credentials buy something
+		// anonymous access cannot. Proven in prod: the engine's Tidal is
+		// tokenless, so it answers "proxy HTTP 401 / no Tidal APIs configured"
+		// and fails, while our path refreshes the personal token and succeeds on
+		// the same track. Asking the engine first only spends time on a request
+		// we know is weaker.
+		//
+		// The engine still backs it up: a token does not guarantee the track is
+		// on Tidal, and the engine reaches routes we do not.
+		if byotConfigured(svc) {
+			filename, err := native()
+			if err == nil {
+				return filename, nil
+			}
+			if EngineHandles(svc) {
+				slog.Info("[BYOT] Native path failed, trying the engine", "service", svc, "err", err, "track", req.TrackName)
+				return downloadViaEngine(req, svc, spotifyURL)
+			}
+			return "", err
+		}
+
+		// No credentials for this provider: the engine owns it, failure included.
+		// The auto chain still moves to the NEXT provider, so this is not the end
+		// of the job.
+		if EngineHandles(svc) {
+			slog.Info("[Engine] Delegating", "service", svc, "track", req.TrackName)
+			return downloadViaEngine(req, svc, spotifyURL)
+		}
+		return native()
 	}
 
 	// One always-on line per download so a prod log makes the decision path
@@ -489,6 +497,25 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Quality mapping helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+// byotConfigured reports whether the operator has supplied credentials for svc,
+// which makes our native path the better of the two and therefore the one to try
+// first (see runService).
+//
+// Tidal is the only provider with a native path left, so it is the only one that
+// can be true today. Other providers may join: the engine accepts qobuz_token,
+// qobuz_local_api_url and tidal_custom_api, so a future "bring your own account"
+// is likely a credential handed to the engine rather than new native code — at
+// which point this function decides ordering, not implementation.
+//
+// LoadTidalToken reads cache/disk without touching the network. An expired token
+// is still "configured": the download path refreshes it itself.
+func byotConfigured(svc string) bool {
+	if !strings.EqualFold(strings.TrimSpace(svc), "tidal") {
+		return false
+	}
+	return tidal.LoadTidalToken() != nil
+}
 
 // TidalQualityFor converts any quality string to the nearest valid Tidal quality.
 func TidalQualityFor(format string) string {
