@@ -120,7 +120,7 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 | File | Purpose |
 |------|---------|
-| `jobs.db` | BoltDB single-file database. Buckets: `jobs`, `watchlist`, `users`, `apikeys`, `api_proxies`, `proxy_discovery`, `history`, `fetch_history`. |
+| `jobs.db` | BoltDB single-file database. Buckets: `jobs`, `watchlist`, `users`, `apikeys`, `api_proxies`, `history`, `fetch_history`. A `proxy_discovery` bucket survives in databases created before 2026-07-28; nothing reads it and it is a few hundred bytes, so it is left in place rather than migrated away. |
 | `jwt_secret` | Auto-generated JWT signing key (mode `0600`). Skipped when `JWT_SECRET` env var is set. |
 | `tidal_token.json` | Cached Tidal Device Code token (mode `0644`). Created on successful auth, deleted on disconnect or refresh failure. Auto-refreshed before expiry. |
 | `config.json` | Legacy global settings (read-only fallback for users with no per-user settings yet). New deployments should not need this — settings are stored per-user inside `jobs.db`. |

@@ -9,10 +9,10 @@ import (
 // ValidateExternalURL rejects URLs that could be used for SSRF against the
 // server's own network: non-http(s) schemes, missing host, or a host that
 // resolves to a loopback / private / link-local / unspecified address.
-// Used to vet both operator-supplied proxy URLs (PUT /api/v1/apis/proxies)
-// and proxy URLs pulled from the third-party discovery feed
-// (tidal-uptime.geeked.wtf) before either is used as the base of an
-// outbound request made by the server.
+// Vets operator-supplied proxy URLs (PUT /api/v1/apis/proxies) before they are
+// used as the base of an outbound request made by the server. It also vetted
+// URLs from the third-party discovery feed until that feed, and the code
+// reading it, were removed.
 //
 // This is a save-time / ingest-time check, not a request-time one — it does
 // not protect against DNS rebinding (a hostname resolving to a public IP

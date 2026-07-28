@@ -471,10 +471,10 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	all := make([]serviceEntry, 0, 32)
 	all = append(all, coreServices...)
 
-	// Build Tidal proxy entries from the effective configuration — includes
-	// auto-discovered proxies from tidal-uptime.geeked.wtf in addition to
-	// the user's saved config. Falls back to user config if no discovery data.
-	for _, proxyURL := range util.GetTidalProxiesEffective() {
+	// One entry per configured Tidal proxy. This used to read an "effective"
+	// list that merged in auto-discovered hosts; the discovery feed is dead and
+	// the merge is gone, so the user's saved config is the whole list.
+	for _, proxyURL := range util.GetTidalProxies() {
 		name := "Tidal · " + proxyDisplayName(proxyURL)
 		all = append(all, serviceEntry{name, proxyURL, pingTidalProxy})
 	}

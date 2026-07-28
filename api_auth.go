@@ -7,7 +7,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 )
@@ -281,47 +280,17 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 	writeV1JSON(w, http.StatusOK, results)
 }
 
-// ProxyConfigResponse extends ProxyConfig with auto-discovery metadata.
-// Returned by GET /api/v1/apis/proxies; the extra fields are read-only
-// (PUT /api/v1/apis/proxies still uses plain ProxyConfig — no discovery fields saved).
-type ProxyConfigResponse struct {
-	ProxyConfig
-	// TidalDiscovered contains proxies found by auto-discovery that are NOT
-	// in the user's configured tidal_proxies list. Read-only — managed automatically.
-	TidalDiscovered    []string `json:"tidal_discovered"`
-	DiscoveryCheckedAt int64    `json:"discovery_checked_at,omitempty"`
-	DiscoverySource    string   `json:"discovery_source,omitempty"`
-}
+// The response used to be a ProxyConfigResponse wrapping ProxyConfig with three
+// auto-discovery fields (tidal_discovered / discovery_checked_at /
+// discovery_source). Discovery is gone — its feed died — so the wrapper had
+// nothing left to add and the plain config is the whole answer.
 
 func (s *Server) v1GetProxies(w http.ResponseWriter, r *http.Request) {
 	// Read-only: proxy configuration.
 	if !v1RequirePermission(w, r, "read") {
 		return
 	}
-	cfg := GetProxyConfig(s.ctr.DB)
-	resp := ProxyConfigResponse{ProxyConfig: cfg}
-
-	if result, err := LoadLastDiscoveryResult(s.ctr.DB); err == nil && result != nil {
-		normalize := func(u string) string {
-			if u == "" {
-				return ""
-			}
-			return strings.TrimRight(strings.TrimSpace(u), "/")
-		}
-		configSet := make(map[string]struct{}, len(cfg.TidalProxies))
-		for _, u := range cfg.TidalProxies {
-			configSet[normalize(u)] = struct{}{}
-		}
-		for _, u := range result.TidalUp {
-			if _, inConfig := configSet[normalize(u)]; !inConfig {
-				resp.TidalDiscovered = append(resp.TidalDiscovered, u)
-			}
-		}
-		resp.DiscoveryCheckedAt = result.CheckedAt
-		resp.DiscoverySource = result.Source
-	}
-
-	writeV1JSON(w, http.StatusOK, resp)
+	writeV1JSON(w, http.StatusOK, GetProxyConfig(s.ctr.DB))
 }
 
 func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {

@@ -1121,24 +1121,24 @@ Parallel health check of every external service (cached for 30 seconds, invalida
 **Status values:** `ok` · `down` · `ratelimited` · `unconfigured`
 
 ### `GET /api/v1/apis/proxies`
-Current proxy configuration *plus* auto-discovery metadata.
+Current proxy configuration.
 
 ```json
 {
   "tidal_proxies":   ["https://eu-central.monochrome.tf", "..."],
   "qobuz_providers": [],
   "amazon_proxies":  ["https://amazon.spotbye.qzz.io"],
-  "deezer_proxies":  ["https://api.deezmate.com"],
-  "tidal_discovered": ["https://newly-found-proxy.example", "..."],
-  "discovery_checked_at": 1747800000,
-  "discovery_source": "tidal-uptime.geeked.wtf"
+  "deezer_proxies":  ["https://api.deezmate.com"]
 }
 ```
 
-`tidal_discovered` lists proxies returned by the discovery feed that are **not** already in the user's `tidal_proxies` list — read-only, refreshed every 6 h. They are merged automatically at runtime (see `GetTidalProxiesEffective`); to make one persistent, copy it into `tidal_proxies` via `PUT`.
+> **Changed 2026-07-28.** This used to also return `tidal_discovered`,
+> `discovery_checked_at` and `discovery_source`, from a background feed that has
+> been NXDOMAIN for months. Auto-discovery is gone; the saved config is the whole
+> answer. Clients reading those three fields should treat them as absent.
 
 ### `PUT /api/v1/apis/proxies`
-Update proxy configuration. Body: a `ProxyConfig` object (the four arrays above; discovery fields are ignored when present). Empty arrays fall back to **factory defaults** — true "reset" behaviour, independent of any in-memory user override. Applies immediately without restart and invalidates the status cache. Returns `204`.
+Update proxy configuration. Body: a `ProxyConfig` object (the four arrays above). Empty arrays fall back to **factory defaults** — true "reset" behaviour, independent of any in-memory user override. Applies immediately without restart and invalidates the status cache. Returns `204`.
 
 ```json
 {
@@ -1208,7 +1208,7 @@ curl -s -X POST $BASE/api/v1/admin/retag-legacy \
 curl -s $BASE/api/v1/apis/status \
   -H "Authorization: Bearer $TOKEN" | jq '.[] | select(.status != "ok")'
 
-# Inspect proxy config including auto-discovery
+# Inspect proxy config
 curl -s $BASE/api/v1/apis/proxies \
   -H "Authorization: Bearer $TOKEN" | jq
 ```

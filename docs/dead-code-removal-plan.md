@@ -74,7 +74,7 @@ What disappears is the **Go-side** session plumbing, not the solver.
 | File | LOC | What goes |
 |---|---|---|
 | `backend/downloader.go` | 678 | the `qobuz`/`amazon`/`deezer` cases in `runService`, their `*Params` builders, `QobuzQualityFor` |
-| `backend/util/proxy_config.go` | 231 | `qobuzProviders`, `amazonProxies`, `deezerProxies`, `qobuzMusicDLURL` + getters/setters/defaults. **Keep** `tidalProxies` + discovery (BYOT rides on them) |
+| `backend/util/proxy_config.go` | 231 | `qobuzProviders`, `amazonProxies`, `deezerProxies`, `qobuzMusicDLURL` + getters/setters/defaults. **Keep** `tidalProxies` (BYOT rides on it); the discovery overlay went in item 8 |
 | `api_status.go` | 656 | probes for musicdl, spotbye, deezmate, Qobuz-GET, community. **Keep** Tidal + Engine |
 | `api_proxies.go` | 141 | the three providers' proxy-config endpoints. **Keep** Tidal |
 | `main.go` | 232 | the community wiring |
@@ -106,7 +106,7 @@ authoritative source — behind a persistent cache. It is the primary ISRC path
 | `GetAllURLsFromSpotify` | ❌ dies — **7b** | supplied `amazon_url` (native gone) and `tidal_url` — and Tidal has two better paths of its own: its ISRC endpoint and name search. Last caller is `metadata_service.go:63`, i.e. the availability feature. |
 | `ScrapeSongLinkHTML`, `ScrapeSongLinkViaAppleMusic` | ✅ **dead 7a** | fallbacks for the above, reachable only from the deleted cascade |
 | `GetISRC` (via Song.link) | ✅ **dead 7a** | `genremeta.go` moved to `GetISRCDirect` in item 12, leaving it callerless |
-| `GetDeezerSearchFallback` | ✅ **keep** (decided) | name→ISRC **and `tidal_url`** via Deezer's own API — one call, no rate-limit. It is what replaced the cascade for the BYOT path, not a peer of it. |
+| `GetDeezerSearchFallback` | ✅ **keep** (decided) | name→ISRC via Deezer's own API — one call, no rate-limit. ⚠️ It returns **only** an ISRC: the `TidalURL`/`AmazonURL` fields on its return type were never filled, which 7b discovered and deleted. It is what replaced the cascade for the BYOT path, not a peer of it. |
 | `tidal.GetTidalURLFromSpotify` | ✅ **dead 7a** | its only caller was `tidal/client.go:766`, and it existed only to consume Song.link URLs |
 
 **Why Song.link is superseded — the accurate reason.** Not because it is down: the
@@ -126,7 +126,7 @@ Same error class, found by probing instead of reading imports:
 
 | Item | I said | Measured 2026-07-26 |
 |---|---|---|
-| `proxy_discovery.go` + `tidal-uptime.geeked.wtf` | "keep — BYOT rides on it" | **feed is DNS-dead.** A goroutine wakes every 6 h to fail, plus BoltDB persistence and a 3-tier merge in `GetTidalProxiesEffective` that now merges nothing. Prod logs have shown `no such host` for days. |
+| `proxy_discovery.go` + `tidal-uptime.geeked.wtf` | "keep — BYOT rides on it" | **feed is DNS-dead.** A goroutine wakes every 6 h to fail, plus BoltDB persistence and a 3-tier merge in `GetTidalProxiesEffective` that now merges nothing. Prod logs have shown `no such host` for days. ✅ removed in item 8. |
 | SpotFetch (`spotify.afkarxyz.fun`) | never examined | **unreachable.** A silent fallback for the Spotify scraper, still wired through a setting, a code path and a status probe. |
 | Tidal default proxy list | "keep" | `hifi-api.kennyy.com.br` unreachable; the two monochrome hosts answer 200. List is partly stale. |
 | `qobuzProviders` | listed for removal | already an **empty slice** — its getters/setters/API/UI manage nothing. |
@@ -246,13 +246,34 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
    while working in prod through the engine — 4/4 on an album test. Re-enabled. That
    file was the only place the UI blocked it.
 
-8. **`proxy_discovery.go` + `tidal-uptime.geeked.wtf`** — ✅ **go (contributes nothing)**
+8. **`proxy_discovery.go` + `tidal-uptime.geeked.wtf`** — ✅ **DONE 2026-07-28**
    **305 LOC** plus a goroutine and a BoltDB blob. The feed is DNS-dead, and
    `GetTidalProxiesEffective()` explicitly falls back to the static list when there is
    no discovery data — which is now always. Prod confirms it never even restores:
    `[Discovery] Cached result is stale, skipping restore age=70h32m0s`.
-   Consumers (`api_status.go:568`, `tidal/client.go:239`) would behave identically off
-   the static list. No replacement feed known; if one appears, repoint instead.
+   **Re-verified before deleting** (2026-07-28): `tidal-uptime.geeked.wtf` is
+   `NXDOMAIN`, `curl` returns `000`. Not "slow" or "flaky" — the name does not exist.
+
+   | removed | why |
+   |---|---|
+   | `proxy_discovery.go` (305 LOC, whole file) | the goroutine, the feed parser, the BoltDB persistence |
+   | `main.go`: `loadSavedDiscovery` + `startProxyDiscovery` + their `context.WithCancel` | its only startup wiring |
+   | `util.SetTidalDiscovery`, `tidalDiscoveredUp/Down`, **`GetTidalProxiesEffective`** | the three-tier merge. With an always-empty overlay it always took its own "no discovery data" early return, i.e. it *was* `GetTidalProxies()`. Callers (`api_status.go`, `tidal/client.go`) repointed there. |
+   | `ProxyConfigResponse` + the enrichment block in `v1GetProxies` | the wrapper existed only to add the three discovery fields; the handler is now one line |
+   | `tidal_discovered` / `discovery_checked_at` / `discovery_source` (rpc.ts), the ApisTab panel + `formatDiscoveryAge` | the UI |
+
+   **Kept:** `urlsafety.go`. Its SSRF guard is also what vets operator-supplied
+   proxy URLs at `api_proxies.go:94` — the discovery feed was its second caller,
+   not its reason to exist. Its 5 tests stay.
+
+   **Left alone deliberately:** the `proxy_discovery` BoltDB bucket in databases
+   created before today. Nothing reads it, it is a few hundred bytes, and writing a
+   migration to drop it would be more risk than the bytes are worth. Noted in
+   `deployment.md` so the next person reading the bucket list is not confused.
+
+   **API break to be aware of:** `GET /api/v1/apis/proxies` no longer returns those
+   three fields. Nothing in this repo's frontend reads them any more; an external
+   client that did will now see them absent rather than empty.
 
 9. **SpotFetch** — ❌ **non-issue. Leave it.**
    ⚠️ *An earlier revision of this item called it a "hard switch" that "fails outright",

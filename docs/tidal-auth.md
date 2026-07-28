@@ -149,10 +149,7 @@ Personal token present and valid
         ↓
 api.tidal.com (official, full FLAC)
         ↓ (no token / refresh failed / 4xx)
-Community HiFi proxies — tried in order from GetTidalProxiesEffective():
-    Tier 1: discovered-up (refreshed every 6h from tidal-uptime.geeked.wtf)
-    Tier 2: user-configured proxies not in discovered-down
-    Tier 3: user-configured proxies in discovered-down (last resort)
+Community HiFi proxies — tried in configured order (util.GetTidalProxies)
         ↓ (every proxy fails)
 Provider chain continues to Qobuz / Amazon / Deezer per `autoOrder`
         ↓ (every provider fails)

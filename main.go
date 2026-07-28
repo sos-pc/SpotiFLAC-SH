@@ -14,7 +14,6 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -119,14 +118,11 @@ func main() {
 
 	LoadProxyConfig(db)
 
-	// Restore last discovery result so GetTidalProxiesEffective() is correct
-	// immediately, before the first scheduled run of the discovery goroutine.
-	loadSavedDiscovery(db)
-
-	// Start background proxy auto-discovery (tidal-uptime.geeked.wtf, every 6h).
-	discoveryCtx, cancelDiscovery := context.WithCancel(context.Background())
-	defer cancelDiscovery()
-	util.SafeGo("proxyDiscovery", func() { startProxyDiscovery(discoveryCtx, db) })
+	// Proxy auto-discovery used to start here: a goroutine polling
+	// tidal-uptime.geeked.wtf every 6 h to reorder the Tidal proxy list. That
+	// domain has been NXDOMAIN for months, so every run failed and the merge it
+	// fed never had data to merge. Removed with proxy_discovery.go; the
+	// configured list LoadProxyConfig just restored is what was in use anyway.
 
 	// No community-session refresh here any more. It signed requests for the
 	// native Qobuz and Amazon downloaders, which are gone; the engine obtains its

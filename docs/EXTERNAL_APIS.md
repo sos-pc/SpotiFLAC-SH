@@ -85,15 +85,18 @@ These are public application credentials shared across the community. The previo
 
 > **Status, May 2026.** All community proxies are reachable as servers but Tidal returns `assetPresentation: "PREVIEW"` (30-second segments) for every request without a personal Premium token. **Full FLAC downloads require authentication via Settings → Tidal Account.** The proxies remain useful as the API layer that the personal token rides on top of.
 
-**Auto-discovery — `tidal-uptime.geeked.wtf`**
+**~~Auto-discovery — `tidal-uptime.geeked.wtf`~~ — removed 2026-07-28**
 
-A goroutine runs every 6 hours (with a 0–30 s startup jitter to avoid thundering herd) and queries the upstream feed:
+A goroutine used to poll that feed every 6 h and reorder the proxy list from it,
+persisting the last result in BoltDB. **The domain is NXDOMAIN** and has been for
+months, so every run failed and the three-tier merge it fed never had anything to
+merge — `GetTidalProxiesEffective()` always returned exactly `GetTidalProxies()`.
+Removed along with the `tidal_discovered` / `discovery_checked_at` /
+`discovery_source` fields of `GET /api/v1/apis/proxies`.
 
-- **`https://tidal-uptime.geeked.wtf`** — JSON-formatted live status of community Tidal HiFi proxies. Sections: `streaming` (full streaming verified), `api` (server up), `down` (confirmed unreachable).
-
-The result is merged into `GetTidalProxiesEffective()` in three tiers: discovered-up first, then user-configured proxies not in discovered-down, then user-configured proxies in discovered-down (last resort). The user's saved configuration is **never modified** by this overlay; auto-discovered proxies are exposed read-only via the `tidal_discovered` field of `GET /api/v1/apis/proxies`.
-
-The last result is persisted in BoltDB so the effective list is correct immediately after a server restart, even before the next scheduled run. Cached results older than 24 hours are ignored on startup.
+The proxy list is now purely what the operator configures (Settings → APIs).
+If an equivalent feed appears, the place to reintroduce this is a fetch + a
+`SetTidalProxies` call — not a second list to merge.
 
 **Self-hosted alternative**
 

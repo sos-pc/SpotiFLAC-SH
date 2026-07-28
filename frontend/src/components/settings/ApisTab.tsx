@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
-import { Trash2, RefreshCw, Save, Zap } from "lucide-react";
+import { Trash2, RefreshCw, Save } from "lucide-react";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
   GetAPIStatuses,
@@ -85,16 +85,6 @@ export function ApisTab() {
           }
         : prev,
     );
-  };
-
-  const formatDiscoveryAge = (ts: number): string => {
-    // A "time ago" label a few seconds stale between renders is
-    // imperceptible here — not worth a ticking-clock state just to satisfy
-    // strict render-purity analysis.
-    // eslint-disable-next-line react-hooks/purity
-    const mins = Math.round((Date.now() / 1000 - ts) / 60);
-    if (mins < 60) return `${mins}m ago`;
-    return `${Math.round(mins / 60)}h ago`;
   };
 
   return (
@@ -223,21 +213,9 @@ export function ApisTab() {
 
           {/* Tidal list */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Tidal ({proxies.tidal_proxies.length} configured
-                {(proxies.tidal_discovered?.length ?? 0) > 0
-                  ? `, ${proxies.tidal_discovered!.length} auto-discovered`
-                  : ""}
-                )
-              </Label>
-              {proxies.discovery_checked_at && (
-                <span className="text-xs text-muted-foreground">
-                  Last check:{" "}
-                  {formatDiscoveryAge(proxies.discovery_checked_at)}
-                </span>
-              )}
-            </div>
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Tidal ({proxies.tidal_proxies.length} configured)
+            </Label>
             {proxies.tidal_proxies.map((p, i) => (
               <div key={i} className="flex items-center gap-2">
                 <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">
@@ -253,24 +231,6 @@ export function ApisTab() {
                 </Button>
               </div>
             ))}
-            {(proxies.tidal_discovered?.length ?? 0) > 0 && (
-              <div className="mt-1 space-y-1 border-t pt-2">
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <Zap className="h-3 w-3 text-blue-400 shrink-0" />
-                  Auto-discovered via{" "}
-                  {proxies.discovery_source ?? "tidal-uptime.geeked.wtf"} —
-                  read-only, used automatically
-                </p>
-                {proxies.tidal_discovered!.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0" />
-                    <code className="flex-1 text-xs font-mono truncate border border-blue-500/20 rounded px-2 py-1.5 bg-blue-500/5 text-muted-foreground">
-                      {p}
-                    </code>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <Button

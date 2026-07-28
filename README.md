@@ -20,7 +20,6 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 - **LAN bypass** — optional auto-login on local network (no password required)
 - File browser, audio converter, audio analysis
 - **Optional Tidal Premium** — OAuth 2.0 Device Code Flow for full FLAC; falls back to community HiFi proxies (preview-only as of May 2026) without any account
-- **Auto proxy discovery** — Tidal proxy list refreshed every 6h from `tidal-uptime.geeked.wtf`
 - Automatic BoltDB cleanup (deduplication every 24h)
 - Docker-first deployment with GitHub Actions CI/CD
 
@@ -185,7 +184,7 @@ curl -s -X POST http://your-server:6890/api/v1/auth/tidal/device/poll \
 Browser → /api/v1/auth/login  → Jellyfin auth → JWT (24h, HMAC-SHA256)
 Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true and request is LAN-direct)
 Browser → /api/v1/* + JWT     → handlers (per-user filtered)
-                              → BoltDB (jobs, watchlists, history, users, settings, api_keys, api_proxies, proxy_discovery)
+                              → BoltDB (jobs, watchlists, history, users, settings, api_keys, api_proxies)
                               → SQLite catalog (tracks, albums, library_files, download_attempts,
                                 playlist_snapshots — long-term source of truth for what's on disk;
                                 additive to BoltDB, M3U8 generation reads it first)
@@ -198,7 +197,6 @@ Browser → /api/v1/* + JWT     → handlers (per-user filtered)
 Background goroutines (started in main.go):
   - Watcher.daemon            — checks watchlists every 5 minutes
   - JobManager.cleanupLoop    — dedup BoltDB every 24h (after 5 min warm-up)
-  - startProxyDiscovery       — refreshes Tidal proxy list every 6h from tidal-uptime.geeked.wtf
 ```
 
 **Data isolation per user:**
@@ -248,7 +246,6 @@ Background goroutines (started in main.go):
 ├── applog.go / logbuffer.go # In-memory ring buffer backing the Debug Logs page
 │                        #   (GET /admin/logs snapshot + server_log SSE events)
 ├── ratelimit.go         # Login rate limiter (10/1min, 5min block)
-├── proxy_discovery.go   # Auto-refresh Tidal proxy list from tidal-uptime.geeked.wtf
 ├── backend/
 │   ├── downloader.go    # Download dispatcher (BYOT first, then engine, per autoOrder)
 │   ├── engine_ingest.go # Engine route + ingestion into our tree/tags
@@ -451,5 +448,4 @@ See [CREDITS.md](CREDITS.md) for the full list of community projects, libraries 
 - [spotbye/SpotiFLAC](https://github.com/spotbye/SpotiFLAC) — upstream
 - [afkarxyz/SpotiFLAC](https://github.com/afkarxyz/SpotiFLAC) — original project
 - [orpheusdl-tidal](https://github.com/Dniel97/orpheusdl-tidal) — Tidal Device Code credentials
-- [tidal-uptime.geeked.wtf](https://tidal-uptime.geeked.wtf) — Tidal proxy auto-discovery feed
 - [MusicBrainz](https://musicbrainz.org) · [LRCLIB](https://lrclib.net) · [hifi-api](https://github.com/binimum/hifi-api)

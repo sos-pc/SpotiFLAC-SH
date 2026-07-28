@@ -66,18 +66,19 @@ Spotify URL and resolves internally.
 
 ### "All Tidal proxies failed"
 
-Every entry in `GetTidalProxiesEffective()` (user config + auto-discovery) returned an error. Options:
+Every entry in `util.GetTidalProxies()` returned an error. The list is purely
+what the operator configured — auto-discovery was removed in 2026-07 when its
+feed died, so nothing refreshes it on its own. Options:
 
-1. Wait — the discovery goroutine refreshes the list every 6 h from `tidal-uptime.geeked.wtf`.
-2. Force a refresh by restarting the container (`loadSavedDiscovery` runs at startup).
-3. Authenticate with your own Tidal Premium account (see [tidal-auth.md](tidal-auth.md)) — that bypasses community proxies entirely.
-4. Switch to Qobuz or Amazon (`downloader: qobuz`) in Settings.
+1. Authenticate with your own Tidal Premium account (see [tidal-auth.md](tidal-auth.md)) — that bypasses community proxies entirely, and is the only path to full FLAC anyway.
+2. Replace the dead hosts via **Settings → APIs → Proxy Configuration** (applies immediately, no restart).
+3. Switch to a provider the engine handles (Qobuz, Amazon, Deezer).
 
-To inspect what discovery returned:
+To see the configured list:
 
 ```bash
 curl -s http://spotiflac.example.com/api/v1/apis/proxies \
-  -H "Authorization: Bearer <token>" | jq '{tidal_discovered, discovery_checked_at, discovery_source}'
+  -H "Authorization: Bearer <token>" | jq .tidal_proxies
 ```
 
 ### Track not available on any platform
@@ -194,13 +195,7 @@ docker compose down && docker compose pull && docker compose up -d
 
 ---
 
-## Discovery / Proxies
-
-### `tidal_discovered` is empty or stale
-
-- The goroutine fetches `https://tidal-uptime.geeked.wtf` every 6 h, plus once at startup after a 0–30 s random jitter.
-- Cached results older than 24 h are ignored on restart (`maxDiscoveryAge`). If you've been offline for days, you may briefly see no discovery data until the first run completes.
-- If the upstream feed itself is down, `discovery_source` is still `"tidal-uptime.geeked.wtf"` but `error` will be set in the BoltDB record (currently not exposed via the API).
+## Proxies
 
 ### Community proxies all show `ratelimited` with "PREVIEW only" error
 
