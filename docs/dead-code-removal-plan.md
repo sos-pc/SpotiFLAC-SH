@@ -170,7 +170,7 @@ Mitigations:
 3. **Delete Qobuz, then Deezer** — one commit each: package + its `runService`
    case + its params + its proxy config + its status probe + its UI.
 4. **Delete Amazon** — same shape, gated on step 1.
-5. **Delete `backend/community/`** + the `main.go` wiring + the health probe,
+5. ✅ **DONE 2026-07-28.** **Deleted `backend/community/`** + the `main.go` wiring + the health probe,
    once no provider references it.
 6. **Re-verify**: a full watchlist sync, an explicit download per remaining
    provider, and Tidal with its token (the BYOT path must be untouched).

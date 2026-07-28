@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -478,13 +477,6 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	for _, proxyURL := range util.GetTidalProxiesEffective() {
 		name := "Tidal · " + proxyDisplayName(proxyURL)
 		all = append(all, serviceEntry{name, proxyURL, pingTidalProxy})
-	}
-
-	// Qobuz community service — the session-authenticated download provider that
-	// replaced the dead musicdl.me. Its /health answers without a session, so it
-	// is a real liveness signal even before verification.
-	if healthURL, err := community.QobuzHealthURL(); err == nil {
-		all = append(all, serviceEntry{"Qobuz · community", healthURL, pingURL})
 	}
 
 	// Download engine sidecar. Listed only when configured, so an install without

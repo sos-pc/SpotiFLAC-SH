@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/community"
 	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -120,17 +119,6 @@ func main() {
 
 	LoadProxyConfig(db)
 
-	// ── Community session (Turnstile solver) ────────────────────────────────
-	if err := community.InitStore(db); err != nil {
-		slog.Warn("[Main] community session store init failed, proceeding without", "err", err)
-	}
-	// Version declared when signing community download requests (Qobuz). Kept in
-	// step with the "dev" fallback the refresh loop below uses, so a request and
-	// the session it rides on never disagree on app version.
-	if community.AppVersion = os.Getenv("APP_VERSION"); community.AppVersion == "" {
-		community.AppVersion = "dev"
-	}
-
 	// Restore last discovery result so GetTidalProxiesEffective() is correct
 	// immediately, before the first scheduled run of the discovery goroutine.
 	loadSavedDiscovery(db)
@@ -140,18 +128,10 @@ func main() {
 	defer cancelDiscovery()
 	util.SafeGo("proxyDiscovery", func() { startProxyDiscovery(discoveryCtx, db) })
 
-	// Community session refresh (Turnstile → grant → HMAC signing for Qobuz/Amazon proxies).
-	solver := community.SolverFromEnv()
-	if solver != nil {
-		appVersion := os.Getenv("APP_VERSION")
-		if appVersion == "" {
-			appVersion = "dev"
-		}
-		util.SafeGo("communityRefresh", func() { community.RefreshLoop(discoveryCtx, solver, appVersion) })
-	} else {
-		slog.Info("[Main] TURNSTILE_SOLVER_URL not set, community session refresh disabled")
-	}
-
+	// No community-session refresh here any more. It signed requests for the
+	// native Qobuz and Amazon downloaders, which are gone; the engine obtains its
+	// own session, and the solver container now answers the engine rather than
+	// us. Tidal, the one native path left, authenticates with its own token.
 	server := NewServer(ctr)
 
 	httpServer := &http.Server{
