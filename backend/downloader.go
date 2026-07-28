@@ -424,19 +424,21 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		// the native paths byte-for-byte unchanged.
 		if EngineHandles(svc) {
 			slog.Info("[Engine] Delegating", "service", svc, "track", req.TrackName)
-			filename, err := downloadViaEngine(req, svc, spotifyURL)
-			if err == nil {
-				return filename, nil
-			}
-			// Fall through to this provider's native path instead of giving up on
-			// it. The two reach genuinely different routes, and their strengths are
-			// complementary: the engine matches far better (text+score, duration
-			// validation) but cannot answer the community challenge headlessly — it
-			// prompts for a grant on stdin and dies on EOF — whereas our native path
-			// matches poorly but rides a real community session obtained by the
-			// solver. Returning here would skip to the NEXT provider in the auto
-			// chain and waste the one credential we actually hold.
-			slog.Info("[Engine] Failed, retrying on the native path", "service", svc, "err", err, "track", req.TrackName)
+			// A delegated provider is the engine's, outcome included. There is no
+			// second attempt on the native path.
+			//
+			// That fallback existed to rescue tracks the engine could not fetch
+			// because it was blocked on a community challenge, using the session our
+			// solver holds. Both halves of that premise are gone: the engine now
+			// obtains its own grant, and the fallback never once succeeded —
+			// measured over every download since the engine went live, it was
+			// reached 3 times and died all 3 in searchByISRC, the ~80%-broken
+			// resolution the engine was adopted to escape. It cost latency on
+			// already-failing downloads and returned nothing.
+			//
+			// The auto chain still moves to the NEXT provider on failure, so a
+			// delegated provider failing is not the end of the job.
+			return downloadViaEngine(req, svc, spotifyURL)
 		}
 		switch svc {
 		case "amazon":

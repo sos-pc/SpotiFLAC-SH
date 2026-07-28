@@ -152,7 +152,7 @@ Mitigations:
 
 1. **Prove Amazon through the engine** (one successful download) — or accept it
    stays native indefinitely. Blocks step 4 only.
-2. **Remove the native fallback call** in `runService` for engine-delegated
+2. ✅ **DONE 2026-07-28.** **Removed the native fallback call** in `runService` for engine-delegated
    providers. Cheap, reversible, and stops paying latency for a path that has
    never produced a file. *Do this first — it is the measurement that justifies
    the rest.*
