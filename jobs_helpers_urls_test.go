@@ -14,9 +14,9 @@ func TestNeedsNativeProviderURLs(t *testing.T) {
 		engineOn string // ENGINE_SERVICES
 		want     bool
 	}{
-		// Only Tidal and Amazon ever read the resolved URLs.
+		// Tidal is the only remaining consumer of the resolved URLs.
 		{"explicit tidal, native", "tidal", "", "", true},
-		{"explicit amazon, native", "amazon", "", "", true},
+		{"explicit amazon has no native path left", "amazon", "", "", false},
 		{"explicit tidal, delegated", "tidal", "", "tidal", false},
 		{"explicit amazon, delegated", "amazon", "", "amazon", false},
 
@@ -26,7 +26,7 @@ func TestNeedsNativeProviderURLs(t *testing.T) {
 
 		// auto: one native URL consumer anywhere in the chain is enough.
 		{"auto, tidal native in chain", "auto", "qobuz-tidal-deezer", "qobuz,deezer", true},
-		{"auto, amazon native in chain", "auto", "qobuz-amazon", "qobuz", true},
+		{"auto, amazon in chain no longer forces resolution", "auto", "qobuz-amazon", "qobuz", false},
 		{"auto, every consumer delegated", "auto", "tidal-qobuz-amazon-deezer", "tidal,qobuz,amazon,deezer", false},
 		{"auto, chain has no URL consumer", "auto", "qobuz-deezer", "", false},
 
@@ -61,10 +61,8 @@ func TestNeedsNativeProviderURLsWithoutEngine(t *testing.T) {
 	t.Setenv("ENGINE_URL", "")
 	t.Setenv("ENGINE_SERVICES", "tidal,qobuz,amazon,deezer")
 
-	for _, svc := range []string{"tidal", "amazon"} {
-		if !needsNativeProviderURLs(JobSettings{Service: svc}) {
-			t.Errorf("%s must still resolve URLs when ENGINE_URL is unset", svc)
-		}
+	if !needsNativeProviderURLs(JobSettings{Service: "tidal"}) {
+		t.Error("tidal must still resolve URLs when ENGINE_URL is unset")
 	}
 	if !needsNativeProviderURLs(JobSettings{Service: "auto", AutoOrder: "tidal-qobuz"}) {
 		t.Error("auto chain containing tidal must resolve URLs when the engine is off")

@@ -10,12 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/amazon"
 	"github.com/afkarxyz/SpotiFLAC/backend/audio"
-	"github.com/afkarxyz/SpotiFLAC/backend/deezer"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/qobuz"
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -52,29 +48,23 @@ type DownloadRequest struct {
 	EmbedLyrics          bool   `json:"embed_lyrics,omitempty"`
 	EmbedMaxQualityCover bool   `json:"embed_max_quality_cover,omitempty"`
 	ServiceURL           string `json:"service_url,omitempty"`
-	// AmazonURL carries Amazon's own stream URL so the `auto` fallback chain can
-	// hand Amazon the right URL instead of ServiceURL, which holds Tidal's (that
-	// mismatch silently broke auto→amazon). The frontend's direct Amazon
-	// download still sends its URL as service_url, so amazonParams falls back to
-	// ServiceURL when this is empty.
-	AmazonURL          string `json:"amazon_url,omitempty"`
-	ISRC               string `json:"isrc,omitempty"`
-	AutoOrder          string `json:"auto_order,omitempty"`
-	Duration           int    `json:"duration,omitempty"`
-	ItemID             string `json:"item_id,omitempty"`
-	SpotifyTrackNumber int    `json:"spotify_track_number,omitempty"`
-	SpotifyDiscNumber  int    `json:"spotify_disc_number,omitempty"`
-	SpotifyTotalTracks int    `json:"spotify_total_tracks,omitempty"`
-	SpotifyTotalDiscs  int    `json:"spotify_total_discs,omitempty"`
-	Copyright          string `json:"copyright,omitempty"`
-	Publisher          string `json:"publisher,omitempty"`
-	PlaylistName       string `json:"playlist_name,omitempty"`
-	PlaylistOwner      string `json:"playlist_owner,omitempty"`
-	AllowFallback      bool   `json:"allow_fallback"`
-	UseFirstArtistOnly bool   `json:"use_first_artist_only,omitempty"`
-	UseSingleGenre     bool   `json:"use_single_genre,omitempty"`
-	EmbedGenre         bool   `json:"embed_genre,omitempty"`
-	UserID             string `json:"user_id,omitempty"`
+	ISRC                 string `json:"isrc,omitempty"`
+	AutoOrder            string `json:"auto_order,omitempty"`
+	Duration             int    `json:"duration,omitempty"`
+	ItemID               string `json:"item_id,omitempty"`
+	SpotifyTrackNumber   int    `json:"spotify_track_number,omitempty"`
+	SpotifyDiscNumber    int    `json:"spotify_disc_number,omitempty"`
+	SpotifyTotalTracks   int    `json:"spotify_total_tracks,omitempty"`
+	SpotifyTotalDiscs    int    `json:"spotify_total_discs,omitempty"`
+	Copyright            string `json:"copyright,omitempty"`
+	Publisher            string `json:"publisher,omitempty"`
+	PlaylistName         string `json:"playlist_name,omitempty"`
+	PlaylistOwner        string `json:"playlist_owner,omitempty"`
+	AllowFallback        bool   `json:"allow_fallback"`
+	UseFirstArtistOnly   bool   `json:"use_first_artist_only,omitempty"`
+	UseSingleGenre       bool   `json:"use_single_genre,omitempty"`
+	EmbedGenre           bool   `json:"embed_genre,omitempty"`
+	UserID               string `json:"user_id,omitempty"`
 	// SpeedCallback est appelé pendant le téléchargement avec (mbDownloaded, speedMBps).
 	// Nil si non requis. Non sérialisé.
 	SpeedCallback func(mbDownloaded, speedMBps float64) `json:"-"`
@@ -189,7 +179,6 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	lyricsChan := make(chan string, 1)
-	isrcChan := make(chan string, 1)
 
 	if req.SpotifyID != "" {
 		if req.EmbedLyrics {
@@ -211,58 +200,18 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		} else {
 			close(lyricsChan)
 		}
-		// Same reasoning as fetchLyrics above: isrcChan's reader blocks
-		// until something arrives, so a recovered panic must still send a
-		// fallback ("" — the same value the normal all-methods-failed
-		// path already sends).
-		util.SafeGoOrElse("downloader.resolveISRC", func() {
-			if req.ISRC != "" {
-				slog.Debug("[ISRC] Using pre-fetched ISRC", "isrc", req.ISRC)
-				isrcChan <- req.ISRC
-				return
-			}
-
-			var finalIsrc string
-			// 1. Tenter Deezer Fallback (rapide, sans compte, pas de rate-limit Songlink)
-			if req.TrackName != "" && req.ArtistName != "" {
-				if fallback, ferr := songlink.GetDeezerSearchFallback(req.TrackName, req.ArtistName); ferr == nil && fallback != nil && fallback.ISRC != "" {
-					finalIsrc = fallback.ISRC
-					slog.Debug("[ISRC] Found via Deezer API", "isrc", finalIsrc)
-				}
-			}
-
-			// 2. Si Deezer a échoué, tenter Songlink (JSON ou HTML)
-			if finalIsrc == "" {
-				sl := songlink.GetSongLinkClient()
-				if sl != nil {
-					// L'appel GetAllURLs inclut le fallback HTML depuis la v1.3.6
-					urls, err := sl.GetAllURLsFromSpotify(req.SpotifyID, "")
-					if err == nil && urls != nil && urls.ISRC != "" {
-						finalIsrc = urls.ISRC
-						slog.Debug("[ISRC] Found via Songlink JSON", "isrc", finalIsrc)
-					} else {
-						// Fallback ultime : Scraping HTML (si l'appel global ne l'a pas déjà fait)
-						if htmlURLs, hErr := sl.ScrapeSongLinkHTML(req.SpotifyID); hErr == nil && htmlURLs != nil && htmlURLs.ISRC != "" {
-							finalIsrc = htmlURLs.ISRC
-							slog.Debug("[ISRC] Found via Songlink HTML", "isrc", finalIsrc)
-						}
-					}
-				}
-			}
-
-			if finalIsrc == "" {
-				slog.Debug("[ISRC] All lookup methods failed", "track", req.TrackName)
-			}
-
-			isrcChan <- finalIsrc
-		}, func() { isrcChan <- "" })
+		// The ISRC resolution that used to live here is gone with the Qobuz
+		// downloader that was its only consumer. It ran a Deezer lookup, then
+		// Song.link, then an HTML scrape on every download — a second copy of
+		// the cascade jobs_helpers already performs, feeding a channel nobody
+		// reads now. The engine resolves from the Spotify URL, and req.ISRC
+		// (set upstream from Spotify's own catalog record) still reaches the
+		// ingestion for genre and tagging.
 	} else {
 		close(lyricsChan)
-		close(isrcChan)
 	}
 
 	tidalFmt := TidalQualityFor(req.AudioFormat)
-	qobuzFmt := QobuzQualityFor(req.AudioFormat)
 
 	// Build the tidal.DownloadParams once; the same struct fits all three Tidal entry points
 	// (Download, DownloadByURL, DownloadByURLWithFallback). The call site picks one method,
@@ -295,106 +244,6 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
 			UseSingleGenre:       req.UseSingleGenre,
 			EmbedGenre:           req.EmbedGenre,
-		}
-	}
-
-	// Same idea for Qobuz. The ISRC is supplied separately, after being awaited
-	// from isrcChan (we don't always know it at this point).
-	qobuzParams := func(isrc string) qobuz.DownloadParams {
-		return qobuz.DownloadParams{
-			DeezerISRC:           isrc,
-			SpotifyID:            req.SpotifyID,
-			OutputDir:            req.OutputDir,
-			Quality:              qobuzFmt,
-			FilenameFormat:       req.FilenameFormat,
-			Position:             req.Position,
-			IncludeTrackNumber:   req.TrackNumber,
-			UseAlbumTrackNumber:  req.UseAlbumTrackNumber,
-			UseFirstArtistOnly:   req.UseFirstArtistOnly,
-			SpotifyTrackName:     req.TrackName,
-			SpotifyArtistName:    req.ArtistName,
-			SpotifyAlbumName:     req.AlbumName,
-			SpotifyAlbumArtist:   req.AlbumArtist,
-			SpotifyReleaseDate:   req.ReleaseDate,
-			SpotifyCoverURL:      req.CoverURL,
-			SpotifyTrackNumber:   req.SpotifyTrackNumber,
-			SpotifyDiscNumber:    req.SpotifyDiscNumber,
-			SpotifyTotalTracks:   req.SpotifyTotalTracks,
-			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
-			SpotifyCopyright:     req.Copyright,
-			SpotifyPublisher:     req.Publisher,
-			SpotifyURL:           spotifyURL,
-			AllowFallback:        req.AllowFallback,
-			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
-			UseSingleGenre:       req.UseSingleGenre,
-			EmbedGenre:           req.EmbedGenre,
-		}
-	}
-
-	// Amazon parameters: includes PlaylistName/PlaylistOwner (used for filename
-	// generation) but no AllowFallback (Amazon has no quality fallback yet).
-	amazonParams := func() amazon.DownloadParams {
-		// Amazon's own URL only. NOT ServiceURL: in the auto loop that holds
-		// Tidal's URL (ensureTidalServiceURL), and feeding it to Amazon made it
-		// try to parse an ASIN out of a tidal.com link ("failed to extract ASIN
-		// from URL: https://tidal.com/track/…"). When there's no Amazon URL,
-		// runService falls back to DownloadBySpotifyID instead.
-		return amazon.DownloadParams{
-			URL:                  req.AmazonURL,
-			SpotifyTrackID:       req.SpotifyID,
-			OutputDir:            req.OutputDir,
-			Quality:              req.AudioFormat,
-			FilenameFormat:       req.FilenameFormat,
-			Position:             req.Position,
-			IncludeTrackNumber:   req.TrackNumber,
-			UseFirstArtistOnly:   req.UseFirstArtistOnly,
-			PlaylistName:         req.PlaylistName,
-			PlaylistOwner:        req.PlaylistOwner,
-			SpotifyTrackName:     req.TrackName,
-			SpotifyArtistName:    req.ArtistName,
-			SpotifyAlbumName:     req.AlbumName,
-			SpotifyAlbumArtist:   req.AlbumArtist,
-			SpotifyReleaseDate:   req.ReleaseDate,
-			SpotifyCoverURL:      req.CoverURL,
-			SpotifyTrackNumber:   req.SpotifyTrackNumber,
-			SpotifyDiscNumber:    req.SpotifyDiscNumber,
-			SpotifyTotalTracks:   req.SpotifyTotalTracks,
-			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
-			SpotifyCopyright:     req.Copyright,
-			SpotifyPublisher:     req.Publisher,
-			SpotifyURL:           spotifyURL,
-			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
-			UseSingleGenre:       req.UseSingleGenre,
-			EmbedGenre:           req.EmbedGenre,
-		}
-	}
-
-	// Deezer parameters: no Quality (Deezer always uses FLAC via Deezmate),
-	// no AllowFallback, no genre flags (not consumed by Deezer client today).
-	deezerParams := func() deezer.DownloadParams {
-		return deezer.DownloadParams{
-			SpotifyID:            req.SpotifyID,
-			OutputDir:            req.OutputDir,
-			FilenameFormat:       req.FilenameFormat,
-			Position:             req.Position,
-			IncludeTrackNumber:   req.TrackNumber,
-			UseFirstArtistOnly:   req.UseFirstArtistOnly,
-			PlaylistName:         req.PlaylistName,
-			PlaylistOwner:        req.PlaylistOwner,
-			SpotifyTrackName:     req.TrackName,
-			SpotifyArtistName:    req.ArtistName,
-			SpotifyAlbumName:     req.AlbumName,
-			SpotifyAlbumArtist:   req.AlbumArtist,
-			SpotifyReleaseDate:   req.ReleaseDate,
-			SpotifyCoverURL:      req.CoverURL,
-			SpotifyTrackNumber:   req.SpotifyTrackNumber,
-			SpotifyDiscNumber:    req.SpotifyDiscNumber,
-			SpotifyTotalTracks:   req.SpotifyTotalTracks,
-			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
-			SpotifyCopyright:     req.Copyright,
-			SpotifyPublisher:     req.Publisher,
-			SpotifyURL:           spotifyURL,
-			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
 		}
 	}
 
@@ -440,16 +289,15 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 			// delegated provider failing is not the end of the job.
 			return downloadViaEngine(req, svc, spotifyURL)
 		}
+		// Only Tidal has a native path left. Qobuz, Amazon and Deezer were
+		// anonymous community-proxy wrappers the engine replaced; Tidal stays
+		// because it carries a personal token, which is the one thing the
+		// engine's anonymous access cannot provide.
+		//
+		// So an undelegated qobuz/amazon/deezer now falls to default and errors
+		// rather than silently doing nothing — the message names the variable to
+		// set, since "unknown service: qobuz" would otherwise read as a bug.
 		switch svc {
-		case "amazon":
-			dl := amazon.NewAmazonDownloader()
-			dl.SpeedCallback = req.SpeedCallback
-			// Gate on Amazon's own URL, not ServiceURL (which is Tidal's in the
-			// auto loop) — otherwise a Tidal URL gets sent to DownloadByURL.
-			if req.AmazonURL != "" {
-				return dl.DownloadByURL(amazonParams())
-			}
-			return dl.DownloadBySpotifyID(amazonParams())
 		case "tidal":
 			if tidalApiURL == "" || tidalApiURL == "auto" {
 				dl := tidal.NewTidalDownloader("")
@@ -467,15 +315,8 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				return dl.DownloadByURL(p)
 			}
 			return dl.Download(p)
-		case "qobuz":
-			isrc := <-isrcChan
-			dl := qobuz.NewQobuzDownloader()
-			dl.SpeedCallback = req.SpeedCallback
-			return dl.DownloadTrackWithISRC(qobuzParams(isrc))
-		case "deezer":
-			dl := deezer.NewDeezerDownloader()
-			dl.SpeedCallback = req.SpeedCallback
-			return dl.Download(deezerParams())
+		case "qobuz", "amazon", "deezer":
+			return "", fmt.Errorf("%s is only available through the download engine — add it to ENGINE_SERVICES", svc)
 		default:
 			return "", fmt.Errorf("unknown service: %s", svc)
 		}

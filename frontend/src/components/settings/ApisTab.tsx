@@ -2,13 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Trash2, RefreshCw, Save, Zap } from "lucide-react";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
@@ -19,7 +12,6 @@ import {
   type ProxyConfig,
 } from "@/lib/rpc";
 
-type ProxyService = "tidal" | "qobuz" | "amazon" | "deezer";
 
 // ApisTab — external service status board + per-service proxy configuration.
 // Loads statuses and the proxy config on mount (the tab only renders while
@@ -30,7 +22,6 @@ export function ApisTab() {
   const [proxies, setProxies] = useState<ProxyConfig | null>(null);
   const [proxySaving, setProxySaving] = useState(false);
   const [newProxyURL, setNewProxyURL] = useState("");
-  const [newProxyService, setNewProxyService] = useState<ProxyService>("tidal");
 
   const loadApiStatuses = useCallback(async () => {
     setApisLoading(true);
@@ -79,68 +70,21 @@ export function ApisTab() {
   const handleAddProxy = () => {
     const url = newProxyURL.trim();
     if (!url || !proxies) return;
-    if (newProxyService === "tidal")
-      setProxies((prev) =>
-        prev ? { ...prev, tidal_proxies: [...prev.tidal_proxies, url] } : prev,
-      );
-    else if (newProxyService === "qobuz")
-      setProxies((prev) =>
-        prev
-          ? { ...prev, qobuz_providers: [...prev.qobuz_providers, url] }
-          : prev,
-      );
-    else if (newProxyService === "amazon")
-      setProxies((prev) =>
-        prev
-          ? { ...prev, amazon_proxies: [...prev.amazon_proxies, url] }
-          : prev,
-      );
-    else if (newProxyService === "deezer")
-      setProxies((prev) =>
-        prev
-          ? { ...prev, deezer_proxies: [...prev.deezer_proxies, url] }
-          : prev,
-      );
+    setProxies((prev) =>
+      prev ? { ...prev, tidal_proxies: [...prev.tidal_proxies, url] } : prev,
+    );
     setNewProxyURL("");
   };
 
-  const handleRemoveProxy = (service: ProxyService, idx: number) => {
-    if (service === "tidal")
-      setProxies((prev) =>
-        prev
-          ? {
-              ...prev,
-              tidal_proxies: prev.tidal_proxies.filter((_, i) => i !== idx),
-            }
-          : prev,
-      );
-    else if (service === "qobuz")
-      setProxies((prev) =>
-        prev
-          ? {
-              ...prev,
-              qobuz_providers: prev.qobuz_providers.filter((_, i) => i !== idx),
-            }
-          : prev,
-      );
-    else if (service === "amazon")
-      setProxies((prev) =>
-        prev
-          ? {
-              ...prev,
-              amazon_proxies: prev.amazon_proxies.filter((_, i) => i !== idx),
-            }
-          : prev,
-      );
-    else
-      setProxies((prev) =>
-        prev
-          ? {
-              ...prev,
-              deezer_proxies: prev.deezer_proxies.filter((_, i) => i !== idx),
-            }
-          : prev,
-      );
+  const handleRemoveProxy = (idx: number) => {
+    setProxies((prev) =>
+      prev
+        ? {
+            ...prev,
+            tidal_proxies: prev.tidal_proxies.filter((_, i) => i !== idx),
+          }
+        : prev,
+    );
   };
 
   const formatDiscoveryAge = (ts: number): string => {
@@ -250,29 +194,15 @@ export function ApisTab() {
           <div>
             <h3 className="text-sm font-semibold mb-1">Proxy Configuration</h3>
             <p className="text-xs text-muted-foreground">
-              Add proxies for each service. All services support multiple
-              proxies with automatic fallback to the next one on failure.
+              Tidal proxies, tried in order with automatic fallback. The other
+              providers are handled by the download engine and have no proxy
+              list here.
             </p>
           </div>
 
-          {/* Add proxy form */}
+          {/* Add proxy form — Tidal only: every other provider is served by the
+              download engine, which carries its own routes. */}
           <div className="flex gap-2">
-            <Select
-              value={newProxyService}
-              onValueChange={(v: string) =>
-                setNewProxyService(v as ProxyService)
-              }
-            >
-              <SelectTrigger className="w-36 shrink-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tidal">Tidal</SelectItem>
-                <SelectItem value="qobuz">Qobuz</SelectItem>
-                <SelectItem value="amazon">Amazon Music</SelectItem>
-                <SelectItem value="deezer">Deezer</SelectItem>
-              </SelectContent>
-            </Select>
             <InputWithContext
               value={newProxyURL}
               onChange={(e) => setNewProxyURL(e.target.value)}
@@ -316,7 +246,7 @@ export function ApisTab() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => handleRemoveProxy("tidal", i)}
+                  onClick={() => handleRemoveProxy(i)}
                   className="text-destructive hover:text-destructive px-2 shrink-0"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -341,72 +271,6 @@ export function ApisTab() {
                 ))}
               </div>
             )}
-          </div>
-
-          {/* Qobuz list */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Qobuz ({proxies.qobuz_providers.length})
-            </Label>
-            {proxies.qobuz_providers.map((p, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">
-                  {p}
-                </code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRemoveProxy("qobuz", i)}
-                  className="text-destructive hover:text-destructive px-2 shrink-0"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-
-          {/* Amazon list */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Amazon Music ({proxies.amazon_proxies.length})
-            </Label>
-            {proxies.amazon_proxies.map((p, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">
-                  {p}
-                </code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRemoveProxy("amazon", i)}
-                  className="text-destructive hover:text-destructive px-2 shrink-0"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-
-          {/* Deezer list */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Deezer ({proxies.deezer_proxies.length})
-            </Label>
-            {proxies.deezer_proxies.map((p, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <code className="flex-1 text-xs font-mono truncate border rounded px-2 py-1.5 bg-muted/20">
-                  {p}
-                </code>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRemoveProxy("deezer", i)}
-                  className="text-destructive hover:text-destructive px-2 shrink-0"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
           </div>
 
           <Button

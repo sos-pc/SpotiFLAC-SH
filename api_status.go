@@ -245,42 +245,6 @@ func pingSpotFetch(name, baseURL string) ServiceStatus {
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 }
 
-// pingDeezerProxy validates a community Deezer download proxy by requesting
-// a known track from the /dl/ endpoint used by the downloader.
-// Unlike pingDeezer (which checks api.deezer.com), this tests community
-// proxies that serve FLAC files directly.
-func pingDeezerProxy(name, baseURL string) ServiceStatus {
-	const testTrackID = "3135556" // Get Lucky — Daft Punk
-	testURL := strings.TrimSuffix(baseURL, "/") + "/dl/" + testTrackID
-
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-
-	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
-	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
-	}
-	defer resp.Body.Close()
-
-	latency := int(elapsed.Milliseconds())
-
-	switch {
-	case resp.StatusCode == 429:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode >= 500:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode != http.StatusOK:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	}
-
-	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-}
-
 // pingTidalProxy performs a real track-endpoint request to validate that a
 // community Tidal HiFi proxy is actually serving audio data — not just
 // reachable at its root URL.
@@ -365,60 +329,6 @@ func pingTidalProxy(name, baseURL string) ServiceStatus {
 
 	return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
 		Error: "Unrecognized reply — proxy may be incompatible", CheckedAt: time.Now().Unix()}
-}
-
-// pingQobuzProxy performs a real track-endpoint request to validate a
-// user-configured standard GET-based Qobuz provider.
-func pingQobuzProxy(name, baseURL string) ServiceStatus {
-	// Qobuz track ID 20882393 — "Get Lucky" by Daft Punk.
-	const testTrackID = "20882393"
-	testURL := baseURL + testTrackID + "&quality=6"
-
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-
-	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
-	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
-	}
-	defer resp.Body.Close()
-
-	latency := int(elapsed.Milliseconds())
-
-	switch {
-	case resp.StatusCode == 429:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode >= 500:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode != http.StatusOK:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil || len(body) < 2 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "Empty reply — service answered with nothing", CheckedAt: time.Now().Unix()}
-	}
-	var result map[string]interface{}
-	if json.Unmarshal(body, &result) != nil || len(result) == 0 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "Reply was not valid JSON — proxy may be incompatible", CheckedAt: time.Now().Unix()}
-	}
-
-	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-}
-
-// pingAmazonProxy checks whether the Amazon Music community proxy is reachable
-// by hitting its /status endpoint. A 401 (no X-Debug-Key header) still means
-// the server is alive and correctly rejecting unauthenticated requests.
-func pingAmazonProxy(name, baseURL string) ServiceStatus {
-	testURL := strings.TrimSuffix(baseURL, "/") + "/status"
-	return pingURL(name, testURL)
 }
 
 // pingDeezer performs a real track lookup to validate the Deezer API is
@@ -568,28 +478,6 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	for _, proxyURL := range util.GetTidalProxiesEffective() {
 		name := "Tidal · " + proxyDisplayName(proxyURL)
 		all = append(all, serviceEntry{name, proxyURL, pingTidalProxy})
-	}
-
-	// Build Qobuz entries from the live configuration.
-	// The stored URL is the full API base (includes path prefix) as used by
-	// the downloader — pingQobuzProxy appends the test track ID correctly.
-	for _, proxyBase := range util.GetQobuzProviders() {
-		name := "Qobuz · " + proxyDisplayName(proxyBase)
-		all = append(all, serviceEntry{name, proxyBase, pingQobuzProxy})
-	}
-
-	// Amazon community proxies — read from live config.
-	// pingAmazonProxy checks /status; a 401 (no X-Debug-Key) still means server is alive.
-	for _, proxyURL := range util.GetAmazonProxies() {
-		name := "Amazon · " + proxyDisplayName(proxyURL)
-		all = append(all, serviceEntry{name, proxyURL, pingAmazonProxy})
-	}
-
-	// Deezer community proxies — read from live config.
-	// pingDeezerProxy tests the actual /dl/ endpoint with a known track ID.
-	for _, proxyURL := range util.GetDeezerProxies() {
-		name := "Deezer · " + proxyDisplayName(proxyURL)
-		all = append(all, serviceEntry{name, proxyURL, pingDeezerProxy})
 	}
 
 	// Qobuz community service — the session-authenticated download provider that

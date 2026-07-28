@@ -34,10 +34,6 @@ import (
 func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	s := job.Settings
 
-	if s.Service == "deezer" {
-		return nil
-	}
-
 	result := make(map[string]string)
 
 	// Cheapest and most authoritative first: Spotify's own catalog record for
@@ -85,10 +81,10 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 // job still needs a pre-resolved stream URL — that is, runs natively rather than
 // through the engine.
 //
-// Only Tidal and Amazon ever consume those URLs (see buildDownloadRequest);
-// Qobuz and Deezer never did. Note Tidal's is merely a shortcut — with an ISRC
-// it reaches its own API via GetTidalIDFromISRC — whereas Song.link is the sole
-// source of amazon_url.
+// Tidal is now the only consumer: Amazon used to read amazon_url, but its native
+// downloader is gone, so nothing reads that key any more. Qobuz and Deezer never
+// did. Tidal's URL is itself only a shortcut — given an ISRC it reaches its own
+// API through GetTidalIDFromISRC.
 //
 // When the chain cannot be known here (auto with no configured order, which
 // ExecuteDownload fills in later) the answer is yes: guessing wrong would
@@ -96,8 +92,7 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 // wrong in that direction is only the round-trips we pay today.
 func needsNativeProviderURLs(s JobSettings) bool {
 	needsURL := func(svc string) bool {
-		svc = strings.TrimSpace(strings.ToLower(svc))
-		return (svc == "tidal" || svc == "amazon") && !backend.EngineHandles(svc)
+		return strings.EqualFold(strings.TrimSpace(svc), "tidal") && !backend.EngineHandles("tidal")
 	}
 
 	svc := strings.TrimSpace(strings.ToLower(s.Service))
@@ -138,13 +133,6 @@ func (jm *JobManager) resolveISRCDirect(job *Job) string {
 // enrich its result with the ISRC-direct lookup above without duplicating
 // this logic.
 func (jm *JobManager) getStreamingURLsViaFallbackChain(job *Job) map[string]string {
-	s := job.Settings
-
-	// Amazon URLs only come from Songlink.
-	if s.Service == "amazon" {
-		return jm.getStreamingURLsViaSonglink(job)
-	}
-
 	// 1. Deezer public API (no rate-limit, ~fast)
 	if job.TrackName != "" && job.ArtistName != "" {
 		if fallback, ferr := songlink.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil && fallback != nil {
@@ -327,11 +315,9 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 	// iterates the AutoOrder chain. The Tidal name-search fallback is not
 	// duplicated here; ExecuteDownload's ensureTidalServiceURL owns it.
 	tidalURL := ""
-	amazonURL := ""
 	isrc := ""
 	if streamingURLs != nil {
 		isrc = streamingURLs["isrc"]
-		amazonURL = streamingURLs["amazon_url"]
 
 		// Only resolve Tidal's URL when Tidal can actually run — no point paying
 		// for a Tidal ISRC lookup on an explicit qobuz/deezer/amazon download.
@@ -387,7 +373,6 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, streaming
 		EmbedLyrics:          s.EmbedLyrics,
 		EmbedMaxQualityCover: s.EmbedMaxQualityCover,
 		ServiceURL:           tidalURL,
-		AmazonURL:            amazonURL,
 		AutoOrder:            s.AutoOrder,
 		Duration:             durationSeconds,
 		ItemID:               job.ID,

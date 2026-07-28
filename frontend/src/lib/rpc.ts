@@ -453,9 +453,6 @@ export const GetAPIStatuses = () =>
 
 export interface ProxyConfig {
   tidal_proxies: string[];
-  qobuz_providers: string[];
-  amazon_proxies: string[];
-  deezer_proxies: string[];
   /** Override manuel du client_id OAuth Tidal. Vide = auto-découverte. */
   tidal_client_id: string;
   /** Proxies found automatically by discovery — NOT in tidal_proxies (read-only). */

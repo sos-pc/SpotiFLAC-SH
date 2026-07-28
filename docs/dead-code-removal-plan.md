@@ -27,12 +27,15 @@ Removal is allowed only where the engine is **proven at least as good**:
 |---|---|---|---|
 | **Qobuz** | ~10 successes, full-length FLAC, 6–30 s | reached 3×, **0 successes** — dies at `searchByISRC` | ✅ removable |
 | **Deezer** | 4/4 on an album, 8–15 s each | its only proxy returns HTML; long dead | ✅ removable |
-| **Amazon** | **no observed success** | `no streaming URLs found` / cooldown | ⛔ **not yet** — no evidence either way |
+| **Amazon** | ✅ **3 successes 2026-07-28** (`AMAZON · LOSSLESS`, 11–39 s) | `no streaming URLs found` / cooldown | ✅ removable — gate passed |
 | **Tidal** | anonymous = previews only | personal token = full FLAC | 🔒 **keep permanently** (BYOT) |
 
-⚠️ **Amazon is the trap.** Its native code is as dead-looking as the others, but we
-have never seen the engine succeed on it. Deleting it would remove a path without
-a proven replacement. It waits for one successful engine download.
+~~⚠️ Amazon is the trap.~~ **Gate passed 2026-07-28**: three engine downloads
+succeeded, so all four providers are proven. With the evidence in hand the
+provider-by-provider split lost its purpose — splitting would have retouched
+`proxy_config`, `api_status` and `downloader.go` three times over — so the cut was
+made in one commit **by concern** instead: native downloaders together, then
+`backend/community`, then the Song.link half, then `proxy_discovery`.
 
 ## 3. Inventory
 

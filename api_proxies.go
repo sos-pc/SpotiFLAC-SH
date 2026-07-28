@@ -12,10 +12,7 @@ var bucketProxies = []byte("api_proxies")
 
 // ProxyConfig est la configuration persistée en BoltDB.
 type ProxyConfig struct {
-	TidalProxies   []string `json:"tidal_proxies"`
-	QobuzProviders []string `json:"qobuz_providers"`
-	AmazonProxies  []string `json:"amazon_proxies"`
-	DeezerProxies  []string `json:"deezer_proxies"`
+	TidalProxies []string `json:"tidal_proxies"`
 }
 
 // defaultProxyConfig returns the factory defaults — hardcoded values that are
@@ -24,10 +21,7 @@ type ProxyConfig struct {
 // the user submits an empty list, enabling a true "reset to defaults".
 func defaultProxyConfig() ProxyConfig {
 	return ProxyConfig{
-		TidalProxies:   util.GetDefaultTidalProxies(),
-		QobuzProviders: util.GetDefaultQobuzProviders(),
-		AmazonProxies:  util.GetDefaultAmazonProxies(),
-		DeezerProxies:  util.GetDefaultDeezerProxies(),
+		TidalProxies: util.GetDefaultTidalProxies(),
 	}
 }
 
@@ -49,15 +43,6 @@ func LoadProxyConfig(db *bolt.DB) {
 
 	if len(cfg.TidalProxies) > 0 {
 		util.SetTidalProxies(cfg.TidalProxies)
-	}
-	if len(cfg.QobuzProviders) > 0 {
-		util.SetQobuzProviders(cfg.QobuzProviders)
-	}
-	if len(cfg.AmazonProxies) > 0 {
-		util.SetAmazonProxies(cfg.AmazonProxies)
-	}
-	if len(cfg.DeezerProxies) > 0 {
-		util.SetDeezerProxies(cfg.DeezerProxies)
 	}
 }
 
@@ -98,16 +83,13 @@ func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
 	}
 	def := defaultProxyConfig()
 	cfg.TidalProxies = cleanList(cfg.TidalProxies, def.TidalProxies)
-	cfg.QobuzProviders = cleanList(cfg.QobuzProviders, def.QobuzProviders)
-	cfg.AmazonProxies = cleanList(cfg.AmazonProxies, def.AmazonProxies)
-	cfg.DeezerProxies = cleanList(cfg.DeezerProxies, def.DeezerProxies)
 
 	// Ces URLs deviennent la base de requêtes sortantes faites par le
 	// serveur (téléchargements) — un schéma non-http(s) ou une cible privée/
 	// loopback ouvrirait une SSRF. Rejeter la config entière plutôt que de
 	// dropper silencieusement une entrée invalide (l'admin doit savoir
 	// laquelle poser problème).
-	for _, list := range [][]string{cfg.TidalProxies, cfg.QobuzProviders, cfg.AmazonProxies, cfg.DeezerProxies} {
+	for _, list := range [][]string{cfg.TidalProxies} {
 		for _, u := range list {
 			if err := ValidateExternalURL(u); err != nil {
 				return err
@@ -131,9 +113,6 @@ func SaveProxyConfig(db *bolt.DB, cfg ProxyConfig) error {
 
 	// Appliquer immédiatement
 	util.SetTidalProxies(cfg.TidalProxies)
-	util.SetQobuzProviders(cfg.QobuzProviders)
-	util.SetAmazonProxies(cfg.AmazonProxies)
-	util.SetDeezerProxies(cfg.DeezerProxies)
 	// Invalider le cache de statut pour que le prochain refresh reflète la nouvelle config
 	invalidateStatusCache()
 
