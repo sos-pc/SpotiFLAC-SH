@@ -103,11 +103,11 @@ authoritative source — behind a persistent cache. It is the primary ISRC path
 | Part | Sort | Why |
 |---|---|---|
 | `GetISRCDirect` + `isrc_cache.go` | ✅ keep | Spotify-direct + cache. Needed by **BYOT Tidal** (ISRC → Tidal id) and genre lookup — neither goes through the engine. |
-| `GetAllURLsFromSpotify` | ❌ dies | supplied `amazon_url` (native gone) and `tidal_url` — and Tidal has two better paths of its own: its ISRC endpoint and name search |
-| `ScrapeSongLinkHTML`, `ScrapeSongLinkViaAppleMusic` | ❌ die | fallbacks for the above |
-| `GetISRC` (via Song.link) | ❌ dies | `genremeta.go:104` calls it where `GetISRCDirect` is strictly better — a leftover |
-| `GetDeezerSearchFallback` | ❓ decide | name→ISRC via Deezer's API; only earns its place if `GetTrackISRC` proves insufficient |
-| `tidal.GetTidalURLFromSpotify` | ❌ dies | its only caller is `tidal/client.go:766`, and it exists only to consume Song.link URLs |
+| `GetAllURLsFromSpotify` | ❌ dies — **7b** | supplied `amazon_url` (native gone) and `tidal_url` — and Tidal has two better paths of its own: its ISRC endpoint and name search. Last caller is `metadata_service.go:63`, i.e. the availability feature. |
+| `ScrapeSongLinkHTML`, `ScrapeSongLinkViaAppleMusic` | ✅ **dead 7a** | fallbacks for the above, reachable only from the deleted cascade |
+| `GetISRC` (via Song.link) | ✅ **dead 7a** | `genremeta.go` moved to `GetISRCDirect` in item 12, leaving it callerless |
+| `GetDeezerSearchFallback` | ✅ **keep** (decided) | name→ISRC **and `tidal_url`** via Deezer's own API — one call, no rate-limit. It is what replaced the cascade for the BYOT path, not a peer of it. |
+| `tidal.GetTidalURLFromSpotify` | ✅ **dead 7a** | its only caller was `tidal/client.go:766`, and it existed only to consume Song.link URLs |
 
 **Why Song.link is superseded — the accurate reason.** Not because it is down: the
 API answered HTTP 200 on 2026-07-26. Because **we no longer need cross-platform
@@ -116,7 +116,9 @@ investigation also found it never returns Qobuz links.)
 
 After the cut, what remains is an ISRC provider with a cache and nothing to do with
 Song.link. **Rename/move it** (e.g. into `backend/spotify` or a small `isrc`
-package), or the misleading name will cause this same mistake again.
+package), or the misleading name will cause this same mistake again. Deferred to
+**after 7b**: renaming now would churn `metadata_service.go` and `api_status.go`,
+which 7b edits anyway.
 
 ### Other code I classified without measuring
 
@@ -180,18 +182,43 @@ Mitigations:
 Each question below was answered from the code and from live probes, not from the
 import graph. Verdicts differ per item; two turned out to be non-issues.
 
-7. **Split `backend/songlink`** — ✅ **go, low risk**
-   Tidal's Song.link path is **third-tier**, not primary:
+7. **Split `backend/songlink`** — ✅ **7a DONE 2026-07-28**, 7b pending
+   Split on execution, because the two halves are not the same size: **7a** removes
+   Song.link from the *download* path (backend only, no UI impact); **7b** removes the
+   *availability* feature, which the inventory said was 2 frontend files and is
+   actually 6 (see §7.4). 7a shipped:
+
+   | removed | LOC | why it was safe |
+   |---|---|---|
+   | `jobs_helpers.go:getStreamingURLsViaSonglink` + both call sites | ~70 | the chain's only surviving consumer is Tidal-BYOT, which the Deezer step already serves |
+   | `jobs.go:songLinkSem` / `songLinkDelay` | 3 | rate-limiter with nothing left to limit |
+   | `tidal.GetTidalURLFromSpotify` + the fallback in `Download()` | ~30 | tier 3 of 3 (see below) |
+   | `songlink.GetISRC`, `GetDeezerURLFromSpotify` | ~90 | `GetISRC`'s last caller (`genremeta.go`) moved to `GetISRCDirect` in item 12; `GetDeezerURLFromSpotify` existed only to feed it |
+   | `songlink.ScrapeSongLinkHTML`, `ScrapeSongLinkViaAppleMusic`, `searchITunes`, `itunesResult` | ~350 | cascade steps 3 and 4, reachable only from the deleted `getStreamingURLsViaSonglink` |
+   | `songlink/client_test.go` | 198 | 8 tests, all of `searchITunes` — they died with their subject, not with a behaviour |
+
+   Net: `client.go` 967 → 526 lines, and **`backend/tidal` no longer imports
+   `backend/songlink`** — the dependency edge is gone, not just the calls. What stays
+   until 7b: `GetAllURLsFromSpotify`, `CheckTrackAvailability`, `checkQobuzAvailability`
+   and the rate-limit machinery, all reachable only from `metadata_service.go`.
+   The package rename waits for 7b too — renaming now would touch files 7b deletes.
+
+   Tidal's Song.link path was **third-tier**, not primary:
    ```
    1. jobs_helpers.go:278  tidal.GetTidalIDFromISRC   → Tidal's own official API, by ISRC
    2. tidal/client.go:759  SearchTidalByName          → direct search, ~200 ms, no rate-limit
    3. tidal/client.go:766  GetTidalURLFromSpotify     → Song.link, only if 1 AND 2 failed
    ```
-   `downloader.go:406` (`ensureTidalServiceURL`) also pre-resolves by name, so most
+   `downloader.go:252` (`ensureTidalServiceURL`) also pre-resolves by name, so most
    downloads take `DownloadByURLWithFallback` and never reach `Download()` — the only
-   function that touches Song.link at all. Removing it costs the residual case where
+   function that touched Song.link at all. Removing it costs the residual case where
    both the ISRC lookup and the name search fail, i.e. where the track is probably not
-   on Tidal. Keep `GetISRCDirect` + `isrc_cache.go`, then rename the package.
+   on Tidal. `GetISRCDirect` + `isrc_cache.go` kept.
+
+   **Also done in the same commit** (operator request): Deezer was still greyed out in
+   the settings provider selector (`GeneralTab.tsx`, `disabled` + "(unavailable)")
+   while working in prod through the engine — 4/4 on an album test. Re-enabled. That
+   file was the only place the UI blocked it.
 
 8. **`proxy_discovery.go` + `tidal-uptime.geeked.wtf`** — ✅ **go (contributes nothing)**
    **305 LOC** plus a goroutine and a BoltDB blob. The feed is DNS-dead, and

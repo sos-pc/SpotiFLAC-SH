@@ -7,7 +7,6 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -26,11 +25,9 @@ import (
 // Streaming URL resolution
 // ─────────────────────────────────────────────────────────────────────────────
 
-// getStreamingURLs resolves Tidal/Amazon/ISRC URLs for a job.
-// Priority: ISRC-direct (Spotify's own catalog record) enriches whatever the
-// URL chain below finds → Deezer (no rate-limit) → Songlink → HTML scraping
-// fallbacks.
-// FIX #2 — respects cancellation context while waiting on the semaphore.
+// getStreamingURLs resolves the ISRC, and a Tidal URL when the BYOT path may
+// run. ISRC-direct (Spotify's own catalog record, cached) comes first and wins;
+// the Deezer lookup only fills what it leaves empty.
 func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	s := job.Settings
 
@@ -44,12 +41,10 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 		result["isrc"] = directISRC
 	}
 
-	// The URL chain below exists to produce tidal_url and amazon_url, which only
-	// the NATIVE Tidal/Amazon downloaders read. A provider delegated to the
-	// engine is handed the Spotify URL and resolves internally, so running the
-	// chain for a job whose candidates are all delegated spends several
-	// third-party round-trips (Deezer API → Song.link → Apple/HTML scrapes) on a
-	// result nobody reads.
+	// The lookup below produces tidal_url, which only the NATIVE Tidal downloader
+	// reads. A delegated provider is handed the Spotify URL and resolves
+	// internally, so running it for a job whose candidates are all delegated
+	// spends a third-party round-trip on a result nobody reads.
 	if !needsNativeProviderURLs(s) {
 		slog.Debug("[Jobs] Skipping URL resolution — every candidate provider is delegated",
 			"track", job.TrackName, "service", s.Service)
@@ -60,9 +55,9 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 	}
 
 	for k, v := range jm.getStreamingURLsViaFallbackChain(job) {
-		// ISRC-direct is name-match-free, so it still outranks whatever the chain
-		// found via Deezer/Song.link name search — same precedence as before,
-		// expressed as "don't overwrite" now that it is resolved first.
+		// ISRC-direct is name-match-free, so it still outranks what the Deezer
+		// name search finds — same precedence as before, expressed as
+		// "don't overwrite" now that it is resolved first.
 		if k == "isrc" && result["isrc"] != "" {
 			continue
 		}
@@ -112,7 +107,7 @@ func needsNativeProviderURLs(s JobSettings) bool {
 }
 
 // resolveISRCDirect resolves job.SpotifyID's ISRC straight from Spotify's
-// metadata, independent of the Deezer/Song.link URL chain. Cached (see
+// metadata, independent of the Deezer lookup. Cached (see
 // songlink.GetISRCDirect), so repeat downloads/retags of the same track
 // don't pay for a fresh lookup.
 func (jm *JobManager) resolveISRCDirect(job *Job) string {
@@ -128,12 +123,15 @@ func (jm *JobManager) resolveISRCDirect(job *Job) string {
 	return isrc
 }
 
-// getStreamingURLsViaFallbackChain is getStreamingURLs' pre-existing
-// Deezer/Song.link URL resolution, factored out so getStreamingURLs can
-// enrich its result with the ISRC-direct lookup above without duplicating
-// this logic.
+// getStreamingURLsViaFallbackChain resolves a Tidal URL for the BYOT path.
+//
+// It used to continue into Song.link and two HTML scrapes when Deezer came up
+// empty. Those are gone: Song.link exists to translate a Spotify ID into links
+// on other platforms, and the engine resolves from the Spotify URL itself, so
+// the only consumer left is Tidal — which reaches its own API by ISRC anyway
+// (GetTidalIDFromISRC in buildDownloadRequest). One cheap lookup, no cascade.
 func (jm *JobManager) getStreamingURLsViaFallbackChain(job *Job) map[string]string {
-	// 1. Deezer public API (no rate-limit, ~fast)
+	// Deezer's public API: no rate-limit, one call, gives ISRC + a Tidal link.
 	if job.TrackName != "" && job.ArtistName != "" {
 		if fallback, ferr := songlink.GetDeezerSearchFallback(job.TrackName, job.ArtistName); ferr == nil && fallback != nil {
 			result := make(map[string]string)
@@ -151,76 +149,7 @@ func (jm *JobManager) getStreamingURLsViaFallbackChain(job *Job) map[string]stri
 				return result
 			}
 		} else if ferr != nil {
-			slog.Debug("[Jobs] Deezer failed, trying Songlink", "track", job.TrackName, "err", ferr)
-		}
-	}
-
-	// 2. Songlink as last resort
-	return jm.getStreamingURLsViaSonglink(job)
-}
-
-// getStreamingURLsViaSonglink calls Songlink with rate-limiting semaphore.
-func (jm *JobManager) getStreamingURLsViaSonglink(job *Job) map[string]string {
-	select {
-	case jm.songLinkSem <- struct{}{}:
-	case <-jm.ctx.Done():
-		slog.Debug("[Jobs] song.link skipped (shutdown)", "track", job.TrackName)
-		return nil
-	}
-
-	defer func() {
-		time.Sleep(time.Duration(songLinkDelay) * time.Millisecond)
-		<-jm.songLinkSem
-	}()
-
-	client := jm.songLinkClient
-
-	if !client.IsRateLimited() {
-		urls, err := client.GetAllURLsFromSpotify(job.SpotifyID, job.Settings.Region)
-		if err == nil && urls != nil {
-			result := make(map[string]string)
-			data, _ := json.Marshal(urls)
-			json.Unmarshal(data, &result)
-			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
-				return result
-			}
-		}
-		if err != nil {
-			slog.Debug("[Jobs] song.link failed", "track", job.TrackName, "err", err)
-		}
-	} else {
-		slog.Debug("[Jobs] Songlink rate-limited, trying HTML scraping", "track", job.TrackName)
-	}
-
-	// Fallback 1: iTunes Search + song.link /i/{appleMusicID}
-	if job.TrackName != "" && job.ArtistName != "" {
-		amURLs, amErr := client.ScrapeSongLinkViaAppleMusic(job.TrackName, job.ArtistName, job.AlbumName, job.Settings.Region, job.DurationMs)
-		if amErr == nil && amURLs != nil {
-			result := make(map[string]string)
-			data, _ := json.Marshal(amURLs)
-			json.Unmarshal(data, &result)
-			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
-				slog.Debug("[Jobs] AppleMusic scraping OK", "track", job.TrackName)
-				return result
-			}
-		} else if amErr != nil {
-			slog.Debug("[Jobs] AppleMusic scraping failed", "track", job.TrackName, "err", amErr)
-		}
-	}
-
-	// Fallback 2: HTML scraping song.link /s/{spotifyID}
-	if job.SpotifyID != "" {
-		htmlURLs, hErr := client.ScrapeSongLinkHTML(job.SpotifyID)
-		if hErr == nil && htmlURLs != nil {
-			result := make(map[string]string)
-			data, _ := json.Marshal(htmlURLs)
-			json.Unmarshal(data, &result)
-			if result["tidal_url"] != "" || result["amazon_url"] != "" || result["isrc"] != "" {
-				slog.Debug("[Jobs] HTML scraping OK", "track", job.TrackName)
-				return result
-			}
-		} else if hErr != nil {
-			slog.Debug("[Jobs] HTML scraping failed", "track", job.TrackName, "err", hErr)
+			slog.Debug("[Jobs] Deezer lookup failed", "track", job.TrackName, "err", ferr)
 		}
 	}
 	return nil

@@ -29,9 +29,8 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 const (
-	jobWorkers    = 1         // parallel download workers
-	songLinkDelay = 6500      // ms between song.link requests (max 9/min)
-	dbFile        = "jobs.db" // path relative to configDir
+	jobWorkers = 1         // parallel download workers
+	dbFile     = "jobs.db" // path relative to configDir
 )
 
 var (
@@ -199,7 +198,6 @@ type JobManager struct {
 	db             *bolt.DB
 	catalog        *sql.DB // SQLite catalog: tracks, library_files, download_attempts
 	queue          chan string
-	songLinkSem    chan struct{}
 	songLinkClient *songlink.SongLinkClient
 	eventHandler   JobEventHandler
 	hub            *SSEHub
@@ -264,7 +262,6 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 		db:             db,
 		catalog:        catalog,
 		queue:          make(chan string, 10000),
-		songLinkSem:    make(chan struct{}, 1),
 		songLinkClient: songlink.GetSongLinkClient(),
 		hub:            newSSEHub(),
 		ctx:            ctx,

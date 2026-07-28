@@ -18,7 +18,6 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
 	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
-	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
@@ -135,22 +134,6 @@ func (t *TidalDownloader) SearchTidalByName(trackName, artistName string) (strin
 	}
 
 	return fmt.Sprintf("https://tidal.com/track/%d", searchResp.Items[0].ID), nil
-}
-
-func (t *TidalDownloader) GetTidalURLFromSpotify(spotifyTrackID string) (string, error) {
-	slog.Debug("[Tidal] Getting Tidal URL from Spotify")
-
-	client := songlink.GetSongLinkClient()
-	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, "")
-	if err != nil {
-		return "", fmt.Errorf("failed to get Tidal URL: %w", err)
-	}
-	if urls.TidalURL == "" {
-		return "", fmt.Errorf("tidal link not found")
-	}
-
-	slog.Debug("[Tidal] Found Tidal URL", "url", urls.TidalURL)
-	return urls.TidalURL, nil
 }
 
 func (t *TidalDownloader) GetTrackIDFromURL(tidalURL string) (int64, error) {
@@ -752,21 +735,20 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 
 func (t *TidalDownloader) Download(p DownloadParams) (string, error) {
 
-	var tidalURL string
-	var err error
-	// Try direct Tidal search first (no rate-limit, ~200 ms)
-	if p.SpotifyTrackName != "" && p.SpotifyArtistName != "" {
-		tidalURL, err = t.SearchTidalByName(p.SpotifyTrackName, p.SpotifyArtistName)
-		if err != nil {
-			slog.Debug("[Tidal] Direct search failed, falling back to song.link", "err", err)
-		}
+	// Tidal's own search, by name. This used to fall back to Song.link when the
+	// search came up empty; that hop is gone, because Song.link's job — turning a
+	// Spotify ID into a link elsewhere — is what the engine now does from the
+	// Spotify URL directly. Callers that already hold a URL (the common case,
+	// resolved by ISRC) go through DownloadByURL* and never reach here.
+	if p.SpotifyTrackName == "" || p.SpotifyArtistName == "" {
+		return "", fmt.Errorf("could not find track on Tidal: no track/artist name to search with")
 	}
-	// Fall back to song.link when direct search fails
+	tidalURL, err := t.SearchTidalByName(p.SpotifyTrackName, p.SpotifyArtistName)
+	if err != nil {
+		return "", fmt.Errorf("could not find track on Tidal: %w", err)
+	}
 	if tidalURL == "" {
-		tidalURL, err = t.GetTidalURLFromSpotify(p.SpotifyTrackID)
-		if err != nil {
-			return "", fmt.Errorf("could not find track on Tidal: %w", err)
-		}
+		return "", fmt.Errorf("could not find track on Tidal: search returned no match")
 	}
 
 	p.URL = tidalURL

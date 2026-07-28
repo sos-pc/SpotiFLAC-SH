@@ -210,10 +210,10 @@ export function GeneralTab({
                           Amazon Music
                         </span>
                       </SelectItem>
-                      <SelectItem value="deezer" disabled>
-                        <span className="flex items-center opacity-50">
+                      <SelectItem value="deezer">
+                        <span className="flex items-center">
                           <DeezerIcon />
-                          Deezer (unavailable)
+                          Deezer
                         </span>
                       </SelectItem>
                     </SelectContent>
