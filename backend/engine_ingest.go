@@ -45,13 +45,18 @@ func engineStagingDir() string {
 	return "/staging"
 }
 
-// engineHandles reports whether svc is delegated to the engine.
+// EngineHandles reports whether svc is delegated to the engine.
 //
 // Opt-in and comma-separated (ENGINE_SERVICES=deezer, then deezer,qobuz, …), so
 // providers move over one at a time and only after each is proven in prod —
 // the staged cutover in docs/module-engine.md §3. Unset = nothing
 // delegated, every provider keeps its native Go path.
-func engineHandles(svc string) bool {
+//
+// Exported because the job pipeline needs the same answer before deciding
+// whether to resolve provider URLs at all (jobs_helpers.go): a delegated
+// provider takes the Spotify URL and resolves internally, so paying for that
+// lookup would be pure waste. One definition, so the two cannot disagree.
+func EngineHandles(svc string) bool {
 	if EngineBaseURL() == "" {
 		return false
 	}

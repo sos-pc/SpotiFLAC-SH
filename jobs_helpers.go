@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/songlink"
 	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
@@ -37,20 +38,82 @@ func (jm *JobManager) getStreamingURLs(job *Job) map[string]string {
 		return nil
 	}
 
-	result := jm.getStreamingURLsViaFallbackChain(job)
+	result := make(map[string]string)
 
-	// ISRC-direct is name-match-free (reads Spotify's own catalog record for
-	// this exact track), so it's more trustworthy than whatever the chain
-	// above found via Deezer/Song.link name search — it overrides rather
-	// than just fills a gap. Tidal/Amazon URLs from the chain are kept as-is.
+	// Cheapest and most authoritative first: Spotify's own catalog record for
+	// this exact track, cached. Hoisted above the chain because it no longer
+	// merely overrides the chain's ISRC — when the chain is skipped it is the
+	// only source.
 	if directISRC := jm.resolveISRCDirect(job); directISRC != "" {
-		if result == nil {
-			result = make(map[string]string)
-		}
 		result["isrc"] = directISRC
 	}
 
+	// The URL chain below exists to produce tidal_url and amazon_url, which only
+	// the NATIVE Tidal/Amazon downloaders read. A provider delegated to the
+	// engine is handed the Spotify URL and resolves internally, so running the
+	// chain for a job whose candidates are all delegated spends several
+	// third-party round-trips (Deezer API → Song.link → Apple/HTML scrapes) on a
+	// result nobody reads.
+	if !needsNativeProviderURLs(s) {
+		slog.Debug("[Jobs] Skipping URL resolution — every candidate provider is delegated",
+			"track", job.TrackName, "service", s.Service)
+		if len(result) == 0 {
+			return nil
+		}
+		return result
+	}
+
+	for k, v := range jm.getStreamingURLsViaFallbackChain(job) {
+		// ISRC-direct is name-match-free, so it still outranks whatever the chain
+		// found via Deezer/Song.link name search — same precedence as before,
+		// expressed as "don't overwrite" now that it is resolved first.
+		if k == "isrc" && result["isrc"] != "" {
+			continue
+		}
+		if v != "" {
+			result[k] = v
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
 	return result
+}
+
+// needsNativeProviderURLs reports whether any provider that could run for this
+// job still needs a pre-resolved stream URL — that is, runs natively rather than
+// through the engine.
+//
+// Only Tidal and Amazon ever consume those URLs (see buildDownloadRequest);
+// Qobuz and Deezer never did. Note Tidal's is merely a shortcut — with an ISRC
+// it reaches its own API via GetTidalIDFromISRC — whereas Song.link is the sole
+// source of amazon_url.
+//
+// When the chain cannot be known here (auto with no configured order, which
+// ExecuteDownload fills in later) the answer is yes: guessing wrong would
+// silently strip a URL a native download depends on, and the cost of being
+// wrong in that direction is only the round-trips we pay today.
+func needsNativeProviderURLs(s JobSettings) bool {
+	needsURL := func(svc string) bool {
+		svc = strings.TrimSpace(strings.ToLower(svc))
+		return (svc == "tidal" || svc == "amazon") && !backend.EngineHandles(svc)
+	}
+
+	svc := strings.TrimSpace(strings.ToLower(s.Service))
+	if svc != "" && svc != "auto" {
+		return needsURL(svc)
+	}
+
+	if strings.TrimSpace(s.AutoOrder) == "" {
+		return true
+	}
+	for _, candidate := range strings.Split(s.AutoOrder, "-") {
+		if needsURL(candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveISRCDirect resolves job.SpotifyID's ISRC straight from Spotify's

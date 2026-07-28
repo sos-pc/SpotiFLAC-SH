@@ -422,7 +422,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		// than in the switch below so it covers every entry point at once —
 		// explicit service and the auto chain — and so an unset env var leaves
 		// the native paths byte-for-byte unchanged.
-		if engineHandles(svc) {
+		if EngineHandles(svc) {
 			slog.Info("[Engine] Delegating", "service", svc, "track", req.TrackName)
 			filename, err := downloadViaEngine(req, svc, spotifyURL)
 			if err == nil {

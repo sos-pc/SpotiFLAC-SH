@@ -27,8 +27,8 @@ func TestEngineHandlesRequiresBothURLAndService(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("ENGINE_URL", tc.url)
 			t.Setenv("ENGINE_SERVICES", tc.services)
-			if got := engineHandles(tc.svc); got != tc.want {
-				t.Errorf("engineHandles(%q) with URL=%q services=%q = %v, want %v",
+			if got := EngineHandles(tc.svc); got != tc.want {
+				t.Errorf("EngineHandles(%q) with URL=%q services=%q = %v, want %v",
 					tc.svc, tc.url, tc.services, got, tc.want)
 			}
 		})

@@ -343,7 +343,7 @@ an ordering constraint (close it **before** touching the filename template).
 for **package imports**, false for **provider logic** — a second sweep found it spread
 much wider. Recorded because each item changes the size or the risk of the work.
 
-### 7.1 The enrichment chain runs for engine downloads, and its output is discarded
+### 7.1 The enrichment chain runs for engine downloads, and its output is discarded — ✅ **DONE 2026-07-26**
 
 `jobs_helpers.go:getStreamingURLs` runs a cascade **per job** — Deezer API → Song.link →
 Apple Music scrape → HTML scrape — producing `tidal_url`, `amazon_url`, `isrc`.
