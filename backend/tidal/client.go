@@ -21,17 +21,13 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
-// tidalAPIBase is the one Tidal endpoint left. The community HiFi proxies that
-// used to sit beside it were removed on 2026-07-28: all of them answer
-// assetPresentation="PREVIEW" without a personal token, which the download path
-// refuses, so they could only ever cost time.
-const tidalAPIBase = "https://api.tidal.com"
-
+// TidalDownloader talks to api.tidal.com, the one Tidal endpoint left. It used
+// to carry an apiURL to select between community HiFi proxies, plus timeout and
+// maxRetries fields — all three were written by the constructor and read by
+// nothing. They went with the proxies on 2026-07-28; the 5-second timeout that
+// actually applies lives on the HTTP client.
 type TidalDownloader struct {
 	client        *http.Client
-	timeout       time.Duration
-	maxRetries    int
-	apiURL        string
 	SpeedCallback func(mbDownloaded, speedMBps float64)
 }
 
@@ -61,21 +57,11 @@ type TidalBTSManifest struct {
 	URLs           []string `json:"urls"`
 }
 
-// NewTidalDownloader builds a client for Tidal's official API.
-//
-// apiURL used to select between community proxies; there is one endpoint now
-// (api.tidal.com) and the parameter is kept only because DownloadByURL callers
-// still pass one through. An empty value means the same thing as the default.
-func NewTidalDownloader(apiURL string) *TidalDownloader {
-	if apiURL == "" {
-		apiURL = tidalAPIBase
-	}
-	return &TidalDownloader{
-		client:     util.NewHTTPClient(5 * time.Second),
-		timeout:    5 * time.Second,
-		maxRetries: 3,
-		apiURL:     apiURL,
-	}
+// NewTidalDownloader builds a client for Tidal's official API. It took an apiURL
+// to pick a community proxy; there is one endpoint now and every caller passed
+// the empty string, so the parameter went with the list.
+func NewTidalDownloader() *TidalDownloader {
+	return &TidalDownloader{client: util.NewHTTPClient(5 * time.Second)}
 }
 
 func (t *TidalDownloader) SearchTidalByName(trackName, artistName string) (string, error) {
@@ -455,113 +441,6 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 	return nil
 }
 
-func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
-	if p.OutputDir != "." {
-		if err := os.MkdirAll(p.OutputDir, 0755); err != nil {
-			return "", fmt.Errorf("directory error: %w", err)
-		}
-	}
-
-	slog.Debug("[Tidal] Using URL", "url", p.URL)
-
-	trackID, err := t.GetTrackIDFromURL(p.URL)
-	if err != nil {
-		return "", err
-	}
-
-	if trackID == 0 {
-		return "", fmt.Errorf("no track ID found")
-	}
-
-	artistName := p.SpotifyArtistName
-	trackTitle := p.SpotifyTrackName
-	albumTitle := p.SpotifyAlbumName
-
-	filename := p.buildFilename()
-	outputFilename := filepath.Join(p.OutputDir, filename)
-
-	if fileInfo, err := os.Stat(outputFilename); err == nil && fileInfo.Size() > 0 {
-		slog.Debug("[Tidal] File already exists", "path", outputFilename, "mb", float64(fileInfo.Size())/(1024*1024))
-		return "EXISTS:" + outputFilename, nil
-	}
-
-	downloadURL, err := t.GetDownloadURL(trackID, p.Quality)
-	if err != nil {
-		if (p.Quality == "HI_RES" || p.Quality == "HI_RES_LOSSLESS") && p.AllowFallback {
-			slog.Debug("[Tidal] Quality unavailable/failed, falling back to LOSSLESS", "quality", p.Quality)
-			downloadURL, err = t.GetDownloadURL(trackID, "LOSSLESS")
-			if err != nil {
-				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", p.Quality, err)
-			}
-		} else {
-			return "", err
-		}
-	}
-
-	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre)
-
-	slog.Debug("[Tidal] Downloading to", "path", outputFilename)
-	if err := t.DownloadFile(downloadURL, outputFilename); err != nil {
-		return "", err
-	}
-
-	var isrc string
-	var mbMeta meta.Metadata
-	if p.SpotifyURL != "" {
-		result := <-metaChan
-		isrc = result.ISRC
-		mbMeta = result.Metadata
-	}
-
-	slog.Debug("[Tidal] Adding metadata")
-
-	coverPath := ""
-
-	if p.SpotifyCoverURL != "" {
-		coverPath = outputFilename + ".cover.jpg"
-		coverClient := meta.NewCoverClient()
-		if err := coverClient.DownloadCoverToPath(p.SpotifyCoverURL, coverPath, p.EmbedMaxQualityCover); err != nil {
-			slog.Warn("[Tidal] Failed to download Spotify cover", "err", err)
-			coverPath = ""
-		} else {
-			defer os.Remove(coverPath)
-			slog.Debug("[Tidal] Spotify cover downloaded")
-		}
-	}
-
-	trackNumberToEmbed := p.SpotifyTrackNumber
-	if trackNumberToEmbed == 0 {
-		trackNumberToEmbed = 1
-	}
-
-	metadata := meta.Metadata{
-		Title:       trackTitle,
-		Artist:      artistName,
-		Album:       albumTitle,
-		AlbumArtist: p.SpotifyAlbumArtist,
-		Date:        p.SpotifyReleaseDate,
-		TrackNumber: trackNumberToEmbed,
-		TotalTracks: p.SpotifyTotalTracks,
-		DiscNumber:  p.SpotifyDiscNumber,
-		TotalDiscs:  p.SpotifyTotalDiscs,
-		URL:         p.SpotifyURL,
-		Copyright:   p.SpotifyCopyright,
-		Publisher:   p.SpotifyPublisher,
-		ISRC:        isrc,
-		Genre:       mbMeta.Genre,
-		SpotifyID:   p.SpotifyTrackID,
-	}
-
-	if err := meta.EmbedMetadata(outputFilename, metadata, coverPath); err != nil {
-		return "", fmt.Errorf("failed to embed metadata: %w", err)
-	}
-	slog.Debug("[Tidal] Metadata saved")
-
-	slog.Debug("[Tidal] Done")
-	slog.Debug("[Tidal] Downloaded successfully")
-	return outputFilename, nil
-}
-
 // DownloadByURLWithFallback downloads p.URL, degrading a hi-res request to
 // LOSSLESS when the track has no hi-res master and the user allows it.
 //
@@ -613,7 +492,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre)
 
 	slog.Debug("[Tidal] Downloading to", "path", outputFilename)
-	downloader := NewTidalDownloader("")
+	downloader := NewTidalDownloader()
 	if err := downloader.DownloadFile(downloadURL, outputFilename); err != nil {
 		return "", err
 	}

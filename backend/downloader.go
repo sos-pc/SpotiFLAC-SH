@@ -37,7 +37,6 @@ type DownloadRequest struct {
 	AlbumArtist          string `json:"album_artist,omitempty"`
 	ReleaseDate          string `json:"release_date,omitempty"`
 	CoverURL             string `json:"cover_url,omitempty"`
-	ApiURL               string `json:"api_url,omitempty"`
 	OutputDir            string `json:"output_dir,omitempty"`
 	AudioFormat          string `json:"audio_format,omitempty"`
 	FilenameFormat       string `json:"filename_format,omitempty"`
@@ -213,8 +212,8 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 	tidalFmt := TidalQualityFor(req.AudioFormat)
 
-	// Build the tidal.DownloadParams once; the same struct fits all three Tidal entry points
-	// (Download, DownloadByURL, DownloadByURLWithFallback). The call site picks one method,
+	// Build the tidal.DownloadParams once; the same struct fits both Tidal entry
+	// points (Download, DownloadByURLWithFallback). The call site picks one,
 	// which then reads either p.URL or p.SpotifyTrackID.
 	tidalParams := func(quality string) tidal.DownloadParams {
 		return tidal.DownloadParams{
@@ -253,7 +252,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 	// the name is known, populating req.ServiceURL. No-op if it's already set.
 	ensureTidalServiceURL := func(logMsg string) {
 		if req.ServiceURL == "" && req.TrackName != "" && req.ArtistName != "" {
-			dl := tidal.NewTidalDownloader("")
+			dl := tidal.NewTidalDownloader()
 			if tidalURL, serr := dl.SearchTidalByName(req.TrackName, req.ArtistName); serr == nil && tidalURL != "" {
 				req.ServiceURL = tidalURL
 				slog.Debug(logMsg, "url", tidalURL)
@@ -275,7 +274,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		native := func() (string, error) {
 			switch svc {
 			case "tidal":
-				dl := tidal.NewTidalDownloader("")
+				dl := tidal.NewTidalDownloader()
 				dl.SpeedCallback = req.SpeedCallback
 				p := tidalParams(tidalFmt)
 				if req.ServiceURL != "" {

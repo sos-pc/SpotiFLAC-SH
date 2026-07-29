@@ -1,7 +1,7 @@
 package tidal
 
-// DownloadParams groups the inputs of TidalDownloader.Download,
-// DownloadByURL and DownloadByURLWithFallback.
+// DownloadParams groups the inputs of TidalDownloader.Download and
+// DownloadByURLWithFallback.
 //
 // Replaces 25-argument positional signatures. URL and SpotifyTrackID are
 // mutually exclusive: URL is used by Download* methods that already have a

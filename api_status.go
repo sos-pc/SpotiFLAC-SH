@@ -60,11 +60,10 @@ func setCachedStatuses(s []ServiceStatus) {
 	statusCachedAt = time.Now()
 }
 
-func invalidateStatusCache() {
-	statusCacheMu.Lock()
-	defer statusCacheMu.Unlock()
-	statusCache = nil
-}
+// invalidateStatusCache lived here. Its only caller was SaveProxyConfig, which
+// dropped the cache so a proxy edit showed up before the 30 s TTL expired. With
+// no proxy configuration left there is nothing to invalidate on: every service
+// the board probes is fixed at startup.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Health check helpers
@@ -77,8 +76,9 @@ func invalidateStatusCache() {
 // a code) into a short sentence whose MEANING comes first and whose technical
 // detail comes second, where truncation can eat it harmlessly.
 //
-// The bar to clear is the Tidal PREVIEW message below: it says what happened,
-// why, and where to go fix it.
+// The bar to clear used to be the Tidal PREVIEW message, which named the
+// problem, the cause and the settings screen that fixed it. That probe went
+// with the proxy list; the standard to hold these to did not.
 
 // describeRequestError explains a transport-level failure. Raw Go errors leak
 // here otherwise, e.g. `Get "https://x": dial tcp: lookup x: no such host`,
