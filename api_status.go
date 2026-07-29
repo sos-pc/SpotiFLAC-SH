@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
 	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,92 +241,6 @@ func pingSpotFetch(name, baseURL string) ServiceStatus {
 	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
 }
 
-// pingTidalProxy performs a real track-endpoint request to validate that a
-// community Tidal HiFi proxy is actually serving audio data — not just
-// reachable at its root URL.
-//
-// Format used by all community proxies:
-//
-//	{baseURL}/track/?id={testID}&quality={quality}
-//
-// The response is parsed to check assetPresentation:
-//
-//	"FULL"    → proxy can serve complete tracks → "ok"
-//	"PREVIEW" → proxy is up but Tidal restricts to 30-second previews
-//	           (full downloads require a personal Tidal Premium token via the Device Code flow) → "ratelimited"
-func pingTidalProxy(name, baseURL string) ServiceStatus {
-	// Uses the same probe track as the upstream TidalDownloader.
-	const testTrackID = "441821360"
-	testURL := strings.TrimSuffix(baseURL, "/") + "/track/?id=" + testTrackID + "&quality=HI_RES_LOSSLESS"
-
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-
-	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
-	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
-	}
-	defer resp.Body.Close()
-
-	latency := int(elapsed.Milliseconds())
-
-	switch {
-	case resp.StatusCode == 429:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode >= 500:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	case resp.StatusCode != http.StatusOK:
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	if err != nil || len(body) < 2 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-			Error: "Empty reply — service answered with nothing", CheckedAt: time.Now().Unix()}
-	}
-
-	// Try v2 format: {"version":"2.x","data":{"assetPresentation":"FULL"|"PREVIEW",...}}
-	var v2 struct {
-		Data struct {
-			AssetPresentation string `json:"assetPresentation"`
-			Manifest          string `json:"manifest"`
-		} `json:"data"`
-	}
-	if json.Unmarshal(body, &v2) == nil && v2.Data.AssetPresentation != "" {
-		switch v2.Data.AssetPresentation {
-		case "FULL":
-			if v2.Data.Manifest != "" {
-				return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-			}
-			return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-				Error: "Offers full tracks but sent no audio link — proxy is broken", CheckedAt: time.Now().Unix()}
-		case "PREVIEW":
-			return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency,
-				Error: "PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)", CheckedAt: time.Now().Unix()}
-		}
-	}
-
-	// Try legacy format: [{"OriginalTrackUrl":"..."}]
-	var legacy []struct {
-		OriginalTrackURL string `json:"OriginalTrackUrl"`
-	}
-	if json.Unmarshal(body, &legacy) == nil {
-		for _, item := range legacy {
-			if item.OriginalTrackURL != "" {
-				return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-			}
-		}
-	}
-
-	return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency,
-		Error: "Unrecognized reply — proxy may be incompatible", CheckedAt: time.Now().Unix()}
-}
-
 // pingDeezer performs a real track lookup to validate the Deezer API is
 // returning valid data (not just an HTTP 200 with an error payload).
 func pingDeezer(name, baseURL string) ServiceStatus {
@@ -445,22 +357,6 @@ var coreServices = []serviceEntry{
 	{"Tidal API", "https://api.tidal.com", nil},
 }
 
-// proxyDisplayName extracts a short human-readable label from a proxy base URL.
-// "https://wolf.qqdl.site/track/?id=" → "wolf.qqdl.site"
-func proxyDisplayName(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
-		// Fallback: strip scheme manually
-		s := strings.TrimPrefix(rawURL, "https://")
-		s = strings.TrimPrefix(s, "http://")
-		if idx := strings.IndexAny(s, "/?"); idx > 0 {
-			return s[:idx]
-		}
-		return s
-	}
-	return u.Hostname()
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CheckAllServices runs parallel health checks for every external service
 // including Tidal/Qobuz proxies as currently configured by the user.
@@ -471,13 +367,9 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 	all := make([]serviceEntry, 0, 32)
 	all = append(all, coreServices...)
 
-	// One entry per configured Tidal proxy. This used to read an "effective"
-	// list that merged in auto-discovered hosts; the discovery feed is dead and
-	// the merge is gone, so the user's saved config is the whole list.
-	for _, proxyURL := range util.GetTidalProxies() {
-		name := "Tidal · " + proxyDisplayName(proxyURL)
-		all = append(all, serviceEntry{name, proxyURL, pingTidalProxy})
-	}
+	// One entry per Tidal community proxy used to be added here. That list is
+	// gone (see api_auth.go): previews only, so it could not produce a download.
+	// "Tidal API" in coreServices covers the endpoint that is actually used.
 
 	// Download engine sidecar. Listed only when configured, so an install without
 	// the engine doesn't show a phantom service that is always down. Its /health

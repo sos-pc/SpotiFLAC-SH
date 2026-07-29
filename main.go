@@ -116,8 +116,6 @@ func main() {
 	// after the literal above rather than inside it.
 	ctr.Files = NewFileService(ctr)
 
-	LoadProxyConfig(db)
-
 	// Proxy auto-discovery used to start here: a goroutine polling
 	// tidal-uptime.geeked.wtf every 6 h to reorder the Tidal proxy list. That
 	// domain has been NXDOMAIN for months, so every run failed and the merge it

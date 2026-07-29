@@ -19,7 +19,7 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 - Real-time download queue (Server-Sent Events) with progress, speed and size
 - **LAN bypass** — optional auto-login on local network (no password required)
 - File browser, audio converter, audio analysis
-- **Optional Tidal Premium** — OAuth 2.0 Device Code Flow for full FLAC; falls back to community HiFi proxies (preview-only as of May 2026) without any account
+- **Optional Tidal Premium** — OAuth 2.0 Device Code Flow unlocks the native full-FLAC path; without an account, Tidal is routed to the download engine like the other providers
 - Automatic BoltDB cleanup (deduplication every 24h)
 - Docker-first deployment with GitHub Actions CI/CD
 
@@ -175,7 +175,7 @@ curl -s -X POST http://your-server:6890/api/v1/auth/tidal/device/poll \
 ```
 
 - Token cached in `<config>/tidal_token.json` and **auto-refreshed** before expiry (5-minute window).
-- If the refresh fails (subscription lapsed, token revoked) the file is deleted and SpotiFLAC falls back to community proxies.
+- If the refresh fails (subscription lapsed, token revoked) the file is deleted and Tidal falls through to the download engine.
 - See [`docs/tidal-auth.md`](docs/tidal-auth.md) for the full walkthrough.
 
 ## Architecture
@@ -189,10 +189,9 @@ Browser → /api/v1/* + JWT     → handlers (per-user filtered)
                                 playlist_snapshots — long-term source of truth for what's on disk;
                                 additive to BoltDB, M3U8 generation reads it first)
                               → JobManager (1 worker, unified queue: manual + watchlist downloads)
-                                → Tidal  (Device Code token → Community HiFi proxies, fallback loop)
-                                → Qobuz  (musicdl.me primary → community proxies, fallback loop)
-                                → Amazon (community proxy with X-Debug-Key)
-                                → Deezer (community proxy /dl/ endpoint)
+                                → Tidal  (Device Code token → api.tidal.com)  [native, BYOT]
+                                → engine sidecar for everything else:
+                                    Qobuz · Amazon · Deezer · tokenless Tidal
 
 Background goroutines (started in main.go):
   - Watcher.daemon            — checks watchlists every 5 minutes
@@ -225,7 +224,7 @@ Background goroutines (started in main.go):
 │                        #   its rename methods coordinate Catalog+Jobs+history)
 ├── auth.go              # Jellyfin auth, JWT (HMAC-SHA256), middleware
 ├── api_v1.go            # REST API v1 route registration + shared helpers (v1Auth, errors)
-├── api_auth.go          # /auth/* + /apis/proxies handlers
+├── api_auth.go          # /auth/* handlers
 ├── api_admin.go         # /admin/* admin-only maintenance (retag-legacy, library-rebuild,
 │                        #   retag-incomplete-metadata, per-watchlist repair, server logs)
 ├── api_jobs.go          # /jobs/*, /downloads/*, /history/* handlers

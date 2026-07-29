@@ -13,34 +13,31 @@ The original desktop application that SpotiFLAC Web is based on. The core downlo
 
 ## Community Proxies & Hosted Services
 
-These community-maintained services provide the "zero-account" FLAC streaming that powers SpotiFLAC's default mode.
+**None of these are called by this codebase any more**, and the section stays as
+attribution rather than documentation. The "zero-account" path they used to
+provide is now the download engine's job (see
+[module-engine.md](docs/module-engine.md)); the native wrappers around them were
+removed through July 2026.
 
-**Tidal HiFi Proxies**
-- **eu-central.monochrome.tf** — `https://eu-central.monochrome.tf` (v2.10, ✅ Jul 2026)
-- **us-west.monochrome.tf** — `https://us-west.monochrome.tf` (v2.10, ✅ Jul 2026)
-- **api.monochrome.tf** — `https://api.monochrome.tf` (v2.5, ✅ Jul 2026)
-- **monochrome-api.samidy.com** — `https://monochrome-api.samidy.com` (v2.3, ✅ Jul 2026)
-
-*Thanks also to **hifi-api.kennyy.com.br**, dropped from the default list on 2026-07-28
-after its host stopped answering. The work it did while it was up still counts.*
-
-> ⚠️ All community Tidal proxies currently return preview-only content (30s). Full FLAC requires a personal Premium token (Device Code flow).
+**Tidal HiFi Proxies** — removed 2026-07-28. Every one serves 30-second previews
+without a personal Premium token, which the download path refuses.
+- **eu-central.monochrome.tf**, **us-west.monochrome.tf**, **api.monochrome.tf**,
+  **monochrome-api.samidy.com** — all answering 200 when last probed, 2026-07-28.
+- **hifi-api.kennyy.com.br** — stopped answering; dropped a little earlier the same day.
 
 **Self-hostable Tidal Proxy**
-- **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — Fork of [sachinsenal0x64/hifi](https://github.com/sachinsenal0x64/hifi). A self-hostable Python proxy for Tidal supporting `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW` quality and Dolby Atmos. Compatible with SpotiFLAC's Tidal proxy slot (`Settings → APIs → Proxy Configuration`).
+- **[binimum/hifi-api](https://github.com/binimum/hifi-api)** — Fork of [sachinsenal0x64/hifi](https://github.com/sachinsenal0x64/hifi). A self-hostable Python proxy for Tidal supporting `HI_RES_LOSSLESS`, `LOSSLESS`, `HIGH`, `LOW` and Dolby Atmos. It could serve `FULL`, unlike the anonymous community hosts — but there is no proxy slot left to point it at.
 
-**Qobuz Proxies**
-- **musicdl.me** — `https://www.musicdl.me` (primary, POST + X-Debug-Key, ✅ May 2026)
-- **yeet.su** — `https://dab.yeet.su` (⚠️ unreachable May 2026)
-- **dabmusic.xyz** — `https://dabmusic.xyz` (⚠️ Cloudflare-protected May 2026)
+**Qobuz** — native downloader removed 2026-07.
+- **musicdl.me**, **dab.yeet.su**, **dabmusic.xyz**
 
-**Amazon Music Proxy**
-- **spotbye** — `https://amazon.spotbye.qzz.io` (✅ May 2026, requires X-Debug-Key)
+**Amazon Music** — native downloader removed 2026-07.
+- **spotbye** — `https://amazon.spotbye.qzz.io`
 
-**Deezer Proxy**
+**Deezer** — native downloader removed 2026-07.
 - **deezmate** — `https://api.deezmate.com`
 
-All proxy lists are configurable at runtime in **Settings → APIs → Proxy Configuration**.
+Thanks to everyone who ran these while the app depended on them.
 
 ---
 
@@ -96,4 +93,4 @@ Used on first launch to auto-install `ffmpeg` and `ffprobe` on Windows, Linux, a
 
 ## Disclaimer
 
-SpotiFLAC Web is intended for personal use with content you have the right to access. The community proxies listed above are operated by their respective maintainers and are not affiliated with this project. Proxy availability may change over time.
+SpotiFLAC Web is intended for personal use with content you have the right to access. The community services listed above are operated by their respective maintainers and are not affiliated with this project.

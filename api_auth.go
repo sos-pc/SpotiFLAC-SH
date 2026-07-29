@@ -280,33 +280,14 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 	writeV1JSON(w, http.StatusOK, results)
 }
 
-// The response used to be a ProxyConfigResponse wrapping ProxyConfig with three
-// auto-discovery fields (tidal_discovered / discovery_checked_at /
-// discovery_source). Discovery is gone — its feed died — so the wrapper had
-// nothing left to add and the plain config is the whole answer.
-
-func (s *Server) v1GetProxies(w http.ResponseWriter, r *http.Request) {
-	// Read-only: proxy configuration.
-	if !v1RequirePermission(w, r, "read") {
-		return
-	}
-	writeV1JSON(w, http.StatusOK, GetProxyConfig(s.ctr.DB))
-}
-
-func (s *Server) v1PutProxies(w http.ResponseWriter, r *http.Request) {
-	// Proxy URLs become the base of outbound requests the server makes on
-	// every download (backend/tidal/client.go etc.), so letting any
-	// authenticated user repoint them is an SSRF primitive — admin only.
-	if !v1RequireAdmin(w, r) {
-		return
-	}
-	var cfg ProxyConfig
-	if !decodeV1JSON(w, r, &cfg) {
-		return
-	}
-	if err := SaveProxyConfig(s.ctr.DB, cfg); err != nil {
-		writeV1Error(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
+// GET and PUT /api/v1/apis/proxies lived here. They configured one list — the
+// Tidal community HiFi proxies — which was removed on 2026-07-28 because every
+// host on it answers assetPresentation="PREVIEW" without a personal token, and
+// the download path refuses previews. A settings screen for a list that could
+// not produce a download was worse than none.
+//
+// Tokenless Tidal goes through the engine now (ENGINE_SERVICES); with a token it
+// goes to api.tidal.com. Neither is operator-configurable, and neither should be:
+// letting an authenticated user repoint the base of the server's own outbound
+// requests was an SSRF primitive that needed admin-only + ValidateExternalURL to
+// contain. That surface is gone rather than guarded.

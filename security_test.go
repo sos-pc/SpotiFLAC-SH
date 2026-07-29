@@ -11,37 +11,15 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func TestValidateExternalURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		url     string
-		wantErr bool
-	}{
-		{"public https", "https://eu-central.monochrome.tf", false},
-		{"public http", "http://api.example.com/track", false},
-		{"public https with port", "https://api.example.com:8443/x", false},
-		{"non-http scheme", "ftp://example.com", true},
-		{"file scheme", "file:///etc/passwd", true},
-		{"missing host", "https:///path", true},
-		{"invalid URL", "http://[::1", true},
-		{"loopback IP literal", "http://127.0.0.1/track", true},
-		{"loopback IPv6 literal", "http://[::1]/track", true},
-		{"localhost hostname", "http://localhost/track", true},
-		{"private 10.x literal", "http://10.0.0.5/track", true},
-		{"private 192.168.x literal", "http://192.168.1.10/track", true},
-		{"link-local / cloud metadata", "http://169.254.169.254/latest/meta-data", true},
-		{"unspecified", "http://0.0.0.0/track", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateExternalURL(tt.url)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateExternalURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
-			}
-		})
-	}
-}
-
+// TestValidateExternalURL lived here until 2026-07-28. ValidateExternalURL
+// guarded one thing: operator-supplied Tidal proxy URLs, which became the base
+// of the server's own outbound requests. That list and its PUT endpoint are
+// gone (see api_auth.go), so the guard had no caller and went with them.
+//
+// Nothing replaced it because nothing needs it: the two remaining
+// user-configurable URLs are Jellyfin and SpotFetch, and Jellyfin is routinely
+// on a private address — applying this check there would reject legitimate
+// installs, not protect them.
 func TestIsSubPath(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -1,6 +1,6 @@
 # Tidal Authentication
 
-SpotiFLAC works without any Tidal account — it falls back to community HiFi proxies automatically. Authenticating with a **personal Tidal Premium account** unlocks full FLAC (`HI_RES_LOSSLESS`); without authentication, community proxies currently serve preview-only audio.
+SpotiFLAC works without any Tidal account — tokenless Tidal is routed to the download engine (`ENGINE_SERVICES`). Authenticating with a **personal Tidal Premium account** unlocks the native path to `api.tidal.com` and full FLAC (`HI_RES_LOSSLESS`), which is the only way to get it from Tidal directly.
 
 > **Requires an active, paid Tidal subscription.** Free accounts do not receive the `playback` scope.
 
@@ -25,7 +25,7 @@ The token is stored in `<config>/tidal_token.json` (mode `0644`):
 }
 ```
 
-The refresh path runs in `GetValidTidalToken`: 5 minutes before expiry, the refresh endpoint is hit. On failure, the file is deleted and SpotiFLAC falls back to community proxies.
+The refresh path runs in `GetValidTidalToken`: 5 minutes before expiry, the refresh endpoint is hit. On failure, the file is deleted and Tidal falls through to the engine.
 
 ---
 
@@ -121,7 +121,7 @@ curl -s http://your-spotiflac-host:6890/api/v1/auth/tidal/status \
 
 - Stored in `<config>/tidal_token.json`.
 - **Auto-refreshed** 5 minutes before expiry by `GetValidTidalToken`.
-- On refresh failure (revoked, subscription lapsed, network outage longer than the expiry window), the file is deleted via `DeleteTidalToken` and SpotiFLAC falls back to community proxies transparently.
+- On refresh failure (revoked, subscription lapsed, network outage longer than the expiry window), the file is deleted via `DeleteTidalToken` and Tidal falls through to the engine transparently.
 - The country code (`country_code`) is fetched once via `GET /v1/sessions` and cached on the token; it's used for region-specific track availability.
 
 ---
@@ -149,16 +149,21 @@ Personal token present and valid
         ↓
 api.tidal.com (official, full FLAC)
         ↓ (no token / refresh failed / 4xx)
-Community HiFi proxies — tried in configured order (util.GetTidalProxies)
-        ↓ (every proxy fails)
+The download engine, if tidal is in ENGINE_SERVICES
+        ↓ (engine fails or tidal is not delegated)
 Provider chain continues to Qobuz / Amazon / Deezer per `autoOrder`
         ↓ (every provider fails)
 Job marked `failed` (retried on next manual sync via SyncWatchlist)
 ```
 
-> **As of May 2026**, every community proxy responds with `assetPresentation: "PREVIEW"` (30-second preview only) without a personal token. Authenticating is the only way to get full FLAC from Tidal.
+A list of community HiFi proxies sat between those first two steps until
+2026-07-28. Every host on it answers `assetPresentation: "PREVIEW"` (30-second
+segments) without a personal token, and the download path refuses previews — so
+the step could only exhaust the list and fail, at up to 5 s per host. Removed
+along with **Settings → APIs → Proxy Configuration**.
 
-The proxy list is configurable in **Settings → APIs → Proxy Configuration** without restarting the server. Auto-discovered proxies are listed read-only — copy them into the user list to make them persistent.
+Authenticating remains the only way to get full FLAC from Tidal *natively*. The
+engine reaches it another way, through a challenge-gated web session.
 
 ---
 

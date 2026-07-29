@@ -441,13 +441,7 @@ export interface ServiceStatus {
 export const GetAPIStatuses = () =>
   rest<ServiceStatus[]>("GET", "/apis/status");
 
-export interface ProxyConfig {
-  tidal_proxies: string[];
-  /** Override manuel du client_id OAuth Tidal. Vide = auto-découverte. */
-  tidal_client_id: string;
-  /** Proxies found automatically by discovery — NOT in tidal_proxies (read-only). */
-}
-
-export const GetAPIProxies = () => rest<ProxyConfig>("GET", "/apis/proxies");
-export const UpdateAPIProxies = (cfg: ProxyConfig) =>
-  rest<void>("PUT", "/apis/proxies", cfg);
+// ProxyConfig, GetAPIProxies and UpdateAPIProxies were removed on 2026-07-28
+// with the Tidal community proxy list they configured: every host on it serves
+// 30-second previews without a personal token, which the download path refuses.
+// Both endpoints are gone server-side too.

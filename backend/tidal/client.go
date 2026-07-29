@@ -21,6 +21,12 @@ import (
 	"github.com/afkarxyz/SpotiFLAC/backend/util"
 )
 
+// tidalAPIBase is the one Tidal endpoint left. The community HiFi proxies that
+// used to sit beside it were removed on 2026-07-28: all of them answer
+// assetPresentation="PREVIEW" without a personal token, which the download path
+// refuses, so they could only ever cost time.
+const tidalAPIBase = "https://api.tidal.com"
+
 type TidalDownloader struct {
 	client        *http.Client
 	timeout       time.Duration
@@ -55,34 +61,21 @@ type TidalBTSManifest struct {
 	URLs           []string `json:"urls"`
 }
 
+// NewTidalDownloader builds a client for Tidal's official API.
+//
+// apiURL used to select between community proxies; there is one endpoint now
+// (api.tidal.com) and the parameter is kept only because DownloadByURL callers
+// still pass one through. An empty value means the same thing as the default.
 func NewTidalDownloader(apiURL string) *TidalDownloader {
 	if apiURL == "" {
-		downloader := &TidalDownloader{
-			client:     util.NewHTTPClient(5 * time.Second),
-			timeout:    5 * time.Second,
-			maxRetries: 3,
-			apiURL:     "",
-		}
-
-		apis, err := downloader.GetAvailableAPIs()
-		if err == nil && len(apis) > 0 {
-			apiURL = apis[0]
-		}
+		apiURL = tidalAPIBase
 	}
-
 	return &TidalDownloader{
 		client:     util.NewHTTPClient(5 * time.Second),
 		timeout:    5 * time.Second,
 		maxRetries: 3,
 		apiURL:     apiURL,
 	}
-}
-
-func (t *TidalDownloader) GetAvailableAPIs() ([]string, error) {
-	apis := []string{
-		"https://api.tidal.com",
-	}
-	return apis, nil
 }
 
 func (t *TidalDownloader) SearchTidalByName(trackName, artistName string) (string, error) {
@@ -164,7 +157,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 
 	token, err := GetValidTidalToken()
 	if err != nil {
-		slog.Debug("[Tidal] Authentication failed, falling back to public HiFi APIs", "err", err)
+		slog.Debug("[Tidal] Authentication failed — no token, no download", "err", err)
 	}
 
 	if token != nil {
@@ -217,43 +210,14 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 		}
 	}
 
+	// A loop over community HiFi proxies used to run here when the token path
+	// came up empty. It could not succeed: every reachable host answers
+	// assetPresentation="PREVIEW" without a token (all four probed 2026-07-28),
+	// and the loop's own guard skipped previews — so it always exhausted the list
+	// and failed, at up to 5 s per host. Tokenless Tidal goes through the engine
+	// now, which is what ENGINE_SERVICES is for.
 	if !success {
-		slog.Debug("[Tidal] Falling back to public HiFi APIs")
-		apis := util.GetTidalProxies()
-		for _, apiBase := range apis {
-			fallbackURL := fmt.Sprintf("%s/track/?id=%d&audioquality=%s", apiBase, trackID, quality)
-			slog.Debug("[Tidal] Trying fallback API", "url", fallbackURL)
-			req, err := http.NewRequest("GET", fallbackURL, nil)
-			if err != nil {
-				continue
-			}
-			resp, err := t.client.Do(req)
-			if err != nil {
-				continue
-			}
-			if resp.StatusCode == 200 {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				bodyStr := string(bodyBytes)
-				if strings.Contains(bodyStr, "Upstream API error") || strings.Contains(bodyStr, "\"detail\"") {
-					slog.Debug("[Tidal] Fallback failed (upstream error)", "api", apiBase)
-				} else if strings.Contains(bodyStr, "\"PREVIEW\"") {
-					slog.Debug("[Tidal] Fallback returned a preview snippet, skipping", "api", apiBase)
-				} else {
-					slog.Debug("[Tidal] Fallback API succeeded", "api", apiBase)
-					body = bodyBytes
-					success = true
-					break
-				}
-			} else {
-				slog.Debug("[Tidal] Fallback returned non-200 status", "api", apiBase, "status", resp.StatusCode)
-				resp.Body.Close()
-			}
-		}
-	}
-
-	if !success {
-		return "", fmt.Errorf("tidal: download URL — status %d from primary and all fallbacks failed", respStatusCode)
+		return "", fmt.Errorf("tidal: download URL — status %d (a personal Tidal token is required; without one, route tidal through the engine)", respStatusCode)
 	}
 
 	var v2Response TidalAPIResponseV2
@@ -598,12 +562,12 @@ func (t *TidalDownloader) DownloadByURL(p DownloadParams) (string, error) {
 	return outputFilename, nil
 }
 
+// DownloadByURLWithFallback downloads p.URL, degrading a hi-res request to
+// LOSSLESS when the track has no hi-res master and the user allows it.
+//
+// The "fallback" in the name is that quality ladder, not an endpoint list: the
+// endpoint rotation this used to carry ran over a hardcoded single-element slice.
 func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, error) {
-	apis, err := t.GetAvailableAPIs()
-	if err != nil {
-		return "", fmt.Errorf("no APIs available for fallback: %w", err)
-	}
-
 	if p.OutputDir != "." {
 		if err := os.MkdirAll(p.OutputDir, 0755); err != nil {
 			return "", fmt.Errorf("directory error: %w", err)
@@ -633,11 +597,11 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 		return "EXISTS:" + outputFilename, nil
 	}
 
-	successAPI, downloadURL, err := getDownloadURLRotated(apis, trackID, p.Quality)
+	downloadURL, err := t.GetDownloadURL(trackID, p.Quality)
 	if err != nil {
 		if (p.Quality == "HI_RES" || p.Quality == "HI_RES_LOSSLESS") && p.AllowFallback {
-			slog.Debug("[Tidal] Quality unavailable/failed on all APIs, falling back to LOSSLESS", "quality", p.Quality)
-			successAPI, downloadURL, err = getDownloadURLRotated(apis, trackID, "LOSSLESS")
+			slog.Debug("[Tidal] Quality unavailable, falling back to LOSSLESS", "quality", p.Quality)
+			downloadURL, err = t.GetDownloadURL(trackID, "LOSSLESS")
 			if err != nil {
 				return "", fmt.Errorf("failed to get download URL (%s & LOSSLESS both failed): %w", p.Quality, err)
 			}
@@ -649,7 +613,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(p DownloadParams) (string, e
 	metaChan := providerutil.FetchGenreMetadataAsync("", p.SpotifyURL, trackTitle, artistName, albumTitle, p.UseSingleGenre, p.EmbedGenre)
 
 	slog.Debug("[Tidal] Downloading to", "path", outputFilename)
-	downloader := NewTidalDownloader(successAPI)
+	downloader := NewTidalDownloader("")
 	if err := downloader.DownloadFile(downloadURL, outputFilename); err != nil {
 		return "", err
 	}
@@ -893,15 +857,6 @@ func parseManifest(manifestB64 string) (directURL string, initURL string, mediaU
 	}
 
 	return "", initURL, mediaURLs, "", nil
-}
-
-func getDownloadURLRotated(apis []string, trackID int64, quality string) (string, string, error) {
-	downloader := NewTidalDownloader("")
-	url, err := downloader.GetDownloadURL(trackID, quality)
-	if err != nil {
-		return "", "", err
-	}
-	return "https://api.tidal.com", url, nil
 }
 
 // buildFilename produces the download's target filename through

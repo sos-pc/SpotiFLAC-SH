@@ -74,9 +74,9 @@ What disappears is the **Go-side** session plumbing, not the solver.
 | File | LOC | What goes |
 |---|---|---|
 | `backend/downloader.go` | 678 | the `qobuz`/`amazon`/`deezer` cases in `runService`, their `*Params` builders, `QobuzQualityFor` |
-| `backend/util/proxy_config.go` | 231 | `qobuzProviders`, `amazonProxies`, `deezerProxies`, `qobuzMusicDLURL` + getters/setters/defaults. **Keep** `tidalProxies` (BYOT rides on it); the discovery overlay went in item 8 |
+| `backend/util/proxy_config.go` | 231 | ~~**Keep** `tidalProxies` (BYOT rides on it)~~ — **the whole file went** in item 10. BYOT does *not* ride on the proxies: with a token, `GetDownloadURL` goes straight to `api.tidal.com`. |
 | `api_status.go` | 656 | probes for musicdl, spotbye, deezmate, Qobuz-GET, community. **Keep** Tidal + Engine |
-| `api_proxies.go` | 141 | the three providers' proxy-config endpoints. **Keep** Tidal |
+| `api_proxies.go` | 141 | ~~**Keep** Tidal~~ — **the whole file went** in item 10, with both `/apis/proxies` routes |
 | `main.go` | 232 | the community wiring |
 | `frontend/.../ApisTab.tsx` | — | the Qobuz/Amazon/Deezer proxy UI |
 | `frontend/src/lib/settings.ts` | — | the proxy lists |
@@ -298,8 +298,45 @@ import graph. Verdicts differ per item; two turned out to be non-issues.
    cannot hurt either, and its failure message reports both errors, which is good
    diagnostics. Removing it buys nothing; repointing it at a live mirror would.
 
-10. **Tidal default proxy list** — ✅ **dead host dropped 2026-07-28**; the bigger
-    question stays open.
+10. **Tidal default proxy list** — ✅ **CLOSED 2026-07-28**: the whole list is gone.
+
+    Settled by measuring the two ends of the path rather than the list itself:
+
+    - **BYOT does not ride on these proxies.** With a valid token `GetDownloadURL`
+      goes to `api.tidal.com` directly; the proxy loop is only reached in the
+      `if !success` branch. §3.3 of this plan and a comment I wrote the same
+      morning both claimed otherwise. Wrong.
+    - **The loop could not succeed.** `client.go` skipped any response containing
+      `"PREVIEW"`, and all four surviving hosts return exactly that without a
+      token. Not a fallback — a guaranteed failure costing up to 5 s per host.
+
+    So it went, and with it everything that existed to feed it: `proxy_config.go`
+    and `api_proxies.go` (whole files), `GET`/`PUT /api/v1/apis/proxies`,
+    `pingTidalProxy` + `proxyDisplayName` + the per-proxy status entries,
+    `LoadProxyConfig`, the **Settings → APIs → Proxy Configuration** screen, and
+    `ProxyConfig` in `rpc.ts` (whose `tidal_client_id` field the Go side never
+    sent — a phantom).
+
+    Two consequences worth stating plainly:
+
+    - **`urlsafety.go` went too.** Its SSRF guard had exactly one caller,
+      `api_proxies.go:94`, vetting operator-supplied proxy URLs before they became
+      the base of the server's outbound requests. Removing the surface removed the
+      need. Nothing replaced it because nothing needs it: the two remaining
+      user-configurable URLs are Jellyfin and SpotFetch, and Jellyfin is routinely
+      on a private address — this check would reject legitimate installs.
+    - **`getDownloadURLRotated` was theatre.** It ignored its `apis` parameter
+      entirely, called `NewTidalDownloader("")` and returned a hardcoded
+      `"https://api.tidal.com"`. `GetAvailableAPIs` fed it a one-element slice.
+      Both gone; `DownloadByURLWithFallback` calls `GetDownloadURL` directly and
+      its "fallback" is now unambiguously the quality ladder it always was.
+
+    **The original open question is answered:** a hand-curated list was not
+    viable, because curation could not have helped — the hosts work, they just
+    cannot serve what we need. Tokenless Tidal leans on the engine, like the
+    other three providers.
+
+    ~~the bigger question stays open.~~
     Re-probed all five with the app's own test track (`441821360`), not the plan's
     memory — and the first probe was **my** error, a Qobuz ID against a Tidal endpoint,
     which returned 404 everywhere and briefly looked like total collapse:

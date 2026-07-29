@@ -37,10 +37,13 @@ The rate limiter is **10 attempts per 1-minute window per source IP**, with a **
 
 ### Tidal downloads start but produce a 30-second file (preview)
 
-This is the "current state" of the community Tidal proxies (May 2026). Without a personal token, Tidal returns `assetPresentation: "PREVIEW"` to every community proxy.
+Should no longer happen through this app: the community proxies that served
+previews were removed on 2026-07-28, precisely because that was all they could
+serve without a personal token.
 
-- The status dashboard flags this as `ratelimited` with the message `PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)`.
-- To get full FLAC, authenticate with a Premium account: **Settings → Tidal Account → Connect with Tidal**. See [tidal-auth.md](tidal-auth.md).
+If you still see one, it came through the engine. Authenticate with a Premium
+account to get the native full-FLAC path: **Settings → Tidal Account → Connect
+with Tidal**. See [tidal-auth.md](tidal-auth.md).
 
 ### No Tidal link found
 
@@ -60,26 +63,18 @@ Spotify URL and resolves internally.
 
 ### Downloaded file is 0 bytes or corrupt
 
-- Almost always a CDN/proxy issue: the proxy returned an HTML error page instead of audio. Retry the download.
-- Check the APIs status dashboard. If a specific proxy is consistently failing, remove it via **Settings → APIs → Proxy Configuration**.
-- Submit a working alternative through the same UI; lists are applied immediately without restart.
+- Usually an upstream issue: the source returned an HTML error page instead of audio. Retry the download.
+- Check the APIs status dashboard, and the engine's own logs (`docker compose logs spotiflac-engine`) for the provider that failed.
 
-### "All Tidal proxies failed"
+### Tidal fails with "a personal Tidal token is required"
 
-Every entry in `util.GetTidalProxies()` returned an error. The list is purely
-what the operator configured — auto-discovery was removed in 2026-07 when its
-feed died, so nothing refreshes it on its own. Options:
+The native Tidal path needs a token, and there is no tokenless native fallback
+any more — the community proxies that filled that role served previews only, and
+the download path refuses previews, so the fallback could not succeed. Options:
 
-1. Authenticate with your own Tidal Premium account (see [tidal-auth.md](tidal-auth.md)) — that bypasses community proxies entirely, and is the only path to full FLAC anyway.
-2. Replace the dead hosts via **Settings → APIs → Proxy Configuration** (applies immediately, no restart).
-3. Switch to a provider the engine handles (Qobuz, Amazon, Deezer).
-
-To see the configured list:
-
-```bash
-curl -s http://spotiflac.example.com/api/v1/apis/proxies \
-  -H "Authorization: Bearer <token>" | jq .tidal_proxies
-```
+1. **Authenticate** with your own Tidal Premium account (see [tidal-auth.md](tidal-auth.md)) — the only path to full FLAC natively.
+2. **Add `tidal` to `ENGINE_SERVICES`** so tokenless Tidal is routed to the engine, which reaches it another way.
+3. Switch to a provider the engine already handles (Qobuz, Amazon, Deezer).
 
 ### Track not available on any platform
 
@@ -146,7 +141,7 @@ Amazon tracks are delivered as encrypted `.m4a` and decrypted via `ffmpeg -decry
 
 ### Downloads are slow / sequential
 
-By design, SpotiFLAC processes **one download at a time** (`jobWorkers = 1` in `jobs_worker.go`). This avoids hammering community proxies and getting IP-banned. For large playlists (100+ tracks), expect a long initial run; the M3U8 file is updated incrementally as tracks finish.
+By design, SpotiFLAC processes **one download at a time** (`jobWorkers = 1` in `jobs_worker.go`). This avoids hammering upstream sources and getting IP-banned. For large playlists (100+ tracks), expect a long initial run; the M3U8 file is updated incrementally as tracks finish.
 
 ### UI feels slow / SSE not connecting
 

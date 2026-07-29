@@ -263,12 +263,11 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 	// runService builds the client for one provider and runs the download.
 	// Previously this per-provider logic was written twice — once in the direct
-	// switch below and once inside the "auto" fallback loop — which diverged
-	// only in how Tidal's API URL was chosen. tidalApiURL captures that one
-	// difference ("" / "auto" → public HiFi endpoints with fallback, otherwise
-	// the specific proxy); it's ignored for the other providers. Returns the
-	// downloaded filename and error from the underlying client.
-	runService := func(svc, tidalApiURL string) (string, error) {
+	// switch below and once inside the "auto" fallback loop. The one thing that
+	// differed between them was which Tidal endpoint to use, which stopped being
+	// a choice when the community proxies went: there is one endpoint now.
+	// Returns the downloaded filename and error from the underlying client.
+	runService := func(svc string) (string, error) {
 		// Only Tidal has a native path left. Qobuz, Amazon and Deezer were
 		// anonymous community-proxy wrappers the engine replaced; Tidal stays
 		// because it carries a personal token, which is the one thing the
@@ -276,20 +275,11 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		native := func() (string, error) {
 			switch svc {
 			case "tidal":
-				if tidalApiURL == "" || tidalApiURL == "auto" {
-					dl := tidal.NewTidalDownloader("")
-					dl.SpeedCallback = req.SpeedCallback
-					p := tidalParams(tidalFmt)
-					if req.ServiceURL != "" {
-						return dl.DownloadByURLWithFallback(p)
-					}
-					return dl.Download(p)
-				}
-				dl := tidal.NewTidalDownloader(tidalApiURL)
+				dl := tidal.NewTidalDownloader("")
 				dl.SpeedCallback = req.SpeedCallback
 				p := tidalParams(tidalFmt)
 				if req.ServiceURL != "" {
-					return dl.DownloadByURL(p)
+					return dl.DownloadByURLWithFallback(p)
 				}
 				return dl.Download(p)
 			case "qobuz", "amazon", "deezer":
@@ -340,11 +330,11 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 
 	switch req.Service {
 	case "amazon", "qobuz", "deezer":
-		filename, err = runService(req.Service, "")
+		filename, err = runService(req.Service)
 
 	case "tidal":
 		ensureTidalServiceURL("[DownloadTrack] Found Tidal URL via fallback search")
-		filename, err = runService("tidal", req.ApiURL)
+		filename, err = runService("tidal")
 
 	case "auto":
 		// Respecter l'ordre configuré par l'user (AutoOrder)
@@ -365,7 +355,7 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 				continue
 			}
 			slog.Info("[Auto] Trying", "service", svc, "track", req.TrackName)
-			filename, err = runService(svc, "")
+			filename, err = runService(svc)
 			if err == nil {
 				slog.Info("[Auto] Success", "service", svc, "track", req.TrackName)
 				break

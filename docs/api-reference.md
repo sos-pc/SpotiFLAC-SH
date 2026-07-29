@@ -1108,46 +1108,32 @@ In Docker, FFmpeg and FFprobe are pre-installed and `installed: true` always. Th
 ## APIs
 
 ### `GET /api/v1/apis/status`
-Parallel health check of every external service (cached for 30 seconds, invalidated when `PUT /apis/proxies` is called). Includes core APIs and every Tidal/Qobuz/Amazon/Deezer proxy as currently configured *and* discovered.
+Parallel health check of every external service (cached for 30 seconds).
 
 ```json
 [
-  { "name": "Tidal · eu-central.monochrome.tf", "url": "https://eu-central.monochrome.tf", "status": "ok",          "latency_ms": 45,  "checked_at": 1753920000 },
-  { "name": "Tidal · api.monochrome.tf",        "url": "https://api.monochrome.tf",        "status": "ratelimited", "latency_ms": 80,  "checked_at": 1753920000, "error": "PREVIEW only — full FLAC requires Tidal Premium token (Settings → Tidal Account)" },
-  { "name": "Amazon · amazon.spotbye.qzz.io",   "url": "https://amazon.spotbye.qzz.io",    "status": "down",                              "checked_at": 1753920000, "error": "connection refused" }
+  { "name": "Tidal API",        "url": "https://api.tidal.com",   "status": "ok",   "latency_ms": 45, "checked_at": 1753920000 },
+  { "name": "Deezer",           "url": "https://api.deezer.com",  "status": "ok",   "latency_ms": 62, "checked_at": 1753920000 },
+  { "name": "Download engine",  "url": "http://spotiflac-engine:8080", "status": "ok", "latency_ms": 3, "checked_at": 1753920000 }
 ]
 ```
 
+> **Changed 2026-07-28.** The per-proxy entries (`Tidal · <host>`, `Amazon · <host>`, …) are gone with the proxy lists themselves. The engine entry appears only when `ENGINE_URL` is configured, and it is the probe that says whether delegated providers can run.
+
 **Status values:** `ok` · `down` · `ratelimited` · `unconfigured`
 
-### `GET /api/v1/apis/proxies`
-Current proxy configuration.
+### ~~`GET` / `PUT /api/v1/apis/proxies`~~ — removed 2026-07-28
 
-```json
-{
-  "tidal_proxies":   ["https://eu-central.monochrome.tf", "..."],
-  "qobuz_providers": [],
-  "amazon_proxies":  ["https://amazon.spotbye.qzz.io"],
-  "deezer_proxies":  ["https://api.deezmate.com"]
-}
-```
+Both endpoints configured community proxy lists. Qobuz, Amazon and Deezer lost
+theirs with their native downloaders (items 3–5); Tidal's went last, because
+every host on it serves 30-second previews without a personal token and the
+download path refuses previews — the list could not produce a download.
 
-> **Changed 2026-07-28.** This used to also return `tidal_discovered`,
-> `discovery_checked_at` and `discovery_source`, from a background feed that has
-> been NXDOMAIN for months. Auto-discovery is gone; the saved config is the whole
-> answer. Clients reading those three fields should treat them as absent.
+Provider routing is not operator-configurable any more, by design: `ENGINE_SERVICES`
+decides what the engine handles, a Tidal token decides whether Tidal runs natively,
+and neither is a URL the server will point its own outbound requests at.
 
-### `PUT /api/v1/apis/proxies`
-Update proxy configuration. Body: a `ProxyConfig` object (the four arrays above). Empty arrays fall back to **factory defaults** — true "reset" behaviour, independent of any in-memory user override. Applies immediately without restart and invalidates the status cache. Returns `204`.
-
-```json
-{
-  "tidal_proxies":   ["https://my.proxy"],
-  "qobuz_providers": [],
-  "amazon_proxies":  [],
-  "deezer_proxies":  []
-}
-```
+Clients calling either endpoint now get `404`.
 
 ---
 
@@ -1208,7 +1194,4 @@ curl -s -X POST $BASE/api/v1/admin/retag-legacy \
 curl -s $BASE/api/v1/apis/status \
   -H "Authorization: Bearer $TOKEN" | jq '.[] | select(.status != "ok")'
 
-# Inspect proxy config
-curl -s $BASE/api/v1/apis/proxies \
-  -H "Authorization: Bearer $TOKEN" | jq
 ```

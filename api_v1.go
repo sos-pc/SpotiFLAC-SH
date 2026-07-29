@@ -389,8 +389,6 @@ func (s *Server) registerV1Routes() {
 	s.mux.Handle("POST /api/v1/auth/tidal/device/start", s.v1Auth(s.v1TidalDeviceStart))
 	s.mux.Handle("POST /api/v1/auth/tidal/device/poll", s.v1Auth(s.v1TidalDevicePoll))
 	s.mux.Handle("GET /api/v1/apis/status", s.v1Auth(s.v1APIStatus))
-	s.mux.Handle("GET /api/v1/apis/proxies", s.v1Auth(s.v1GetProxies))
-	s.mux.Handle("PUT /api/v1/apis/proxies", s.v1Auth(s.v1PutProxies))
 
 	// ── Jobs, downloads, history ──────────────────────────────────────────
 	s.registerJobRoutes()
