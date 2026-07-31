@@ -18,7 +18,7 @@ RUN bun run build
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 — Build backend Go
 # ─────────────────────────────────────────────────────────────────────────────
-FROM golang:1.26-bookworm@sha256:18aedc16aa19b3fd7ded7245fc14b109e054d65d22ed53c355c899582bbb2113 AS backend-builder
+FROM golang:1.26-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS backend-builder
 
 WORKDIR /app
 
