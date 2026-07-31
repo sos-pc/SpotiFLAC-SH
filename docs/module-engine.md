@@ -5,11 +5,16 @@
 > [archive/](archive/); several of their predictions turned out wrong and are
 > corrected below (see [What we got wrong](#what-we-got-wrong)).
 
-The engine is a fork of a third-party Python downloader, run as a sidecar, that
-resolves a Spotify track and fetches its audio. Our Go service keeps everything
-that gives a track its identity: naming, tags, catalog, queue, watcher, auth, SSE.
+The engine is a third-party Python downloader, run as a sidecar, that resolves a
+Spotify track and fetches its audio. Our Go service keeps everything that gives a
+track its identity: naming, tags, catalog, queue, watcher, auth, SSE.
 
-Related: [FORK-MAINTENANCE.md](../engine/FORK-MAINTENANCE.md) (keeping the fork cheap) ·
+It used to be a fork we merged from; it is now upstream's published package plus
+our shim and patches, built into an image by CI. See
+[engine/README.md](../engine/README.md) for the build and
+[upstream-tracking-plan.md](upstream-tracking-plan.md) for why the fork went.
+
+Related: [engine/README.md](../engine/README.md) ·
 [docker-compose.engine.example.yaml](../docker-compose.engine.example.yaml)
 
 ---
@@ -26,8 +31,10 @@ carries several stream hosts per provider and falls through them — and resolve
 tracks by text search + scoring + duration validation instead of ISRC lookup.
 That resilience, maintained upstream, is the point; "more providers" is not.
 
-Forking (rather than vendoring a black box or reimplementing in Go) keeps the
-code readable and moddable while offloading most maintenance.
+Installing their published package (rather than vendoring a black box or
+reimplementing in Go) keeps the code readable and patchable while offloading most
+maintenance. It began as a fork; see [engine/README.md](../engine/README.md) for
+why that was retired without losing either property.
 
 ---
 
@@ -35,7 +42,7 @@ code readable and moddable while offloading most maintenance.
 
 ```
 ┌── spotiflac (Go) ──────────────┐        ┌── spotiflac-engine ─────────────┐
-│ queue · watcher · catalog      │  HTTP  │ forked Python module            │
+│ queue · watcher · catalog      │  HTTP  │ upstream Python package         │
 │ auth · SSE · M3U8 · tagging    │───────▶│ + our FastAPI shim (engine/)    │
 │                                │◀───────│                                 │
 └────────────┬───────────────────┘        └───────────────┬─────────────────┘
@@ -197,12 +204,16 @@ tracks those are.
 
 ## 7. Operating it
 
-**Deploy** (both containers when the shim changed):
+**Deploy** — both images are pulled, nothing is built on the host:
 ```bash
-cd <compose-dir>/engine-src && git pull
-docker compose -f <compose-file> pull spotiflac
-docker compose -f <compose-file> up -d --build spotiflac-engine spotiflac
+docker compose -f <compose-file> pull
+docker compose -f <compose-file> up -d
 ```
+
+The engine image is rebuilt and published by CI whenever upstream releases, so a
+`pull` is all that is needed to pick up an engine update. To pin or roll back,
+replace `latest` with a version tag in the compose file — every image carries the
+SpotiFLAC version it contains in its `org.opencontainers.image.version` label.
 
 **Health** — the engine appears as an `Engine` row in Settings → APIs, probing
 `/health`. It is listed only when `ENGINE_URL` is set, so an install without the

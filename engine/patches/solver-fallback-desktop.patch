@@ -1,0 +1,41 @@
+diff --git a/SpotiFLAC/core/signed_session_desktop.py b/SpotiFLAC/core/signed_session_desktop.py
+index 11c8587..d1cb117 100644
+--- a/SpotiFLAC/core/signed_session_desktop.py
++++ b/SpotiFLAC/core/signed_session_desktop.py
+@@ -8,6 +8,7 @@ import os
+ import queue
+ import re
+ import secrets
++import sys
+ import threading
+ import time
+ import urllib.parse
+@@ -165,7 +166,28 @@ def clear_community_session_credentials() -> None:
+ def _run_manual_terminal_verification(challenge_url: str) -> str:
+     """Fallback da terminale (o Docker/Telegram).
+     Mostra l'URL e attende l'input dell'utente su sys.stdin.
++
++    When stdin is not a TTY (Docker container), attempts to use the
++    external solver (TURNSTILE_SOLVER_URL) before giving up.
+     """
++    if not sys.stdin.isatty():
++        solver_url = os.environ.get("TURNSTILE_SOLVER_URL", "").rstrip("/")
++        if solver_url:
++            try:
++                resp = requests.post(
++                    f"{solver_url}/grant",
++                    json={"challenge_url": challenge_url},
++                    timeout=45,
++                )
++                resp.raise_for_status()
++                data = resp.json()
++                grant = (data.get("grant") or "").strip()
++                if grant:
++                    return grant
++            except Exception as e:
++                logger.warning(
++                    "solver fallback failed for community session: %s", e
++                )
+     try:
+         grant = input(
+             "Incolla qui il grant (da DevTools → Network → verify → Preview → field 'grant'): ",

@@ -19,6 +19,8 @@ M3U8 consistency (see docs/module-engine.md §4).
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import io
 import logging
 import os
@@ -148,6 +150,53 @@ def _discard(out: pathlib.Path) -> None:
     shutil.rmtree(out, ignore_errors=True)
 
 
+async def _prime_tidal_apis() -> None:
+    """Populate the Tidal API list, which nothing upstream does for us.
+
+    Without this, every Tidal download fails with
+    `[tidal] UNAVAILABLE: no Tidal APIs configured`, four times over — once per
+    quality tier, on a condition that cannot vary by tier. Traced 2026-07-30:
+
+      * `PROVIDER_REGISTRY` maps "tidal" to the TidalProvider *class*, so the
+        orchestrator constructs it directly. `TidalProvider.create()` — the async
+        factory that refreshes the API list — is never called anywhere in the
+        package, and neither is `prime_tidal_api_list()`.
+      * A direct construction leaves `self._apis = _TIDAL_APIS_GET`, which is
+        hardcoded `[]`. The gist that used to fill it (afkarxyz/2ce772b9…) is 404.
+      * `get_rotated_tidal_api_list()` then raises "No cached Tidal API URLs",
+        and its caller swallows that with a bare `except Exception`, falling back
+        to the same empty `self._apis`.
+      * The one path that *does* refresh the list is a background thread inside
+        `core/metadata_enrichment.py` — which we disable with
+        `enrich_metadata=False`, because tagging belongs to the Go ingestion.
+
+    So the last branch that filled the list is one we switch off ourselves.
+    Priming explicitly is the fix, and it belongs here rather than in a patch to
+    upstream's source: it is a call we fail to make, not a line they got wrong.
+
+    The list comes from their live endpoint registry, which does carry Tidal
+    entries (`tidal.post` and `community.tidal`, both non-empty, checked
+    2026-07-30). Best-effort on purpose: a failure here must not stop a Qobuz or
+    Deezer download that never needed the list.
+    """
+    try:
+        from SpotiFLAC.providers.tidal import prime_tidal_api_list
+
+        # Sync in the version this fork pins, async from 1.5.6 on (they merged the
+        # sync/async pair). Dispatch on the signature so the same shim works either
+        # side of that bump — awaiting the sync one raises TypeError, and calling
+        # the async one without awaiting does nothing at all. Both fail quietly,
+        # which is the worst way for this to fail.
+        if inspect.iscoroutinefunction(prime_tidal_api_list):
+            await prime_tidal_api_list()
+        else:
+            await asyncio.to_thread(prime_tidal_api_list)
+    except Exception as exc:  # noqa: BLE001 - never block a download on this
+        logging.getLogger("spotiflac-engine-shim").warning(
+            "could not prime the Tidal API list: %s", exc
+        )
+
+
 async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
     """The only engine-specific code. Rewrite this body to swap engines.
 
@@ -172,6 +221,7 @@ async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
         # After construction, not before: the client installs its own logging
         # handlers, and a filter attached earlier would not cover them.
         _quiet_engine_logs()
+        await _prime_tidal_apis()
         await client.download_track(req.spotify_url)
 
 

@@ -1,8 +1,8 @@
 # SpotiFLAC + download engine (two services).
 #
-# The engine is a fork of the SpotiFLAC Python module (see engine/FORK-MAINTENANCE.md
-# in that repo) wrapped in our HTTP shim. Our Go app sends it "download this Spotify
-# URL" and ingests the resulting FLAC — naming, tags and catalog stay ours.
+# The engine is the upstream SpotiFLAC Python package wrapped in our HTTP shim
+# (see engine/README.md). Our Go app sends it "download this Spotify URL" and
+# ingests the resulting FLAC — naming, tags and catalog stay ours.
 #
 # This file shows only the engine wiring. If you already run SpotiFLAC, add the
 # marked pieces to your existing compose rather than replacing it — in particular
@@ -40,10 +40,15 @@ services:
 
   # ── ADD: the engine ────────────────────────────────────────────────────────
   spotiflac-engine:
-    build:
-      # The fork, cloned next to this file (git clone …/SpotiFLAC-Module-Version engine-src)
-      context: ./engine-src
-      dockerfile: engine/Dockerfile
+    # Pulled, not built. There is no source checkout to keep next to this file
+    # and no build tooling needed on the host: CI publishes the image whenever
+    # upstream releases (see .github/workflows/engine-image.yml).
+    #
+    # Updating is `docker compose pull && docker compose up -d`. To pin or roll
+    # back, replace `latest` with a version tag — `docker inspect` reports the
+    # SpotiFLAC version inside any image in its org.opencontainers.image.version
+    # label.
+    image: ghcr.io/sos-pc/spotiflac-engine:latest
     container_name: spotiflac-engine
     restart: unless-stopped
     # Same uid as the app, so the FLACs it writes to /staging are readable and

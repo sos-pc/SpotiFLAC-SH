@@ -1,29 +1,74 @@
-# Engine image = THIS fork (the download engine) + our HTTP shim.
-# Built FROM the fork's source, not a pinned pip blob — so you run exactly the code
-# you can read and mod. Heavy deps (python/node/ffmpeg) live here; the Go app stays
-# a lean static binary. Never published on the host — internal compose network only.
+# Engine image = upstream's published package + our HTTP shim + our patches.
 #
-# Build context = the fork root. This file lives at engine/Dockerfile in the fork.
+# Build context is THIS directory (engine/), not a checkout of the engine's
+# source: the core now comes from PyPI. That is the point of retiring the fork —
+# see docs/upstream-tracking-plan.md §2. Heavy deps (python/node/ffmpeg) live
+# here; the Go app stays a lean static binary. Never published on the host —
+# internal compose network only.
 FROM python:3.12-slim
 
+# `patch` is NOT in python:3.12-slim and is needed below. The rest is runtime:
+# ffmpeg/flac for audio, nodejs for the engine's JS extension route
+# (ext:tidal-web, which is what carries tokenless Tidal).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates ffmpeg flac nodejs \
+        ca-certificates ffmpeg flac nodejs patch \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install the fork's own package from source, then its root requirements.txt,
-# then ours.
+# Which version to install. CI resolves it from PyPI — the same call its
+# staleness check already makes — and passes it here, so the image tag, the OCI
+# label and the installed package cannot disagree. Left empty by default so a
+# manual `docker build` still works, taking whatever is current.
+ARG SPOTIFLAC_VERSION=
+
+# Two installs, and the second is not optional.
 #
-# All three are needed: `pip install .` only pulls pyproject's [project]
-# dependencies, which are NOT the engine's full runtime set — the root
-# requirements.txt additionally lists `nodriver`, and `requests` is missing from
-# both (our engine/requirements.txt fills that gap; see the note there).
-# Installing only the package fails at import time.
-COPY . .
-RUN pip install --no-cache-dir . \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir -r engine/requirements.txt
+# The wheel's metadata declares fewer dependencies than the project actually
+# imports: as of 1.5.9 `nodriver`, `pydoll-python` and `aiogram` appear only in
+# the repo's requirements.txt. Without them `from SpotiFLAC import AsyncSpotiFLAC`
+# raises ModuleNotFoundError outright — not a lazily-hit path, the package simply
+# does not import (verified in a clean venv, 2026-07-30).
+#
+# So: install the package, ask it which version actually landed, then fetch THAT
+# tag's requirements.txt from upstream and install that too. Upstream stays the
+# source of truth for its own dependency list — we never copy it here, and it is
+# precisely the file they keep fixing ("Missing requirements", "Update
+# requirements.txt"). urllib rather than curl: already present, so no extra
+# package, and it raises on a 404 instead of silently writing an error page.
+RUN if [ -n "$SPOTIFLAC_VERSION" ]; then SPEC="SpotiFLAC==$SPOTIFLAC_VERSION"; else SPEC="SpotiFLAC<2"; fi \
+    && pip install --no-cache-dir "$SPEC" \
+    && V="$(python -c 'import importlib.metadata as m; print(m.version("SpotiFLAC"))')" \
+    && echo "installed SpotiFLAC $V" \
+    && python -c "import urllib.request,sys; urllib.request.urlretrieve('https://raw.githubusercontent.com/BartolomeoRusso9/SpotiFLAC-Module-Version/v%s/requirements.txt' % sys.argv[1], '/tmp/upstream-requirements.txt')" "$V" \
+    && pip install --no-cache-dir -r /tmp/upstream-requirements.txt \
+    && rm -f /tmp/upstream-requirements.txt
+
+# Our own deps (FastAPI + uvicorn for the shim).
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Patches applied to the installed package, in site-packages.
+#
+# This is what replaces carrying a fork. A patch that stops applying fails the
+# build, loudly, right here — the property a scheduled drift-checker was meant to
+# provide, obtained for free and sooner. --dry-run first so a bad patch cannot
+# leave a half-modified tree behind. An empty patches/ is fine: the loop no-ops.
+COPY patches/ /tmp/patches/
+RUN SITE="$(python -c 'import SpotiFLAC, pathlib; print(pathlib.Path(SpotiFLAC.__file__).parent.parent)')" \
+    && for p in /tmp/patches/*.patch; do \
+         [ -e "$p" ] || continue; \
+         echo "applying $(basename "$p")"; \
+         patch -p1 -d "$SITE" --dry-run < "$p" && patch -p1 -d "$SITE" < "$p"; \
+       done \
+    && rm -rf /tmp/patches
+
+# Fail the build rather than ship an image that cannot import its own core.
+# Cheap, and it catches the exact class of breakage that reached production
+# before: a dependency the wheel does not declare.
+RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; import nodriver, pydoll; print('import check OK')"
+
+COPY shim.py /app/shim.py
 
 # Non-root, same uid as the Go service so FLACs written to the shared /staging
 # volume are readable/movable by it. HOME set explicitly (numeric uid, no passwd).
@@ -40,6 +85,6 @@ ENV HOME=/home/nonroot
 ENV ENGINE_PORT=8080
 
 EXPOSE 8080
-# shim.py lives at engine/shim.py; --app-dir puts it on sys.path. The engine package
-# itself was pip-installed above, so `from SpotiFLAC import ...` resolves globally.
-CMD ["sh", "-c", "uvicorn shim:app --app-dir /app/engine --host 0.0.0.0 --port ${ENGINE_PORT}"]
+# shim.py sits at /app/shim.py; --app-dir puts it on sys.path. The engine package
+# was pip-installed above, so `from SpotiFLAC import ...` resolves globally.
+CMD ["sh", "-c", "uvicorn shim:app --app-dir /app --host 0.0.0.0 --port ${ENGINE_PORT}"]
