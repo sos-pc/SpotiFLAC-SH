@@ -87,8 +87,24 @@ RUN apt-get update && \
         xz-utils && \
     rm -rf /var/lib/apt/lists/*
 
-ARG FFMPEG_BUILD_TAG=autobuild-2026-07-11-13-13
-ARG FFMPEG_ASSET=ffmpeg-N-125519-g300cac3078-linux64-lgpl.tar.xz
+# The `latest` release tag, not a dated autobuild.
+#
+# BtbN prunes its autobuild-* releases: only ~8 days of them exist at any time,
+# so pinning to one guaranteed a broken build within about a week. It duly broke
+# on 2026-07-31 — `autobuild-2026-07-11-13-13` returned 404 for the release
+# itself, eleven minutes after the previous build of this branch had succeeded
+# against it.
+#
+# `latest` is never pruned and carries stable asset filenames. Taking the
+# `n8.1-latest` asset rather than `master-latest` keeps us on the 8.1 release
+# line — patch updates within it, no surprise major jump.
+#
+# We lose exact reproducibility across time, but less than it looks: the
+# checksum was always fetched from the same release as the tarball, so it
+# verified the download's integrity, never which build we got. That property is
+# unchanged.
+ARG FFMPEG_BUILD_TAG=latest
+ARG FFMPEG_ASSET=ffmpeg-n8.1-latest-linux64-lgpl-8.1.tar.xz
 WORKDIR /tmp/ffmpeg
 RUN curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/${FFMPEG_ASSET}" && \
     curl -fLO "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD_TAG}/checksums.sha256" && \
