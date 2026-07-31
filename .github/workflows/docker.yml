@@ -4,9 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+    # One publication branch (main, released by tag) and feature branches, which
+    # each publish their own image so a change can be tested before it lands.
+    # `dev2` was deleted in v4.0.0: it had drifted 218 commits behind the branch
+    # the work was actually happening on, which is what a dev branch that is not
+    # the working branch always does.
     branches:
-      - dev
-      - dev2
       - 'feature/**'
   workflow_dispatch:
 
@@ -131,7 +134,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=ref,event=branch
-            type=raw,value=dev2,enable=${{ github.ref == 'refs/heads/dev2' }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

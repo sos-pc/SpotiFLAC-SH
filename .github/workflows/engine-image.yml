@@ -26,7 +26,7 @@ on:
     # PyPI version against the published label, so it cannot notice that OUR
     # shim, patches or Dockerfile changed. Without this, an engine/ change
     # merged to main would sit unbuilt until upstream happened to release.
-    branches: [main, dev2, "feature/**"]
+    branches: [main, "feature/**"]
     paths:
       - "engine/**"
       - ".github/workflows/engine-image.yml"
