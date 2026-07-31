@@ -170,8 +170,33 @@ An engine-sourced file is indistinguishable from a natively downloaded one.
 |---|---|
 | **Qobuz** | works — the provider that failed ~80% on our ISRC path. Full-length FLAC, correct tags, ~6–30 s |
 | **Deezer** | works — 4/4 on a Charlie Parker album (46–61 MB each). One route 502s, others take over |
+| **Tidal (tokenless)** | works, but only via the `ext:tidal-web` fallback — see below |
 | **Ingestion** | verified on disk: our folder tree, our tags, `SPOTIFY_ID`, genre, cover, staging cleaned |
 | **Tracks absent from the catalogue** | still fail (`TRACK_NOT_FOUND`) — no setting changes that |
+
+**Tidal's direct API route is dead upstream, and the fallback carries it.**
+Measured 2026-07-31, three tracks, all successful:
+
+```
+✗ tidal · proxy · HTTP 404 Not Found
+✗ tidal ·       · HTTP 410 - The v1 download API has been retired.
+  [tidal] UNAVAILABLE: All Tidal APIs failed (of 2 total, 0 in cooldown).
+⚠️  Fallback: switching to backup extension (ext:tidal-web)...
+```
+
+Both endpoints in upstream's registry are gone — one 404s, the other answers
+**410 Gone**: its v1 download API has been retired. Nothing on our side fixes
+that; it is their endpoint table, and they are active enough that it will
+probably move on its own.
+
+Two things this is worth knowing for. First, `ext:tidal-web` is not a nicety —
+it is the only working tokenless Tidal path, so the JS extension route and the
+`nodejs` package the image installs for it are load-bearing. Second, the error
+finally *says* something: it used to read `no Tidal APIs configured`, which was
+our own omission (the API list was never primed — fixed in `shim.py`'s
+`_prime_tidal_apis`). Reaching a real endpoint and being told it is retired is a
+different, more useful failure — and it got faster, 58 s and 28 s against 68 s
+before.
 
 **Hi-res is opportunistic.** Much of the catalogue exists only in 16/44.1, and a
 strict 24-bit request on such a track fails outright (observed: a bare HTTP 500
