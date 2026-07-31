@@ -1,0 +1,49 @@
+# Upstream files we deliberately do NOT watch — for check-upstream.sh.
+#
+# Format: <upstream-path-relative-to-backend/>|<reason>
+#
+# EVERYTHING NOT LISTED HERE IS WATCHED. That direction is the point: a new
+# upstream file — a new provider, a new feature — is reported the first time it
+# changes, without anyone having to remember to add it to a list. Only the
+# things we have decided to stop caring about need writing down, and each one
+# is a decision with a date attached.
+#
+# This replaces .github/upstream-map.txt, which classified all ~46 upstream
+# files and required a local path for each of the ~30 we did watch. Eight of
+# those paths went stale the moment we deleted the code they pointed at, and
+# reported "MAPPED changed, go look" at directories that no longer existed. An
+# ignore list has nothing to rot: it names upstream files only.
+#
+# Before adding a line, be sure the reason is "we chose not to have this", not
+# "we have not looked yet". The second is what the report is for.
+
+# ── Providers delegated to the download engine (cleanup plan items 3–5) ──────
+# We deleted our native implementations on purpose; the engine carries these
+# now, with more routes and third-party maintenance. Porting upstream's work
+# here would be undoing that decision.
+amazon.go|native Amazon downloader deleted — engine-only provider
+qobuz.go|native Qobuz downloader deleted — engine-only provider
+qobuz_api.go|part of the deleted native Qobuz path
+qobuz_community.go|part of the deleted native Qobuz path
+tidal_community.go|Tidal community proxy fallback removed (item 10) — previews only, could never succeed
+
+# ── The community-session plumbing those providers needed ───────────────────
+community_apikey.go|backend/community deleted with the providers it served
+community_endpoints.go|idem — and its AES-GCM encrypted proxy URLs are deliberately never decrypted
+community_session.go|idem — the solver now answers the engine, not our Go
+provider_endpoints.go|per-provider endpoint table for providers we no longer implement
+
+# ── Cross-platform link resolution, removed with Song.link (item 7) ──────────
+# The engine resolves from the Spotify URL internally, so cross-platform links
+# stopped being something we need at all.
+link_resolver.go|Song.link removed — engine resolves internally
+songlink.go|idem
+songstats.go|idem — one of the resolvers link_resolver orchestrated
+
+# ── DRM ─────────────────────────────────────────────────────────────────────
+mp4ff_decrypt.go|Widevine/CENC decryption left with the native Amazon downloader; not reimplemented here
+
+# ── Desktop-only (Wails) — never applicable to a web server ─────────────────
+file_dialog.go|native file picker, desktop build only
+fileicon_darwin.go|macOS icon extraction, desktop build only
+fileicon_stub.go|build stub for the above

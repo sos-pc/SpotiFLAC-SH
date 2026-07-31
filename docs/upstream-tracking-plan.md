@@ -337,16 +337,33 @@ Eight stale entries, each reporting "MAPPED changed, go look" at a local copy
 that doesn't exist, forever — `dead-code-removal-plan.md` §7.6 predicted exactly
 this.
 
-**Replace the file with a whitelist of the directories we still actually port
-ideas from:** `spotify/` (metadata, TOTP), `meta/` (tagging, MusicBrainz,
-lyrics), `util/`, Tidal auth. Nothing else in spotbye is a port candidate any
-more — its Qobuz/Amazon/Deezer churn is exactly what item 3–5 of the cleanup
-plan deleted from our side on purpose. A four-path whitelist self-maintains the
-way the old map couldn't: delete a local package, delete a line.
+**Done 2026-07-30 — but not as a whitelist.** That was the plan until it was
+measured against upstream's actual layout rather than ours:
 
-Not built yet: the whitelist file itself, and whatever's left of the classifier
-once it only has four paths to check (likely simple enough to fold into a
-single script, replacing both the standalone one and the inline workflow copy).
+```bash
+git ls-tree -r --name-only upstream/main -- backend/ | grep -c '\.go$'   # 46
+git ls-tree -d --name-only upstream/main -- backend/                     # (empty)
+```
+
+**spotbye's `backend/` is flat** — 46 `.go` files, no subdirectories.
+`spotify/`, `meta/`, `util/` are *our* directory names, not theirs, so a
+whitelist of directories had nothing to match on. Sorting their files by topic
+instead gives 30 to watch against 16 to ignore, so the ignore list is both
+smaller and — decisively — **fails in the right direction**: a new upstream file
+is watched by default instead of silently unwatched. Keeping that property was
+the whole reason the old script auto-discovered files rather than listing them.
+
+So: `.github/upstream-ignore.txt`, 16 entries, each `path|reason`. Nothing in it
+names a local path, so nothing in it can rot the way the eight `MAPPED` entries
+did. `upstream-map.txt` deleted.
+
+The duplication went too: `check-upstream.sh` is now the single implementation
+and the workflow calls it (`--github` emits step outputs). 449 lines across three
+files became 330 across three, with one copy of the logic instead of two.
+
+And the backlog mechanism: when everything that changed is ignored, there is no
+decision for a human to make, so the workflow advances the baseline itself. That
+is what stops 35 commits from piling up again.
 
 ## 6. Order of work
 
@@ -360,8 +377,8 @@ single script, replacing both the standalone one and the inline workflow copy).
    + build CI workflow (§2.5).
 5. Switch the example compose from `build: ./engine-src` to `image:
    ghcr.io/sos-pc/spotiflac-engine`.
-6. Replace `upstream-map.txt` + the duplicated classifier with the spotbye
-   whitelist (§5).
+6. ~~Replace `upstream-map.txt` + the duplicated classifier~~ ✅ done (§5) —
+   as an ignore list, not a whitelist; see the measurement there.
 
 ## 7. Superseded first draft (kept for the record)
 

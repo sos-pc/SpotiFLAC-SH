@@ -1,5 +1,13 @@
 name: Check Upstream Changes
 
+# Watches spotbye/SpotiFLAC — the origin of our Go code. It is a PORT SOURCE, not
+# a dependency: we read it for ideas, we never merge it. (The engine, which IS a
+# dependency, is handled by engine-image.yml — different problem, different shape.)
+#
+# All the logic lives in ./check-upstream.sh so there is one implementation and
+# it can be run locally, which is where triage actually happens. This file used
+# to reimplement it inline; the two had already drifted apart.
+
 on:
   schedule:
     - cron: '0 8 * * 1'
@@ -14,181 +22,99 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Add upstream remote
-        run: |
-          git remote add upstream https://github.com/spotbye/SpotiFLAC.git
-          git fetch upstream --quiet
+        run: git remote add upstream https://github.com/spotbye/SpotiFLAC.git
 
-      - name: Run upstream watch
+      - name: Compare against the reviewed baseline
         id: check
+        run: ./check-upstream.sh --github
+
+      # Nothing we watch moved, but upstream did. There is no decision to make,
+      # so the marker advances on its own — this is what stops a backlog forming
+      # (35 commits sat un-triaged for ten days before this existed).
+      - name: Advance baseline (nothing watched changed)
+        if: steps.check.outputs.can_auto_advance == 'true'
         run: |
-          MAP_FILE=".github/upstream-map.txt"
-          BASELINE_FILE=".github/upstream-last-reviewed.txt"
-
-          UPSTREAM_HEAD=$(git rev-parse upstream/main)
-          UPSTREAM_DATE=$(git log -1 --format="%ci" upstream/main)
-          BASELINE=$(cat "$BASELINE_FILE")
-
-          echo "upstream_head=${UPSTREAM_HEAD:0:8}" >> $GITHUB_OUTPUT
-
-          if [[ "$UPSTREAM_HEAD" == "$BASELINE" ]]; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          COMMIT_COUNT=$(git rev-list --count "${BASELINE}..upstream/main")
-
-          # ── Commits : séparer code vs docs-only ─────────────────────────────
-          CODE_COMMITS=""
-          CODE_COMMIT_COUNT=0
-          DOC_ONLY_COUNT=0
-          for SHA in $(git rev-list "${BASELINE}..upstream/main" --reverse); do
-            TOUCHED=$(git show --name-only --format="" "$SHA")
-            NON_DOC=$(echo "$TOUCHED" | grep -vE '^(README\.md|docs/|\.github/)' || true)
-            if [[ -n "$NON_DOC" ]]; then
-              MSG=$(git log -1 --format="%h %s" "$SHA")
-              CODE_COMMITS="${CODE_COMMITS}- ${MSG}\n"
-              ((CODE_COMMIT_COUNT++)) || true
-            else
-              ((DOC_ONLY_COUNT++)) || true
-            fi
-          done
-
-          if [[ "$CODE_COMMIT_COUNT" -eq 0 ]]; then
-            # Rien que du README/docs — pas la peine de créer/mettre à jour une issue,
-            # mais on avance le marqueur pour ne pas les revoir la semaine prochaine.
-            echo "$UPSTREAM_HEAD" > "$BASELINE_FILE"
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add "$BASELINE_FILE"
-            git commit -m "chore(upstream): mark ${UPSTREAM_HEAD:0:8} as reviewed (docs-only commits)"
-            git push
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # ── Classification ───────────────────────────────────────────────────
-          declare -A MAP_STATUS
-          declare -A MAP_NOTE
-          while IFS='|' read -r path status note; do
-            [[ -z "$path" || "$path" == \#* ]] && continue
-            MAP_STATUS["$path"]="$status"
-            MAP_NOTE["$path"]="$note"
-          done < "$MAP_FILE"
-
-          UPSTREAM_FILES=$(git ls-tree -r --name-only upstream/main -- backend/ | grep '\.go$' || true)
-          UPSTREAM_FILES="${UPSTREAM_FILES}
-          $(git ls-tree upstream/main -- app.go main.go | awk '{print $4}')"
-
-          MAPPED_CHANGED=""
-          UNMAPPED_CHANGED=""
-          IGNORED_COUNT=0
-          MAPPED_UNCHANGED_COUNT=0
-
-          while IFS= read -r FULLPATH; do
-            [[ -z "$FULLPATH" ]] && continue
-            KEY="$FULLPATH"
-            [[ "$FULLPATH" == backend/* ]] && KEY="${FULLPATH#backend/}"
-
-            STATUS="${MAP_STATUS[$KEY]:-UNMAPPED}"
-            NOTE="${MAP_NOTE[$KEY]:-needs manual triage — not yet classified in $MAP_FILE}"
-
-            if [[ "$STATUS" == "IGNORE" ]]; then
-              ((IGNORED_COUNT++)) || true
-              continue
-            fi
-
-            DIFF_OUTPUT=$(git diff "${BASELINE}" upstream/main -- "$FULLPATH" 2>/dev/null || true)
-            if [[ -z "$DIFF_OUTPUT" ]]; then
-              [[ "$STATUS" == "MAPPED" ]] && ((MAPPED_UNCHANGED_COUNT++)) || true
-              continue
-            fi
-
-            ADDED=$(echo "$DIFF_OUTPUT" | grep -c '^+[^+]' || true)
-            REMOVED=$(echo "$DIFF_OUTPUT" | grep -c '^-[^-]' || true)
-            LINE="- \`${FULLPATH}\` (+${ADDED}/-${REMOVED}) → ${NOTE}\n"
-
-            if [[ "$STATUS" == "MAPPED" ]]; then
-              MAPPED_CHANGED="${MAPPED_CHANGED}${LINE}"
-            else
-              UNMAPPED_CHANGED="${UNMAPPED_CHANGED}${LINE}"
-            fi
-          done <<< "$UPSTREAM_FILES"
-
-          GOMOD_DIFF=$(git diff "${BASELINE}" upstream/main -- go.mod 2>/dev/null | grep -E '^[+-][^+-]' || true)
-
-          cat > /tmp/issue_body.md << MDEOF
-          ## 🔄 État upstream — [spotbye/SpotiFLAC](https://github.com/spotbye/SpotiFLAC)
-
-          Cette issue reflète toujours l'état courant (mise à jour en place, pas de nouvelle issue à chaque run).
-
-          **Upstream HEAD :** \`${UPSTREAM_HEAD:0:8}\` — ${UPSTREAM_DATE:0:10}
-          **Baseline (dernier triage) :** \`${BASELINE:0:8}\`
-          **Commits depuis la baseline :** ${COMMIT_COUNT} (${CODE_COMMIT_COUNT} de code, ${DOC_ONLY_COUNT} README/docs-only masqués)
-
-          ---
-
-          ### Commits de code
-          $(echo -e "$CODE_COMMITS")
-
-          ---
-
-          ### 🔴 Fichiers MAPPED modifiés — on sait où regarder
-          $(echo -e "$MAPPED_CHANGED")
-
-          ### 🟠 Fichiers UNMAPPED modifiés — triage manuel requis
-          > Pas encore classés dans \`.github/upstream-map.txt\`. Chacun est soit à
-          > mapper vers un fichier local existant, soit à marquer \`IGNORE\` avec une
-          > raison, soit un vrai gap fonctionnel à évaluer.
-
-          $(echo -e "$UNMAPPED_CHANGED")
-
-          ${MAPPED_UNCHANGED_COUNT} fichiers mappés inchangés · ${IGNORED_COUNT} fichiers ignorés (desktop-only, voir \`.github/upstream-map.txt\`)
-
-          $(if [[ -n "$GOMOD_DIFF" ]]; then echo "### go.mod — dépendances upstream modifiées"; echo '```diff'; echo "$GOMOD_DIFF"; echo '```'; fi)
-
-          ---
-
-          ### Une fois trianger
-          \`\`\`bash
-          ./check-upstream.sh --verbose   # revoir les diffs en local
-          echo ${UPSTREAM_HEAD} > .github/upstream-last-reviewed.txt
+          set -euo pipefail
+          echo "${{ steps.check.outputs.upstream_head }}" > .github/upstream-last-reviewed.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/upstream-last-reviewed.txt
-          git commit -m "chore(upstream): mark ${UPSTREAM_HEAD:0:8} as reviewed"
-          \`\`\`
+          git commit -m "chore(upstream): mark ${{ steps.check.outputs.upstream_short }} as reviewed (nothing watched changed)"
+          git push
 
-          Pour un fichier UNMAPPED qui s'avère pertinent, l'ajouter à \`.github/upstream-map.txt\`
-          (\`MAPPED|chemin local\`) plutôt que de le laisser en triage permanent.
-
-          ---
-          *Mis à jour automatiquement — [upstream-check.yml](../.github/workflows/upstream-check.yml)*
-          MDEOF
-
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-
+      # One issue, updated in place. A new one per run would be noise, and the
+      # question it asks is always the same one.
       - name: Upsert tracking issue
         if: steps.check.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_HEAD: ${{ steps.check.outputs.upstream_head }}
+          UPSTREAM_SHORT: ${{ steps.check.outputs.upstream_short }}
+          COMMIT_COUNT: ${{ steps.check.outputs.commit_count }}
+          WATCHED_COUNT: ${{ steps.check.outputs.watched_count }}
+          IGNORED_COUNT: ${{ steps.check.outputs.ignored_count }}
+          WATCHED_FILES: ${{ steps.check.outputs.watched_files }}
         run: |
-          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream-sync --state open --json number --jq '.[0].number // empty')
-          TITLE="[Upstream Watch] spotbye/SpotiFLAC @ ${{ steps.check.outputs.upstream_head }}"
+          set -euo pipefail
+          BASELINE_SHORT=$(cut -c1-8 .github/upstream-last-reviewed.txt)
 
-          if [[ -n "$EXISTING" ]]; then
-            gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue_body.md
-            echo "Updated existing issue #${EXISTING}"
+          cat > /tmp/issue.md <<EOF
+          ## 🔄 Upstream — [spotbye/SpotiFLAC](https://github.com/spotbye/SpotiFLAC)
+
+          Updated in place; this issue always reflects the current state.
+
+          **HEAD** \`${UPSTREAM_SHORT}\` · **baseline** \`${BASELINE_SHORT}\` · **${COMMIT_COUNT}** commit(s)
+
+          ${WATCHED_COUNT} watched file(s) changed · ${IGNORED_COUNT} ignored by
+          [\`upstream-ignore.txt\`](../blob/main/.github/upstream-ignore.txt)
+
+          ---
+
+          ### Worth a look
+
+          ${WATCHED_FILES}
+
+          ---
+
+          ### Triaging
+
+          \`\`\`bash
+          ./check-upstream.sh --verbose    # the diffs, locally
+          echo ${UPSTREAM_HEAD} > .github/upstream-last-reviewed.txt
+          git commit -am "chore(upstream): reviewed ${UPSTREAM_SHORT}"
+          \`\`\`
+
+          Decided we do not want one of these at all? Add it to
+          \`.github/upstream-ignore.txt\` with a reason — that is how it stops
+          coming back, and the reason is the record of the decision.
+
+          ---
+          *[upstream-check.yml](../blob/main/.github/workflows/upstream-check.yml)*
+          EOF
+
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream-sync \
+                       --state open --json number --jq '.[0].number // empty')
+          TITLE="[Upstream] spotbye/SpotiFLAC @ ${UPSTREAM_SHORT}"
+
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue.md
+            echo "updated issue #${EXISTING}"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue_body.md --label upstream-sync
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+              --body-file /tmp/issue.md --label upstream-sync
           fi
 
       - name: Summary
         run: |
-          if [[ "${{ steps.check.outputs.has_changes }}" == "false" ]]; then
-            echo "✅ Rien à signaler (déjà à jour, ou uniquement des commits docs-only déjà absorbés)."
+          if [ "${{ steps.check.outputs.has_changes }}" = "true" ]; then
+            echo "⚠️ ${{ steps.check.outputs.watched_count }} watched file(s) changed — issue updated." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.check.outputs.can_auto_advance }}" = "true" ]; then
+            echo "✅ ${{ steps.check.outputs.commit_count }} commit(s), none touching anything we watch — baseline advanced." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "⚠️ Changements upstream pertinents. Issue upstream-sync mise à jour."
+            echo "✅ Already at the reviewed baseline." >> "$GITHUB_STEP_SUMMARY"
           fi
