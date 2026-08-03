@@ -4,11 +4,32 @@ This directory builds `ghcr.io/sos-pc/spotiflac-engine`: upstream's published
 package plus our HTTP shim, plus whatever patches upstream has not adopted yet.
 
 ```
-Dockerfile          builds the image (context = this directory)
-shim.py             the engine-agnostic HTTP adapter the Go app calls
-requirements.txt    the shim's own deps
-patches/*.patch     applied to the installed package at build time
+Dockerfile            builds the image (context = this directory)
+docker-entrypoint.sh  starts Xvfb, then hands over to uvicorn
+shim.py               the engine-agnostic HTTP adapter the Go app calls
+requirements.txt      the shim's own deps
+patches/*.patch       applied to the installed package at build time
 ```
+
+## The image must carry a browser
+
+Several provider routes drive Chromium through `pydoll`. Upstream's own
+Dockerfile therefore installs `xvfb`, `chromium` and `fonts-liberation`, sets
+`DISPLAY=:99`, and starts Xvfb in its entrypoint before the application.
+
+Ours did none of that for a while: the package list here was ported from theirs
+with those three dropped. Nothing caught it, because the gap only surfaces when
+a route actually reaches for a browser, and it surfaces as
+`[Errno 2] No such file or directory: 'Xvfb'` — which reads like an engine bug
+rather than our packaging.
+
+Two consequences worth keeping in mind:
+
+- **`shm_size: 1g` is required in compose.** Chromium puts renderer shared
+  memory in `/dev/shm` and crashes on Docker's 64 MB default. Upstream's run
+  example passes `--shm-size=1g` for the same reason.
+- **Do not set `read_only: true` on this service.** It writes JS extensions, a
+  browser profile and the X socket.
 
 ## Why there is no fork any more
 

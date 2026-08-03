@@ -63,6 +63,12 @@ services:
     # would hang the download waiting for a human. (Observed 2026-07-23.)
     stdin_open: false
     tty: false
+    # Chromium — which several provider routes drive through pydoll — puts its
+    # renderer shared memory in /dev/shm. Docker's 64 MB default is well under
+    # what it needs and it crashes on a blank tab; upstream's own run example
+    # passes --shm-size=1g for exactly this. Not optional once a route opens a
+    # browser.
+    shm_size: 1g
     volumes:
       - spotiflac_staging:/staging
       - engine_cache:/home/nonroot/.cache

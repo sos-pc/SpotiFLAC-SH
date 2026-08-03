@@ -7,11 +7,22 @@
 # internal compose network only.
 FROM python:3.12-slim
 
-# `patch` is NOT in python:3.12-slim and is needed below. The rest is runtime:
-# ffmpeg/flac for audio, nodejs for the engine's JS extension route
-# (ext:tidal-web, which is what carries tokenless Tidal).
+# This list is upstream's own Dockerfile list, plus `patch` (not in
+# python:3.12-slim, needed below). Runtime roles, in their words:
+#   ffmpeg/flac        audio processing
+#   nodejs             the JS extension route (ext:tidal-web carries tokenless Tidal)
+#   xvfb               the virtual display — "MANDATORY for Chromium even without VNC"
+#   chromium + fonts   the browser pydoll drives, and web fonts
+#
+# The last three were missing here for a while: we had ported their package list
+# and dropped them. Nothing in the shim revealed it, because the failure only
+# appears when a provider route actually reaches for a browser, and then it reads
+# `[Errno 2] No such file or directory: 'Xvfb'` — which looks like an engine bug
+# rather than our packaging. Chromium is most of this image's size; it is also
+# what several provider routes are.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates ffmpeg flac nodejs patch \
+        xvfb chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -79,12 +90,23 @@ COPY shim.py /app/shim.py
 # root:root and this container (uid 1000) cannot write the downloaded file into
 # it — and neither can the Go app, which has to move the file out and delete the
 # job dir. A bind mount hides the problem only because you chown it by hand.
-RUN mkdir -p /home/nonroot/.cache /staging && chown -R 1000:1000 /home/nonroot /app /staging
+#
+# /tmp/.X11-unix is created here for the same reason: Xvfb runs as uid 1000 and
+# has to create its socket there.
+RUN mkdir -p /home/nonroot/.cache /staging /tmp/.X11-unix \
+    && chown -R 1000:1000 /home/nonroot /app /staging /tmp/.X11-unix
 USER 1000:1000
 ENV HOME=/home/nonroot
 ENV ENGINE_PORT=8080
 
+# Matches upstream's image. Set before the entrypoint starts Xvfb on the same
+# display, so solver._ensure_xvfb() sees a display and never spawns its own.
+ENV DISPLAY=:99
+
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 8080
 # shim.py sits at /app/shim.py; --app-dir puts it on sys.path. The engine package
 # was pip-installed above, so `from SpotiFLAC import ...` resolves globally.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["sh", "-c", "uvicorn shim:app --app-dir /app --host 0.0.0.0 --port ${ENGINE_PORT}"]
