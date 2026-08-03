@@ -1,0 +1,37 @@
+Fix an unformatted template string in Amazon's SongLink resolver.
+
+`source_url` is a module-level constant (amazon.py:59):
+
+    source_url = "https://open.spotify.com/track/{track_id}"
+
+Nothing ever calls .format() on it, so resolution step 4 puts the literal
+placeholder on the wire and every request 400s:
+
+    links?url=https://open.spotify.com/track/{track_id}&userCountry=US
+
+Observed in production 2026-08-04 on four separate tracks; the route has
+never succeeded for any track. `track_id` is in scope here — the same
+function's failure message at the end of the chain prints the real value.
+
+Not a missing f-prefix: the string is defined at module level where
+`track_id` does not exist, so an f-string there would raise NameError at
+import. The template is deliberate; only the substitution is missing.
+
+Worth knowing: the ISRC variant just below (step 5) is correctly formatted
+and still returns 400, so song.link may be refusing us regardless. This
+fixes the bug either way — a route that cannot possibly work is worse than
+one that merely might not.
+
+diff --git a/SpotiFLAC/providers/amazon.py b/SpotiFLAC/providers/amazon.py
+--- a/SpotiFLAC/providers/amazon.py
++++ b/SpotiFLAC/providers/amazon.py
+@@ -476,7 +476,8 @@
+
+         # 4. SONGLINK API (Spotify ID)
+         try:
+-            sl_api_url = f"https://api.song.link/v1-alpha.1/links?url={source_url}&userCountry=US"
++            spotify_url = source_url.format(track_id=track_id)
++            sl_api_url = f"https://api.song.link/v1-alpha.1/links?url={spotify_url}&userCountry=US"
+             resp = await self._async_http.get(sl_api_url, timeout=15)
+             data = resp.json()
+             links = data.get("linksByPlatform", {})
