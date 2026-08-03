@@ -4,3 +4,9 @@
 # on every platform so the comparison doesn't break under core.autocrlf=true
 # (the failure mode observed on Windows worktrees).
 backend/spotify/testdata/** text eol=lf
+
+# Shell scripts are COPY'd into Linux images and executed there. Under
+# core.autocrlf=true a Windows checkout would give them CRLF endings, and the
+# kernel then reads the shebang as `/usr/bin/env sh\r` — "bad interpreter", at
+# container start, only for whoever built locally on Windows. CI never sees it.
+*.sh text eol=lf
