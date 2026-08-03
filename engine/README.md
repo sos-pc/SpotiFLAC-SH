@@ -57,6 +57,18 @@ cleanly while silently going stale — a worse failure than a conflict.
   same call site, reformatted. It was dropped rather than duplicated. The
   desktop one may well go the same way; no PR was opened for either.
 
+- **`amazon-songlink-unformatted-url.patch`** — `amazon.py`: `source_url` is a
+  module-level template, `"https://open.spotify.com/track/{track_id}"`, and
+  nothing calls `.format()` on it. Amazon resolution step 4 therefore put the
+  literal `{track_id}` on the wire and took an HTTP 400 every time; the route had
+  never resolved a single track. Found in production logs 2026-08-04.
+
+  Not a missing `f` prefix — the constant is defined where `track_id` is not in
+  scope, so an f-string there would raise `NameError` at import. Only the
+  substitution is missing. The ISRC variant just below it is correctly formatted
+  and still 400s, so this removes a route that could not work rather than
+  guaranteeing one that does.
+
 **When upstream adopts a patch**, `patch --dry-run` reports "Reversed (or
 previously applied)" and the build fails. That is the signal to delete the file.
 
