@@ -55,13 +55,32 @@ jobs:
         id: published
         run: |
           set -uo pipefail
-          # Anonymous read of a public image's config labels; no pull. "none"
-          # covers the first run, when :latest does not exist yet.
-          v=$(docker buildx imagetools inspect \
-                "${REGISTRY}/${IMAGE_NAME}:latest" \
-                --format '{{json .Config.Labels}}' 2>/dev/null \
-              | jq -r '.["org.opencontainers.image.version"] // "none"') || v="none"
-          [ -n "$v" ] || v="none"
+          # Read the label straight off the registry: anonymous, no pull, three
+          # small requests. "none" covers the first run (no :latest yet) and any
+          # failure — never guess a version, just rebuild.
+          #
+          # NOT `docker buildx imagetools inspect --format '{{json .Config.Labels}}'`:
+          # :latest is a multi-platform OCI index and .Config is empty on an
+          # index, so that returned "none" every run and rebuilt the image every
+          # 30 minutes for half a day before anyone looked. Walk
+          # index -> platform manifest -> config blob, which is what that command
+          # does internally anyway.
+          IMG="${IMAGE_NAME}"
+          ACCEPT='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
+          v=none
+          if TOKEN=$(curl -fsS "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMG}:pull" | jq -er .token); then
+            if M=$(curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" "https://ghcr.io/v2/${IMG}/manifests/latest"); then
+              D=$(echo "$M" | jq -r 'if .manifests then (.manifests[]|select(.platform.architecture=="amd64")|.digest) else empty end' | head -1)
+              if [ -n "$D" ]; then
+                M=$(curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" "https://ghcr.io/v2/${IMG}/manifests/${D}") || M=""
+              fi
+              C=$(echo "$M" | jq -r '.config.digest // empty')
+              if [ -n "$C" ]; then
+                v=$(curl -fsSL -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/${IMG}/blobs/${C}" | jq -r '.config.Labels["org.opencontainers.image.version"] // "none"') || v=none
+              fi
+            fi
+          fi
+          [ -n "$v" ] || v=none
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "published: $v"
 
