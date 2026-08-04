@@ -51,7 +51,6 @@ func ProbeDuration(filePath string) (float64, error) {
 		filePath,
 	)
 	cmd := exec.Command(ffprobePath, args...)
-	setHideWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("ffprobe failed: %w - %s", err, string(output))

@@ -14,10 +14,6 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
-// setHideWindow is a no-op on Linux (Docker target). On Windows it would hide
-// the console window of spawned subprocesses; that build target is not supported.
-func setHideWindow(_ *exec.Cmd) {}
-
 func IsFFprobeInstalled() (bool, error) {
 	ffprobePath, err := util.GetFFprobePath()
 	if err != nil {
@@ -29,7 +25,6 @@ func IsFFprobeInstalled() (bool, error) {
 	}
 
 	cmd := exec.Command(ffprobePath, "-version")
-	setHideWindow(cmd)
 	err = cmd.Run()
 	return err == nil, nil
 }
@@ -46,7 +41,6 @@ func IsFFmpegInstalled() (bool, error) {
 
 	cmd := exec.Command(ffmpegPath, "-version")
 
-	setHideWindow(cmd)
 	err = cmd.Run()
 	return err == nil, nil
 }
@@ -225,7 +219,6 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 
 			cmd := exec.Command(ffmpegPath, args...)
 
-			setHideWindow(cmd)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				result.Error = fmt.Sprintf("conversion failed: %s - %s", err.Error(), string(output))

@@ -33,13 +33,6 @@ func NewFileService(catalog *sql.DB, jobs *JobManager) *FileService {
 	return &FileService{catalog: catalog, jobs: jobs}
 }
 
-func (f *FileService) OpenFolder(path string) error {
-	if path == "" {
-		return fmt.Errorf("path is required")
-	}
-	return backend.OpenFolderInExplorer(path)
-}
-
 func (f *FileService) GetFileSizes(files []string) map[string]int64 {
 	return backend.GetFileSizes(files)
 }

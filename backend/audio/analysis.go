@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/go-flac/go-flac"
 	mewflac "github.com/mewkiz/flac"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 type AnalysisResult struct {
@@ -202,7 +202,6 @@ func GetMetadataWithFFprobe(filePath string) (*AnalysisResult, error) {
 		filePath,
 	)
 	cmd := exec.Command(ffprobePath, args...)
-	setHideWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe failed: %w - %s", err, string(output))
