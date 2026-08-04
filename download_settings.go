@@ -1,6 +1,9 @@
 package main
 
-import "github.com/sos-pc/SpotiFLAC-SH/backend"
+import (
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/config"
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DownloadSettings — typed view over the backend-behavior subset of the
@@ -146,7 +149,7 @@ func EffectiveDownloadSettings(auth *AuthManager, userID string) DownloadSetting
 		}
 	}
 	if raw == nil {
-		raw, _ = loadSettingsFile()
+		raw, _ = config.LoadSettingsFile()
 	}
 	return ParseDownloadSettings(raw)
 }

@@ -7,6 +7,8 @@ import (
 	"runtime"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/config"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 )
 
 // SystemService groups the process/config-level operations: where config
@@ -55,7 +57,7 @@ func (s *SystemService) SaveSettings(settings map[string]interface{}) error {
 // settings — download_settings.go did, and had to construct a throwaway
 // SystemService to get at them — can call the function directly.
 func (s *SystemService) LoadSettings() (map[string]interface{}, error) {
-	return loadSettingsFile()
+	return config.LoadSettingsFile()
 }
 
 func (s *SystemService) GetDefaults() map[string]string {
@@ -73,8 +75,8 @@ func (s *SystemService) GetDefaults() map[string]string {
 
 func (s *SystemService) GetOSInfo() (string, error) { return util.GetOSInfo() }
 
-// CreateM3U8File delegates to writeM3U8File. Kept as a method because the API
+// CreateM3U8File delegates to m3u8.WriteFile. Kept as a method because the API
 // layer calls it through the service; the work itself needs no instance.
 func (s *SystemService) CreateM3U8File(m3u8Name string, outputDir string, filePaths []string, jellyfinMusicPath string, musicRoot string) error {
-	return writeM3U8File(m3u8Name, outputDir, filePaths, jellyfinMusicPath, musicRoot)
+	return m3u8.WriteFile(m3u8Name, outputDir, filePaths, jellyfinMusicPath, musicRoot)
 }

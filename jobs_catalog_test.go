@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/go-flac/flacvorbis"
 	flac "github.com/go-flac/go-flac"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 )
 
 // TestActualCatalogQualityFallsBackWhenUnanalyzable covers the safety-net

@@ -1,4 +1,4 @@
-package main
+package config
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings file, read from util.AppDir().
@@ -20,7 +20,7 @@ import (
 )
 
 // settingsFilePath is where the user's settings blob lives on disk.
-func settingsFilePath() (string, error) {
+func SettingsFilePath() (string, error) {
 	dir, err := util.AppDir()
 	if err != nil {
 		return "", err
@@ -36,8 +36,8 @@ func settingsFilePath() (string, error) {
 // download_settings.go had to write `(&SystemService{}).LoadSettings()` — a
 // throwaway object built purely to reach a method, and a dependency from the
 // settings domain onto the service layer for no behaviour at all.
-func loadSettingsFile() (map[string]interface{}, error) {
-	configPath, err := settingsFilePath()
+func LoadSettingsFile() (map[string]interface{}, error) {
+	configPath, err := SettingsFilePath()
 	if err != nil {
 		return nil, err
 	}

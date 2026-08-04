@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
-	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 	"github.com/go-flac/flacvorbis"
 	flac "github.com/go-flac/go-flac"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 )
 
 // writeTestFlacWithSpotifyID mirrors writeTestFlacWithTags (jobs_catalog_test.go)

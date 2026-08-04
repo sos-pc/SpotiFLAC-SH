@@ -20,6 +20,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/providerutil"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 )
 
 // retagLegacyResult is the JSON payload returned by POST /api/v1/admin/retag-legacy.
@@ -217,10 +218,10 @@ func (s *Server) runLibraryRebuildAsync(roots []string) {
 // watchlistRepairResult is the JSON payload returned by
 // POST /api/v1/watchlists/{id}/repair.
 type watchlistRepairResult struct {
-	Retag     retagLegacyResult    `json:"retag"`
-	Rebuild   libraryRebuildResult `json:"rebuild"`
-	M3U8      m3u8GenerationResult `json:"m3u8"`
-	M3U8Error string               `json:"m3u8_error,omitempty"`
+	Retag     retagLegacyResult     `json:"retag"`
+	Rebuild   libraryRebuildResult  `json:"rebuild"`
+	M3U8      m3u8.GenerationResult `json:"m3u8"`
+	M3U8Error string                `json:"m3u8_error,omitempty"`
 }
 
 // v1RepairWatchlist runs the same recovery steps as retag-legacy +

@@ -18,6 +18,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -729,7 +730,7 @@ func (w *Watcher) OnPermanentFailure(watchlistID, spotifyID string) {
 // est écrit à partir des pistes réellement arrivées sur le disque. Ça marche
 // aussi quand l'onglet a été fermé entre-temps.
 //
-// Même écriture partagée que les watchlists (writeM3U8ToPlaylistsDir), donc même
+// Même écriture partagée que les watchlists (m3u8.WriteToPlaylistsDir), donc même
 // dossier et même convention de nommage. Le garde anti-rétrécissement est
 // toujours actif ici : un lot manuel est par nature un sous-ensemble, il ne doit
 // jamais remplacer le fichier complet par une version partielle.
@@ -746,7 +747,7 @@ func (w *Watcher) OnManualBatchComplete(req BatchM3U8Request, paths []string) {
 		root = util.GetDefaultMusicPath()
 	}
 	baseName := m3u8BaseName(req.Name, req.SourceID)
-	result, err := writeM3U8ToPlaylistsDir(
+	result, err := m3u8.WriteToPlaylistsDir(
 		filepath.Clean(root), baseName, settings.JellyfinMusicPath, paths, len(paths), true,
 	)
 	if err != nil {
@@ -1322,7 +1323,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 	if m3u8Enabled {
 		playlistDir := filepath.Join(outputDir, "Playlists")
 		m3u8Path := filepath.Join(playlistDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8")
-		m3u8Count, m3u8Exists = countM3U8Entries(m3u8Path)
+		m3u8Count, m3u8Exists = m3u8.CountEntries(m3u8Path)
 	}
 
 	return computeFreshnessReport(
@@ -1516,7 +1517,7 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // on disk, in the order Spotify reports the playlist. Files moved, renamed,
 // or copied keep working as long as the tag is preserved.
 //
-// force=true bypasses the shrink-guard (see shouldSkipShrinkingWrite) and
+// force=true bypasses the shrink-guard (see m3u8.ShouldSkipShrinkingWrite) and
 // always writes the freshly-resolved list, even if it's smaller than what's
 // currently on disk. Used by the explicit per-watchlist repair action,
 // where the user has just asked to reconcile the M3U8 with reality — unlike
@@ -1524,21 +1525,21 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // silently destroy a better existing file, an explicit repair should show
 // the true current state even if that state got worse (e.g. a file was
 // deleted outside SpotiFLAC).
-func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8GenerationResult, error) {
+func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.GenerationResult, error) {
 	pl, err := w.getWatchlistByID(watchlistID)
 	if err != nil || pl == nil {
-		return m3u8GenerationResult{}, fmt.Errorf("watchlist not found: %s", watchlistID)
+		return m3u8.GenerationResult{}, fmt.Errorf("watchlist not found: %s", watchlistID)
 	}
 
 	settings := w.loadM3U8Settings(pl)
 	if settings == nil {
-		return m3u8GenerationResult{}, fmt.Errorf("M3U8 generation is disabled (createM3u8File setting)")
+		return m3u8.GenerationResult{}, fmt.Errorf("M3U8 generation is disabled (createM3u8File setting)")
 	}
 
 	outputDir := w.watchlistOutputRoot(pl)
 
 	paths := w.resolveTrackPaths(pl, outputDir)
-	result := m3u8GenerationResult{
+	result := m3u8.GenerationResult{
 		Total:      len(pl.TrackIDs),
 		Resolved:   len(paths),
 		Unresolved: len(pl.TrackIDs) - len(paths),
@@ -1578,7 +1579,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 	// The shrink guard applies only when tracks failed to resolve: a
 	// fully-resolved shorter list means the playlist genuinely shrank, and
 	// sync_deletions has already pruned pl.TrackIDs before we get here.
-	result, err = writeM3U8ToPlaylistsDir(outputDir, baseName, settings.JellyfinPath,
+	result, err = m3u8.WriteToPlaylistsDir(outputDir, baseName, settings.JellyfinPath,
 		paths, len(pl.TrackIDs), result.Unresolved > 0 && !force)
 	if err != nil {
 		return result, fmt.Errorf("failed to create %s: %w", pl.Name, err)
@@ -1587,7 +1588,7 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		return result, nil
 	}
 	slog.Info("[Watcher] M3U8 written", "file", baseName+".m3u8", "entries", len(paths))
-	playlistDir := filepath.Join(outputDir, playlistsDirName)
+	playlistDir := filepath.Join(outputDir, m3u8.PlaylistsDirName)
 	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
 
 	// One-time migration cleanup: remove the pre-disambiguation file (no ID

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 )
 
 // TestM3U8BaseNameAvoidsCollisions is the regression test for two
@@ -69,7 +71,7 @@ func TestCountM3U8Entries(t *testing.T) {
 					t.Fatalf("WriteFile: %v", err)
 				}
 			}
-			count, ok := countM3U8Entries(path)
+			count, ok := m3u8.CountEntries(path)
 			if ok != tt.wantOK {
 				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
 			}
@@ -144,9 +146,9 @@ func TestShouldSkipShrinkingWrite(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldSkipShrinkingWrite(tt.newCount, tt.existingCount)
+			got := m3u8.ShouldSkipShrinkingWrite(tt.newCount, tt.existingCount)
 			if got != tt.want {
-				t.Errorf("shouldSkipShrinkingWrite(%d, %d) = %v, want %v", tt.newCount, tt.existingCount, got, tt.want)
+				t.Errorf("m3u8.ShouldSkipShrinkingWrite(%d, %d) = %v, want %v", tt.newCount, tt.existingCount, got, tt.want)
 			}
 		})
 	}
