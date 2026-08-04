@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -38,7 +39,7 @@ func loadOrGenerateJWTSecret() []byte {
 		return []byte(v)
 	}
 	// 2. Fichier persisté dans le dossier config
-	configDir, err := getConfigDir()
+	configDir, err := util.AppDir()
 	if err == nil {
 		secretFile := configDir + "/jwt_secret"
 		if data, err := os.ReadFile(secretFile); err == nil && len(data) > 0 {

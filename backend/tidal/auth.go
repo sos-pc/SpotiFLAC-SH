@@ -56,7 +56,7 @@ var (
 
 // GetTidalTokenPath retourne le chemin absolu du fichier de configuration du token Tidal
 func GetTidalTokenPath() string {
-	configDir, err := util.GetFFmpegDir() // Utilise le répertoire .spotiflac (homeDir)
+	configDir, err := util.AppDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".spotiflac", "tidal_token.json")

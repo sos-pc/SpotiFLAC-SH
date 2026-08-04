@@ -47,7 +47,15 @@ func ValidateExecutable(path string) error {
 	return nil
 }
 
-func GetFFmpegDir() (string, error) {
+// AppDir is SpotiFLAC's own directory under the user's home: ~/.SpotiFLAC. It
+// holds the BoltDB file, the JWT secret, the Tidal token cache and the settings
+// blob — everything the service persists outside the music library.
+//
+// It was called GetFFmpegDir until 2026-08-05, from the desktop era when its
+// only job was to say where the auto-installer had put ffmpeg. That installer
+// is gone, four call sites use it as the config directory, and one of them said
+// so in a trailing comment because the name did not.
+func AppDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
@@ -79,7 +87,7 @@ func ffmpegBinary(name string) (string, error) {
 		name += ".exe"
 	}
 
-	dir, err := GetFFmpegDir()
+	dir, err := AppDir()
 	if err != nil {
 		return "", err
 	}

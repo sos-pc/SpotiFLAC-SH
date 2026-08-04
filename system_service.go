@@ -18,7 +18,7 @@ import (
 type SystemService struct{}
 
 func (s *SystemService) GetConfigPath() (string, error) {
-	dir, err := util.GetFFmpegDir()
+	dir, err := util.AppDir()
 	if err != nil {
 		return "", err
 	}

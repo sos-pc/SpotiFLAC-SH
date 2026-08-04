@@ -14,6 +14,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	catalogdb "github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -26,7 +27,7 @@ func main() {
 	initLogger()
 
 	// ── Config dir ────────────────────────────────────────────────────────
-	configDir, err := getConfigDir()
+	configDir, err := util.AppDir()
 	if err != nil {
 		fprintReal("FATAL: cannot determine config dir: %v\n", err)
 		os.Exit(1)

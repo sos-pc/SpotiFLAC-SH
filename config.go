@@ -1,11 +1,14 @@
 package main
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Config paths.
+// Settings file, read from util.AppDir().
 //
-// Extracted from main.go: auth.go needs getConfigDir too, and a package cannot
-// import the one holding func main(). Config resolution is more fundamental
-// than either of them anyway — it is what they are both configured by.
+// This file briefly also held getConfigDir(), extracted from main.go so auth.go
+// could reach it. That turned out to be a byte-for-byte duplicate of
+// util.GetFFmpegDir — the same ~/.SpotiFLAC join, written once in package main
+// and once in util, because util cannot import the package holding func main().
+// Both are gone: util.AppDir is the single definition, and its name now says
+// what it returns.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
@@ -16,20 +19,9 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
-// getConfigDir retourne le dossier de config SpotiFLAC.
-// Sous Docker : /home/nonroot/.SpotiFLAC
-// En local    : ~/.SpotiFLAC
-func getConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".SpotiFLAC"), nil
-}
-
 // settingsFilePath is where the user's settings blob lives on disk.
 func settingsFilePath() (string, error) {
-	dir, err := util.GetFFmpegDir()
+	dir, err := util.AppDir()
 	if err != nil {
 		return "", err
 	}
