@@ -25,11 +25,38 @@ rather than our packaging.
 
 Two consequences worth keeping in mind:
 
-- **`shm_size: 1g` is required in compose.** Chromium puts renderer shared
-  memory in `/dev/shm` and crashes on Docker's 64 MB default. Upstream's run
-  example passes `--shm-size=1g` for the same reason.
+- **`shm_size: 1g` in compose.** Chromium puts renderer shared memory in
+  `/dev/shm` and Docker's default is 64 MB. The wrapper below also passes
+  `--disable-dev-shm-usage`, so this is now a safety net rather than a
+  requirement — keep it anyway.
 - **Do not set `read_only: true` on this service.** It writes JS extensions, a
   browser profile and the X socket.
+
+### Why `/usr/bin/chromium` is a wrapper script
+
+Upstream gates Chromium's container flags on being root:
+
+```python
+# SpotiFLAC/core/solver.py
+_docker_flags = []
+if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+    _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
+```
+
+Their image runs as root; ours runs as uid 1000, which is what makes `/staging`
+shareable with the Go app and is not up for negotiation. So the list stays empty
+and every browser launch dies with `No usable sandbox!` — `cap_drop: ALL` blocks
+the user-namespace sandbox and `no-new-privileges` blocks the setuid helper.
+
+The Dockerfile therefore moves the real binary to `/usr/bin/chromium.real` and
+puts a wrapper at `/usr/bin/chromium` that appends the same two flags. It lives
+in our packaging rather than in their source, so there is nothing to re-verify
+on each release and no patch that can rot.
+
+**This drops Chromium's internal sandbox**: a compromised renderer holds
+container privileges. The container is already non-root, capability-dropped,
+`no-new-privileges` and unpublished — and the alternative, restoring `SYS_ADMIN`
+or dropping `no-new-privileges`, is strictly worse.
 
 ## Why there is no fork any more
 

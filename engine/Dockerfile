@@ -25,6 +25,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
+# Chromium cannot start in this container without --no-sandbox, and upstream
+# only passes it when running as root:
+#
+#     # SpotiFLAC/core/solver.py
+#     _docker_flags = []
+#     if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+#         _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
+#
+# Their image runs as root, so the flags apply there. Ours runs as uid 1000 —
+# which is not negotiable, it is what makes /staging shareable with the Go app —
+# so the list stays empty and every launch dies with "No usable sandbox!".
+# `cap_drop: ALL` blocks the userns sandbox and `no-new-privileges` blocks the
+# setuid helper, so there is no sandbox left to use.
+#
+# Wrapping the binary applies exactly the flags upstream already applies, and
+# does it in our packaging rather than in their source: nothing to re-verify on
+# each release, and no patch that could rot. /usr/bin/chromium still exists, so
+# anything discovering the browser by path still finds it.
+#
+# The trade-off, stated plainly: --no-sandbox drops Chromium's internal sandbox,
+# so a compromised renderer holds container privileges. This container is
+# already non-root, fully capability-dropped, no-new-privileges and unpublished.
+# The alternative — handing back SYS_ADMIN or dropping no-new-privileges — is
+# strictly worse. --disable-dev-shm-usage additionally makes the image
+# independent of whether the operator set shm_size.
+RUN mv /usr/bin/chromium /usr/bin/chromium.real \
+    && printf '#!/bin/sh\nexec /usr/bin/chromium.real --no-sandbox --disable-dev-shm-usage "$@"\n' \
+         > /usr/bin/chromium \
+    && chmod 0755 /usr/bin/chromium
+
 WORKDIR /app
 
 # Which version to install. CI resolves it from PyPI — the same call its
