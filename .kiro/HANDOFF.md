@@ -5,6 +5,20 @@ version of this file (the catalog-refactor handoff below in git history) —
 that work shipped, is deployed, and is documented in `docs/api-reference.md`;
 see "Superseded content" at the bottom if you need that history.
 
+> ## ⚠️ Ce fichier décrit l'état d'avant la v4.0.0
+>
+> Vérifié le **2026-08-04** : rien de sa section « TL;DR » n'est encore vrai.
+>
+> | Ce qu'il dit | Réalité au 2026-08-04 |
+> |---|---|
+> | branche de travail `dev`, tête `8f6461d` | **`dev` n'existe plus.** Il ne reste que `main` (plus les branches dependabot). `dev2` et `feature/module-engine` ont été supprimées après fusion. |
+> | `main` taggé `v3.9.0` | **`v4.0.0`**, publiée le 2026-07-31 |
+> | la couche provider est native | Qobuz, Amazon et Deezer sont **délégués à un sidecar** ; leur code Go a été supprimé |
+>
+> Pour l'état courant, partir de [docs/README.md](../docs/README.md). Ce qui suit
+> reste utile comme historique de la session v3.9.0 et pour les « Standing
+> constraints », qui n'ont pas changé.
+
 Last updated: end of the session that released `v3.9.0` and renamed the dev
 branch `kiro` → `dev`.
 

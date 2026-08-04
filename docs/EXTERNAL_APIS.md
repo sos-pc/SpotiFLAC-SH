@@ -101,7 +101,7 @@ All three were anonymous community-proxy wrappers: one hand-maintained host each
 which is exactly what the engine does with more routes and third-party
 maintenance. `backend/{qobuz,amazon,deezer}` (2201 LOC) and `backend/community`
 (1837 LOC) were deleted in items 3–5 of
-[dead-code-removal-plan.md](dead-code-removal-plan.md).
+[dead-code-removal-plan.md](archive/dead-code-removal-plan.md).
 
 Endpoint archaeology, kept because the pattern is instructive — these hosts rotate
 without announcement, which is the argument for delegating rather than curating:

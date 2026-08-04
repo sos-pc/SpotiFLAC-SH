@@ -4,7 +4,7 @@
 > propose the wrong fix; see §0).** Every number is measured, not estimated; the
 > commands that produced them are inline so they can be re-run. Companion:
 > [module-engine.md](module-engine.md) ·
-> [dead-code-removal-plan.md](dead-code-removal-plan.md) §7.6, which predicted the
+> [dead-code-removal-plan.md](archive/dead-code-removal-plan.md) §7.6, which predicted the
 > breakage §2 measures.
 
 ## 0. What changed since the first draft

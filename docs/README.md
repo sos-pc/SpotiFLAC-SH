@@ -24,9 +24,12 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 | Chantier | Docs | Où ça en est | Prochain pas |
 |---|---|---|---|
-| **Retrait de la couche provider superseded** | [dead-code-removal-plan.md](dead-code-removal-plan.md) | 🧭 **planifié, rien de supprimé** — analyse de dépendances mesurée. ~2200 LOC retirables (Qobuz, Deezer, community), ~1000 de plus quand Amazon sera prouvé. Tidal **conservé** (BYOT). | Étape 2 du plan : retirer l'appel au repli natif (0 succès en 3 invocations) |
-| **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; 3 points ouverts | `grep memory /proc/cgroups` ; logs nginx SWAG (502 `stream-token`) ; rotations d'identifiants |
-| **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | 🟢 phases 1-4 faites+vérifiées prod ; audit 76 routes (1 élévation corrigée) | 2 décisions posées, non tranchées (catalogue `admin`→`read`, explorateur BoltDB) |
+| **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; 3 points ouverts. ⚠️ Antérieur au moteur : ne dit rien de `spotiflac-engine`, de `shm_size` ni du navigateur embarqué | `grep memory /proc/cgroups` ; logs nginx SWAG (502 `stream-token`) ; durcir le service moteur |
+| **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | 🟢 phases 1-4 faites+vérifiées prod | 2 décisions posées, non tranchées (catalogue `admin`→`read`, explorateur BoltDB) |
+
+Le **retrait de la couche provider superseded** est terminé : `backend/{qobuz,amazon,deezer,community,songlink}`
+et `util/proxy_config.go` n'existent plus — vérifié fichier par fichier le 2026-08-04. Le plan est
+[passé en archive](archive/dead-code-removal-plan.md).
 
 ### B. Références du code — « comment ça marche »
 
@@ -57,7 +60,7 @@ l'état à jour — voir `module-engine.md` §5.
 ### D. Archive — [archive/](archive/)
 
 Tout ce qui est **fait** ou **superseded** est déplacé dans [archive/](archive/) (voir son index).
-N'y cherche pas l'état courant — seulement le « pourquoi ». **11 docs** : refontes terminées
+N'y cherche pas l'état courant — seulement le « pourquoi ». **13 docs** : refontes terminées
 (sélection de service, réglages, rattrapage amont), constats clos (ffmpeg, audit couche 2, carte de
 sélection historique), les deux plans que l'engine remplace (couche API externe, MusicBrainz→Qobuz),
 et les **trois plans du moteur** eux-mêmes — livrés, donc remplacés par la référence

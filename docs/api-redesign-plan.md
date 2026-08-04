@@ -1,6 +1,13 @@
 # Plan — cohérence de l'API (read / manage / admin) + accès DB
 
-> **Statut re-vérifié contre le code le 2026-07-19 : toujours rien de commencé.** Les 4 phases sont
+> **Statut re-vérifié contre le code le 2026-08-04 : phases 1 à 4 livrées.**
+> Les routes `GET /api/v1/admin/db/tables` et `GET /api/v1/admin/db/{table}` existent, ce que
+> le corps de ce document décrit encore comme à faire. **Ce qui reste sont les 2 décisions
+> ouvertes de la §3**, pas du code : le passage du catalogue de `admin` à `read`, et
+> l'explorateur BoltDB. Le texte ci-dessous n'a pas été réécrit — il vaut comme trace du
+> raisonnement, pas comme liste de tâches.
+>
+> *Ancien en-tête, conservé pour la datation :* « re-vérifié le 2026-07-19 : toujours rien de commencé. » Les 4 phases sont
 > intactes. Vérification faite parce que beaucoup de travail API a eu lieu le 18/19 (migration des
 > réglages : `/downloads/track`, `/files/exists`, `/media/*`, suppression de `/files/m3u8`) — mais
 > c'était un chantier **orthogonal** : qui décide des réglages, pas ce que l'API expose ni qui y accède.

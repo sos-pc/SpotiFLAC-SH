@@ -2,7 +2,7 @@
 
 > **🧭 Plan — 2026-07-26, nothing removed yet.** Dependency analysis is measured
 > (import graph + LOC), not estimated. Reference for what replaced this code:
-> [module-engine.md](module-engine.md).
+> [module-engine.md](../module-engine.md).
 
 ## 1. The dividing line — dead code vs redundancy
 
