@@ -55,50 +55,46 @@ func GetFFmpegDir() (string, error) {
 	return filepath.Join(homeDir, ".SpotiFLAC"), nil
 }
 
-func GetFFmpegPath() (string, error) {
-	ffmpegDir, err := GetFFmpegDir()
+// ffmpegBinary resolves one of the FFmpeg tools, in two places and in this
+// order:
+//
+//  1. ~/.SpotiFLAC — where the first-launch auto-installer used to put it. That
+//     installer was deleted on 2026-08-04 (it downloaded from a repository that
+//     no longer exists), so nothing populates this directory any more. It is
+//     kept as a manual override: a binary dropped there still wins over the
+//     system one, which is the only way to pin a different build without
+//     rebuilding the image.
+//  2. $PATH — what the Docker image actually uses. FFmpeg is baked in at build
+//     time from BtbN/FFmpeg-Builds.
+//
+// On failure it returns the path it looked for *and* an error: the API status
+// endpoint displays that path to show where the search happened.
+//
+// GetFFmpegPath used to return (nonexistentPath, nil) here while GetFFprobePath
+// returned an error — the same function written twice, disagreeing. Every caller
+// already checks the error and reports "ffmpeg not found"; they simply never
+// received one, and proceeded to exec a path that was not there.
+func ffmpegBinary(name string) (string, error) {
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+
+	dir, err := GetFFmpegDir()
 	if err != nil {
 		return "", err
 	}
 
-	ffmpegName := "ffmpeg"
-	if runtime.GOOS == "windows" {
-		ffmpegName = "ffmpeg.exe"
+	local := filepath.Join(dir, name)
+	if _, err := os.Stat(local); err == nil {
+		return local, nil
 	}
 
-	localPath := filepath.Join(ffmpegDir, ffmpegName)
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath, nil
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
 	}
 
-	path, err := exec.LookPath(ffmpegName)
-	if err == nil {
-		return path, nil
-	}
-
-	return localPath, nil
+	return local, fmt.Errorf("%s not found in %s or on PATH", name, dir)
 }
 
-func GetFFprobePath() (string, error) {
-	ffmpegDir, err := GetFFmpegDir()
-	if err != nil {
-		return "", err
-	}
-
-	ffprobeName := "ffprobe"
-	if runtime.GOOS == "windows" {
-		ffprobeName = "ffprobe.exe"
-	}
-
-	localPath := filepath.Join(ffmpegDir, ffprobeName)
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath, nil
-	}
-
-	path, err := exec.LookPath(ffprobeName)
-	if err == nil {
-		return path, nil
-	}
-
-	return localPath, fmt.Errorf("ffprobe not found in app directory or system path")
-}
+func GetFFmpegPath() (string, error)  { return ffmpegBinary("ffmpeg") }
+func GetFFprobePath() (string, error) { return ffmpegBinary("ffprobe") }
