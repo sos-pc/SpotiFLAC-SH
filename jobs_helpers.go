@@ -181,7 +181,7 @@ func outputSubfolder(folderTemplate string, createPlaylistFolder, useFirstArtist
 // Download request assembly
 // ─────────────────────────────────────────────────────────────────────────────
 
-func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc string) DownloadRequest {
+func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc string) backend.DownloadRequest {
 	s := job.Settings
 
 	service := s.Service
@@ -230,7 +230,7 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc stri
 		durationSeconds = job.DurationMs / 1000
 	}
 
-	return DownloadRequest{
+	return backend.DownloadRequest{
 		Service:              service,
 		ISRC:                 isrc,
 		TrackName:            job.TrackName,
