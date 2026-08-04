@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // swapChain installs a fake chain for one test and restores the real one after.

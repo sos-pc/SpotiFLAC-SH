@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 )
 
 // MediaService groups the auxiliary media downloads (lyrics, cover, artist

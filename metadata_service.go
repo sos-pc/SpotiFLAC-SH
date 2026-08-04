@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 )
 
 // The JobManager dependency went with them: it was held only to borrow the

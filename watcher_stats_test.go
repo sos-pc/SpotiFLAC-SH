@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -17,7 +17,7 @@ import (
 
 	"sort"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )

@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/audio"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
-	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/audio"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/tidal"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // defaultAutoOrder is the fallback chain used when "auto" is requested with no

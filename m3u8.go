@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // CreateM3U8File génère un fichier .m3u8 de manière atomique (write-then-rename).

@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 

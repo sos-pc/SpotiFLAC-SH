@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // trackNumberSeparator values used by the two callers. They differ, and that

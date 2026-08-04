@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -33,7 +33,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 )
 
 // checkDeletedRequest is the body of POST /admin/library-check-deleted.

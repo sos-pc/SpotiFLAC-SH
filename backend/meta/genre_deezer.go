@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // Deezer sits in the middle of the chain: like Apple it matches on the ISRC

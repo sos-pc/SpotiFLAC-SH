@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/tidal"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

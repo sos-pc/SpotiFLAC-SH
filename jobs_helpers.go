@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
-	"github.com/afkarxyz/SpotiFLAC/backend/tidal"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/tidal"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // -----------------------------------------------------------------------------

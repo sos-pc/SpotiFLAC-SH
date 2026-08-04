@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/go-flac/go-flac"
 	mewflac "github.com/mewkiz/flac"
 )

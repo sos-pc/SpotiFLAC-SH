@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // Track represents the Spotify identity of a track. It carries everything

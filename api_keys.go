@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 

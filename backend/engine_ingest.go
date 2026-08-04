@@ -22,10 +22,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/engine"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/engine"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/providerutil"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // EngineBaseURL is where the shim lives on the internal compose network

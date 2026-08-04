@@ -1,6 +1,6 @@
 package main
 
-import "github.com/afkarxyz/SpotiFLAC/backend"
+import "github.com/sos-pc/SpotiFLAC-SH/backend"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DownloadSettings — typed view over the backend-behavior subset of the

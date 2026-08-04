@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/ulikunitz/xz"
 )
 
@@ -59,6 +59,16 @@ func IsFFmpegInstalled() (bool, error) {
 	return err == nil, nil
 }
 
+// ⚠️ github.com/afkarxyz/ffmpeg-binaries 404s as of 2026-08-04 — the repository
+// is gone, not just this release. Every URL below therefore fails, and the
+// auto-install path they serve cannot succeed on any platform.
+//
+// Left in place rather than deleted because this is the LEGACY DESKTOP path and
+// nothing in the served product reaches it: the Docker image bakes FFmpeg in
+// from BtbN/FFmpeg-Builds at build time, and EnsureFFmpeg finds it on PATH.
+// Removing the constants would mean removing the auto-install feature, which is
+// a product decision, not a link fix. Anyone reviving that feature needs a new
+// source first; this comment is the warning that they do.
 const (
 	ffmpegWindowsURL = "https://github.com/afkarxyz/ffmpeg-binaries/releases/download/v8.0/ffmpeg-windows-amd64.zip"
 	ffmpegLinuxURL   = "https://github.com/afkarxyz/ffmpeg-binaries/releases/download/v8.0/ffmpeg-linux-amd64.tar.xz"

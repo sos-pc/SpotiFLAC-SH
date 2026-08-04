@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
-	catalogdb "github.com/afkarxyz/SpotiFLAC/backend/db"
-	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	catalogdb "github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

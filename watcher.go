@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	bolt "go.etcd.io/bbolt"
 )
 

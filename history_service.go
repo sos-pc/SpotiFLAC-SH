@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
 )
 
 // HistoryService groups everything about past downloads: clearing/exporting

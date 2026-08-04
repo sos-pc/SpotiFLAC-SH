@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/providerutil"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/providerutil"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // TidalDownloader talks to api.tidal.com, the one Tidal endpoint left. It used

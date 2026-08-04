@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 )
 
 // The one distinction the check-deleted pass rests on: "the file is not there" and

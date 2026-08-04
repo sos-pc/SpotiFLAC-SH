@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // DownloadToFileAtomic streams src into a temp file next to finalPath, then

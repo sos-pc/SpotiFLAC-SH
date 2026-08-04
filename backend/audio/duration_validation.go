@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // Thresholds for ValidateTrackDuration. Ported from upstream's

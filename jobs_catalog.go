@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/audio"
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/audio"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 )
 
 // catalogWriteTimeout caps how long any single catalog mirror operation

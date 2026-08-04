@@ -3,8 +3,8 @@ package providerutil
 import (
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 func TestFetchGenreMetadataAsyncClosedWhenGenreNotRequested(t *testing.T) {

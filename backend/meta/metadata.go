@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	id3v2 "github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacpicture"
 	"github.com/go-flac/flacvorbis"

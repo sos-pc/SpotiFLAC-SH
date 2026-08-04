@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

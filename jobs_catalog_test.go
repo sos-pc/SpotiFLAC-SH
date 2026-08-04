@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/go-flac/flacvorbis"
 	flac "github.com/go-flac/go-flac"
 )

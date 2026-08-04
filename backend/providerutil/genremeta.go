@@ -3,9 +3,9 @@ package providerutil
 import (
 	"strings"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/isrclookup"
-	"github.com/afkarxyz/SpotiFLAC/backend/meta"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // MBResult is the outcome of an async genre-metadata lookup: the ISRC that

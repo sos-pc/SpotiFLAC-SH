@@ -3,7 +3,7 @@ package tidal
 import (
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // The bug this file exists to prevent is silent and expensive: the download and

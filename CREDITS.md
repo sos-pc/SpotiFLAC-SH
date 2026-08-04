@@ -71,8 +71,15 @@ These are public application credentials (not tied to any user account). The pre
 
 Pre-compiled FFmpeg binaries are sourced from:
 
-**[afkarxyz/ffmpeg-binaries](https://github.com/afkarxyz/ffmpeg-binaries)**
-Used on first launch to auto-install `ffmpeg` and `ffprobe` on Windows, Linux, and macOS. Not used in the Docker image (FFmpeg is pre-installed).
+**`afkarxyz/ffmpeg-binaries`** — ⚠️ **gone: the repository 404s as of 2026-08-04.**
+It was used on first launch by the legacy desktop build to auto-install `ffmpeg`
+and `ffprobe` on Windows, Linux and macOS. The link is left unlinked rather than
+removed, because the code path that reads it still exists and anyone hitting it
+deserves to know why it fails.
+
+The Docker image never used it: FFmpeg comes from
+[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), fetched and
+checksum-verified in the Dockerfile's build stage.
 
 ---
 

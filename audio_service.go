@@ -11,8 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/audio"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/audio"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 type AudioService struct{}

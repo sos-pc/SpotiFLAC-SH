@@ -29,8 +29,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/spotify"
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // Client holds the HTTP client and the lazily-built Spotify client behind

@@ -1,4 +1,4 @@
-module github.com/afkarxyz/SpotiFLAC
+module github.com/sos-pc/SpotiFLAC-SH
 
 go 1.26.5
 

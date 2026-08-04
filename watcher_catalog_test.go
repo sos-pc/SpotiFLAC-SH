@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 )
 
 // TestCatalogFileSizesForWatchlistOnlyCountsPresentFiles is the regression

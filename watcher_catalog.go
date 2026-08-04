@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 )
 
 // catalogMirrorTimeout caps how long the watcher waits on the catalog

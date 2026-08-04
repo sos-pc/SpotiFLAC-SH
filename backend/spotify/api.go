@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 func GetSpotifyDataWithAPI(ctx context.Context, spotifyURL string, useAPI bool, apiBaseURL string, batch bool, delay time.Duration) (interface{}, error) {

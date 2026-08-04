@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afkarxyz/SpotiFLAC/backend"
-	"github.com/afkarxyz/SpotiFLAC/backend/audio"
+	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/backend/audio"
 	bolt "go.etcd.io/bbolt"
 )
 
