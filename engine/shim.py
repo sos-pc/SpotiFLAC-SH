@@ -71,20 +71,50 @@ _LOG_FILTER = _QuietEngineErrors()
 
 
 def _quiet_engine_logs() -> None:
-    """Attach the filter to whatever handlers currently exist.
+    """Filter at logger level, and drop the progress handlers upstream leaks.
 
-    Called before each download rather than once at import: the engine
-    configures logging when a client is constructed, so handlers installed after
-    us would otherwise bypass the filter. Adding it twice is harmless — the
-    membership check keeps it idempotent.
+    This function previously attached the filter to the handlers on `root` and
+    on `SpotiFLAC`, and did nothing at all: production logs kept every traceback
+    and printed every line twice. Two upstream behaviours defeat it, both in
+    `SpotiFLAC/core/progress.py::install_console_interception`, which runs
+    *during* the download — after anything we do here:
+
+    1. It removes every StreamHandler from root and from `SpotiFLAC*`, so the
+       handlers we just attached the filter to are destroyed moments later.
+       Handler-level attachment can never survive that ordering. Logger-level
+       does: a record is filtered at the logger it was logged on, before it
+       reaches any handler, whatever handlers exist by then.
+
+    2. It then adds a fresh TqdmLoggingHandler to root — and since that class
+       extends logging.Handler rather than logging.StreamHandler, its own
+       cleanup in (1) never removes it, and `uninstall_console_interception`
+       does not either. One accumulates per download, each printing every line
+       again: measured 1, 2, 3, 4, 5 handlers over five downloads. Pruning them
+       here leaves exactly one, because upstream re-adds one during the
+       download.
+
+    Attaching at logger level only, never both: a logger filter that consumed
+    the "same as previous message" state would make the handler pass drop the
+    record entirely and silence the container.
+
+    Loggers are enumerated rather than named: upstream creates 39 module-level
+    loggers at import, all of which exist by the time this runs, plus pydoll's
+    own tree, which is not under `SpotiFLAC` at all.
     """
     if os.environ.get("ENGINE_LOG_TRACEBACKS") == "1":
         return
-    handlers = list(logging.root.handlers)
-    handlers += list(logging.getLogger("SpotiFLAC").handlers)
-    for h in handlers:
-        if _LOG_FILTER not in h.filters:
-            h.addFilter(_LOG_FILTER)
+
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if "Tqdm" in type(h).__name__:
+            root.removeHandler(h)
+
+    loggers = [root]
+    loggers += [lg for lg in logging.Logger.manager.loggerDict.values()
+                if isinstance(lg, logging.Logger)]
+    for lg in loggers:
+        if _LOG_FILTER not in lg.filters:
+            lg.addFilter(_LOG_FILTER)
 
 
 class DownloadRequest(BaseModel):
@@ -135,6 +165,16 @@ async def download(req: DownloadRequest) -> DownloadResponse:
         _discard(out)
         return DownloadResponse(status="error", error="engine produced no audio file",
                                 log=log.getvalue())
+
+    # The engine can report success on a file it just failed to parse, so
+    # "a file with an audio extension exists" is not enough to call this ok.
+    # Checking here rather than only in Go keeps the contract honest, fails
+    # before the file is streamed across the volume boundary, and leaves two
+    # independent checks between a corrupt payload and the library.
+    if (why := _unplayable(audio)) is not None:
+        _discard(out)
+        return DownloadResponse(status="error", error=why, log=log.getvalue())
+
     return DownloadResponse(status="ok", file=str(audio), log=log.getvalue())
 
 
@@ -229,4 +269,42 @@ def _first_audio(d: pathlib.Path) -> pathlib.Path | None:
     for p in sorted(d.rglob("*")):
         if p.is_file() and p.suffix.lower() in AUDIO_EXTS:
             return p
+    return None
+
+
+def _unplayable(p: pathlib.Path) -> str | None:
+    """Return why `p` is not the audio its name claims, or None if it is fine.
+
+    An extension is not evidence. Observed in production 2026-08-04: a Deezer
+    route whose stream died mid-transfer left the partial response at a .flac
+    path, the engine logged "is not a valid FLAC file", downgraded it to
+    "Tagging failed (non-fatal)", and still reported the download successful.
+    Every consumer of this contract would have taken that on trust.
+
+    mutagen deliberately, not ffprobe or a magic-byte check: it is what the
+    engine's own tagger uses, so "mutagen cannot read this" is exactly the
+    condition that made tagging fail. Same library, same verdict, no new
+    dependency and no subprocess.
+
+    Reports rather than raises so the caller can put the reason in the error
+    field, where the Go side already logs it.
+    """
+    try:
+        size = p.stat().st_size
+    except OSError as e:  # noqa: BLE001
+        return f"cannot stat produced file: {e}"
+    if size == 0:
+        return "engine produced an empty file"
+
+    try:
+        import mutagen
+    except ImportError:  # pragma: no cover — mutagen ships with the engine
+        return None      # never reject on our own missing dependency
+
+    try:
+        parsed = mutagen.File(str(p))
+    except Exception as e:  # noqa: BLE001 — mutagen raises per-format types
+        return f"produced file is not readable audio ({size} bytes): {e}"
+    if parsed is None:
+        return f"produced file is not recognised as audio ({size} bytes)"
     return None
