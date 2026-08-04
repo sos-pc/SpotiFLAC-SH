@@ -8,10 +8,17 @@ services:
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
-      # Turnstile solver for community proxy access (Qobuz/Amazon).
-      # Comment out or remove to disable automatic session refresh.
-      - TURNSTILE_SOLVER_URL=http://turnstile-solver:5000
-      - APP_VERSION=latest
+      # Le moteur de téléchargement, dans le service ci-dessous. Depuis la
+      # v4.0.0 il n'est pas optionnel : Qobuz, Amazon et Deezer n'ont plus de
+      # chemin Go natif et répondent "only available through the download
+      # engine" sans lui. Seul Tidal fonctionne sans, et seulement avec un
+      # token personnel.
+      - ENGINE_URL=http://spotiflac-engine:8080
+      - ENGINE_SERVICES=qobuz,deezer,amazon,tidal
+      # PAS de TURNSTILE_SOLVER_URL ici : aucun code Go ne le lit depuis la
+      # suppression de backend/community. Il va sur le service engine.
+    depends_on:
+      - spotiflac-engine   # ordre de démarrage uniquement
     # L'image tourne en non-root, uid/gid 1000.
     # Le dossier musique ci-dessous est un chemin choisi sur l'hôte (pour que
     # Jellyfin puisse y accéder directement) : il doit appartenir à cet uid
@@ -30,24 +37,54 @@ services:
       - /path/to/music:/home/nonroot/Music
       # Configuration et base de données — volume Docker géré
       - spotiflac_config:/home/nonroot/.SpotiFLAC
+      # Passe-plat avec le moteur : MÊME chemin des deux côtés, obligatoire.
+      # Le moteur renvoie un chemin absolu que l'app ouvre tel quel.
+      - spotiflac_staging:/staging
 
-  # ── Turnstile Solver (companion container) ──────────────────────────────
-  # Required for automatic community proxy session renewal (Qobuz/Amazon).
-  # This container runs a headless Chromium browser that solves Cloudflare
-  # Turnstile challenges on behalf of SpotiFLAC. It does not need to be
-  # exposed to the host — communication happens over the internal Docker
-  # network.
+  # ── Moteur de téléchargement ────────────────────────────────────────────
+  # Tiré, jamais construit : la CI le republie à chaque release amont.
+  # Pour épingler ou revenir en arrière, remplacer `latest` par une version —
+  # chaque image porte la sienne dans org.opencontainers.image.version, et
+  # l'annonce au démarrage ("engine shim: SpotiFLAC x.y.z, image <sha>").
+  spotiflac-engine:
+    image: ghcr.io/sos-pc/spotiflac-engine:latest
+    container_name: spotiflac-engine
+    restart: unless-stopped
+    user: "1000:1000"      # même uid que l'app, sinon elle ne peut pas
+                           # récupérer les fichiers déposés dans /staging
+    expose:
+      - "8080"             # réseau compose uniquement — ne jamais publier :
+                           # il exécute du code tiers
+    stdin_open: false      # une route retombe sur une saisie de grant au
+    tty: false             # clavier ; sans TTY elle échoue vite au lieu de
+                           # figer le téléchargement en attendant un humain
+    shm_size: 1g           # Chromium met sa mémoire de rendu dans /dev/shm et
+                           # plante sur les 64 Mo par défaut de Docker
+    # PAS de read_only : il écrit ses extensions JS, un profil navigateur et
+    # la socket X.
+    environment:
+      # Le solveur, s'il tourne (service ci-dessous). C'est ICI qu'il se
+      # déclare, pas sur l'app.
+      - TURNSTILE_SOLVER_URL=http://turnstile-solver:5000
+    volumes:
+      - spotiflac_staging:/staging
+      - engine_cache:/home/nonroot/.cache
+
+  # ── Turnstile Solver (optionnel) ────────────────────────────────────────
+  # Fournit une session communautaire au MOTEUR quand une de ses routes bute
+  # sur un challenge. Le seul service que ce compose construit localement.
+  # Sans lui, les routes concernées échouent et la chaîne passe au fournisseur
+  # suivant — la plupart des téléchargements aboutissent quand même.
   #
-  # Resource note: Chromium headless needs ~300-500 MB RAM. If your host is
-  # tight, increase the Docker memory limit or remove this service and disable
-  # TURNSTILE_SOLVER_URL in the spotiflac container above (Qobuz/Amazon
-  # downloads will stop working without a manual session grant).
+  # Mesuré 2026-08-04 : le moteur a son propre chemin automatisé, mais ce
+  # solveur reste le plus fiable des deux (grant obtenu en 25 s sur un essai
+  # où le navigateur interne n'avait pas démarré).
   turnstile-solver:
     build: ./solver
     container_name: spotiflac-turnstile
     restart: unless-stopped
-    # No ports exposed — internal Docker network only.
-    # Uncomment the line below if you need to debug the solver API directly:
+    # Aucun port publié — réseau Docker interne uniquement.
+    # Décommenter pour déboguer l'API du solveur directement :
     # ports:
     #   - "5000:5000"
 
@@ -57,6 +94,17 @@ volumes:
   # les bonnes permissions automatiquement. Aucune action requise.
   spotiflac_config:
     name: spotiflac_config
+
+  # Passe-plat app <-> moteur. Éphémère par nature : le moteur y dépose le
+  # fichier, l'app le déplace dans la bibliothèque et supprime le dossier de
+  # job. Rien à sauvegarder ici.
+  spotiflac_staging:
+    name: spotiflac_staging
+
+  # Cache du moteur (extensions JS, profil navigateur). Le perdre coûte un
+  # re-téléchargement au démarrage suivant, rien de plus.
+  engine_cache:
+    name: engine_cache
 
   # Option B — vous choisissez l'emplacement exact sur le disque (utile par
   # ex. si vous avez déjà une sauvegarde programmée sur un dossier donné et

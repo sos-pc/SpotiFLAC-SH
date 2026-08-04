@@ -32,28 +32,65 @@ Open `http://your-server:6890` and log in with your Jellyfin credentials.
 
 ## docker-compose.yaml
 
+**Two services, not one.** Since v4.0.0 the Qobuz, Amazon and Deezer downloaders
+live in a sidecar; the Go service has no native path for them and answers
+*"only available through the download engine"* if it is missing. Only Tidal still
+works engine-less, and only with a personal token.
+
 ```yaml
 services:
   spotiflac:
     image: ghcr.io/sos-pc/spotiflac-sh:latest
     container_name: spotiflac
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 45s        # > the 30s of httpServer.Shutdown
     ports:
       - "6890:6890"
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
       # - DISABLE_AUTH_ON_LAN=true   # see authentication.md
+      - ENGINE_URL=http://spotiflac-engine:8080
+      - ENGINE_SERVICES=qobuz,deezer,amazon,tidal
     user: "1000:1000"
+    depends_on:
+      - spotiflac-engine          # start order only
     volumes:
       - /path/to/music:/home/nonroot/Music
       - spotiflac_config:/home/nonroot/.SpotiFLAC
+      - spotiflac_staging:/staging
+
+  spotiflac-engine:
+    image: ghcr.io/sos-pc/spotiflac-engine:latest
+    container_name: spotiflac-engine
+    restart: unless-stopped
+    user: "1000:1000"             # same uid, or it cannot hand files over
+    expose:
+      - "8080"                    # internal only — never publish it
+    stdin_open: false             # one route prompts for a grant on stdin;
+    tty: false                    # with no TTY it fails fast instead of hanging
+    shm_size: 1g                  # Chromium crashes on Docker's 64 MB default
+    # No read_only: it writes JS extensions, a browser profile and the X socket.
+    volumes:
+      - spotiflac_staging:/staging  # SAME path as above — not optional
+      - engine_cache:/home/nonroot/.cache
 
 volumes:
   spotiflac_config:
     name: spotiflac_config
+  spotiflac_staging:
+    name: spotiflac_staging
+  engine_cache:
+    name: engine_cache
 ```
+
+The staging volume must be mounted at the **same path in both containers**: the
+engine returns an absolute path and the app opens it verbatim. `ENGINE_STAGING_DIR`
+moves it if `/staging` is inconvenient, but it has to move on both sides.
+
+The engine image carries Chromium (~480 MB against the app's ~114 MB) because
+several provider routes drive a real browser. That is where `shm_size` and the
+absence of `read_only` come from.
 
 ### Volume mapping
 
@@ -111,6 +148,17 @@ sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, **reachable from inside the container** (so not `localhost` if Jellyfin runs on the host). |
 | `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates 32 random bytes on first start and writes them to `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas, or to inject one from a secret manager. |
 | `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md). |
+| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for the client IP. Set it **only** behind a proxy you control — see [deployment-hardening.md](deployment-hardening.md). |
+| `LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error`. |
+| `ENGINE_URL` | *(unset)* | Where the download engine's shim listens, e.g. `http://spotiflac-engine:8080`. **Required in practice** — see below. |
+| `ENGINE_SERVICES` | *(unset)* | Providers delegated to the engine, comma-separated: `qobuz,deezer,amazon,tidal`. |
+| `ENGINE_STAGING_DIR` | `/staging` | The volume shared with the engine. Must resolve to the same directory in both containers. |
+
+`TURNSTILE_SOLVER_URL` is **not** read by this service. It belongs on the engine
+container; setting it here does nothing.
+
+Those are the complete set the code reads. `APP_VERSION` is baked into the image
+at build time and only needs setting to override what the build recorded.
 
 ---
 
