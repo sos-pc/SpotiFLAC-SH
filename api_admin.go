@@ -206,8 +206,8 @@ func (s *Server) runLibraryRebuildAsync(roots []string) {
 		"imported", result.Imported, "verified", result.Verified, "moved", result.Moved,
 		"duplicate", result.Duplicate, "no_tag", result.NoTag, "failed", result.Failed, "timed_out", result.TimedOut)
 
-	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
-		s.ctr.Jobs.hub.publish(JobEvent{
+	if s.ctr.Jobs != nil {
+		s.ctr.Jobs.Publish(JobEvent{
 			Type: "library_rebuild_done",
 			Data: result,
 		})
@@ -321,8 +321,8 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 	}
 	slog.Info("[Repair] done", "playlist", pl.Name, "resolved", result.M3U8.Resolved, "total", result.M3U8.Total)
 
-	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
-		s.ctr.Jobs.hub.publish(JobEvent{
+	if s.ctr.Jobs != nil {
+		s.ctr.Jobs.Publish(JobEvent{
 			Type: "watchlist_repaired",
 			Data: map[string]interface{}{
 				"watchlist_id": pl.ID,
@@ -726,8 +726,8 @@ func (s *Server) v1RetagIncompleteMetadata(w http.ResponseWriter, r *http.Reques
 // in the request.
 func (s *Server) runRetagIncompleteMetadataAsync(tracks []db.TrackForRetag) {
 	result := s.retagIncompleteMetadata(context.Background(), tracks)
-	if s.ctr.Jobs != nil && s.ctr.Jobs.hub != nil {
-		s.ctr.Jobs.hub.publish(JobEvent{
+	if s.ctr.Jobs != nil {
+		s.ctr.Jobs.Publish(JobEvent{
 			Type: "retag_incomplete_metadata_done",
 			Data: result,
 		})

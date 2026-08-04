@@ -241,14 +241,14 @@ func TestScanRootForRebuildImportsMultipleFiles(t *testing.T) {
 // so a client disconnect can no longer abort the scan; completion is
 // announced over SSE instead of in the (now long-gone) HTTP response.
 func TestLibraryRebuildAsyncPublishesSSEEvent(t *testing.T) {
-	jm := newTestJobManager(t, true)
-	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm}}
+	jm, hub := newTestJobManagerWithHub(t, true)
+	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm, SSE: hub}}
 
 	root := t.TempDir()
 	writeTestFlacWithSpotifyID(t, filepath.Join(root, "track.flac"), "spotify:track:a")
 
-	sub := jm.hub.subscribe()
-	defer jm.hub.unsubscribe(sub)
+	sub := hub.subscribe()
+	defer hub.unsubscribe(sub)
 
 	s.runLibraryRebuildAsync([]string{root})
 
@@ -275,11 +275,11 @@ func TestLibraryRebuildAsyncPublishesSSEEvent(t *testing.T) {
 // timeout), same fix (run against context.Background(), announce
 // completion over SSE instead of returning it in the HTTP response).
 func TestRetagIncompleteMetadataAsyncPublishesSSEEvent(t *testing.T) {
-	jm := newTestJobManager(t, true)
-	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm}}
+	jm, hub := newTestJobManagerWithHub(t, true)
+	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm, SSE: hub}}
 
-	sub := jm.hub.subscribe()
-	defer jm.hub.unsubscribe(sub)
+	sub := hub.subscribe()
+	defer hub.unsubscribe(sub)
 
 	// No tracks needing retag — this test only verifies the async+publish
 	// plumbing, not the retag logic itself (already covered elsewhere).

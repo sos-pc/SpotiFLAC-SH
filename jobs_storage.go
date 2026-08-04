@@ -220,9 +220,9 @@ func (jm *JobManager) CleanupOldJobs() (int, []string, error) {
 	if err == nil && deleted > 0 {
 		slog.Info("[Jobs] Cleanup: deleted duplicate/old jobs", "count", deleted)
 	}
-	if err == nil && jm.hub != nil {
+	if err == nil {
 		for _, id := range deletedIDs {
-			jm.hub.publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id}})
+			jm.Publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id}})
 		}
 	}
 	return deleted, deletedIDs, err
@@ -264,10 +264,8 @@ func (jm *JobManager) clearJobsWhere(userID string, isAdmin bool, pred func(Job)
 		}
 		return nil
 	})
-	if jm.hub != nil {
-		for i, id := range deletedIDs {
-			jm.hub.publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id, UserID: deletedOwners[i]}})
-		}
+	for i, id := range deletedIDs {
+		jm.Publish(JobEvent{Type: "job_deleted", Job: &Job{ID: id, UserID: deletedOwners[i]}})
 	}
 	return deletedIDs, err
 }

@@ -15,6 +15,13 @@ type Container struct {
 	Auth    *AuthManager
 	Watcher *Watcher
 
+	// SSE is the event transport. It sits here, beside the components that use
+	// it, rather than inside JobManager: the manager only publishes and takes it
+	// as an EventSink, while the stream handler needs subscribe/unsubscribe.
+	// Reaching it through `Jobs.hub` made every consumer traverse an unexported
+	// field of an unexported field, and tied the job layer to its own transport.
+	SSE *SSEHub
+
 	// Domain services carved out of the former App god-object (R3). Each holds
 	// only the dependencies it actually needs; stateless ones (System, Media,
 	// Audio) have none.

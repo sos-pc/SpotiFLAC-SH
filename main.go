@@ -74,14 +74,23 @@ func main() {
 		slog.Warn("[Main] failed to init ISRC cache bucket", "err", err)
 	}
 
+	// ── SSE hub ───────────────────────────────────────────────────────────
+	// Owned here rather than inside the job manager: three different things
+	// need it, each a different half. The manager only ever publishes, so it
+	// receives it as an EventSink; the log buffer and the shutdown hook need the
+	// concrete type for attachHub and closeAll. Constructing it in the manager
+	// forced everyone to reach back through `jobs.hub`, and made the job layer
+	// depend on its own transport.
+	sseHub := newSSEHub()
+
 	// ── Job manager (workers + cleanup) ───────────────────────────────────
-	jobs, err := NewJobManager(configDir, db, catalog)
+	jobs, err := NewJobManager(configDir, db, catalog, sseHub)
 	if err != nil {
 		fprintReal("FATAL: cannot init job manager: %v\n", err)
 		os.Exit(1)
 	}
 	defer jobs.Close()
-	serverLogs.attachHub(jobs.hub)
+	serverLogs.attachHub(sseHub)
 
 	// ── Auth (Jellyfin + JWT) ─────────────────────────────────────────────
 	auth, err := NewAuthManager(db)
@@ -104,6 +113,7 @@ func main() {
 		Jobs:     jobs,
 		Auth:     auth,
 		Watcher:  watcher,
+		SSE:      sseHub,
 		System:   &SystemService{},
 		Media:    &MediaService{},
 		History:  NewHistoryService(jobs),
@@ -142,7 +152,7 @@ func main() {
 	// idle, so Shutdown waits the full 30 s timeout every restart. Registered
 	// here (not called inline) so it runs after the listeners are closed — no
 	// new stream can subscribe in the gap.
-	httpServer.RegisterOnShutdown(ctr.Jobs.hub.closeAll)
+	httpServer.RegisterOnShutdown(sseHub.closeAll)
 
 	// ── Graceful shutdown ─────────────────────────────────────────────────
 	stop := make(chan os.Signal, 1)

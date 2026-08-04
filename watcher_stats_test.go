@@ -16,6 +16,13 @@ import (
 // newTestAuthManager (api_keys_test.go)'s pattern.
 func newTestJobManager(t *testing.T, withCatalog bool) *JobManager {
 	t.Helper()
+	return newTestJobManagerSink(t, withCatalog, nil)
+}
+
+// newTestJobManagerSink builds the manager with an explicit sink. nil is a
+// supported value: a test that never inspects events does not need a transport.
+func newTestJobManagerSink(t *testing.T, withCatalog bool, hub EventSink) *JobManager {
+	t.Helper()
 	f, err := os.CreateTemp("", "spotiflac-test-*.db")
 	if err != nil {
 		t.Fatalf("CreateTemp: %v", err)
@@ -39,12 +46,24 @@ func newTestJobManager(t *testing.T, withCatalog bool) *JobManager {
 		catalog = catalogHandle
 	}
 
-	jm, err := NewJobManager(t.TempDir(), boltDB, catalog)
+	jm, err := NewJobManager(t.TempDir(), boltDB, catalog, hub)
 	if err != nil {
 		t.Fatalf("NewJobManager: %v", err)
 	}
 	t.Cleanup(jm.Close)
 	return jm
+}
+
+// newTestJobManagerWithHub is newTestJobManager for the tests that assert on
+// emitted events. The hub is returned rather than reachable through the manager
+// because the manager no longer owns it: it holds an EventSink, which has no
+// subscribe. Handing back the concrete hub is the whole point of the split —
+// a test that wants to observe events says so, instead of reaching into a
+// field.
+func newTestJobManagerWithHub(t *testing.T, withCatalog bool) (*JobManager, *SSEHub) {
+	t.Helper()
+	hub := newSSEHub()
+	return newTestJobManagerSink(t, withCatalog, hub), hub
 }
 
 // TestGetWatchlistStatsUsesCatalogForSizeAndStatus is the end-to-end

@@ -85,7 +85,7 @@ func (b *logRingBuffer) add(e LogEntry) {
 	b.mu.Unlock()
 
 	if hub != nil {
-		hub.publish(JobEvent{Type: "server_log", Data: e})
+		hub.Publish(JobEvent{Type: "server_log", Data: e})
 	}
 }
 

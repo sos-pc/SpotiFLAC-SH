@@ -28,15 +28,18 @@ import (
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-type JobEvent struct {
-	Type string      `json:"type"`
-	Job  *Job        `json:"job,omitempty"`
-	Data interface{} `json:"data,omitempty"` // payload pour les events non-job (ex: watchlist_synced)
-}
-
+// JobEvent lives in jobs.go, beside the Job it carries.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 // SSEHub — fan-out des événements vers tous les clients connectés
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// The hub is a transport: it knows how to fan an event out to connected
+// clients, and nothing about what produces them. JobManager holds it as a
+// jobs.EventSink (see jobs.go), so the dependency runs one way — SSE knows about
+// jobs, jobs does not know about SSE. That is what makes JobManager testable
+// without standing up an HTTP server, and it is why Publish is the only
+// exported method here: it is the interface, the rest is internal plumbing.
 
 type SSEHub struct {
 	mu   sync.RWMutex
@@ -91,9 +94,13 @@ func (h *SSEHub) closeAll() {
 	}
 }
 
-// publish diffuse un événement à tous les abonnés.
+// Publish diffuse un événement à tous les abonnés.
 // Les canaux trop lents sont ignorés (select default) pour ne pas bloquer.
-func (h *SSEHub) publish(event JobEvent) {
+//
+// Exported because it is the one method EventSink requires: a future package
+// split has to be able to name it from outside. subscribe/unsubscribe/closeAll
+// stay unexported — they belong to whoever owns the hub, not to its producers.
+func (h *SSEHub) Publish(event JobEvent) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.subs {
@@ -194,8 +201,16 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// S'abonner au hub
-	ch := s.ctr.Jobs.hub.subscribe()
-	defer s.ctr.Jobs.hub.unsubscribe(ch)
+	// The hub is injected now, so nil is reachable in a way it was not when the
+	// job manager built its own. Refuse the stream instead of panicking on a nil
+	// receiver deep inside subscribe(): a misconfigured container should fail
+	// this one request, not take down the process.
+	if s.ctr.SSE == nil {
+		writeV1Error(w, http.StatusServiceUnavailable, "event stream unavailable")
+		return
+	}
+	ch := s.ctr.SSE.subscribe()
+	defer s.ctr.SSE.unsubscribe(ch)
 
 	// Signal de connexion établie
 	sendSSEEvent(w, flusher, "connected", map[string]string{"status": "ok"})

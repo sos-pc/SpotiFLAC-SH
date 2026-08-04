@@ -194,18 +194,39 @@ type JobEventHandler interface {
 // JobManager
 // ─────────────────────────────────────────────────────────────────────────────
 
+// JobEvent is what the job layer emits. It lives here rather than in sse.go
+// because it carries a *Job: putting it beside the transport made SSE and jobs
+// each need a type from the other, which is a cycle a package split cannot
+// compile.
+type JobEvent struct {
+	Type string      `json:"type"`
+	Job  *Job        `json:"job,omitempty"`
+	Data interface{} `json:"data,omitempty"` // payload pour les events non-job (ex: watchlist_synced)
+}
+
+// EventSink is where JobManager sends those events. Declared here, by the
+// producer, so the job layer names an interface it owns instead of importing a
+// transport: *SSEHub satisfies it, and so does a channel-backed fake in a test
+// that has no HTTP server. The dependency now runs SSE → jobs and not back.
+type EventSink interface {
+	Publish(JobEvent)
+}
+
 type JobManager struct {
 	db           *bolt.DB
 	catalog      *sql.DB // SQLite catalog: tracks, library_files, download_attempts
 	queue        chan string
 	isrcClient   *isrclookup.Client
 	eventHandler JobEventHandler
-	hub          *SSEHub
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
-	closedOnce   sync.Once
+	// Injected, not constructed: whoever owns the transport keeps the concrete
+	// handle it needs for subscribe/closeAll, and hands the manager only the
+	// half it uses. nil is a supported value — see notifyJob.
+	sink       EventSink
+	wg         sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.RWMutex
+	closedOnce sync.Once
 	// In-memory batch counters for O(1) batch-completion detection.
 	// Protected by mu.
 	batchTotals  map[string]int    // batchID → total jobs enqueued
@@ -242,7 +263,10 @@ func (jm *JobManager) SetEventHandler(h JobEventHandler) {
 // periodic cleanup goroutine. catalog is the SQLite handle returned by
 // backend/db.Open; the manager records every terminal transition there
 // (best-effort, errors logged not propagated).
-func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager, error) {
+// NewJobManager takes the event sink rather than building one: the caller keeps
+// the concrete hub it needs for subscribe/closeAll, and the manager receives
+// only the Publish half. Pass nil when events are not wanted.
+func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSink) (*JobManager, error) {
 	err := db.Update(func(tx *bolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists(bucketJobs); err != nil {
 			return err
@@ -263,7 +287,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 		catalog:      catalog,
 		queue:        make(chan string, 10000),
 		isrcClient:   isrclookup.Shared(),
-		hub:          newSSEHub(),
+		sink:         sink,
 		ctx:          ctx,
 		cancel:       cancel,
 		batchTotals:  make(map[string]int),
@@ -286,11 +310,21 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB) (*JobManager,
 	return jm, nil
 }
 
+// Publish sends an event to the sink, if there is one.
+//
+// Exported so callers outside this type stop reaching through
+// `s.ctr.Jobs.hub.publish(...)` into an unexported field of an unexported field.
+// A nil sink is normal, not an error: a JobManager built for a test that does
+// not care about events is a legitimate configuration.
+func (jm *JobManager) Publish(ev JobEvent) {
+	if jm.sink != nil {
+		jm.sink.Publish(ev)
+	}
+}
+
 // notifyJob publishes a job_update event to all connected SSE clients.
 func (jm *JobManager) notifyJob(job *Job) {
-	if jm.hub != nil {
-		jm.hub.publish(JobEvent{Type: "job_update", Job: job})
-	}
+	jm.Publish(JobEvent{Type: "job_update", Job: job})
 }
 
 // cleanupLoop runs CleanupOldJobs after 5 minutes, then every 24 h. Each

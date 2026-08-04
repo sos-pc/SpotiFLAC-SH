@@ -365,7 +365,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
 
 	// Notifier le frontend que la sync est terminée
-	w.jm.hub.publish(JobEvent{
+	w.jm.Publish(JobEvent{
 		Type: "watchlist_synced",
 		Data: map[string]interface{}{
 			"watchlist_id": pl.ID,

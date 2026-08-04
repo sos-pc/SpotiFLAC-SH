@@ -15,8 +15,8 @@ import (
 // requesting user's own jobs, mirroring the same per-event filter already
 // applied to live job_update pushes further down in the same handler.
 func TestV1JobsStreamInitialSnapshotScopedToUser(t *testing.T) {
-	jm := newTestJobManager(t, false)
-	s := &Server{ctr: &Container{Jobs: jm}}
+	jm, hub := newTestJobManagerWithHub(t, false)
+	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
 	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", TrackName: "Song A", UserID: "user-a", Status: StatusDone, UpdatedAt: time.Now()}
 	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", TrackName: "Song B", UserID: "user-b", Status: StatusDone, UpdatedAt: time.Now()}
@@ -72,8 +72,8 @@ func TestV1JobsStreamSendsHeartbeatWhileIdle(t *testing.T) {
 	sseHeartbeatInterval = 10 * time.Millisecond
 	defer func() { sseHeartbeatInterval = orig }()
 
-	jm := newTestJobManager(t, false)
-	s := &Server{ctr: &Container{Jobs: jm}}
+	jm, hub := newTestJobManagerWithHub(t, false)
+	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	claims := &JWTClaims{UserID: "user-a", IsAdmin: false}
@@ -112,8 +112,8 @@ func TestV1JobsStreamSendsHeartbeatWhileIdle(t *testing.T) {
 // bypass on the read side, mirroring the same bypass already covered for
 // deletion in TestClearCompletedJobsAdminClearsEveryone.
 func TestV1JobsStreamInitialSnapshotAdminSeesEveryone(t *testing.T) {
-	jm := newTestJobManager(t, false)
-	s := &Server{ctr: &Container{Jobs: jm}}
+	jm, hub := newTestJobManagerWithHub(t, false)
+	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
 	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusDone, UpdatedAt: time.Now()}
 	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", UserID: "user-b", Status: StatusDone, UpdatedAt: time.Now()}
@@ -162,8 +162,8 @@ func TestV1JobsStreamInitialSnapshotAdminSeesEveryone(t *testing.T) {
 // persisted (as the throttled save now does periodically), a fresh
 // connection's snapshot reflects them instead of defaulting to zero.
 func TestV1JobsStreamSnapshotReflectsPersistedProgress(t *testing.T) {
-	jm := newTestJobManager(t, false)
-	s := &Server{ctr: &Container{Jobs: jm}}
+	jm, hub := newTestJobManagerWithHub(t, false)
+	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
 	job := &Job{
 		ID: "job-a", SpotifyID: "track-a", UserID: "user-a",

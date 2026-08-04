@@ -154,15 +154,15 @@ func TestClearAllJobsLeavesActiveDownloadsAlone(t *testing.T) {
 // not a blank stub, so v1JobsStream's existing per-user filter can keep the
 // broadcast scoped instead of notifying every connected client.
 func TestClearJobsBroadcastsOwnerScopedEvents(t *testing.T) {
-	jm := newTestJobManager(t, false)
+	jm, hub := newTestJobManagerWithHub(t, false)
 
 	job := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusDone}
 	if err := jm.saveJob(job); err != nil {
 		t.Fatalf("saveJob: %v", err)
 	}
 
-	ch := jm.hub.subscribe()
-	defer jm.hub.unsubscribe(ch)
+	ch := hub.subscribe()
+	defer hub.unsubscribe(ch)
 
 	if _, err := jm.ClearCompletedJobs("user-a", false); err != nil {
 		t.Fatalf("ClearCompletedJobs: %v", err)
