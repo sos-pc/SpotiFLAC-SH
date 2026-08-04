@@ -28,17 +28,6 @@ import (
 // Shared response helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-func writeV1JSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-func writeV1Error(w http.ResponseWriter, status int, msg string) {
-	writeV1JSON(w, status, map[string]string{"error": msg})
-}
-
 // decodeV1JSON reads and decodes r's JSON body into dst (a pointer, same
 // contract as json.Decoder.Decode). On failure it writes the 400 response
 // itself and returns false — every v1 handler with a JSON body follows

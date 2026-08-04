@@ -1507,17 +1507,6 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // M3U8 generation pour Jellyfin
 // ─────────────────────────────────────────────────────────────────────────────
 
-// m3u8GenerationResult reports what generateM3U8ForPlaylist actually did,
-// for callers (the repair endpoint) that need to show the user something
-// more useful than fire-and-forget log lines.
-type m3u8GenerationResult struct {
-	Written    bool `json:"written"`    // a file was actually created/updated
-	Skipped    bool `json:"skipped"`    // shrink-guard refused the write (force=false only)
-	Total      int  `json:"total"`      // len(pl.TrackIDs) at generation time
-	Resolved   int  `json:"resolved"`   // tracks successfully resolved to a file on disk
-	Unresolved int  `json:"unresolved"` // Total - Resolved
-}
-
 // generateM3U8ForPlaylist writes the M3U8 file for a watchlist by resolving
 // each Spotify ID in pl.TrackIDs against the filesystem, via the SPOTIFY_ID
 // tag embedded in audio files at download time. BoltDB jobs are used only
@@ -1614,35 +1603,6 @@ func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8G
 		}
 	}
 	return result, nil
-}
-
-// shouldSkipShrinkingWrite reports whether a new M3U8 write with newCount
-// resolved entries should be skipped to avoid overwriting an existing file
-// that already has more (existingCount). Only called once the caller has
-// already established the shortfall is a genuine resolution gap rather than
-// an intentional playlist shrink (sync_deletions removes IDs from
-// pl.TrackIDs before resolution runs, so it never shows up here).
-func shouldSkipShrinkingWrite(newCount, existingCount int) bool {
-	return newCount < existingCount
-}
-
-// countM3U8Entries returns how many track entries the M3U8 file at path
-// currently has (non-empty lines other than the #EXTM3U header), or
-// ok=false if the file doesn't exist / can't be read (e.g. first-ever
-// generation for this playlist — nothing to protect yet).
-func countM3U8Entries(path string) (count int, ok bool) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || line == "#EXTM3U" {
-			continue
-		}
-		count++
-	}
-	return count, true
 }
 
 // m3u8BaseName returns the .m3u8-free base filename SpotiFLAC uses for a

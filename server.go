@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -142,6 +143,59 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
+
+// writeV1JSON / writeV1Error live here rather than in api_v1.go because
+// server.go and sse.go call them too: leaving the writers with the v1 handlers
+// meant the server layer depended on the API layer for its own error
+// responses, which is one half of an import cycle once these split.
+// RequireAuth is a *Server method, so it belongs with the server rather than
+// with the AuthManager it calls into. Living in auth.go made the auth layer
+// name the server type — the other half of the auth<->server cycle.
+// RequireAuth mirrors v1Auth's JWT check, including the live TokenVersion
+// revocation comparison — without it, a demoted/disabled admin's existing
+// JWT would keep working here up to its full 24h expiry even after
+// GetOrCreateUser bumped TokenVersion specifically to invalidate it
+// everywhere else.
+func (s *Server) RequireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := ""
+		auth := r.Header.Get("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			token = auth[7:]
+		}
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token == "" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		claims, err := ValidateJWT(token)
+		if err != nil {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
+		if !claims.IsAPIKey && s.ctr.Auth != nil {
+			if profile, err := s.ctr.Auth.GetUser(claims.UserID); err == nil && profile.TokenVersion != claims.TokenVersion {
+				http.Error(w, `{"error":"session revoked"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+		ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func writeV1JSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeV1Error(w http.ResponseWriter, status int, msg string) {
+	writeV1JSON(w, status, map[string]string{"error": msg})
+}
 
 func (s *Server) registerRoutes() {
 	s.mux.Handle("/api/upload", corsMiddleware(localBypassMiddleware(s.RequireAuth(http.HandlerFunc(s.handleUpload)))))

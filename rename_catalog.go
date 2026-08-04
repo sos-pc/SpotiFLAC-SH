@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 
 	"github.com/afkarxyz/SpotiFLAC/backend"
@@ -39,17 +40,20 @@ import (
 // user explicitly asked for should never fail because a downstream sync
 // issue, and resolveTrackPaths still falls back to a filesystem tag scan
 // for any track whose catalog entry goes stale for some other reason.
-func syncCatalogPathOnRename(ctr *Container, oldPath, newPath string) {
-	if ctr == nil || oldPath == "" || newPath == "" || oldPath == newPath {
+// Takes the two stores it touches rather than the whole Container: holding
+// *Container forced FileService to hold one too, which made the service layer
+// depend on the server layer for a type it never otherwise used.
+func syncCatalogPathOnRename(catalog *sql.DB, jobs *JobManager, oldPath, newPath string) {
+	if oldPath == "" || newPath == "" || oldPath == newPath {
 		return
 	}
 
-	if ctr.Catalog != nil {
+	if catalog != nil {
 		if spotifyID, err := meta.ReadSpotifyID(newPath); err == nil && spotifyID != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
-			existing, err := db.GetActiveLibraryFile(ctx, ctr.Catalog, spotifyID)
+			existing, err := db.GetActiveLibraryFile(ctx, catalog, spotifyID)
 			if err == nil && existing != nil && existing.FilePath == oldPath {
-				if err := db.UpdateLibraryFilePath(ctx, ctr.Catalog, existing.ID, newPath); err != nil {
+				if err := db.UpdateLibraryFilePath(ctx, catalog, existing.ID, newPath); err != nil {
 					slog.Warn("[Catalog] rename sync failed", "spotify_id", spotifyID, "err", err)
 				}
 			}
@@ -57,8 +61,8 @@ func syncCatalogPathOnRename(ctr *Container, oldPath, newPath string) {
 		}
 	}
 
-	if ctr.Jobs != nil {
-		if n, err := ctr.Jobs.UpdateJobFilePathsForRename(oldPath, newPath); err != nil {
+	if jobs != nil {
+		if n, err := jobs.UpdateJobFilePathsForRename(oldPath, newPath); err != nil {
 			slog.Warn("[Catalog] job FilePath rename sync failed", "old_path", oldPath, "err", err)
 		} else if n > 0 {
 			slog.Info("[Catalog] updated job(s) FilePath for rename", "count", n, "old_path", oldPath, "new_path", newPath)

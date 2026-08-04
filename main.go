@@ -121,10 +121,7 @@ func main() {
 		Metadata: NewMetadataService(auth),
 		Download: NewDownloadService(jobs, auth),
 	}
-	// FileService needs the container itself (its rename methods coordinate
-	// across Catalog/Jobs/history via syncCatalogPathOnRename), so it's wired
-	// after the literal above rather than inside it.
-	ctr.Files = NewFileService(ctr)
+	ctr.Files = NewFileService(catalog, jobs)
 
 	// Proxy auto-discovery used to start here: a goroutine polling
 	// tidal-uptime.geeked.wtf every 6 h to reorder the Tidal proxy list. That
@@ -187,17 +184,6 @@ func main() {
 	httpServer.Shutdown(ctx)
 
 	slog.Info("[Main] Bye.")
-}
-
-// getConfigDir retourne le dossier de config SpotiFLAC.
-// Sous Docker : /home/nonroot/.SpotiFLAC
-// En local    : ~/.SpotiFLAC
-func getConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".SpotiFLAC"), nil
 }
 
 // printPermissionHintIfNeeded surfaces the most common cause of a

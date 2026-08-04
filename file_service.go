@@ -4,13 +4,14 @@ package main
 // FileService — file-management operations (list, metadata, rename, upload,
 // existence checks) carved out of the former App god-object (R3).
 //
-// Holds *Container rather than a narrower dependency because its two rename
-// methods delegate to syncCatalogPathOnRename, a cross-store coordinator that
-// touches Catalog, Jobs and download history at once — an honest dependency,
-// not a facade over the whole container.
+// Holds the catalog handle and the job manager, not the Container: its two
+// rename methods delegate to syncCatalogPathOnRename, and those two stores are
+// all it needs. Taking the whole container made this service name a server-layer
+// type for nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -24,11 +25,12 @@ import (
 )
 
 type FileService struct {
-	ctr *Container
+	catalog *sql.DB
+	jobs    *JobManager
 }
 
-func NewFileService(ctr *Container) *FileService {
-	return &FileService{ctr: ctr}
+func NewFileService(catalog *sql.DB, jobs *JobManager) *FileService {
+	return &FileService{catalog: catalog, jobs: jobs}
 }
 
 func (f *FileService) OpenFolder(path string) error {
@@ -71,7 +73,7 @@ func (f *FileService) RenameFilesByMetadata(files []string, format string) []bac
 	results := backend.RenameFiles(files, format)
 	for _, r := range results {
 		if r.Success && r.NewPath != "" {
-			syncCatalogPathOnRename(f.ctr, r.OldPath, r.NewPath)
+			syncCatalogPathOnRename(f.catalog, f.jobs, r.OldPath, r.NewPath)
 		}
 	}
 	return results
@@ -108,7 +110,7 @@ func (f *FileService) RenameFileTo(oldPath, newName string) error {
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
 	}
-	syncCatalogPathOnRename(f.ctr, oldPath, newPath)
+	syncCatalogPathOnRename(f.catalog, f.jobs, oldPath, newPath)
 	return nil
 }
 

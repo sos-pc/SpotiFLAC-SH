@@ -13,7 +13,7 @@ func TestRenameFileToSanitizesTraversalInNewName(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	f := NewFileService(nil)
+	f := NewFileService(nil, nil)
 	if err := f.RenameFileTo(oldPath, "../../../etc/cron.d/evil"); err != nil {
 		t.Fatalf("RenameFileTo: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestRenameFileToRefusesToOverwriteExistingFile(t *testing.T) {
 		t.Fatalf("setup target: %v", err)
 	}
 
-	f := NewFileService(nil)
+	f := NewFileService(nil, nil)
 	err := f.RenameFileTo(oldPath, "target")
 	if err == nil {
 		t.Fatal("expected a collision error, got nil")

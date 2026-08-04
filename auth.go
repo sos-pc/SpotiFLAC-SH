@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -379,41 +378,6 @@ func hmacSign(data string) string {
 type contextKey string
 
 const contextKeyUser contextKey = "user"
-
-// RequireAuth mirrors v1Auth's JWT check, including the live TokenVersion
-// revocation comparison — without it, a demoted/disabled admin's existing
-// JWT would keep working here up to its full 24h expiry even after
-// GetOrCreateUser bumped TokenVersion specifically to invalidate it
-// everywhere else.
-func (s *Server) RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := ""
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			token = auth[7:]
-		}
-		if token == "" {
-			token = r.URL.Query().Get("token")
-		}
-		if token == "" {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
-		claims, err := ValidateJWT(token)
-		if err != nil {
-			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-			return
-		}
-		if !claims.IsAPIKey && s.ctr.Auth != nil {
-			if profile, err := s.ctr.Auth.GetUser(claims.UserID); err == nil && profile.TokenVersion != claims.TokenVersion {
-				http.Error(w, `{"error":"session revoked"}`, http.StatusUnauthorized)
-				return
-			}
-		}
-		ctx := context.WithValue(r.Context(), contextKeyUser, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
 
 func GetUserFromContext(r *http.Request) *JWTClaims {
 	claims, _ := r.Context().Value(contextKeyUser).(*JWTClaims)

@@ -23,27 +23,28 @@ import (
 
 func TestSyncCatalogPathOnRenameNoOpsSafely(t *testing.T) {
 	database := openTestCatalogDB(t)
-	ctr := &Container{Catalog: database}
+	catalog := database
 
-	t.Run("nil container", func(t *testing.T) {
-		syncCatalogPathOnRename(nil, "/a", "/b") // must not panic
-	})
-	t.Run("nil catalog", func(t *testing.T) {
-		syncCatalogPathOnRename(&Container{}, "/a", "/b") // must not panic
+	// "nil container" used to be a separate case here. The function no longer
+	// takes a container, so both stores being nil is the only shape of that
+	// test left — and it is the one that matters: a rename with no catalog
+	// configured must be a silent no-op, not a panic.
+	t.Run("nil stores", func(t *testing.T) {
+		syncCatalogPathOnRename(nil, nil, "/a", "/b") // must not panic
 	})
 	t.Run("same path", func(t *testing.T) {
-		syncCatalogPathOnRename(ctr, "/a", "/a") // no-op, must not touch the DB
+		syncCatalogPathOnRename(catalog, nil, "/a", "/a") // no-op, must not touch the DB
 	})
 	t.Run("empty paths", func(t *testing.T) {
-		syncCatalogPathOnRename(ctr, "", "/b")
-		syncCatalogPathOnRename(ctr, "/a", "")
+		syncCatalogPathOnRename(catalog, nil, "", "/b")
+		syncCatalogPathOnRename(catalog, nil, "/a", "")
 	})
 }
 
 func TestSyncCatalogPathOnRenameSkipsUntaggedFile(t *testing.T) {
 	ctx := context.Background()
 	database := openTestCatalogDB(t)
-	ctr := &Container{Catalog: database}
+	catalog := database
 
 	oldPath := filepath.Join(t.TempDir(), "old.flac")
 	newPath := filepath.Join(t.TempDir(), "new.flac")
@@ -67,7 +68,7 @@ func TestSyncCatalogPathOnRenameSkipsUntaggedFile(t *testing.T) {
 
 	// newPath isn't a parseable audio file, so ReadSpotifyID fails and this
 	// must be a safe no-op — the catalog row must stay exactly as it was.
-	syncCatalogPathOnRename(ctr, oldPath, newPath)
+	syncCatalogPathOnRename(catalog, nil, oldPath, newPath)
 
 	got, err := db.GetActiveLibraryFile(ctx, database, "spotify:track:rename-test")
 	if err != nil {
@@ -131,8 +132,7 @@ func TestSyncCatalogPathOnRenamePropagatesToJobsAndHistory(t *testing.T) {
 		t.Fatalf("AddHistoryItem: %v", err)
 	}
 
-	ctr := &Container{Catalog: database, Jobs: jm}
-	syncCatalogPathOnRename(ctr, oldPath, newPath)
+	syncCatalogPathOnRename(database, jm, oldPath, newPath)
 
 	// 1. Catalog updated.
 	lf, err := db.GetActiveLibraryFile(ctx, database, spotifyID)

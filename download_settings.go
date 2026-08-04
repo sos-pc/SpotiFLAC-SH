@@ -146,7 +146,7 @@ func EffectiveDownloadSettings(auth *AuthManager, userID string) DownloadSetting
 		}
 	}
 	if raw == nil {
-		raw, _ = (&SystemService{}).LoadSettings()
+		raw, _ = loadSettingsFile()
 	}
 	return ParseDownloadSettings(raw)
 }
