@@ -5,7 +5,7 @@
 > ports, lecture du code pour chaque affirmation.
 > **Trois défauts corrigés, deux bugs applicatifs découverts au passage, un point ouvert.**
 > Index : [README.md](README.md). Le durcissement ffmpeg est ailleurs :
-> [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md).
+> [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md).
 >
 > **Volontairement sans identifiants d'hôte.** Ce dépôt est public : les IP, noms de domaine, chemins
 > de disque et clés du déploiement audité n'y ont pas leur place — associés à la liste de trous
@@ -159,7 +159,7 @@ piège que [main.go:188](../main.go) documente déjà.
 
 **La limite mémoire n'existe pas.** C'est le pire cas : une protection qu'on croit avoir. Et c'est
 précisément celle qui bornerait un ffmpeg qui déraille sur un fichier forgé — le complément
-*déploiement* du durcissement de [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md), qui ne
+*déploiement* du durcissement de [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md), qui ne
 réduit pas la probabilité d'une RCE mais dont on voudrait borner l'épuisement de ressources, la
 partie facile à déclencher.
 
@@ -258,7 +258,7 @@ type — *déduire une propriété du serveur depuis une mesure non contrôlée*
   `body="event: connected\ndata: {\"status\":\"ok\"}\n\n"` — rien après.
 
 C'est la même famille d'erreur que le `FROM scratch` et le faux positif `libstdc++` de
-[ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) : **une propriété affirmée sans mesure
+[ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md) : **une propriété affirmée sans mesure
 contrôlée est une propriété fausse**, y compris quand l'instrument est en cause.
 
 ## 7. Tâches ouvertes

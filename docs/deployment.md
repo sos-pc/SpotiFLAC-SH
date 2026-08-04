@@ -295,7 +295,7 @@ docker run -p 6890:6890 \
 > `exec` of ffmpeg failed for three days while the image built green. The runtime is now
 > `distroless/cc`, which supplies exactly those libraries and nothing else, and CI now runs the
 > binaries instead of only copying them. See
-> [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md).
+> [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md).
 
 The Dockerfile pipeline (4 stages):
 

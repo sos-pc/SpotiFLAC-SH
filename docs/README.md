@@ -32,21 +32,27 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 | Doc | Type | Statut |
 |---|---|---|
-| **⭐ [module-engine.md](module-engine.md)** | 📘 | **vérifié en prod 07-25/26** — le moteur de download en sidecar : archi, contrat, activation, flux, limites, exploitation. Inclut §8 « ce qu'on a eu faux », car les plans archivés affirment encore le contraire. |
-| [api-reference.md](api-reference.md) | 📘 | ⚠️ `/downloads/track`, `/files/exists`, `/files/m3u8` corrigés 07-18 ; le reste non re-vérifié |
+| **⭐ [module-engine.md](module-engine.md)** | 📘 | ✅ **vérifié contre le code 2026-08-04**, engine 1.6.0 — le moteur en sidecar : archi, contrat, activation, flux, limites, exploitation. §8 « ce qu'on a eu faux » liste aussi les erreurs de ce document lui-même. |
+| [upstream-tracking-plan.md](upstream-tracking-plan.md) | 📘 | ✅ **en service** — pourquoi il n'y a plus de fork, et comment la CI suit les releases amont (comparaison PyPI ↔ label de notre image). |
+| [api-reference.md](api-reference.md) | 📘 | ✅ **vérifié 2026-08-04** — les 72 routes enregistrées sont documentées, aucune route documentée n'est absente du code. Comparaison automatisée route par route. |
+| [settings-reference.md](settings-reference.md) | 📘 | ✅ **vérifié 2026-08-04** — toutes les clés documentées existent côté frontend (les réglages sont un blob `map[string]interface{}`, le schéma appartient au frontend). |
+| [deployment.md](deployment.md) | 📘+🌍 | ✅ **corrigé 2026-08-04** — décrivait une installation mono-conteneur qui ne télécharge plus rien. Reste « minimal » : lire `deployment-hardening.md` avant mise en ligne. |
 | [authentication.md](authentication.md) | 📘 | ❔ non re-vérifié — JWT, clés API, Jellyfin |
-| [settings-reference.md](settings-reference.md) | 📘 | ⚠️ à relire après la migration backend-autoritaire |
 | [tidal-auth.md](tidal-auth.md) | 📘+🌍 | ❔ non re-vérifié — device-code Tidal (toujours utile : c'est le chemin **BYOT**) |
 | [watchlist.md](watchlist.md) | 📘 | ⚠️ à relire — les watchlists suivent les réglages **globaux** |
-| [deployment.md](deployment.md) | 📘+🌍 | ⚠️ minimal — lire `deployment-hardening.md` avant mise en ligne |
-| [troubleshooting.md](troubleshooting.md) | 📘 | ⚠️ §FFmpeg corrigé 07-15 |
+| [troubleshooting.md](troubleshooting.md) | 📘 | ⚠️ §FFmpeg corrigé 07-15 ; le vocabulaire « proxy » y survit par endroits |
 
 ### C. Observations du monde extérieur — à re-vérifier avant de citer
 
 | Doc | Vérifié | Note |
 |---|---|---|
-| [third-party-layer-status.md](third-party-layer-status.md) | corrigé 2026-07-18 | État réel des services tiers. **Encore valable pendant la transition** (tant que l'engine n'est pas live et que notre app utilise les proxies). Devient caduc une fois les providers passés à l'engine. |
-| [EXTERNAL_APIS.md](EXTERNAL_APIS.md) | Amazon corrigé 07-15 | Les API externes utilisées. Sera fortement réduit post-engine (les proxies Qobuz/Amazon/Deezer partent ; voir la carte de migration). |
+| [EXTERNAL_APIS.md](EXTERNAL_APIS.md) | Amazon corrigé 07-15 | Les API externes utilisées. À relire : la couche proxy Qobuz/Amazon/Deezer qu'il décrit est partie avec la v4.0.0. |
+
+Le relevé de l'ancienne couche de proxies (`third-party-layer-status.md`) est
+[passé en archive](archive/third-party-layer-status.md) : cette couche n'existe
+plus. Les endpoints que le moteur utilise à sa place viennent d'un registre
+chiffré qu'il récupère **à l'exécution**, donc aucun document ne peut en tenir
+l'état à jour — voir `module-engine.md` §5.
 
 ### D. Archive — [archive/](archive/)
 

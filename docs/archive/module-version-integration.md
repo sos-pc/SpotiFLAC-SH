@@ -20,19 +20,19 @@ full download engine behind our existing Go service.
 > see §6;*
 > (4) workspace = **new long-lived branch `feat/module-engine`**, not a new repo.
 
-Related: [EXTERNAL_APIS.md](EXTERNAL_APIS.md) · [CREDITS.md](../CREDITS.md) · [tidal-auth.md](tidal-auth.md)
+Related: [EXTERNAL_APIS.md](../EXTERNAL_APIS.md) · [CREDITS.md](../../CREDITS.md) · [tidal-auth.md](../tidal-auth.md)
 
 ## Reconciliation with prior dev2 work (2026-07-23)
 
 This plan is not a blank slate — dev2 already carried related work. Reconciled:
 
-- **Supersedes (now archived):** [provider-matching-investigation.md](archive/provider-matching-investigation.md)
+- **Supersedes (now archived):** [provider-matching-investigation.md](provider-matching-investigation.md)
   §7 (the MusicBrainz→Qobuz matching pipeline, in Go) and
-  [external-api-layer.md](archive/external-api-layer.md) (the plan to build/verify the community
+  [external-api-layer.md](external-api-layer.md) (the plan to build/verify the community
   Qobuz/Amazon/DRM layer **ourselves**). The engine does resolution + matching internally and owns
   the provider layer, so **neither is implemented.**
 - **Builds on (done):** the service-selection refonte
-  ([archive/override-rework-plan.md](archive/override-rework-plan.md), verified in prod). Two
+  ([archive/override-rework-plan.md](override-rework-plan.md), verified in prod). Two
   consequences that **correct earlier drafts of this plan**:
   - The service-rewrite **override in `jobs_helpers.go` is already removed.** The engine plugs into
     the existing, clean `ExecuteDownload` fallback chain (`backend/downloader.go`, ~line 441) — that

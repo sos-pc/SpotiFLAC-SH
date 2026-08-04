@@ -1002,7 +1002,7 @@ Cette route écrivait un `.m3u8` à la demande du client. Elle n'a plus d'appela
 passée **côté serveur, à la fin du lot** (`OnManualBatchComplete`), parce que le client l'appelait
 juste après l'*enqueue* et ne connaissait donc que les pistes **déjà présentes** sur le disque — une
 playlist entièrement neuve n'obtenait aucun M3U8. Voir
-[settings-source-of-truth.md §7.5 étape 5](settings-source-of-truth.md).
+[settings-source-of-truth.md §7.5 étape 5](archive/settings-source-of-truth.md).
 
 Pour demander un M3U8, un lot passe désormais `m3u8_name` / `m3u8_source_id` à `POST /api/v1/jobs`.
 

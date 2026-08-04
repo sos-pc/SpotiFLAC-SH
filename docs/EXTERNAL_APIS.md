@@ -3,7 +3,7 @@
 > **🌍 Observation — partiellement périmé.** Ce document décrit des services tiers, qui meurent sans
 > prévenir : la section Amazon a été corrigée le 2026-07-15 (le proxy ne résout plus), **le reste n'a
 > pas été re-vérifié depuis**. Pour l'état réel et daté de chaque service, voir
-> [third-party-layer-status.md](third-party-layer-status.md) — et re-tester avant de citer quoi que ce
+> [third-party-layer-status.md](archive/third-party-layer-status.md) — et re-tester avant de citer quoi que ce
 > soit d'ici comme un fait. Index : [README.md](README.md). & Dependencies
 
 SpotiFLAC relies on a layered ecosystem of official public APIs, undocumented endpoints, and community-hosted proxies to achieve "zero-account" FLAC downloading.
@@ -149,7 +149,7 @@ probes, and the Song.link rate-limit override.
 ## 6. Dependencies & binaries
 
 - **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — used by the legacy desktop build for first-launch FFmpeg auto-install. **Not used by the web build.**
-- **GitHub Releases (`https://github.com/BtbN/FFmpeg-Builds/releases/...`)** — the web build's actual FFmpeg source: an FFmpeg/FFprobe build with its codec libraries bundled into the executable, fetched and checksum-verified in the Dockerfile's build stage, then copied into the (shell-less) runtime image — deliberately not `apt install ffmpeg`, which on both Debian bookworm and trixie pulls ~30 transitive shared-library dependencies carrying dozens of CVEs this headless audio-only service never exercises. **Not fully static despite the common shorthand:** the binaries still link glibc/libgcc dynamically, which is why the runtime image is `distroless/cc` and not `scratch` — see [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md). See [deployment.md](deployment.md#building-from-source).
+- **GitHub Releases (`https://github.com/BtbN/FFmpeg-Builds/releases/...`)** — the web build's actual FFmpeg source: an FFmpeg/FFprobe build with its codec libraries bundled into the executable, fetched and checksum-verified in the Dockerfile's build stage, then copied into the (shell-less) runtime image — deliberately not `apt install ffmpeg`, which on both Debian bookworm and trixie pulls ~30 transitive shared-library dependencies carrying dozens of CVEs this headless audio-only service never exercises. **Not fully static despite the common shorthand:** the binaries still link glibc/libgcc dynamically, which is why the runtime image is `distroless/cc` and not `scratch` — see [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md). See [deployment.md](deployment.md#building-from-source).
 
 ---
 

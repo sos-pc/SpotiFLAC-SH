@@ -121,7 +121,7 @@ If you see broken paths:
 > on the pinned asset) and `scratch` ships no ELF loader. `exec` then fails with
 > `no such file or directory` **naming a file that exists** — that error reports the missing
 > *interpreter*, not the missing binary. Diagnosis, blast radius and fix options:
-> [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md).
+> [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md).
 
 The intent (not currently achieved — see above): an FFmpeg/FFprobe build is fetched and verified against a checksum in the Dockerfile's build stage, then copied straight into the (shell-less) runtime image at `/usr/local/bin/ffmpeg` / `/usr/local/bin/ffprobe`.
 

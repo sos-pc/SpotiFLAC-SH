@@ -18,7 +18,7 @@ The example values in this document match `DEFAULT_SETTINGS` (`frontend/src/lib/
 | `downloader` | `"auto" \| "tidal" \| "qobuz" \| "amazon" \| "deezer"` | `"auto"` | Which lossless source to use. With `auto`, providers are tried in the order set by `autoOrder`. |
 | `autoOrder` | string (24 permutations) | `"tidal-qobuz-amazon-deezer"` | Provider fallback order when `downloader = "auto"`. Format is a hyphen-separated permutation of `tidal`, `qobuz`, `amazon`, `deezer`. |
 | `autoQuality` | `"16" \| "24"` | `"16"` | Target bit depth when `downloader = "auto"`. `"16"` → `LOSSLESS`. `"24"` → `HI_RES_LOSSLESS`. |
-| `allowFallback` | bool | `true` | If a provider fails (proxy down, track not found), continue trying the next one in `autoOrder`. When `false`, a single failure marks the job failed. |
+| `allowFallback` | bool | `true` | If a provider fails (route down, track not found), continue trying the next one in `autoOrder`. When `false`, a single failure marks the job failed. Also gates the engine's one hi-res→CD retry, so `false` really does mean "hi-res or nothing". |
 
 When all providers fail, the job is marked `failed` and can be retried on the next watchlist sync (manual sync only — see [watchlist.md](watchlist.md)).
 
@@ -26,7 +26,7 @@ When all providers fail, the job is marked `failed` and can be retried on the ne
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `tidalQuality` | `"LOSSLESS" \| "HI_RES_LOSSLESS"` | `"LOSSLESS"` | Tidal quality tier. `HI_RES_LOSSLESS` (24-bit FLAC) requires a Tidal Premium token; community proxies serve preview-only. |
+| `tidalQuality` | `"LOSSLESS" \| "HI_RES_LOSSLESS"` | `"LOSSLESS"` | Tidal quality tier. `HI_RES_LOSSLESS` (24-bit FLAC) requires a Tidal Premium token — the engine's Tidal is anonymous and serves previews only, so without a token this setting cannot be honoured. |
 | `qobuzQuality` | `"6" \| "7" \| "27"` | `"6"` | Qobuz quality ID. `6` = 16-bit FLAC, `7` = 24-bit FLAC, `27` = 24-bit Hi-Res. |
 | `amazonQuality` | `"original"` | `"original"` | Amazon ships a single quality tier. Reserved for future use. |
 

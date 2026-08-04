@@ -239,9 +239,9 @@ tmpfs: [ /tmp ]
 
 L'affirmation « statique » s'est propagée — ces passages sont **faux en l'état** :
 
-- [`docs/deployment.md:240`](deployment.md) — *« downloads a **statically-linked** FFmpeg/FFprobe build »*
-- [`docs/deployment.md:241`](deployment.md) — *« the two **static** FFmpeg binaries »*
-- [`docs/troubleshooting.md:117`](troubleshooting.md) — *« In Docker deployments this **should never
+- [`docs/deployment.md:240`](../deployment.md) — *« downloads a **statically-linked** FFmpeg/FFprobe build »*
+- [`docs/deployment.md:241`](../deployment.md) — *« the two **static** FFmpeg binaries »*
+- [`docs/troubleshooting.md:117`](../troubleshooting.md) — *« In Docker deployments this **should never
   happen** »* : activement trompeur, il décourage d'enquêter sur exactement ce qui se produit
 - [`README.md:290`](../README.md) — *« static ffmpeg fetch »*
 - Le commentaire du `Dockerfile` (stage 3) — le raisonnement CVE complet
