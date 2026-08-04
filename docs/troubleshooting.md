@@ -190,11 +190,57 @@ docker compose down && docker compose pull && docker compose up -d
 
 ---
 
-## Proxies
+## Download engine
 
-### Community proxies all show `ratelimited` with "PREVIEW only" error
+### `qobuz is only available through the download engine`
 
-This is **expected** as of May 2026 — see "Tidal downloads start but produce a 30-second file" above. Authenticate with a Tidal Premium account to unlock full FLAC.
+Exactly what it says: since v4.0.0 Qobuz, Amazon and Deezer have no native Go path. Set both `ENGINE_URL` and `ENGINE_SERVICES` on the app container, and make sure the engine service is actually running. See [deployment.md](deployment.md).
+
+### Which build am I actually running?
+
+`docker compose pull` **without** `up -d` leaves the previous container running. The engine says what it is at startup and on `/health`:
+
+```bash
+docker compose logs spotiflac-engine | grep "engine shim"
+#   engine shim: SpotiFLAC 1.6.0, image d0b573a
+```
+
+`docker inspect spotiflac-engine --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` answers the same question from the outside.
+
+### `Browser failed to start within timeout` / `No usable sandbox!`
+
+The engine drives Chromium for several provider routes. Both symptoms mean it could not start one:
+
+- **`No usable sandbox!`** — `cap_drop: ALL` blocks the user-namespace sandbox and `no-new-privileges` blocks the setuid helper. Our image ships `/usr/bin/chromium` as a wrapper that passes `--no-sandbox`; if you see this, you are on an image older than `512bc13`.
+- **A crash with no message** — missing `shm_size: 1g`. Chromium puts renderer shared memory in `/dev/shm` and Docker's 64 MB default is not enough. Check with `docker exec spotiflac-engine df -h /dev/shm`.
+
+Test it directly — note the absence of `--headless`, which would bypass both the display and the sandbox and tell you nothing:
+
+```bash
+docker exec spotiflac-engine sh -c 'chromium https://example.com >/tmp/c.log 2>&1 & sleep 8; pgrep -c chromium.real; pkill -f chromium.real'
+```
+
+### `produced file is not readable audio`
+
+The engine downloaded something that is not the audio its filename claims — usually a stream that died mid-transfer, leaving an HTML error body or a truncated file at a `.flac` path. **This is the shim refusing to call it a success**, not a bug. The chain moves on to the next provider.
+
+Left unchecked the engine reports these as successful, so if you ever see a 0-byte or unplayable file reach the library, that is the interesting failure — see [module-engine.md](module-engine.md) §5.
+
+### A provider that worked yesterday fails today
+
+Its host probably died. The engine resolves its endpoints from an encrypted registry fetched **at runtime**, so upstream replaces dead hosts without publishing a release, and the same provider fails differently from one day to the next. Measured 2026-08-04: three of nine Qobuz hosts no longer resolve at all, and Deezer's primary route fails on every attempt with `ext:deezer` carrying the provider.
+
+Confirm it is the host and not your container before digging further:
+
+```bash
+docker exec spotiflac-engine python -c "import socket; print(socket.gethostbyname('pypi.org'))"
+```
+
+If that resolves, container DNS is fine and the dead hosts are upstream's.
+
+### Tidal returns `410 - The v1 download API has been retired`
+
+Expected without a token, and not fixable from here — it is upstream's endpoint table. Tokenless Tidal survives through the `ext:tidal-web` extension route. Authenticate with a Tidal Premium account for the native full-FLAC path.
 
 ---
 

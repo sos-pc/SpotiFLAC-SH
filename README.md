@@ -138,7 +138,7 @@ location / {
 Watchlists track Spotify playlists and automatically sync them at a configurable interval.
 
 - New tracks added to the Spotify playlist are downloaded automatically.
-- Failed tracks are retried on **manual** sync (`SyncWatchlist` button / `POST /watchlists/{id}/sync`); the scheduled daemon does not auto-retry to avoid hammering rate-limited proxies.
+- Failed tracks are retried on **manual** sync (`SyncWatchlist` button / `POST /watchlists/{id}/sync`); the scheduled daemon does not auto-retry, to avoid hammering shared upstream hosts that rate-limit.
 - M3U8 files are regenerated for Jellyfin after each sync. Generation walks the filesystem and resolves each Spotify ID via the embedded `SPOTIFY_ID` tag, with BoltDB job records as a fallback for legacy files that lack the tag.
 - Stats track total / downloaded / skipped / failed / pending per playlist.
 - Playlist names are resolved from Spotify metadata on first sync and re-validated on each sync (renaming the Spotify playlist deletes the old M3U8 and creates a new one).
@@ -147,7 +147,9 @@ See [docs/watchlist.md](docs/watchlist.md) for details.
 
 ## Tidal Authentication
 
-By default SpotiFLAC uses **community HiFi API proxies** — no Tidal account required. As of May 2026, those proxies are reachable but Tidal restricts the unauthenticated API to `assetPresentation: "PREVIEW"` (30-second segments). Full FLAC requires a personal token.
+Without an account, Tidal is routed to the **download engine** like the other providers — no Tidal login required, but the engine's Tidal is anonymous and Tidal restricts the unauthenticated API to `assetPresentation: "PREVIEW"` (30-second segments). Full FLAC requires a personal token.
+
+> Measured 2026-07-31: both endpoints in the engine's Tidal registry are gone — one 404s, the other answers **410 Gone, "the v1 download API has been retired"**. Tokenless Tidal survives only through the engine's `ext:tidal-web` extension route, which is why the image ships Node.js. That table lives upstream and is fetched at runtime, so it can recover without any change on our side.
 
 To get full FLAC, authenticate with a **Premium Tidal account** via the **OAuth 2.0 Device Code Flow** (same flow used by `tiddl`, `orpheusdl-tidal`, etc.).
 
@@ -261,8 +263,8 @@ Background goroutines (started in main.go):
 │   ├── db/              # SQLite catalog
 │   ├── meta/            # Lyrics (LRCLIB), cover art, MusicBrainz, tag embedding,
 │   │                    #   spotify_index.go (BuildSpotifyIDIndex / WriteSpotifyIDTag)
-│   └── util/            # Config, filenames, HTTP client, proxy config, system,
-│                        #   ReadFFprobeTags
+│   └── util/            # Config, filenames, HTTP client (honours HTTP_PROXY/
+│                        #   HTTPS_PROXY), system, ReadFFprobeTags
 └── frontend/            # React 19 + Vite + Tailwind 4
 ```
 

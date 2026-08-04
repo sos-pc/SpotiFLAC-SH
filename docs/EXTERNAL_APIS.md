@@ -1,12 +1,18 @@
-# External APIs
+# External APIs & Dependencies
 
 > **🌍 Observation — partiellement périmé.** Ce document décrit des services tiers, qui meurent sans
 > prévenir : la section Amazon a été corrigée le 2026-07-15 (le proxy ne résout plus), **le reste n'a
-> pas été re-vérifié depuis**. Pour l'état réel et daté de chaque service, voir
-> [third-party-layer-status.md](archive/third-party-layer-status.md) — et re-tester avant de citer quoi que ce
-> soit d'ici comme un fait. Index : [README.md](README.md). & Dependencies
+> pas été re-vérifié depuis**. Re-tester avant de citer quoi que ce soit d'ici comme un fait.
+> Index : [README.md](README.md).
+>
+> **Ce qui a changé depuis (v4.0.0).** Les fournisseurs Qobuz, Amazon et Deezer ne sont plus
+> atteints par notre code : le moteur en sidecar s'en charge, et il résout **ses** endpoints depuis
+> un registre chiffré récupéré **à l'exécution**. Aucun document ne peut donc en tenir l'état à jour —
+> c'est structurel, pas un oubli. Voir [module-engine.md](module-engine.md) §5 pour la méthode de
+> constat, et [archive/third-party-layer-status.md](archive/third-party-layer-status.md) pour le
+> relevé de l'ancienne couche, conservé comme base de preuve.
 
-SpotiFLAC relies on a layered ecosystem of official public APIs, undocumented endpoints, and community-hosted proxies to achieve "zero-account" FLAC downloading.
+SpotiFLAC relies on a layered ecosystem of official public APIs, undocumented endpoints, and community-hosted services to achieve "zero-account" FLAC downloading.
 
 This document catalogs every external resource used by the backend.
 

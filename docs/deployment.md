@@ -154,6 +154,11 @@ sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
 | `ENGINE_SERVICES` | *(unset)* | Providers delegated to the engine, comma-separated: `qobuz,deezer,amazon,tidal`. |
 | `ENGINE_STAGING_DIR` | `/staging` | The volume shared with the engine. Must resolve to the same directory in both containers. |
 
+`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` are honoured too — not by our code, but
+by Go's standard `http.ProxyFromEnvironment`, which `backend/util/httpclient.go`
+wires in. Useful behind a corporate egress proxy. They have nothing to do with
+the community-proxy feature removed in v4.0.0.
+
 `TURNSTILE_SOLVER_URL` is **not** read by this service. It belongs on the engine
 container; setting it here does nothing.
 
