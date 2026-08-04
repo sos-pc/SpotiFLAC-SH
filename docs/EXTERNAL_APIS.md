@@ -154,7 +154,7 @@ probes, and the Song.link rate-limit override.
 
 ## 6. Dependencies & binaries
 
-- **GitHub Releases (`https://github.com/afkarxyz/ffmpeg-binaries/releases/...`)** — used by the legacy desktop build for first-launch FFmpeg auto-install. **Not used by the web build**, and ⚠️ **the repository 404s as of 2026-08-04** — that desktop path can no longer resolve a download at all.
+- ~~GitHub Releases (`afkarxyz/ffmpeg-binaries`)~~ — **removed 2026-08-04.** A first-launch FFmpeg auto-installer inherited from the upstream desktop application, with download URLs for Windows, macOS ARM, macOS Intel and Linux. It had no callers: this project builds `//go:build !wails` and has a single `package main`, so there is no desktop build to install anything for. The repository it pointed at 404s as well. 329 lines and one module dependency (`ulikunitz/xz`) went with it.
 - **GitHub Releases (`https://github.com/BtbN/FFmpeg-Builds/releases/...`)** — the web build's actual FFmpeg source: an FFmpeg/FFprobe build with its codec libraries bundled into the executable, fetched and checksum-verified in the Dockerfile's build stage, then copied into the (shell-less) runtime image — deliberately not `apt install ffmpeg`, which on both Debian bookworm and trixie pulls ~30 transitive shared-library dependencies carrying dozens of CVEs this headless audio-only service never exercises. **Not fully static despite the common shorthand:** the binaries still link glibc/libgcc dynamically, which is why the runtime image is `distroless/cc` and not `scratch` — see [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md). See [deployment.md](deployment.md#building-from-source).
 
 ---

@@ -9,7 +9,6 @@ require (
 	github.com/go-flac/go-flac v1.0.0
 	github.com/mewkiz/flac v1.0.13
 	github.com/pquerna/otp v1.5.0
-	github.com/ulikunitz/xz v0.5.15
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/text v0.39.0
 	modernc.org/sqlite v1.40.0

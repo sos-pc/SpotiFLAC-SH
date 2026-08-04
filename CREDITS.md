@@ -71,15 +71,14 @@ These are public application credentials (not tied to any user account). The pre
 
 Pre-compiled FFmpeg binaries are sourced from:
 
-**`afkarxyz/ffmpeg-binaries`** — ⚠️ **gone: the repository 404s as of 2026-08-04.**
-It was used on first launch by the legacy desktop build to auto-install `ffmpeg`
-and `ffprobe` on Windows, Linux and macOS. The link is left unlinked rather than
-removed, because the code path that reads it still exists and anyone hitting it
-deserves to know why it fails.
+**[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)**
+FFmpeg and FFprobe, fetched and checksum-verified in the Dockerfile's build
+stage and copied into the runtime image.
 
-The Docker image never used it: FFmpeg comes from
-[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), fetched and
-checksum-verified in the Dockerfile's build stage.
+`afkarxyz/ffmpeg-binaries` was credited here until 2026-08-04, for a first-launch
+auto-installer inherited from the upstream desktop application. That repository
+now 404s, and the code that downloaded from it was removed the same day: this
+project has no desktop build — `//go:build !wails` — so nothing ever called it.
 
 ---
 
@@ -94,7 +93,8 @@ checksum-verified in the Dockerfile's build stage.
 | [bogem/id3v2](https://github.com/bogem/id3v2) | bogem | ID3v2 tag writing |
 | [go.etcd.io/bbolt](https://github.com/etcd-io/bbolt) | etcd-io | Embedded key-value database |
 | [pquerna/otp](https://github.com/pquerna/otp) | pquerna | TOTP / 2FA support |
-| [ulikunitz/xz](https://github.com/ulikunitz/xz) | ulikunitz | XZ decompression (FFmpeg extraction) |
+| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | cznic | SQLite catalog — a pure-Go driver, so no cgo and the image stays distroless |
+| [golang.org/x/text](https://pkg.go.dev/golang.org/x/text) | Go team | Unicode normalisation for filename and search matching |
 
 ---
 
