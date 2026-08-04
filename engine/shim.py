@@ -37,7 +37,43 @@ from SpotiFLAC import AsyncSpotiFLAC  # noqa: E402
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".opus"}
 
+
+def _identity() -> dict[str, str]:
+    """What this image actually is: engine version and the commit that built it."""
+    try:
+        import importlib.metadata as _md
+        engine = _md.version("SpotiFLAC")
+    except Exception:  # noqa: BLE001 — identity must never break startup
+        engine = "unknown"
+    rev = os.environ.get("ENGINE_REVISION") or "unknown"
+    return {"engine_version": engine, "revision": rev[:7] if rev != "unknown" else rev}
+
+
+def _log_identity() -> None:
+    """Print it once at startup.
+
+    Answering "is the fix I just pushed actually running?" used to mean reading
+    OCI labels off the registry from another machine — labels are image
+    metadata and invisible from inside the container, and a `compose pull`
+    without `up -d` leaves the old container running while saying nothing about
+    it. One line at startup settles it from `docker logs` alone.
+
+    Logged on uvicorn's own logger, which is configured by the time this module
+    is imported, so the line lands next to "Started server process" rather than
+    into a root logger that may have no handler yet.
+    """
+    ident = _identity()
+    # ASCII only: this is the first thing the container prints, and a locale
+    # without UTF-8 stdio would turn a decorative separator into a logging
+    # error where the identity line should be.
+    logging.getLogger("uvicorn.error").info(
+        "engine shim: SpotiFLAC %s, image %s",
+        ident["engine_version"], ident["revision"],
+    )
+
+
 app = FastAPI(title="spotiflac-engine-shim")
+_log_identity()
 
 
 class _QuietEngineErrors(logging.Filter):
@@ -142,7 +178,11 @@ class DownloadResponse(BaseModel):
 # falls back to GET, so a GET-only route answers its liveness check with a 405.
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    # Identity alongside liveness: additive, so the Go side's existing decode
+    # into {status} is unaffected, and `curl` from the app container answers
+    # "what is actually running over there?" without restarting anything to
+    # read a startup line.
+    return {"status": "ok", **_identity()}
 
 
 @app.post("/download", response_model=DownloadResponse)

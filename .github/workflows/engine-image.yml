@@ -146,6 +146,7 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             SPOTIFLAC_VERSION=${{ needs.check.outputs.version }}
+            GIT_REVISION=${{ github.sha }}
           # The version label is what the check job reads next time round, so it
           # has to be the version actually installed — hence passing it in rather
           # than letting the build resolve its own.

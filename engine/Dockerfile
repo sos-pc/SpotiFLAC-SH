@@ -129,6 +129,17 @@ USER 1000:1000
 ENV HOME=/home/nonroot
 ENV ENGINE_PORT=8080
 
+# Which commit built this image, as an ENV rather than only an OCI label: labels
+# are image metadata and are not readable from inside the container, so the shim
+# could not otherwise say what it is. CI passes the sha; a manual build says
+# "unknown", which is honest.
+#
+# This exists because confirming "did my fix actually deploy?" meant inspecting
+# the registry from another machine. A `docker compose pull` without `up -d`
+# leaves the old container running, and nothing in the logs said so.
+ARG GIT_REVISION=
+ENV ENGINE_REVISION=$GIT_REVISION
+
 # Matches upstream's image. Set before the entrypoint starts Xvfb on the same
 # display, so solver._ensure_xvfb() sees a display and never spawns its own.
 ENV DISPLAY=:99
