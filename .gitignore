@@ -4,6 +4,14 @@
 go.work
 go.work.sum
 
+# Compiled binaries. `go build` in the repo root drops SpotiFLAC.exe (or
+# SpotiFLAC) right here, and one got committed on 2026-07-28: 20 MB, two thirds
+# of the whole repository's git objects, for an artifact CI rebuilds from source
+# on every tag. Releases carry the binaries; the repository carries the code.
+SpotiFLAC
+SpotiFLAC.exe
+*.exe
+
 # Node / Frontend
 node_modules/
 frontend/node_modules/
