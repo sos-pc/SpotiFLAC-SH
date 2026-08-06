@@ -16,6 +16,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/applog"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	bolt "go.etcd.io/bbolt"
 )
@@ -96,7 +97,7 @@ func main() {
 	applog.ServerLogs.AttachSink(sseHub)
 
 	// ── Auth (Jellyfin + JWT) ─────────────────────────────────────────────
-	auth, err := NewAuthManager(db)
+	auth, err := auth.NewAuthManager(db)
 	if err != nil {
 		applog.FprintReal("FATAL: cannot init auth: %v\n", err)
 		os.Exit(1)

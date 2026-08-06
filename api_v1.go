@@ -13,7 +13,6 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,14 +246,14 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 	return v1CORSMiddleware(localBypassMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. JWT Bearer
 		token := ""
-		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-			token = strings.TrimPrefix(auth, "Bearer ")
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
 		}
 		if token == "" {
 			token = r.URL.Query().Get("token")
 		}
 		if token != "" {
-			if claims, err := ValidateJWT(token); err == nil {
+			if claims, err := auth.ValidateJWT(token); err == nil {
 				if claims.Scope == "stream" && !streamScopedPaths[r.URL.Path] && !isJobDownloadPath(r.URL.Path) {
 					writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 					return
@@ -272,7 +272,7 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 						return
 					}
 				}
-				ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+				ctx := auth.WithUser(r.Context(), claims)
 				next(w, r.WithContext(ctx))
 				return
 			}
@@ -281,7 +281,7 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 		// 2. X-API-Key
 		if apiKey := r.Header.Get("X-API-Key"); apiKey != "" && s.ctr.Auth != nil {
 			if claims, ok := s.ctr.Auth.ValidateAPIKey(apiKey); ok {
-				ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+				ctx := auth.WithUser(r.Context(), claims)
 				next(w, r.WithContext(ctx))
 				return
 			}
@@ -293,7 +293,7 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 
 // userIDFromContext returns the authenticated user's ID, or "" if anonymous.
 func userIDFromContext(r *http.Request) string {
-	if user := GetUserFromContext(r); user != nil {
+	if user := auth.GetUserFromContext(r); user != nil {
 		return user.UserID
 	}
 	return ""
@@ -301,7 +301,7 @@ func userIDFromContext(r *http.Request) string {
 
 // v1RequireAdmin returns 403 if the requesting user is not an admin.
 func v1RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 	if user == nil || !user.IsAdmin {
 		writeV1Error(w, http.StatusForbidden, "admin required")
 		return false
@@ -315,7 +315,7 @@ func v1RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
 // access to its own account, matching what CreateAPIKey's docstring and
 // the Permissions field on APIKey already promise but weren't enforcing.
 func v1RequirePermission(w http.ResponseWriter, r *http.Request, perm string) bool {
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 	if user == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 		return false
@@ -345,7 +345,7 @@ func v1RequirePermission(w http.ResponseWriter, r *http.Request, perm string) bo
 // about what "holding a permission" means, including the "download" alias. If
 // they ever drift, a key could be granted a permission it cannot itself use,
 // or refused one it can.
-func callerHasPermission(user *JWTClaims, perm string) bool {
+func callerHasPermission(user *auth.JWTClaims, perm string) bool {
 	if user == nil {
 		return false
 	}
@@ -413,8 +413,8 @@ func (s *Server) v1LocalLogin(w http.ResponseWriter, r *http.Request) {
 		writeV1Error(w, http.StatusForbidden, "cross-origin request not allowed")
 		return
 	}
-	profile := &UserProfile{ID: "local-admin", DisplayName: "Local Admin", IsAdmin: true}
-	token, err := GenerateJWT(profile)
+	profile := &auth.UserProfile{ID: "local-admin", DisplayName: "Local Admin", IsAdmin: true}
+	token, err := auth.GenerateJWT(profile)
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, "failed to generate token")
 		return

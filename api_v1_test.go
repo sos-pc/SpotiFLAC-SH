@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -41,9 +42,9 @@ func TestV1AuthAcceptsStreamTokenOnJobDownload(t *testing.T) {
 	}
 	handler := s.v1Auth(next)
 
-	token, err := GenerateStreamToken(&JWTClaims{UserID: "user1", IsAdmin: false})
+	token, err := auth.GenerateStreamToken(&auth.JWTClaims{UserID: "user1", IsAdmin: false})
 	if err != nil {
-		t.Fatalf("GenerateStreamToken: %v", err)
+		t.Fatalf("auth.GenerateStreamToken: %v", err)
 	}
 
 	t.Run("job download path -> accepted", func(t *testing.T) {
@@ -89,33 +90,33 @@ func TestGenerateStreamTokenPreservesTokenVersion(t *testing.T) {
 	s := &Server{ctr: &Container{Auth: am}}
 
 	if _, err := am.GetOrCreateUser("u1", "Alice", true); err != nil {
-		t.Fatalf("GetOrCreateUser: %v", err)
+		t.Fatalf("auth.GetOrCreateUser: %v", err)
 	}
 	// Bump TokenVersion above zero, matching any account that has ever had
 	// a Jellyfin admin-flag change.
 	if _, err := am.GetOrCreateUser("u1", "Alice", false); err != nil {
-		t.Fatalf("GetOrCreateUser (demote): %v", err)
+		t.Fatalf("auth.GetOrCreateUser (demote): %v", err)
 	}
 	profile, err := am.GetUser("u1")
 	if err != nil {
-		t.Fatalf("GetUser: %v", err)
+		t.Fatalf("auth.GetUser: %v", err)
 	}
 	if profile.TokenVersion == 0 {
 		t.Fatalf("test setup: TokenVersion should be > 0 after a privilege change")
 	}
 
-	sessionToken, err := GenerateJWT(profile)
+	sessionToken, err := auth.GenerateJWT(profile)
 	if err != nil {
-		t.Fatalf("GenerateJWT: %v", err)
+		t.Fatalf("auth.GenerateJWT: %v", err)
 	}
-	sessionClaims, err := ValidateJWT(sessionToken)
+	sessionClaims, err := auth.ValidateJWT(sessionToken)
 	if err != nil {
-		t.Fatalf("ValidateJWT: %v", err)
+		t.Fatalf("auth.ValidateJWT: %v", err)
 	}
 
-	streamToken, err := GenerateStreamToken(sessionClaims)
+	streamToken, err := auth.GenerateStreamToken(sessionClaims)
 	if err != nil {
-		t.Fatalf("GenerateStreamToken: %v", err)
+		t.Fatalf("auth.GenerateStreamToken: %v", err)
 	}
 
 	handler := s.v1Auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })

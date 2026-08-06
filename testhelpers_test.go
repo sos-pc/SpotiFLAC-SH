@@ -8,6 +8,8 @@ import (
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
+	bolt "go.etcd.io/bbolt"
 )
 
 // openTestCatalogDB opens a throwaway SQLite catalog.
@@ -47,4 +49,30 @@ func writeTestFlacWithTags(t *testing.T, path, isrc, genre string) {
 	if err := os.WriteFile(path, f.Marshal(), 0644); err != nil {
 		t.Fatalf("write test FLAC: %v", err)
 	}
+}
+
+// newTestAuthManager builds an AuthManager on a throwaway BoltDB.
+//
+// internal/auth has its own copy, for the same reason as the two helpers above:
+// test scaffolding cannot be shared across packages without exporting it.
+func newTestAuthManager(t *testing.T) *auth.AuthManager {
+	t.Helper()
+	f, err := os.CreateTemp("", "spotiflac-test-*.db")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	f.Close()
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	database, err := bolt.Open(f.Name(), 0600, nil)
+	if err != nil {
+		t.Fatalf("bolt.Open: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	am, err := auth.NewAuthManager(database)
+	if err != nil {
+		t.Fatalf("NewAuthManager: %v", err)
+	}
+	return am
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
@@ -95,7 +96,7 @@ func (s *Server) registerJobRoutes() {
 			writeV1Error(w, http.StatusNotFound, "job not found")
 			return
 		}
-		if user := GetUserFromContext(r); user != nil {
+		if user := auth.GetUserFromContext(r); user != nil {
 			if !user.IsAdmin && job.UserID != "" && job.UserID != user.UserID {
 				writeV1Error(w, http.StatusForbidden, "forbidden")
 				return
@@ -135,7 +136,7 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		s.ctr.History.ClearCompletedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
@@ -144,7 +145,7 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		s.ctr.History.ClearAllDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
@@ -284,7 +285,7 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		message, err := s.ctr.History.ExportFailedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())

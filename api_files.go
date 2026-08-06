@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
@@ -223,7 +224,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if user != nil && s.ctr.Auth != nil {
 			if profile, err := s.ctr.Auth.GetUser(user.UserID); err == nil && len(profile.Settings) > 0 {
 				writeV1JSON(w, http.StatusOK, profile.Settings)
@@ -246,7 +247,7 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &settings) {
 			return
 		}
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if user != nil && s.ctr.Auth != nil {
 			if err := s.ctr.Auth.SaveUserSettings(user.UserID, settings); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())

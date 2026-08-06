@@ -21,6 +21,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/applog"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 )
@@ -248,7 +249,7 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 	if err := s.checkWatchlistOwnership(id, user); err != nil {
 		writeV1Error(w, http.StatusForbidden, err.Error())
 		return

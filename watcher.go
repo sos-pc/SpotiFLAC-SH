@@ -19,6 +19,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 	bolt "go.etcd.io/bbolt"
@@ -106,7 +107,7 @@ type Watcher struct {
 	catalog *sql.DB
 
 	jm      *jobs.JobManager
-	auth    *AuthManager
+	auth    *auth.AuthManager
 	ctx     context.Context
 	cancel  context.CancelFunc
 	mu      sync.Mutex      // protège les écritures concurrentes sur les watchlists + syncing
@@ -114,7 +115,7 @@ type Watcher struct {
 }
 
 // NewWatcher crée et démarre le daemon de surveillance des playlists.
-func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *jobs.JobManager, auth *AuthManager) *Watcher {
+func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *jobs.JobManager, auth *auth.AuthManager) *Watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Watcher{
 		db:      db,

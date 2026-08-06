@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,21 +16,21 @@ import (
 //   - a browser session is unaffected, because permission scoping applies to
 //     API keys only (v1RequirePermission returns early for !IsAPIKey).
 func TestAuthRouteGuards(t *testing.T) {
-	readOnlyKey := &JWTClaims{
+	readOnlyKey := &auth.JWTClaims{
 		UserID: "u1", IsAPIKey: true, Permissions: []string{"read"},
 	}
-	manageKey := &JWTClaims{
+	manageKey := &auth.JWTClaims{
 		UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "manage"},
 	}
-	adminKey := &JWTClaims{
+	adminKey := &auth.JWTClaims{
 		UserID: "u1", IsAPIKey: true, IsAdmin: true, Permissions: []string{"read", "manage", "admin"},
 	}
-	browser := &JWTClaims{UserID: "u1", IsAPIKey: false}
-	adminBrowser := &JWTClaims{UserID: "u1", IsAPIKey: false, IsAdmin: true}
+	browser := &auth.JWTClaims{UserID: "u1", IsAPIKey: false}
+	adminBrowser := &auth.JWTClaims{UserID: "u1", IsAPIKey: false, IsAdmin: true}
 
 	tests := []struct {
 		name    string
-		claims  *JWTClaims
+		claims  *auth.JWTClaims
 		perm    string // "" means the route uses v1RequireAdmin
 		allowed bool
 	}{
@@ -57,7 +57,7 @@ func TestAuthRouteGuards(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/whatever", nil)
-			req = req.WithContext(context.WithValue(req.Context(), contextKeyUser, tc.claims))
+			req = req.WithContext(auth.WithUser(req.Context(), tc.claims))
 			rec := httptest.NewRecorder()
 
 			var got bool
@@ -82,16 +82,16 @@ func TestAuthRouteGuards(t *testing.T) {
 //
 // The rule now: no API key may mint a key stronger than itself.
 func TestAnAPIKeyCannotMintAStrongerKey(t *testing.T) {
-	readKey := &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read"}}
-	manageKey := &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "manage"}}
-	legacyKey := &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "download"}}
-	adminKey := &JWTClaims{UserID: "u1", IsAPIKey: true, IsAdmin: true,
+	readKey := &auth.JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read"}}
+	manageKey := &auth.JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "manage"}}
+	legacyKey := &auth.JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "download"}}
+	adminKey := &auth.JWTClaims{UserID: "u1", IsAPIKey: true, IsAdmin: true,
 		Permissions: []string{"read", "manage", "admin"}}
-	browser := &JWTClaims{UserID: "u1", IsAPIKey: false}
+	browser := &auth.JWTClaims{UserID: "u1", IsAPIKey: false}
 
 	tests := []struct {
 		name   string
-		caller *JWTClaims
+		caller *auth.JWTClaims
 		grant  string
 		want   bool
 	}{
@@ -126,10 +126,10 @@ func TestAnAPIKeyCannotMintAStrongerKey(t *testing.T) {
 		// callerHasPermission duplicates v1RequirePermission's rule without the
 		// HTTP response. If they drift, a key could be granted a permission it
 		// cannot itself use — pin them together.
-		for _, caller := range []*JWTClaims{readKey, manageKey, legacyKey, adminKey, browser} {
+		for _, caller := range []*auth.JWTClaims{readKey, manageKey, legacyKey, adminKey, browser} {
 			for _, perm := range []string{"read", "manage", "admin"} {
 				req := httptest.NewRequest(http.MethodGet, "/x", nil)
-				req = req.WithContext(context.WithValue(req.Context(), contextKeyUser, caller))
+				req = req.WithContext(auth.WithUser(req.Context(), caller))
 				enforced := v1RequirePermission(httptest.NewRecorder(), req, perm)
 				if asked := callerHasPermission(caller, perm); asked != enforced {
 					t.Errorf("perms=%v perm=%q: asked %v but enforced %v",

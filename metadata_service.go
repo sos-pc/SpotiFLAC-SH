@@ -18,15 +18,16 @@ import (
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 )
 
 // The JobManager dependency went with them: it was held only to borrow the
 // JobManager's shared ISRC client.
 type MetadataService struct {
-	auth *AuthManager
+	auth *auth.AuthManager
 }
 
-func NewMetadataService(auth *AuthManager) *MetadataService {
+func NewMetadataService(auth *auth.AuthManager) *MetadataService {
 	return &MetadataService{auth: auth}
 }
 

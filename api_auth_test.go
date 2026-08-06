@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,9 +12,9 @@ import (
 // requestWithClaimsAndBody mirrors requestWithClaims (security_test.go) but
 // attaches a real JSON body, needed for handlers like v1CreateAPIKey that
 // decode the request.
-func requestWithClaimsAndBody(claims *JWTClaims, body string) *http.Request {
+func requestWithClaimsAndBody(claims *auth.JWTClaims, body string) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys", strings.NewReader(body))
-	ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+	ctx := auth.WithUser(r.Context(), claims)
 	return r.WithContext(ctx)
 }
 
@@ -30,7 +30,7 @@ func TestV1CreateAPIKeyRejectsAdminEscalation(t *testing.T) {
 	s := &Server{ctr: &Container{Auth: am}}
 
 	t.Run("session non-admin demandant la permission admin -> 403, aucune clé créée", func(t *testing.T) {
-		claims := &JWTClaims{UserID: "user1", IsAdmin: false}
+		claims := &auth.JWTClaims{UserID: "user1", IsAdmin: false}
 		r := requestWithClaimsAndBody(claims, `{"name":"escalation","permissions":["read","admin"]}`)
 		w := httptest.NewRecorder()
 
@@ -49,7 +49,7 @@ func TestV1CreateAPIKeyRejectsAdminEscalation(t *testing.T) {
 	})
 
 	t.Run("session non-admin sans permission admin -> 201", func(t *testing.T) {
-		claims := &JWTClaims{UserID: "user2", IsAdmin: false}
+		claims := &auth.JWTClaims{UserID: "user2", IsAdmin: false}
 		r := requestWithClaimsAndBody(claims, `{"name":"normal","permissions":["read","download"]}`)
 		w := httptest.NewRecorder()
 
@@ -61,7 +61,7 @@ func TestV1CreateAPIKeyRejectsAdminEscalation(t *testing.T) {
 	})
 
 	t.Run("session admin demandant la permission admin -> 201", func(t *testing.T) {
-		claims := &JWTClaims{UserID: "admin1", IsAdmin: true}
+		claims := &auth.JWTClaims{UserID: "admin1", IsAdmin: true}
 		r := requestWithClaimsAndBody(claims, `{"name":"admin key","permissions":["read","admin"]}`)
 		w := httptest.NewRecorder()
 

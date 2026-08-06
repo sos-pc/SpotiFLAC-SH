@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"net/http"
 	"net/http/httptest"
@@ -29,8 +30,8 @@ func TestV1JobsStreamInitialSnapshotScopedToUser(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	claims := &JWTClaims{UserID: "user-a", IsAdmin: false}
-	ctx = context.WithValue(ctx, contextKeyUser, claims)
+	claims := &auth.JWTClaims{UserID: "user-a", IsAdmin: false}
+	ctx = auth.WithUser(ctx, claims)
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/stream", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -77,8 +78,8 @@ func TestV1JobsStreamSendsHeartbeatWhileIdle(t *testing.T) {
 	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	claims := &JWTClaims{UserID: "user-a", IsAdmin: false}
-	ctx = context.WithValue(ctx, contextKeyUser, claims)
+	claims := &auth.JWTClaims{UserID: "user-a", IsAdmin: false}
+	ctx = auth.WithUser(ctx, claims)
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/stream", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -126,8 +127,8 @@ func TestV1JobsStreamInitialSnapshotAdminSeesEveryone(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	claims := &JWTClaims{UserID: "admin-1", IsAdmin: true}
-	ctx = context.WithValue(ctx, contextKeyUser, claims)
+	claims := &auth.JWTClaims{UserID: "admin-1", IsAdmin: true}
+	ctx = auth.WithUser(ctx, claims)
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/stream", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -176,8 +177,8 @@ func TestV1JobsStreamSnapshotReflectsPersistedProgress(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	claims := &JWTClaims{UserID: "user-a", IsAdmin: false}
-	ctx = context.WithValue(ctx, contextKeyUser, claims)
+	claims := &auth.JWTClaims{UserID: "user-a", IsAdmin: false}
+	ctx = auth.WithUser(ctx, claims)
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/stream", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 

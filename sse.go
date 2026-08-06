@@ -19,6 +19,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"net/http"
 	"sync"
@@ -179,7 +180,7 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // désactive le buffering nginx
 
 	// Résoudre le user AVANT le snapshot pour appliquer le filtre dès la connexion
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 
 	// Snapshot initial — envoyer les jobs récents (actifs + terminaux des 48h)
 	// Filtré par userID pour éviter les fuites de données entre utilisateurs

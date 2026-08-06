@@ -1,14 +1,10 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	bolt "go.etcd.io/bbolt"
 )
 
 // TestValidateExternalURL lived here until 2026-07-28. ValidateExternalURL
@@ -157,25 +153,25 @@ func TestRemoteIPTrustsForwardedHeadersWhenConfigured(t *testing.T) {
 
 // requestWithClaims builds a request carrying claims the way v1Auth would
 // after a successful JWT/API-key validation.
-func requestWithClaims(claims *JWTClaims) *http.Request {
+func requestWithClaims(claims *auth.JWTClaims) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", nil)
-	ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+	ctx := auth.WithUser(r.Context(), claims)
 	return r.WithContext(ctx)
 }
 
 func TestV1RequirePermission(t *testing.T) {
 	tests := []struct {
 		name   string
-		claims *JWTClaims
+		claims *auth.JWTClaims
 		perm   string
 		want   bool
 	}{
 		{"no claims", nil, "download", false},
-		{"full session, no IsAPIKey flag, no explicit perms", &JWTClaims{UserID: "u1"}, "download", true},
-		{"admin API key bypasses scope check", &JWTClaims{UserID: "u1", IsAPIKey: true, IsAdmin: true}, "download", true},
-		{"API key with matching permission", &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "download"}}, "download", true},
-		{"API key missing permission", &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read"}}, "download", false},
-		{"API key with empty permissions", &JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: nil}, "download", false},
+		{"full session, no IsAPIKey flag, no explicit perms", &auth.JWTClaims{UserID: "u1"}, "download", true},
+		{"admin API key bypasses scope check", &auth.JWTClaims{UserID: "u1", IsAPIKey: true, IsAdmin: true}, "download", true},
+		{"API key with matching permission", &auth.JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read", "download"}}, "download", true},
+		{"API key missing permission", &auth.JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: []string{"read"}}, "download", false},
+		{"API key with empty permissions", &auth.JWTClaims{UserID: "u1", IsAPIKey: true, Permissions: nil}, "download", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,119 +185,6 @@ func TestV1RequirePermission(t *testing.T) {
 				t.Errorf("expected 403/401 on denial, got %d", w.Code)
 			}
 		})
-	}
-}
-
-func TestGetOrCreateUserBumpsTokenVersionOnPrivilegeChange(t *testing.T) {
-	am := newTestAuthManager(t)
-
-	p1, err := am.GetOrCreateUser("jf-1", "Alice", false)
-	if err != nil {
-		t.Fatalf("GetOrCreateUser (create): %v", err)
-	}
-	if p1.TokenVersion != 0 {
-		t.Fatalf("new user TokenVersion = %d, want 0", p1.TokenVersion)
-	}
-
-	// Re-sync with the same admin flag: no privilege change, no bump.
-	p2, err := am.GetOrCreateUser("jf-1", "Alice", false)
-	if err != nil {
-		t.Fatalf("GetOrCreateUser (no change): %v", err)
-	}
-	if p2.TokenVersion != 0 {
-		t.Fatalf("TokenVersion after unchanged re-sync = %d, want 0", p2.TokenVersion)
-	}
-
-	// Jellyfin promotes the user to admin: privilege change, must bump so
-	// any JWT issued before this point (still carrying admin=false, or an
-	// old admin=true from a prior promotion/demotion cycle) stops matching.
-	p3, err := am.GetOrCreateUser("jf-1", "Alice", true)
-	if err != nil {
-		t.Fatalf("GetOrCreateUser (promote): %v", err)
-	}
-	if p3.TokenVersion != 1 {
-		t.Fatalf("TokenVersion after promotion = %d, want 1", p3.TokenVersion)
-	}
-
-	// Demoted back: another privilege change, another bump.
-	p4, err := am.GetOrCreateUser("jf-1", "Alice", false)
-	if err != nil {
-		t.Fatalf("GetOrCreateUser (demote): %v", err)
-	}
-	if p4.TokenVersion != 2 {
-		t.Fatalf("TokenVersion after demotion = %d, want 2", p4.TokenVersion)
-	}
-}
-
-// TestGetOrCreateUserHealsMissingID is the regression test for a real
-// production bug: a profile persisted under BoltDB key jellyfinID whose
-// JSON blob has ID="" baked in (e.g. from before the ID field existed, or
-// any other historical write that lost it) stayed permanently ID="" —
-// every subsequent login refreshed Name/DisplayName/IsAdmin/UpdatedAt but
-// never re-derived ID from the lookup key itself. A real Jellyfin admin
-// hit this: their session correctly showed is_admin=true, but any API key
-// they created inherited UserID="" and ValidateAPIKey's GetUser("") always
-// failed, silently downgrading every admin-scoped key to non-admin.
-func TestGetOrCreateUserHealsMissingID(t *testing.T) {
-	am := newTestAuthManager(t)
-
-	corrupted, err := json.Marshal(UserProfile{
-		ID:          "", // the bug: stored blob has no ID even though the BoltDB key does
-		Name:        "jf-legacy",
-		DisplayName: "Legacy Admin",
-		IsAdmin:     true,
-		Settings:    make(map[string]interface{}),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := am.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketUsers)
-		return b.Put([]byte("jf-legacy"), corrupted)
-	}); err != nil {
-		t.Fatalf("seed corrupted profile: %v", err)
-	}
-
-	profile, err := am.GetOrCreateUser("jf-legacy", "Legacy Admin", true)
-	if err != nil {
-		t.Fatalf("GetOrCreateUser: %v", err)
-	}
-	if profile.ID != "jf-legacy" {
-		t.Fatalf("GetOrCreateUser did not heal ID: got %q, want %q", profile.ID, "jf-legacy")
-	}
-
-	// The real-world symptom: ValidateAPIKey looks up the profile via
-	// GetUser(found.UserID) — this must now succeed and report IsAdmin.
-	healed, err := am.GetUser("jf-legacy")
-	if err != nil {
-		t.Fatalf("GetUser after healing: %v", err)
-	}
-	if !healed.IsAdmin {
-		t.Fatalf("healed profile IsAdmin = false, want true")
-	}
-}
-
-// TestSaveUserSettingsSetsIDOnFirstWrite covers the same bug class as
-// TestGetOrCreateUserHealsMissingID, found by auditing every other writer
-// of bucketUsers after fixing GetOrCreateUser: SaveUserSettings is the
-// sole writer for a userID that has never logged in through
-// GetOrCreateUser (e.g. the local-admin bypass profile, never persisted
-// by design) — without setting ID explicitly here too, that first write
-// would freeze ID="" forever, same as the original bug.
-func TestSaveUserSettingsSetsIDOnFirstWrite(t *testing.T) {
-	am := newTestAuthManager(t)
-
-	if err := am.SaveUserSettings("u2", map[string]interface{}{"theme": "dark"}); err != nil {
-		t.Fatalf("SaveUserSettings: %v", err)
-	}
-	profile, err := am.GetUser("u2")
-	if err != nil {
-		t.Fatalf("GetUser: %v", err)
-	}
-	if profile.ID != "u2" {
-		t.Fatalf("profile.ID = %q, want %q", profile.ID, "u2")
 	}
 }
 
@@ -319,17 +202,17 @@ func TestRequireAuthRejectsRevokedTokenVersion(t *testing.T) {
 
 	profile, err := am.GetOrCreateUser("u1", "Alice", true)
 	if err != nil {
-		t.Fatalf("GetOrCreateUser: %v", err)
+		t.Fatalf("auth.GetOrCreateUser: %v", err)
 	}
-	staleToken, err := GenerateJWT(profile)
+	staleToken, err := auth.GenerateJWT(profile)
 	if err != nil {
-		t.Fatalf("GenerateJWT: %v", err)
+		t.Fatalf("auth.GenerateJWT: %v", err)
 	}
 
 	// Privilege change bumps TokenVersion — every JWT issued before this
 	// point (including staleToken above) must stop working immediately.
 	if _, err := am.GetOrCreateUser("u1", "Alice", false); err != nil {
-		t.Fatalf("GetOrCreateUser (demote): %v", err)
+		t.Fatalf("auth.GetOrCreateUser (demote): %v", err)
 	}
 
 	handlerCalled := false

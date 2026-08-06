@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/config"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
@@ -142,7 +143,7 @@ func serverJobSettings(s DownloadSettings, serviceOverride string) jobs.JobSetti
 // downloadPath/spotFetchAPIUrl was therefore correctly saved and correctly
 // returned by GET /api/v1/settings, yet silently ignored by those four call
 // sites in favor of the operator's global value.
-func EffectiveDownloadSettings(auth *AuthManager, userID string) DownloadSettings {
+func EffectiveDownloadSettings(auth *auth.AuthManager, userID string) DownloadSettings {
 	var raw map[string]interface{}
 	if userID != "" && auth != nil {
 		if profile, err := auth.GetUser(userID); err == nil && profile != nil && len(profile.Settings) > 0 {

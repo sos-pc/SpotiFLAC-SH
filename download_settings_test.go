@@ -105,7 +105,7 @@ func TestEffectiveDownloadSettingsPrefersPerUserOverGlobal(t *testing.T) {
 	if err := am.SaveUserSettings("u1", map[string]interface{}{
 		"downloadPath": "/home/u1/Music",
 	}); err != nil {
-		t.Fatalf("SaveUserSettings: %v", err)
+		t.Fatalf("auth.SaveUserSettings: %v", err)
 	}
 
 	got := EffectiveDownloadSettings(am, "u1")

@@ -5,6 +5,7 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"net/http"
 )
 
@@ -63,7 +64,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return
@@ -85,7 +86,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return
@@ -102,7 +103,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return
@@ -124,7 +125,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return
@@ -142,7 +143,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return
@@ -160,7 +161,7 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		id := r.PathValue("id")
-		user := GetUserFromContext(r)
+		user := auth.GetUserFromContext(r)
 		if err := s.checkWatchlistOwnership(id, user); err != nil {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return

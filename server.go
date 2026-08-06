@@ -1,10 +1,10 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"io"
 	"io/fs"
 	"net"
@@ -107,12 +107,12 @@ func localBypassMiddleware(next http.Handler) http.Handler {
 		if localBypassEnabled() && isLocalIP(r) {
 			// Pas de token dans la requête → injecter un user admin local
 			if r.Header.Get("Authorization") == "" {
-				profile := &UserProfile{
+				profile := &auth.UserProfile{
 					ID:          "local-admin",
 					DisplayName: "Local Admin",
 					IsAdmin:     true,
 				}
-				token, err := GenerateJWT(profile)
+				token, err := auth.GenerateJWT(profile)
 				if err == nil {
 					r.Header.Set("Authorization", "Bearer "+token)
 				}
@@ -122,7 +122,7 @@ func localBypassMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) checkWatchlistOwnership(watchlistID string, user *JWTClaims) error {
+func (s *Server) checkWatchlistOwnership(watchlistID string, user *auth.JWTClaims) error {
 	if user == nil {
 		return fmt.Errorf("unauthorized")
 	}
@@ -149,8 +149,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // meant the server layer depended on the API layer for its own error
 // responses, which is one half of an import cycle once these split.
 // RequireAuth is a *Server method, so it belongs with the server rather than
-// with the AuthManager it calls into. Living in auth.go made the auth layer
-// name the server type — the other half of the auth<->server cycle.
+// with the AuthManager it calls into. Living in authHeader.go made the authHeader layer
+// name the server type — the other half of the authHeader<->server cycle.
 // RequireAuth mirrors v1Auth's JWT check, including the live TokenVersion
 // revocation comparison — without it, a demoted/disabled admin's existing
 // JWT would keep working here up to its full 24h expiry even after
@@ -159,9 +159,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := ""
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			token = auth[7:]
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = authHeader[7:]
 		}
 		if token == "" {
 			token = r.URL.Query().Get("token")
@@ -170,7 +170,7 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		claims, err := ValidateJWT(token)
+		claims, err := auth.ValidateJWT(token)
 		if err != nil {
 			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 			return
@@ -181,7 +181,7 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 		}
-		ctx := context.WithValue(r.Context(), contextKeyUser, claims)
+		ctx := auth.WithUser(r.Context(), claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

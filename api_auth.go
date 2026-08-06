@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/tidal"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ func (s *Server) v1Login(w http.ResponseWriter, r *http.Request) {
 		writeV1Error(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	token, err := GenerateJWT(profile)
+	token, err := auth.GenerateJWT(profile)
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, "failed to generate token")
 		return
@@ -59,24 +60,24 @@ func (s *Server) v1Login(w http.ResponseWriter, r *http.Request) {
 // have to go in the URL instead, where it can end up in reverse-proxy
 // access logs or browser history for its full 24h lifetime.
 func (s *Server) v1StreamToken(w http.ResponseWriter, r *http.Request) {
-	claims := GetUserFromContext(r)
+	claims := auth.GetUserFromContext(r)
 	if claims == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	token, err := GenerateStreamToken(claims)
+	token, err := auth.GenerateStreamToken(claims)
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 	writeV1JSON(w, http.StatusOK, map[string]interface{}{
 		"token":      token,
-		"expires_in": int(streamTokenTTL.Seconds()),
+		"expires_in": int(auth.StreamTokenTTL.Seconds()),
 	})
 }
 
 func (s *Server) v1Me(w http.ResponseWriter, r *http.Request) {
-	claims := GetUserFromContext(r)
+	claims := auth.GetUserFromContext(r)
 	if claims == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -97,7 +98,7 @@ func (s *Server) v1ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	if !v1RequirePermission(w, r, "read") {
 		return
 	}
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 	if user == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -108,13 +109,13 @@ func (s *Server) v1ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if keys == nil {
-		keys = []APIKey{}
+		keys = []auth.APIKey{}
 	}
 	writeV1JSON(w, http.StatusOK, keys)
 }
 
 func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 	if user == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -143,7 +144,7 @@ func (s *Server) v1CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	// Only API keys are constrained. A browser session is the human
 	// themselves, holding whatever their account allows; the admin check
 	// below is what bounds them.
-	if caller := GetUserFromContext(r); caller != nil && caller.IsAPIKey {
+	if caller := auth.GetUserFromContext(r); caller != nil && caller.IsAPIKey {
 		for _, want := range req.Permissions {
 			if !callerHasPermission(caller, want) {
 				writeV1Error(w, http.StatusForbidden,
@@ -184,7 +185,7 @@ func (s *Server) v1RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	if !v1RequirePermission(w, r, "manage") {
 		return
 	}
-	user := GetUserFromContext(r)
+	user := auth.GetUserFromContext(r)
 	if user == nil {
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -275,7 +276,7 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spotFetchURL := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r)).SpotFetchAPIURL
-	results := CheckAllServices(jellyfinURL, spotFetchURL)
+	results := CheckAllServices(auth.JellyfinURL, spotFetchURL)
 	setCachedStatuses(results)
 	writeV1JSON(w, http.StatusOK, results)
 }

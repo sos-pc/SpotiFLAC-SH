@@ -1,6 +1,7 @@
-package main
+package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -21,7 +22,7 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 var (
-	jellyfinURL = getEnv("JELLYFIN_URL", "http://localhost:8096")
+	JellyfinURL = getEnv("JELLYFIN_URL", "http://localhost:8096")
 	jwtSecret   = loadOrGenerateJWTSecret()
 )
 
@@ -69,7 +70,7 @@ func generateRandomSecret() []byte {
 // UserProfile
 // ─────────────────────────────────────────────────────────────────────────────
 
-var bucketUsers = []byte("users")
+var BucketUsers = []byte("users")
 
 type UserProfile struct {
 	ID          string                 `json:"id"`
@@ -99,7 +100,7 @@ type AuthManager struct {
 
 func NewAuthManager(db *bolt.DB) (*AuthManager, error) {
 	err := db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(bucketUsers)
+		_, err := tx.CreateBucketIfNotExists(BucketUsers)
 		return err
 	})
 	if err != nil {
@@ -132,7 +133,7 @@ func (a *AuthManager) AuthenticateWithJellyfin(username, password string) (*User
 	payload, _ := json.Marshal(jellyfinAuthRequest{Username: username, Pw: password})
 
 	req, err := http.NewRequest("POST",
-		jellyfinURL+"/Users/AuthenticateByName",
+		JellyfinURL+"/Users/AuthenticateByName",
 		strings.NewReader(string(payload)))
 	if err != nil {
 		return nil, err
@@ -171,7 +172,7 @@ func (a *AuthManager) AuthenticateWithJellyfin(username, password string) (*User
 func (a *AuthManager) GetOrCreateUser(jellyfinID, name string, isAdmin bool) (*UserProfile, error) {
 	var profile UserProfile
 	err := a.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketUsers)
+		b := tx.Bucket(BucketUsers)
 		data := b.Get([]byte(jellyfinID))
 		if data != nil {
 			if err := json.Unmarshal(data, &profile); err != nil {
@@ -222,7 +223,7 @@ func (a *AuthManager) GetOrCreateUser(jellyfinID, name string, isAdmin bool) (*U
 func (a *AuthManager) GetUser(userID string) (*UserProfile, error) {
 	var profile UserProfile
 	err := a.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketUsers)
+		b := tx.Bucket(BucketUsers)
 		if b == nil {
 			return fmt.Errorf("users bucket not found")
 		}
@@ -237,7 +238,7 @@ func (a *AuthManager) GetUser(userID string) (*UserProfile, error) {
 
 func (a *AuthManager) SaveUserSettings(userID string, settings map[string]interface{}) error {
 	return a.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketUsers)
+		b := tx.Bucket(BucketUsers)
 		if b == nil {
 			return fmt.Errorf("users bucket not found")
 		}
@@ -264,7 +265,7 @@ func (a *AuthManager) SaveUserSettings(userID string, settings map[string]interf
 func (a *AuthManager) GetAllUsers() ([]UserProfile, error) {
 	var users []UserProfile
 	err := a.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketUsers)
+		b := tx.Bucket(BucketUsers)
 		if b == nil {
 			return nil
 		}
@@ -300,13 +301,13 @@ type JWTClaims struct {
 	Scope string `json:"scope,omitempty"`
 }
 
-// streamTokenTTL bounds how long a token minted for an SSE connection or a
+// StreamTokenTTL bounds how long a token minted for an SSE connection or a
 // browser download link stays valid. Short on purpose: this token ends up
 // in the request URL (neither EventSource nor an <a href> download can set
 // custom headers), so it's the one credential that routinely leaks into
 // reverse-proxy access logs / browser history — unlike the 24h session JWT,
 // a leaked stream token is worthless within a minute.
-const streamTokenTTL = 60 * time.Second
+const StreamTokenTTL = 60 * time.Second
 
 func signClaims(claims JWTClaims) (string, error) {
 	payload, err := json.Marshal(claims)
@@ -331,13 +332,13 @@ func GenerateJWT(profile *UserProfile) (string, error) {
 
 // GenerateStreamToken mints a short-lived token carrying the same identity
 // as an already-validated session/API-key claims, for use on the narrow set
-// of endpoints in streamScopedPaths/isJobDownloadPath. See streamTokenTTL.
+// of endpoints in streamScopedPaths/isJobDownloadPath. See StreamTokenTTL.
 func GenerateStreamToken(claims *JWTClaims) (string, error) {
 	return signClaims(JWTClaims{
 		UserID:       claims.UserID,
 		DisplayName:  claims.DisplayName,
 		IsAdmin:      claims.IsAdmin,
-		ExpiresAt:    time.Now().Add(streamTokenTTL).Unix(),
+		ExpiresAt:    time.Now().Add(StreamTokenTTL).Unix(),
 		TokenVersion: claims.TokenVersion,
 		Scope:        "stream",
 	})
@@ -379,6 +380,15 @@ func hmacSign(data string) string {
 type contextKey string
 
 const contextKeyUser contextKey = "user"
+
+// WithUser puts the caller's claims in ctx, and is the only way to do so from
+// outside this package: the key stays unexported, so the type that reads it in
+// GetUserFromContext is the type that was written. Callers used to build the
+// context value themselves with contextKeyUser, which meant exporting the key
+// and trusting every caller to pair it with the right type.
+func WithUser(ctx context.Context, claims *JWTClaims) context.Context {
+	return context.WithValue(ctx, contextKeyUser, claims)
+}
 
 func GetUserFromContext(r *http.Request) *JWTClaims {
 	claims, _ := r.Context().Value(contextKeyUser).(*JWTClaims)

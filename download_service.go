@@ -19,6 +19,7 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
@@ -27,10 +28,10 @@ type DownloadResponse = backend.DownloadResponse
 
 type DownloadService struct {
 	jobs *jobs.JobManager
-	auth *AuthManager
+	auth *auth.AuthManager
 }
 
-func NewDownloadService(jobs *jobs.JobManager, auth *AuthManager) *DownloadService {
+func NewDownloadService(jobs *jobs.JobManager, auth *auth.AuthManager) *DownloadService {
 	return &DownloadService{jobs: jobs, auth: auth}
 }
 

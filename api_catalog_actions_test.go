@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
@@ -99,8 +100,8 @@ func callCheckDeleted(t *testing.T, s *Server, body string) checkDeletedResult {
 	} else {
 		r = httptest.NewRequest(http.MethodPost, "/api/v1/admin/library-check-deleted", strings.NewReader(body))
 	}
-	r = r.WithContext(context.WithValue(r.Context(), contextKeyUser,
-		&JWTClaims{UserID: "u1", IsAdmin: true}))
+	r = r.WithContext(auth.WithUser(r.Context(),
+		&auth.JWTClaims{UserID: "u1", IsAdmin: true}))
 	rec := httptest.NewRecorder()
 	s.v1CheckDeletedFiles(rec, r)
 	if rec.Code != http.StatusOK {
@@ -253,8 +254,8 @@ func TestRedownloadMissingSelectsOnlyMissingAndRespectsDryRun(t *testing.T) {
 
 	t.Run("la simulation ne met rien en file", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/admin/library-redownload-missing", nil)
-		r = r.WithContext(context.WithValue(r.Context(), contextKeyUser,
-			&JWTClaims{UserID: "u1", IsAdmin: true}))
+		r = r.WithContext(auth.WithUser(r.Context(),
+			&auth.JWTClaims{UserID: "u1", IsAdmin: true}))
 		rec := httptest.NewRecorder()
 		s.v1RedownloadMissing(rec, r)
 

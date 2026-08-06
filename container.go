@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 
 	bolt "go.etcd.io/bbolt"
@@ -13,7 +14,7 @@ type Container struct {
 	DB      *bolt.DB // BoltDB: live queue, watchlists, users, api keys, fetch history
 	Catalog *sql.DB  // SQLite: long-term track/file/playlist history (catalog.db)
 	Jobs    *jobs.JobManager
-	Auth    *AuthManager
+	Auth    *auth.AuthManager
 	Watcher *Watcher
 
 	// SSE is the event transport. It sits here, beside the components that use
