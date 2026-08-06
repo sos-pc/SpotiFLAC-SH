@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req EnqueueBatchRequest
+		var req jobs.EnqueueBatchRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -100,7 +101,7 @@ func (s *Server) registerJobRoutes() {
 				return
 			}
 		}
-		if job.Status != StatusDone || job.FilePath == "" {
+		if job.Status != jobs.StatusDone || job.FilePath == "" {
 			writeV1Error(w, http.StatusBadRequest, "file not available")
 			return
 		}
@@ -126,8 +127,8 @@ func (s *Server) registerJobRoutes() {
 
 		job.FilePath = ""
 		job.UpdatedAt = time.Now()
-		_ = s.ctr.Jobs.saveJob(&job)
-		s.ctr.Jobs.notifyJob(&job)
+		_ = s.ctr.Jobs.SaveJob(&job)
+		s.ctr.Jobs.NotifyJob(&job)
 	}))
 
 	s.mux.Handle("DELETE /api/v1/jobs/completed", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {

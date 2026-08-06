@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // The one distinction the check-deleted pass rests on: "the file is not there" and
@@ -204,7 +205,7 @@ func TestRedownloadMissingSelectsOnlyMissingAndRespectsDryRun(t *testing.T) {
 	database := openTestCatalogDB(t)
 	// A non-nil JobManager satisfies the handler's guard; the dry-run path
 	// returns before ever using it.
-	s := &Server{ctr: &Container{Catalog: database, Jobs: &JobManager{}}}
+	s := &Server{ctr: &Container{Catalog: database, Jobs: &jobs.JobManager{}}}
 	ctx := context.Background()
 	dir := t.TempDir()
 

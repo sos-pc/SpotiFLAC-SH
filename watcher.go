@@ -19,6 +19,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 	bolt "go.etcd.io/bbolt"
 )
@@ -43,17 +44,17 @@ type SyncLog struct {
 }
 
 type WatchedPlaylist struct {
-	ID            string      `json:"id"`
-	SpotifyURL    string      `json:"spotify_url"`
-	Name          string      `json:"name"`
-	IntervalHours int         `json:"interval_hours"`
-	Settings      JobSettings `json:"settings"`
-	LastSync      time.Time   `json:"last_sync"`
-	TrackIDs      []string    `json:"track_ids"`
-	CreatedAt     time.Time   `json:"created_at"`
-	SyncDeletions bool        `json:"sync_deletions"`
-	SyncLogs      []SyncLog   `json:"sync_logs,omitempty"`
-	UserID        string      `json:"user_id,omitempty"`
+	ID            string           `json:"id"`
+	SpotifyURL    string           `json:"spotify_url"`
+	Name          string           `json:"name"`
+	IntervalHours int              `json:"interval_hours"`
+	Settings      jobs.JobSettings `json:"settings"`
+	LastSync      time.Time        `json:"last_sync"`
+	TrackIDs      []string         `json:"track_ids"`
+	CreatedAt     time.Time        `json:"created_at"`
+	SyncDeletions bool             `json:"sync_deletions"`
+	SyncLogs      []SyncLog        `json:"sync_logs,omitempty"`
+	UserID        string           `json:"user_id,omitempty"`
 }
 
 // watchlistJobSettings returns the JobSettings a watchlist's downloads run with.
@@ -63,7 +64,7 @@ type WatchedPlaylist struct {
 // M3U8 CreateM3u8File check already read global settings while the path came
 // from the copy). Service too follows the global downloader. See
 // docs/settings-source-of-truth.md.
-func (w *Watcher) watchlistJobSettings(pl *WatchedPlaylist) JobSettings {
+func (w *Watcher) watchlistJobSettings(pl *WatchedPlaylist) jobs.JobSettings {
 	s := EffectiveDownloadSettings(w.auth, pl.UserID)
 	return serverJobSettings(s, s.Downloader)
 }
@@ -78,11 +79,11 @@ func (w *Watcher) watchlistOutputRoot(pl *WatchedPlaylist) string {
 }
 
 type AddWatchlistRequest struct {
-	SpotifyURL    string      `json:"spotify_url"`
-	IntervalHours int         `json:"interval_hours"`
-	Settings      JobSettings `json:"settings"`
-	SyncDeletions bool        `json:"sync_deletions"`
-	UserID        string      `json:"user_id,omitempty"`
+	SpotifyURL    string           `json:"spotify_url"`
+	IntervalHours int              `json:"interval_hours"`
+	Settings      jobs.JobSettings `json:"settings"`
+	SyncDeletions bool             `json:"sync_deletions"`
+	UserID        string           `json:"user_id,omitempty"`
 }
 
 type AddWatchlistResponse struct {
@@ -104,7 +105,7 @@ type Watcher struct {
 	db      *bolt.DB
 	catalog *sql.DB
 
-	jm      *JobManager
+	jm      *jobs.JobManager
 	auth    *AuthManager
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -113,7 +114,7 @@ type Watcher struct {
 }
 
 // NewWatcher crée et démarre le daemon de surveillance des playlists.
-func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *JobManager, auth *AuthManager) *Watcher {
+func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *jobs.JobManager, auth *AuthManager) *Watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Watcher{
 		db:      db,
@@ -126,10 +127,10 @@ func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *JobManager, auth *AuthManager)
 	}
 	// Injecter le callback de résolution des settings actuels d'une watchlist.
 	// processJob l'utilise pour ignorer les settings obsolètes figés dans le job.
-	jm.getWatchlistSettings = func(watchlistID string) (JobSettings, bool) {
+	jm.WatchlistSettingsFunc = func(watchlistID string) (jobs.JobSettings, bool) {
 		pl, err := w.getWatchlistByID(watchlistID)
 		if err != nil || pl == nil {
-			return JobSettings{}, false
+			return jobs.JobSettings{}, false
 		}
 		// Global settings, not pl.Settings — watchlists follow the user's
 		// current global settings (see watchlistJobSettings).
@@ -297,7 +298,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		knownIDs[id] = true
 	}
 
-	var newTracks []JobTrack
+	var newTracks []jobs.JobTrack
 	var newIDs []string
 
 	for i, track := range tracks {
@@ -315,7 +316,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// FIX #4 — EnqueueBatch avant generateM3U8 (était inversé)
 	var batchID string
 	if len(newTracks) > 0 {
-		result, err := w.jm.EnqueueBatch(EnqueueBatchRequest{
+		result, err := w.jm.EnqueueBatch(jobs.EnqueueBatchRequest{
 			Tracks:      newTracks,
 			Settings:    w.watchlistJobSettings(&pl),
 			WatchlistID: pl.ID,
@@ -382,7 +383,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
 
 	// Notifier le frontend que la sync est terminée
-	w.jm.Publish(JobEvent{
+	w.jm.Publish(jobs.JobEvent{
 		Type: "watchlist_synced",
 		Data: map[string]interface{}{
 			"watchlist_id": pl.ID,
@@ -453,7 +454,7 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 						// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
 						job.FilePath = ""
 						job.UpdatedAt = time.Now()
-						_ = jm.saveJob(&job)
+						_ = jm.SaveJob(&job)
 						deletedCount++
 					} else if !os.IsNotExist(err) {
 						slog.Warn("[Watcher] Failed to delete file", "path", job.FilePath, "err", err)
@@ -543,7 +544,7 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 			tracks[i].PlaylistName = name
 			tracks[i].Position = i + 1
 		}
-		batchReq := EnqueueBatchRequest{
+		batchReq := jobs.EnqueueBatchRequest{
 			Tracks:      tracks,
 			Settings:    w.watchlistJobSettings(pl),
 			WatchlistID: pl.ID,
@@ -596,7 +597,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 					// Nettoyer le FilePath dans BoltDB
 					job.FilePath = ""
 					job.UpdatedAt = time.Now()
-					_ = w.jm.saveJob(&job)
+					_ = w.jm.SaveJob(&job)
 				}
 			}
 		}
@@ -750,7 +751,7 @@ func (w *Watcher) OnPermanentFailure(watchlistID, spotifyID string) {
 // dossier et même convention de nommage. Le garde anti-rétrécissement est
 // toujours actif ici : un lot manuel est par nature un sous-ensemble, il ne doit
 // jamais remplacer le fichier complet par une version partielle.
-func (w *Watcher) OnManualBatchComplete(req BatchM3U8Request, paths []string) {
+func (w *Watcher) OnManualBatchComplete(req jobs.BatchM3U8Request, paths []string) {
 	if len(paths) == 0 {
 		return
 	}
@@ -904,7 +905,7 @@ func removeEmptyParents(dir, stopAt string) {
 	}
 }
 
-func extractTracksFromMetadata(data interface{}) []JobTrack {
+func extractTracksFromMetadata(data interface{}) []jobs.JobTrack {
 	raw := toRawBytes(data)
 	if raw == nil {
 		return nil
@@ -1014,7 +1015,7 @@ func extractTracksFromMetadata(data interface{}) []JobTrack {
 	}
 	if err := json.Unmarshal(raw, &single); err == nil && single.Track.SpotifyID != "" {
 		t := single.Track
-		return []JobTrack{{
+		return []jobs.JobTrack{{
 			SpotifyID:   t.SpotifyID,
 			TrackName:   t.Name,
 			ArtistName:  t.Artists,
@@ -1092,7 +1093,7 @@ func extractPlaylistName(data interface{}) string {
 
 // convertTracks est un helper générique pour convertir n'importe quelle slice
 // de structs anonymes en []JobTrack via JSON round-trip.
-func convertTracks(tracks interface{}) []JobTrack {
+func convertTracks(tracks interface{}) []jobs.JobTrack {
 	raw, err := json.Marshal(tracks)
 	if err != nil {
 		return nil
@@ -1119,13 +1120,13 @@ func convertTracks(tracks interface{}) []JobTrack {
 		return nil
 	}
 
-	result := make([]JobTrack, 0, len(items))
+	result := make([]jobs.JobTrack, 0, len(items))
 	for _, t := range items {
 		if t.SpotifyID == "" {
 			continue
 		}
 		artistName := strings.TrimSpace(t.Artists)
-		result = append(result, JobTrack{
+		result = append(result, jobs.JobTrack{
 			SpotifyID:   t.SpotifyID,
 			TrackName:   t.Name,
 			ArtistName:  artistName,
@@ -1218,15 +1219,15 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 		trackIDSet[id] = true
 	}
 
-	jobs, err := jm.GetAllJobs()
+	jobList, err := jm.GetAllJobs()
 	if err != nil {
 		return stats, err
 	}
 
 	// Dédupliquer par SpotifyID : garder le job le plus récent par track
 	// encore présente dans la watchlist.
-	latest := make(map[string]Job)
-	for _, j := range jobs {
+	latest := make(map[string]jobs.Job)
+	for _, j := range jobList {
 		if j.WatchlistID != watchlistID || j.SpotifyID == "" || !trackIDSet[j.SpotifyID] {
 			continue
 		}
@@ -1259,15 +1260,15 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 			continue
 		}
 		switch j.Status {
-		case StatusDone:
+		case jobs.StatusDone:
 			stats.Downloaded++
 			stats.TotalSizeMB += j.TotalSize
-		case StatusSkipped:
+		case jobs.StatusSkipped:
 			stats.Skipped++
 			stats.TotalSizeMB += j.TotalSize
-		case StatusFailed:
+		case jobs.StatusFailed:
 			stats.Failed++
-		case StatusPending, StatusDownloading:
+		case jobs.StatusPending, jobs.StatusDownloading:
 			stats.Pending++
 		}
 	}
@@ -1429,12 +1430,12 @@ type WatchlistHistoryItem struct {
 
 // FIX #6 — sort.Slice à la place du tri O(n²)
 func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryItem, error) {
-	jobs, err := w.jm.GetAllJobs()
+	jobList, err := w.jm.GetAllJobs()
 	if err != nil {
 		return nil, err
 	}
 	var items []WatchlistHistoryItem
-	for _, j := range jobs {
+	for _, j := range jobList {
 		if j.WatchlistID != watchlistID {
 			continue
 		}
@@ -1464,18 +1465,18 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 	if w.jm == nil {
 		return
 	}
-	jobs, err := w.jm.GetAllJobs()
+	jobList, err := w.jm.GetAllJobs()
 	if err != nil {
 		return
 	}
 
 	// Garder le job le plus récent par SpotifyID pour cette watchlist
-	latestJob := make(map[string]Job)
-	for _, job := range jobs {
+	latestJob := make(map[string]jobs.Job)
+	for _, job := range jobList {
 		if job.WatchlistID != pl.ID || job.FilePath == "" {
 			continue
 		}
-		if job.Status != StatusDone && job.Status != StatusSkipped {
+		if job.Status != jobs.StatusDone && job.Status != jobs.StatusSkipped {
 			continue
 		}
 		key := job.SpotifyID
@@ -1757,7 +1758,7 @@ func needsFilesystemIndexFallback(trackIDs []string, validCatalog map[string]str
 // given watchlist, used as fallback for files that don't yet carry the
 // SPOTIFY_ID tag (downloaded before this change).
 func (w *Watcher) legacyJobPaths(watchlistID string) map[string]string {
-	jobs, err := w.jm.GetAllJobs()
+	jobList, err := w.jm.GetAllJobs()
 	if err != nil {
 		return map[string]string{}
 	}
@@ -1766,11 +1767,11 @@ func (w *Watcher) legacyJobPaths(watchlistID string) map[string]string {
 		updatedAt time.Time
 	}
 	latest := make(map[string]jobRef)
-	for _, job := range jobs {
+	for _, job := range jobList {
 		if job.WatchlistID != watchlistID || job.FilePath == "" || job.SpotifyID == "" {
 			continue
 		}
-		if job.Status != StatusDone && job.Status != StatusSkipped {
+		if job.Status != jobs.StatusDone && job.Status != jobs.StatusSkipped {
 			continue
 		}
 		prev, ok := latest[job.SpotifyID]

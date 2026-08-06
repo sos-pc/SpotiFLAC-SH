@@ -9,6 +9,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -115,9 +116,9 @@ func TestSyncCatalogPathOnRenamePropagatesToJobsAndHistory(t *testing.T) {
 	}
 
 	jm := newTestJobManager(t, false)
-	job := &Job{ID: "job-rename-test", SpotifyID: spotifyID, FilePath: oldPath, Status: StatusDone}
-	if err := jm.saveJob(job); err != nil {
-		t.Fatalf("saveJob: %v", err)
+	job := &jobs.Job{ID: "job-rename-test", SpotifyID: spotifyID, FilePath: oldPath, Status: jobs.StatusDone}
+	if err := jm.SaveJob(job); err != nil {
+		t.Fatalf("SaveJob: %v", err)
 	}
 
 	historyBoltDB, err := bolt.Open(filepath.Join(t.TempDir(), "history-test.db"), 0600, nil)

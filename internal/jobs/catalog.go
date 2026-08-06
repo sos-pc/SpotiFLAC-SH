@@ -1,4 +1,4 @@
-package main
+package jobs
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Catalog mirroring for terminal job transitions.
@@ -28,11 +28,11 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 )
 
-// catalogWriteTimeout caps how long any single catalog mirror operation
+// CatalogWriteTimeout caps how long any single catalog mirror operation
 // blocks the worker. The catalog is a local SQLite file so writes should
 // be fast; the timeout exists to bound pathological cases (disk full, fs
 // stalls) and avoid wedging the queue.
-const catalogWriteTimeout = 5 * time.Second
+const CatalogWriteTimeout = 5 * time.Second
 
 // recordCatalogDone writes the success state of a job to the catalog:
 // upsert the track, insert (or replace) the library_file, and append a
@@ -46,7 +46,7 @@ func (jm *JobManager) recordCatalogDone(j *Job) {
 	if jm.catalog == nil || j == nil || j.SpotifyID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), CatalogWriteTimeout)
 	defer cancel()
 
 	if err := db.UpsertTrack(ctx, jm.catalog, jobToCatalogTrack(j)); err != nil {
@@ -74,7 +74,7 @@ func (jm *JobManager) recordCatalogFailed(j *Job) {
 	if jm.catalog == nil || j == nil || j.SpotifyID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), CatalogWriteTimeout)
 	defer cancel()
 
 	if err := db.UpsertTrack(ctx, jm.catalog, jobToCatalogTrack(j)); err != nil {
@@ -98,7 +98,7 @@ func (jm *JobManager) recordCatalogSkipped(j *Job) {
 	if jm.catalog == nil || j == nil || j.SpotifyID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), CatalogWriteTimeout)
 	defer cancel()
 
 	if err := db.UpsertTrack(ctx, jm.catalog, jobToCatalogTrack(j)); err != nil {
@@ -112,7 +112,7 @@ func (jm *JobManager) recordCatalogSkipped(j *Job) {
 	}
 }
 
-// catalogTrackFromTags projects an already-read meta.FullTrackTags into a
+// CatalogTrackFromTags projects an already-read meta.FullTrackTags into a
 // catalog Track. Pure/no I/O — the single place that maps tag field names
 // to db.Track field names, so every caller that ends up with a
 // FullTrackTags (from a fresh read, or reused to avoid a second parse of
@@ -125,7 +125,7 @@ func (jm *JobManager) recordCatalogSkipped(j *Job) {
 // denormalized straight onto the track row instead (see migration 0005).
 // CoverURL has no tag-embedded source (cover art is a binary picture
 // block, not a fetchable URL) — only ever set by callers with a Job.
-func catalogTrackFromTags(spotifyID string, tags meta.FullTrackTags) *db.Track {
+func CatalogTrackFromTags(spotifyID string, tags meta.FullTrackTags) *db.Track {
 	return &db.Track{
 		SpotifyID:   spotifyID,
 		ISRC:        tags.ISRC,
@@ -149,16 +149,16 @@ func catalogTrackFromTags(spotifyID string, tags meta.FullTrackTags) *db.Track {
 //
 // Hot loops that read every file in a library (scanRootForRebuild) must
 // NOT use this — call meta.ReadFullTrackTags once and pass the result to
-// catalogTrackFromTags directly, or this parses the same file twice
+// CatalogTrackFromTags directly, or this parses the same file twice
 // (once for the SpotifyID identification, once here).
 func catalogTrackFromFile(spotifyID, path string) *db.Track {
 	if path == "" {
 		return &db.Track{SpotifyID: spotifyID}
 	}
-	return catalogTrackFromTags(spotifyID, meta.ReadFullTrackTags(path))
+	return CatalogTrackFromTags(spotifyID, meta.ReadFullTrackTags(path))
 }
 
-// trackOverrides carries the subset of catalog Track fields a caller's
+// TrackOverrides carries the subset of catalog Track fields a caller's
 // own already-fetched Spotify metadata (Job or JobTrack) can supply,
 // applied on top of a file-tag-derived Track. A live download/enqueue's
 // Spotify fetch is more trustworthy than whatever ended up embedded in
@@ -166,12 +166,12 @@ func catalogTrackFromFile(spotifyID, path string) *db.Track {
 // tag-embedding fix) — but only when it actually has a value: a zero
 // value here means "Job doesn't know this field," not "this field is
 // empty," so it must never blank out a tag-derived value.
-type trackOverrides struct {
+type TrackOverrides struct {
 	Name, ArtistName, AlbumName, AlbumArtist, ReleaseDate, CoverURL, Copyright string
 	TrackNumber, DiscNumber, DurationMs                                        int
 }
 
-func applyTrackOverrides(t *db.Track, o trackOverrides) {
+func ApplyTrackOverrides(t *db.Track, o TrackOverrides) {
 	if o.Name != "" {
 		t.Name = o.Name
 	}
@@ -216,7 +216,7 @@ func applyTrackOverrides(t *db.Track, o trackOverrides) {
 // with this empty read on a later failed retry of the same track.
 func jobToCatalogTrack(j *Job) *db.Track {
 	t := catalogTrackFromFile(j.SpotifyID, j.FilePath)
-	applyTrackOverrides(t, trackOverrides{
+	ApplyTrackOverrides(t, TrackOverrides{
 		Name:        j.TrackName,
 		ArtistName:  j.ArtistName,
 		AlbumName:   j.AlbumName,
@@ -393,7 +393,7 @@ func fileSizeBytes(path string, fallbackMB float64) int64 {
 }
 
 // catalogReadTimeout caps how long the dedup lookup blocks the enqueue
-// path. Smaller than catalogWriteTimeout because we want EnqueueBatch
+// path. Smaller than CatalogWriteTimeout because we want EnqueueBatch
 // fast: callers can wait on a download but not on a 200-track batch
 // validation.
 const catalogReadTimeout = 2 * time.Second
@@ -486,11 +486,11 @@ func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchReq
 	if jm.catalog == nil || track.SpotifyID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), CatalogWriteTimeout)
 	defer cancel()
 
 	t := catalogTrackFromFile(track.SpotifyID, filePath)
-	applyTrackOverrides(t, trackOverrides{
+	ApplyTrackOverrides(t, TrackOverrides{
 		Name:        track.TrackName,
 		ArtistName:  track.ArtistName,
 		AlbumName:   track.AlbumName,

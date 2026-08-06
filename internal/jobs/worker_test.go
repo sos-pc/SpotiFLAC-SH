@@ -1,4 +1,4 @@
-package main
+package jobs
 
 import "testing"
 
@@ -8,19 +8,19 @@ import "testing"
 // crash the process — if only the top-level worker goroutine were
 // protected, it would permanently kill the sole worker and silently stall
 // the entire download queue forever (see processJobSafely's doc comment).
-// getWatchlistSettings is an injectable seam in the real processJob code
+// WatchlistSettingsFunc is an injectable seam in the real processJob code
 // path (not a test double bolted on the side), so this exercises the real
 // panic-to-recovery flow end to end rather than testing processJobSafely's
 // recover block in isolation.
 func TestProcessJobSafelyRecoversPanicAndMarksJobFailed(t *testing.T) {
 	jm := newTestJobManager(t, false)
-	jm.getWatchlistSettings = func(watchlistID string) (JobSettings, bool) {
+	jm.WatchlistSettingsFunc = func(watchlistID string) (JobSettings, bool) {
 		panic("boom")
 	}
 
 	job := &Job{ID: "job-panic-test", SpotifyID: "x", WatchlistID: "wl-1", Status: StatusPending}
-	if err := jm.saveJob(job); err != nil {
-		t.Fatalf("saveJob: %v", err)
+	if err := jm.SaveJob(job); err != nil {
+		t.Fatalf("SaveJob: %v", err)
 	}
 
 	// Must not panic/crash the test process.
@@ -45,7 +45,7 @@ func TestProcessJobSafelyRecoversPanicAndMarksJobFailed(t *testing.T) {
 func TestProcessJobSafelyLeavesWorkerLoopUsable(t *testing.T) {
 	jm := newTestJobManager(t, false)
 	panicNext := true
-	jm.getWatchlistSettings = func(watchlistID string) (JobSettings, bool) {
+	jm.WatchlistSettingsFunc = func(watchlistID string) (JobSettings, bool) {
 		if panicNext {
 			panicNext = false
 			panic("boom")
@@ -55,11 +55,11 @@ func TestProcessJobSafelyLeavesWorkerLoopUsable(t *testing.T) {
 
 	bad := &Job{ID: "job-bad", SpotifyID: "x", WatchlistID: "wl-1", Status: StatusPending}
 	good := &Job{ID: "job-good", SpotifyID: "y", WatchlistID: "wl-1", Status: StatusPending}
-	if err := jm.saveJob(bad); err != nil {
-		t.Fatalf("saveJob(bad): %v", err)
+	if err := jm.SaveJob(bad); err != nil {
+		t.Fatalf("SaveJob(bad): %v", err)
 	}
-	if err := jm.saveJob(good); err != nil {
-		t.Fatalf("saveJob(good): %v", err)
+	if err := jm.SaveJob(good); err != nil {
+		t.Fatalf("SaveJob(good): %v", err)
 	}
 
 	jm.processJobSafely("job-bad")

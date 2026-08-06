@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // HistoryService groups everything about past downloads: clearing/exporting
@@ -12,10 +13,10 @@ import (
 // history DB (stateless backend calls). Extracted from the former App
 // god-object (R3).
 type HistoryService struct {
-	jobs *JobManager
+	jobs *jobs.JobManager
 }
 
-func NewHistoryService(jobs *JobManager) *HistoryService {
+func NewHistoryService(jobs *jobs.JobManager) *HistoryService {
 	return &HistoryService{jobs: jobs}
 }
 
@@ -36,17 +37,17 @@ func (h *HistoryService) ExportFailedDownloads(userID string, isAdmin bool) (str
 	if jm == nil {
 		return "No failed downloads", nil
 	}
-	jobs, err := jm.GetAllJobs()
+	jobList, err := jm.GetAllJobs()
 	if err != nil {
 		return "", err
 	}
 	var failedItems []string
 	hasFailed := false
-	for _, job := range jobs {
+	for _, job := range jobList {
 		if !isAdmin && job.UserID != userID {
 			continue
 		}
-		if job.Status == StatusFailed {
+		if job.Status == jobs.StatusFailed {
 			hasFailed = true
 			break
 		}
@@ -55,11 +56,11 @@ func (h *HistoryService) ExportFailedDownloads(userID string, isAdmin bool) (str
 		return "No failed downloads to export", nil
 	}
 	failedItems = append(failedItems, "Track,Artist,Album,Error")
-	for _, job := range jobs {
+	for _, job := range jobList {
 		if !isAdmin && job.UserID != userID {
 			continue
 		}
-		if job.Status == StatusFailed {
+		if job.Status == jobs.StatusFailed {
 			row := fmt.Sprintf("%q,%q,%q,%q",
 				job.TrackName, job.ArtistName, job.AlbumName, job.Error)
 			failedItems = append(failedItems, row)

@@ -1,4 +1,4 @@
-package main
+package jobs
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Jobs — types, constants, JobManager lifecycle
@@ -30,7 +30,7 @@ import (
 
 const (
 	jobWorkers = 1         // parallel download workers
-	dbFile     = "jobs.db" // path relative to configDir
+	DBFile     = "jobs.db" // path relative to configDir
 )
 
 var bucketJobs = []byte("jobs")
@@ -217,7 +217,7 @@ type JobManager struct {
 	eventHandler JobEventHandler
 	// Injected, not constructed: whoever owns the transport keeps the concrete
 	// handle it needs for subscribe/closeAll, and hands the manager only the
-	// half it uses. nil is a supported value — see notifyJob.
+	// half it uses. nil is a supported value — see NotifyJob.
 	sink       EventSink
 	wg         sync.WaitGroup
 	ctx        context.Context
@@ -234,7 +234,7 @@ type JobManager struct {
 	// watcher owns their generation.
 	batchM3U8 map[string]BatchM3U8Request
 	// Injected by NewWatcher to retrieve current watchlist settings at runtime.
-	getWatchlistSettings func(watchlistID string) (JobSettings, bool)
+	WatchlistSettingsFunc func(watchlistID string) (JobSettings, bool)
 }
 
 // forgetBatch drops every in-memory trace of a batch, in one place so a new
@@ -266,9 +266,6 @@ func (jm *JobManager) SetEventHandler(h JobEventHandler) {
 func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSink) (*JobManager, error) {
 	err := db.Update(func(tx *bolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists(bucketJobs); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucketIfNotExists(bucketWatchlist); err != nil {
 			return err
 		}
 		return nil
@@ -303,7 +300,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSin
 
 	util.SafeGo("jobs.cleanupLoop", jm.cleanupLoop)
 
-	slog.Info("[Jobs] Manager started", "workers", jobWorkers, "db", filepath.Join(configDir, dbFile))
+	slog.Info("[Jobs] Manager started", "workers", jobWorkers, "db", filepath.Join(configDir, DBFile))
 	return jm, nil
 }
 
@@ -324,13 +321,13 @@ func (jm *JobManager) Publish(ev JobEvent) {
 // recoverPendingJobs picks it up on the next start — the caller only needs to
 // know which of the two happened so it can say so in the log.
 //
-// This exists because download_service.go did it by hand: jm.saveJob(job)
+// This exists because download_service.go did it by hand: jm.SaveJob(job)
 // followed by a select on jm.queue, under a comment claiming it used
 // "les méthodes thread-safe de JobManager". Writing to another type's channel
 // is the opposite of that, and it is the one thing that would have forced the
 // queue field to be exported when this package is split out.
 func (jm *JobManager) Submit(job *Job) (queued bool, err error) {
-	if err := jm.saveJob(job); err != nil {
+	if err := jm.SaveJob(job); err != nil {
 		return false, err
 	}
 	select {
@@ -341,8 +338,8 @@ func (jm *JobManager) Submit(job *Job) (queued bool, err error) {
 	}
 }
 
-// notifyJob publishes a job_update event to all connected SSE clients.
-func (jm *JobManager) notifyJob(job *Job) {
+// NotifyJob publishes a job_update event to all connected SSE clients.
+func (jm *JobManager) NotifyJob(job *Job) {
 	jm.Publish(JobEvent{Type: "job_update", Job: job})
 }
 
@@ -489,12 +486,12 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 			UpdatedAt:    time.Now(),
 		}
 
-		if err := jm.saveJob(job); err != nil {
+		if err := jm.SaveJob(job); err != nil {
 			slog.Error("[Jobs] Failed to persist job", "job_id", job.ID, "err", err)
 			skipped++
 			continue
 		}
-		jm.notifyJob(job)
+		jm.NotifyJob(job)
 
 		select {
 		case jm.queue <- job.ID:

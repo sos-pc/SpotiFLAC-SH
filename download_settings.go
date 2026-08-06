@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/config"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,8 +105,8 @@ func ParseDownloadSettings(raw map[string]interface{}) DownloadSettings {
 // comes from the user's saved server settings, and the ONLY per-download
 // override honoured is the service (the UI's Source selector). The frontend no
 // longer needs to send any of these — the server is the single source of truth.
-func serverJobSettings(s DownloadSettings, serviceOverride string) JobSettings {
-	return JobSettings{
+func serverJobSettings(s DownloadSettings, serviceOverride string) jobs.JobSettings {
+	return jobs.JobSettings{
 		Service:              serviceOverride,
 		DownloadPath:         s.DownloadPath,
 		FolderTemplate:       s.FolderTemplate,

@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // checkDeletedRequest is the body of POST /admin/library-check-deleted.
@@ -258,7 +259,7 @@ func (s *Server) v1RedownloadMissing(w http.ResponseWriter, r *http.Request) {
 
 	result := redownloadMissingResult{Applied: req.Apply, Missing: len(ids)}
 
-	var tracks []JobTrack
+	var tracks []jobs.JobTrack
 	for _, id := range ids {
 		t, err := db.GetTrack(ctx, s.ctr.Catalog, id)
 		if err != nil || t == nil {
@@ -272,7 +273,7 @@ func (s *Server) v1RedownloadMissing(w http.ResponseWriter, r *http.Request) {
 		if len(result.Tracks) < redownloadSampleLimit {
 			result.Tracks = append(result.Tracks, t.ArtistName+" — "+t.Name)
 		}
-		tracks = append(tracks, JobTrack{
+		tracks = append(tracks, jobs.JobTrack{
 			SpotifyID:   t.SpotifyID,
 			TrackName:   t.Name,
 			ArtistName:  t.ArtistName,
@@ -296,7 +297,7 @@ func (s *Server) v1RedownloadMissing(w http.ResponseWriter, r *http.Request) {
 	// watchlist would make the watcher treat them as part of a sync and
 	// regenerate that playlist's M3U8 from a partial batch.
 	userID := userIDFromContext(r)
-	resp, err := s.ctr.Jobs.EnqueueBatch(EnqueueBatchRequest{
+	resp, err := s.ctr.Jobs.EnqueueBatch(jobs.EnqueueBatchRequest{
 		Tracks:   tracks,
 		Settings: serverJobSettings(EffectiveDownloadSettings(s.ctr.Auth, userID), ""),
 		UserID:   userID,

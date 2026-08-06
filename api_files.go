@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ func (s *Server) mediaPlacement(
 	artistName, albumName, albumArtist, releaseDate, playlistName string,
 ) trackMediaPlacement {
 	settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
-	sub := outputSubfolder(
+	sub := jobs.OutputSubfolder(
 		settings.FolderTemplate, settings.CreatePlaylistFolder, settings.UseFirstArtistOnly,
 		artistName, albumName, albumArtist, releaseDate, playlistName,
 	)
@@ -72,9 +73,9 @@ func (s *Server) mediaPlacement(
 		AlbumArtist: albumArtist,
 	}
 	if settings.UseFirstArtistOnly {
-		p.ArtistName = getFirstArtistStatic(p.ArtistName)
+		p.ArtistName = jobs.GetFirstArtistStatic(p.ArtistName)
 		if p.AlbumArtist != "" {
-			p.AlbumArtist = getFirstArtistStatic(p.AlbumArtist)
+			p.AlbumArtist = jobs.GetFirstArtistStatic(p.AlbumArtist)
 		}
 	}
 	return p
@@ -528,7 +529,7 @@ func (s *Server) registerFileRoutes() {
 			t := &params.Tracks[i]
 			// Folder first: outputSubfolder applies the first-artist rule itself,
 			// so it needs the untrimmed names.
-			t.RelativePath = outputSubfolder(
+			t.RelativePath = jobs.OutputSubfolder(
 				settings.FolderTemplate, settings.CreatePlaylistFolder, settings.UseFirstArtistOnly,
 				t.ArtistName, t.AlbumName, t.AlbumArtist, t.ReleaseDate, "",
 			)
@@ -544,9 +545,9 @@ func (s *Server) registerFileRoutes() {
 			t.UseAlbumTrackNumber = strings.Contains(settings.FolderTemplate, "{album}") ||
 				strings.Contains(settings.FolderTemplate, "{album_artist}")
 			if settings.UseFirstArtistOnly {
-				t.ArtistName = getFirstArtistStatic(t.ArtistName)
+				t.ArtistName = jobs.GetFirstArtistStatic(t.ArtistName)
 				if t.AlbumArtist != "" {
-					t.AlbumArtist = getFirstArtistStatic(t.AlbumArtist)
+					t.AlbumArtist = jobs.GetFirstArtistStatic(t.AlbumArtist)
 				}
 			}
 		}

@@ -19,6 +19,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"net/http"
 	"sync"
 	"time"
@@ -43,16 +44,16 @@ import (
 
 type SSEHub struct {
 	mu   sync.RWMutex
-	subs map[chan JobEvent]struct{}
+	subs map[chan jobs.JobEvent]struct{}
 }
 
 func newSSEHub() *SSEHub {
-	return &SSEHub{subs: make(map[chan JobEvent]struct{})}
+	return &SSEHub{subs: make(map[chan jobs.JobEvent]struct{})}
 }
 
 // subscribe crée un canal dédié au client et l'enregistre dans le hub.
-func (h *SSEHub) subscribe() chan JobEvent {
-	ch := make(chan JobEvent, 32) // buffer pour absorber les pics
+func (h *SSEHub) subscribe() chan jobs.JobEvent {
+	ch := make(chan jobs.JobEvent, 32) // buffer pour absorber les pics
 	h.mu.Lock()
 	h.subs[ch] = struct{}{}
 	h.mu.Unlock()
@@ -65,7 +66,7 @@ func (h *SSEHub) subscribe() chan JobEvent {
 // closeAll pendant l'arrêt) n'est pas re-fermé. Sans ce garde, le defer
 // unsubscribe du handler SSE, qui se déclenche justement parce que closeAll a
 // fermé le canal, provoquerait un "close of closed channel".
-func (h *SSEHub) unsubscribe(ch chan JobEvent) {
+func (h *SSEHub) unsubscribe(ch chan jobs.JobEvent) {
 	h.mu.Lock()
 	_, present := h.subs[ch]
 	delete(h.subs, ch)
@@ -100,7 +101,7 @@ func (h *SSEHub) closeAll() {
 // Exported because it is the one method EventSink requires: a future package
 // split has to be able to name it from outside. subscribe/unsubscribe/closeAll
 // stay unexported — they belong to whoever owns the hub, not to its producers.
-func (h *SSEHub) Publish(event JobEvent) {
+func (h *SSEHub) Publish(event jobs.JobEvent) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.subs {
@@ -183,15 +184,15 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 	// Snapshot initial — envoyer les jobs récents (actifs + terminaux des 48h)
 	// Filtré par userID pour éviter les fuites de données entre utilisateurs
 	cutoff := time.Now().Add(-48 * time.Hour)
-	if jobs, err := s.ctr.Jobs.GetAllJobs(); err == nil {
-		for i := range jobs {
-			j := &jobs[i]
+	if jobList, err := s.ctr.Jobs.GetAllJobs(); err == nil {
+		for i := range jobList {
+			j := &jobList[i]
 			// Filtre utilisateur : non-admin ne voit que ses propres jobs
 			if user != nil && !user.IsAdmin && j.UserID != "" && j.UserID != user.UserID {
 				continue
 			}
 			// Borne temporelle : jobs actifs toujours inclus, terminaux limités à 48h
-			if j.Status != StatusPending && j.Status != StatusDownloading {
+			if j.Status != jobs.StatusPending && j.Status != jobs.StatusDownloading {
 				if j.UpdatedAt.Before(cutoff) {
 					continue
 				}

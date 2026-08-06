@@ -20,6 +20,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/providerutil"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 )
 
@@ -105,25 +106,25 @@ func (s *Server) v1RetagLegacy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobs, err := s.ctr.Jobs.GetAllJobs()
+	jobList, err := s.ctr.Jobs.GetAllJobs()
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeV1JSON(w, http.StatusOK, retagJobs(jobs))
+	writeV1JSON(w, http.StatusOK, retagJobs(jobList))
 }
 
 // retagJobs retags every Done/Skipped job in jobs whose FilePath still
 // exists on disk. Shared by v1RetagLegacy (all jobs) and the per-watchlist
 // repair endpoint (jobs pre-filtered to one watchlist).
-func retagJobs(jobs []Job) retagLegacyResult {
+func retagJobs(jobList []jobs.Job) retagLegacyResult {
 	result := retagLegacyResult{}
-	for _, job := range jobs {
+	for _, job := range jobList {
 		if job.SpotifyID == "" || job.FilePath == "" {
 			continue
 		}
-		if job.Status != StatusDone && job.Status != StatusSkipped {
+		if job.Status != jobs.StatusDone && job.Status != jobs.StatusSkipped {
 			continue
 		}
 		if _, statErr := os.Stat(job.FilePath); statErr != nil {
@@ -208,7 +209,7 @@ func (s *Server) runLibraryRebuildAsync(roots []string) {
 		"duplicate", result.Duplicate, "no_tag", result.NoTag, "failed", result.Failed, "timed_out", result.TimedOut)
 
 	if s.ctr.Jobs != nil {
-		s.ctr.Jobs.Publish(JobEvent{
+		s.ctr.Jobs.Publish(jobs.JobEvent{
 			Type: "library_rebuild_done",
 			Data: result,
 		})
@@ -271,9 +272,9 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 
 	// 1. Retag this watchlist's own legacy files (BoltDB job record still
 	// present, file on disk, but no SPOTIFY_ID tag yet).
-	if jobs, jobsErr := s.ctr.Jobs.GetAllJobs(); jobsErr == nil {
-		scoped := make([]Job, 0, len(jobs))
-		for _, j := range jobs {
+	if jobList, jobsErr := s.ctr.Jobs.GetAllJobs(); jobsErr == nil {
+		scoped := make([]jobs.Job, 0, len(jobList))
+		for _, j := range jobList {
 			if j.WatchlistID == pl.ID {
 				scoped = append(scoped, j)
 			}
@@ -282,7 +283,7 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 		slog.Info("[Repair] retag done", "playlist", pl.Name,
 			"scanned", result.Retag.Scanned, "tagged", result.Retag.Tagged, "skipped", result.Retag.Skipped, "failed", result.Retag.Failed)
 	} else {
-		slog.Warn("[Repair] failed to list jobs for retag", "playlist", pl.Name, "err", jobsErr)
+		slog.Warn("[Repair] failed to list jobList for retag", "playlist", pl.Name, "err", jobsErr)
 	}
 
 	// 2. Rebuild the catalog for this watchlist owner's download path only
@@ -323,7 +324,7 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 	slog.Info("[Repair] done", "playlist", pl.Name, "resolved", result.M3U8.Resolved, "total", result.M3U8.Total)
 
 	if s.ctr.Jobs != nil {
-		s.ctr.Jobs.Publish(JobEvent{
+		s.ctr.Jobs.Publish(jobs.JobEvent{
 			Type: "watchlist_repaired",
 			Data: map[string]interface{}{
 				"watchlist_id": pl.ID,
@@ -498,7 +499,7 @@ func (s *Server) ingestLibraryFile(
 	// (ingestVerified) or a stale duplicate (ingestDuplicate) still
 	// deserves its tracks row backfilled from tags on every rebuild run,
 	// not just the first time it's ever seen.
-	if err := db.UpsertTrack(ctx, s.ctr.Catalog, catalogTrackFromTags(spotifyID, tags)); err != nil {
+	if err := db.UpsertTrack(ctx, s.ctr.Catalog, jobs.CatalogTrackFromTags(spotifyID, tags)); err != nil {
 		return ingestImported, fmt.Errorf("upsert track: %w", err)
 	}
 
@@ -728,7 +729,7 @@ func (s *Server) v1RetagIncompleteMetadata(w http.ResponseWriter, r *http.Reques
 func (s *Server) runRetagIncompleteMetadataAsync(tracks []db.TrackForRetag) {
 	result := s.retagIncompleteMetadata(context.Background(), tracks)
 	if s.ctr.Jobs != nil {
-		s.ctr.Jobs.Publish(JobEvent{
+		s.ctr.Jobs.Publish(jobs.JobEvent{
 			Type: "retag_incomplete_metadata_done",
 			Data: result,
 		})
@@ -879,7 +880,7 @@ func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, g
 	}
 
 	catalogTrack := t.Track // copy — start from the existing row, only override what's fresh
-	applyTrackOverrides(&catalogTrack, trackOverrides{
+	jobs.ApplyTrackOverrides(&catalogTrack, jobs.TrackOverrides{
 		Name:        jt.TrackName,
 		ArtistName:  jt.ArtistName,
 		AlbumName:   jt.AlbumName,

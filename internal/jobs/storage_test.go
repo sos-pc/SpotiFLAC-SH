@@ -1,4 +1,4 @@
-package main
+package jobs
 
 import "testing"
 
@@ -7,11 +7,11 @@ func TestUpdateJobFilePathsForRenameUpdatesMatchingJob(t *testing.T) {
 
 	target := &Job{ID: "job-target", SpotifyID: "renamed-track", FilePath: "/music/old.flac", Status: StatusDone}
 	other := &Job{ID: "job-other", SpotifyID: "other-track", FilePath: "/music/other.flac", Status: StatusDone}
-	if err := jm.saveJob(target); err != nil {
-		t.Fatalf("saveJob(target): %v", err)
+	if err := jm.SaveJob(target); err != nil {
+		t.Fatalf("SaveJob(target): %v", err)
 	}
-	if err := jm.saveJob(other); err != nil {
-		t.Fatalf("saveJob(other): %v", err)
+	if err := jm.SaveJob(other); err != nil {
+		t.Fatalf("SaveJob(other): %v", err)
 	}
 
 	updated, err := jm.UpdateJobFilePathsForRename("/music/old.flac", "/music/new.flac")
@@ -43,8 +43,8 @@ func TestUpdateJobFilePathsForRenameNoMatchIsNoop(t *testing.T) {
 	jm := newTestJobManager(t, false)
 
 	job := &Job{ID: "job-1", SpotifyID: "x", FilePath: "/music/a.flac", Status: StatusDone}
-	if err := jm.saveJob(job); err != nil {
-		t.Fatalf("saveJob: %v", err)
+	if err := jm.SaveJob(job); err != nil {
+		t.Fatalf("SaveJob: %v", err)
 	}
 
 	updated, err := jm.UpdateJobFilePathsForRename("/music/nonexistent.flac", "/music/new.flac")
@@ -72,11 +72,11 @@ func TestUpdateJobFilePathsForRenameUpdatesMultipleMatches(t *testing.T) {
 
 	a := &Job{ID: "job-a", SpotifyID: "track-a", FilePath: "/music/shared.flac", Status: StatusDone}
 	b := &Job{ID: "job-b", SpotifyID: "track-b", FilePath: "/music/shared.flac", Status: StatusDone}
-	if err := jm.saveJob(a); err != nil {
-		t.Fatalf("saveJob(a): %v", err)
+	if err := jm.SaveJob(a); err != nil {
+		t.Fatalf("SaveJob(a): %v", err)
 	}
-	if err := jm.saveJob(b); err != nil {
-		t.Fatalf("saveJob(b): %v", err)
+	if err := jm.SaveJob(b); err != nil {
+		t.Fatalf("SaveJob(b): %v", err)
 	}
 
 	updated, err := jm.UpdateJobFilePathsForRename("/music/shared.flac", "/music/renamed.flac")

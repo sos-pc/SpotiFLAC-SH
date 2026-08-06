@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"testing"
 	"time"
 )
@@ -12,9 +13,9 @@ func TestSSEHubPublishFanOutToAllSubscribers(t *testing.T) {
 	defer h.unsubscribe(ch1)
 	defer h.unsubscribe(ch2)
 
-	h.Publish(JobEvent{Type: "job_update", Job: &Job{ID: "job-1"}})
+	h.Publish(jobs.JobEvent{Type: "job_update", Job: &jobs.Job{ID: "job-1"}})
 
-	for i, ch := range []chan JobEvent{ch1, ch2} {
+	for i, ch := range []chan jobs.JobEvent{ch1, ch2} {
 		select {
 		case event := <-ch:
 			if event.Job == nil || event.Job.ID != "job-1" {
@@ -46,7 +47,7 @@ func TestSSEHubUnsubscribeStopsDelivery(t *testing.T) {
 	// A publish after unsubscribe must not panic (send on closed channel)
 	// or hang — the hub is expected to have removed ch from its subscriber
 	// set before closing it.
-	h.Publish(JobEvent{Type: "job_update", Job: &Job{ID: "job-1"}})
+	h.Publish(jobs.JobEvent{Type: "job_update", Job: &jobs.Job{ID: "job-1"}})
 }
 
 // TestSSEHubPublishNonBlockingOnFullSubscriber is the regression test for
@@ -66,7 +67,7 @@ func TestSSEHubPublishNonBlockingOnFullSubscriber(t *testing.T) {
 		// One more than the channel's buffer (32) so at least one publish
 		// hits the full-channel path for the slow subscriber.
 		for i := 0; i < 40; i++ {
-			h.Publish(JobEvent{Type: "job_update", Job: &Job{ID: "job-1"}})
+			h.Publish(jobs.JobEvent{Type: "job_update", Job: &jobs.Job{ID: "job-1"}})
 		}
 		close(done)
 	}()
@@ -95,7 +96,7 @@ func TestSSEHubSubscribeReturnsIndependentChannels(t *testing.T) {
 	// Unsubscribing one channel must not affect another still-active one.
 	ch2 := h.subscribe()
 	defer h.unsubscribe(ch2)
-	h.Publish(JobEvent{Type: "job_update", Job: &Job{ID: "job-1"}})
+	h.Publish(jobs.JobEvent{Type: "job_update", Job: &jobs.Job{ID: "job-1"}})
 
 	select {
 	case <-ch1:
@@ -120,7 +121,7 @@ func TestSSEHubCloseAllTerminatesEverySubscriber(t *testing.T) {
 
 	h.closeAll()
 
-	for i, ch := range []chan JobEvent{ch1, ch2} {
+	for i, ch := range []chan jobs.JobEvent{ch1, ch2} {
 		select {
 		case _, ok := <-ch:
 			if ok {
@@ -159,7 +160,7 @@ func TestPublishAfterCloseAllIsSafe(t *testing.T) {
 	h := newSSEHub()
 	_ = h.subscribe()
 	h.closeAll()
-	h.Publish(JobEvent{Type: "job_update", Job: &Job{ID: "after-close"}}) // must not panic
+	h.Publish(jobs.JobEvent{Type: "job_update", Job: &jobs.Job{ID: "after-close"}}) // must not panic
 }
 
 // Ordinary unsubscribe still closes the channel — the idempotence guard must

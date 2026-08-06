@@ -16,6 +16,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -85,7 +86,7 @@ func (b *logRingBuffer) add(e LogEntry) {
 	b.mu.Unlock()
 
 	if hub != nil {
-		hub.Publish(JobEvent{Type: "server_log", Data: e})
+		hub.Publish(jobs.JobEvent{Type: "server_log", Data: e})
 	}
 }
 

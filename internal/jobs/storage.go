@@ -1,4 +1,4 @@
-package main
+package jobs
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BoltDB persistence helpers for JobManager
@@ -13,7 +13,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func (jm *JobManager) saveJob(job *Job) error {
+func (jm *JobManager) SaveJob(job *Job) error {
 	return jm.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketJobs)
 		if b == nil {

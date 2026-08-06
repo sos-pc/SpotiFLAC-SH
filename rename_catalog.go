@@ -7,7 +7,7 @@ package main
 // stores independently record that file's path and go stale unless told
 // about the rename explicitly:
 //   - the SQLite catalog (library_files.file_path)
-//   - BoltDB jobs (Job.FilePath), read directly by watcher.go's
+//   - BoltDB jm (Job.FilePath), read directly by watcher.go's
 //     recoverMissingFiles (would otherwise think the file vanished and
 //     redundantly re-download it) and its playlist-track-removal path
 //     (os.Remove on the stale path silently fails, leaking the renamed
@@ -27,6 +27,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 // syncCatalogPathOnRename mirrors a filesystem rename into every store that
@@ -43,14 +44,14 @@ import (
 // Takes the two stores it touches rather than the whole Container: holding
 // *Container forced FileService to hold one too, which made the service layer
 // depend on the server layer for a type it never otherwise used.
-func syncCatalogPathOnRename(catalog *sql.DB, jobs *JobManager, oldPath, newPath string) {
+func syncCatalogPathOnRename(catalog *sql.DB, jm *jobs.JobManager, oldPath, newPath string) {
 	if oldPath == "" || newPath == "" || oldPath == newPath {
 		return
 	}
 
 	if catalog != nil {
 		if spotifyID, err := meta.ReadSpotifyID(newPath); err == nil && spotifyID != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), catalogWriteTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), jobs.CatalogWriteTimeout)
 			existing, err := db.GetActiveLibraryFile(ctx, catalog, spotifyID)
 			if err == nil && existing != nil && existing.FilePath == oldPath {
 				if err := db.UpdateLibraryFilePath(ctx, catalog, existing.ID, newPath); err != nil {
@@ -61,8 +62,8 @@ func syncCatalogPathOnRename(catalog *sql.DB, jobs *JobManager, oldPath, newPath
 		}
 	}
 
-	if jobs != nil {
-		if n, err := jobs.UpdateJobFilePathsForRename(oldPath, newPath); err != nil {
+	if jm != nil {
+		if n, err := jm.UpdateJobFilePathsForRename(oldPath, newPath); err != nil {
 			slog.Warn("[Catalog] job FilePath rename sync failed", "old_path", oldPath, "err", err)
 		} else if n > 0 {
 			slog.Info("[Catalog] updated job(s) FilePath for rename", "count", n, "old_path", oldPath, "new_path", newPath)

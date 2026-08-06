@@ -1,4 +1,4 @@
-package main
+package jobs
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Business helpers for JobManager:
@@ -120,7 +120,7 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 	if base == "" {
 		base = util.GetDefaultMusicPath()
 	}
-	sub := outputSubfolder(s.FolderTemplate, s.CreatePlaylistFolder, s.UseFirstArtistOnly,
+	sub := OutputSubfolder(s.FolderTemplate, s.CreatePlaylistFolder, s.UseFirstArtistOnly,
 		job.ArtistName, job.AlbumName, job.AlbumArtist, job.ReleaseDate, job.PlaylistName)
 	if sub != "" {
 		base = filepath.Join(base, sub)
@@ -128,12 +128,12 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 	return util.SanitizeFolderPath(base)
 }
 
-// outputSubfolder computes the per-track subfolder RELATIVE to the base download
+// OutputSubfolder computes the per-track subfolder RELATIVE to the base download
 // path, from the folder template and the track's own fields. Extracted from
 // buildOutputDir so the /files/exists check derives the exact same directory a
 // download would land in — the two must agree, and having one implementation is
 // how they stay in sync (docs/settings-source-of-truth.md D1/D2).
-func outputSubfolder(folderTemplate string, createPlaylistFolder, useFirstArtistOnly bool, artist, album, albumArtist, releaseDate, playlistName string) string {
+func OutputSubfolder(folderTemplate string, createPlaylistFolder, useFirstArtistOnly bool, artist, album, albumArtist, releaseDate, playlistName string) string {
 	var parts []string
 
 	if createPlaylistFolder && playlistName != "" {
@@ -150,13 +150,13 @@ func outputSubfolder(folderTemplate string, createPlaylistFolder, useFirstArtist
 			releaseYear = releaseDate[:4]
 		}
 		if useFirstArtistOnly {
-			artist = getFirstArtistStatic(artist)
+			artist = GetFirstArtistStatic(artist)
 		}
 		if albumArtist == "" {
 			albumArtist = artist
 		}
 		if useFirstArtistOnly {
-			albumArtist = getFirstArtistStatic(albumArtist)
+			albumArtist = GetFirstArtistStatic(albumArtist)
 		}
 
 		tpl := folderTemplate
@@ -211,9 +211,9 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc stri
 	artist := job.ArtistName
 	albumArtist := job.AlbumArtist
 	if s.UseFirstArtistOnly {
-		artist = getFirstArtistStatic(artist)
+		artist = GetFirstArtistStatic(artist)
 		if albumArtist != "" {
-			albumArtist = getFirstArtistStatic(albumArtist)
+			albumArtist = GetFirstArtistStatic(albumArtist)
 		}
 	}
 
@@ -313,11 +313,11 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 
 	artist := job.ArtistName
 	if s.UseFirstArtistOnly {
-		artist = getFirstArtistStatic(artist)
+		artist = GetFirstArtistStatic(artist)
 	}
 	albumArtist := job.AlbumArtist
 	if s.UseFirstArtistOnly && albumArtist != "" {
-		albumArtist = getFirstArtistStatic(albumArtist)
+		albumArtist = GetFirstArtistStatic(albumArtist)
 	}
 
 	useAlbumTrackNumber := strings.Contains(s.FolderTemplate, "{album}")
@@ -471,9 +471,9 @@ func (jm *JobManager) maybeGenerateM3U8(watchlistID, batchID string) {
 // Static helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// getFirstArtistStatic returns the first artist name from a comma/ampersand/feat
+// GetFirstArtistStatic returns the first artist name from a comma/ampersand/feat
 // delimited string, without accessing any JobManager state.
-func getFirstArtistStatic(artistString string) string {
+func GetFirstArtistStatic(artistString string) string {
 	if artistString == "" {
 		return ""
 	}
@@ -503,11 +503,11 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string, currentSettings JobS
 		job.Error = ""
 		job.Progress = 0
 		job.UpdatedAt = time.Now()
-		if err := jm.saveJob(&job); err != nil {
+		if err := jm.SaveJob(&job); err != nil {
 			slog.Error("[Jobs] RequeueFailed: failed to save job", "job_id", job.ID, "err", err)
 			continue
 		}
-		jm.notifyJob(&job)
+		jm.NotifyJob(&job)
 
 		select {
 		case jm.queue <- job.ID:

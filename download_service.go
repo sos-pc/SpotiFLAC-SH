@@ -19,17 +19,18 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 type DownloadRequest = backend.DownloadRequest
 type DownloadResponse = backend.DownloadResponse
 
 type DownloadService struct {
-	jobs *JobManager
+	jobs *jobs.JobManager
 	auth *AuthManager
 }
 
-func NewDownloadService(jobs *JobManager, auth *AuthManager) *DownloadService {
+func NewDownloadService(jobs *jobs.JobManager, auth *AuthManager) *DownloadService {
 	return &DownloadService{jobs: jobs, auth: auth}
 }
 
@@ -49,7 +50,7 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 
 	jm := d.jobs
 	if jm == nil {
-		return DownloadResponse{Success: false, Error: "JobManager not initialized"}, fmt.Errorf("job manager not initialized")
+		return DownloadResponse{Success: false, Error: "jobs.JobManager not initialized"}, fmt.Errorf("job manager not initialized")
 	}
 
 	// Récupération des métadonnées Spotify manquantes (AlbumArtist, Duration, etc.) si possible
@@ -89,7 +90,7 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 	serverSettings := EffectiveDownloadSettings(d.auth, req.UserID)
 
 	// Création du Job
-	job := &Job{
+	job := &jobs.Job{
 		ID:           itemID,
 		SpotifyID:    req.SpotifyID,
 		TrackName:    req.TrackName,
@@ -108,7 +109,7 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		PlaylistName: req.PlaylistName,
 		DurationMs:   req.Duration * 1000,
 		UserID:       req.UserID,
-		Status:       StatusPending,
+		Status:       jobs.StatusPending,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 		// Fully server-authoritative (step 3): every download setting comes from
@@ -126,7 +127,7 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		return DownloadResponse{}, fmt.Errorf("could not save job: %w", err)
 	}
 	if queued {
-		slog.Info("[Download] Job added to queue", "job_id", job.ID)
+		slog.Info("[Download] jobs.Job added to queue", "job_id", job.ID)
 	} else {
 		slog.Warn("[Download] Queue full, job will be picked up later", "job_id", job.ID)
 	}
@@ -139,10 +140,10 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 	}, nil
 }
 
-func (d *DownloadService) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchResponse, error) {
+func (d *DownloadService) EnqueueBatch(req jobs.EnqueueBatchRequest) (jobs.EnqueueBatchResponse, error) {
 	jm := d.jobs
 	if jm == nil {
-		return EnqueueBatchResponse{}, fmt.Errorf("job manager not initialized")
+		return jobs.EnqueueBatchResponse{}, fmt.Errorf("job manager not initialized")
 	}
 	return jm.EnqueueBatch(req)
 }

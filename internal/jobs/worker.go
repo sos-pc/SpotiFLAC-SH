@@ -1,4 +1,4 @@
-package main
+package jobs
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Worker loop and job processing for JobManager
@@ -62,8 +62,8 @@ func (jm *JobManager) processJobSafely(jobID string) {
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("internal error: %v", r)
 		job.UpdatedAt = time.Now()
-		jm.saveJob(job)
-		jm.notifyJob(job)
+		jm.SaveJob(job)
+		jm.NotifyJob(job)
 		jm.recordCatalogFailed(job)
 		if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil && isPermanentFailure(job.Error) {
 			jm.eventHandler.OnPermanentFailure(job.WatchlistID, job.SpotifyID)
@@ -90,8 +90,8 @@ func (jm *JobManager) processJob(jobID string) {
 	// For watchlist jobs, always use current watchlist settings so that
 	// jobs created with stale settings (e.g. empty folderTemplate) still
 	// download to the right location.
-	if job.WatchlistID != "" && jm.getWatchlistSettings != nil {
-		if freshSettings, ok := jm.getWatchlistSettings(job.WatchlistID); ok {
+	if job.WatchlistID != "" && jm.WatchlistSettingsFunc != nil {
+		if freshSettings, ok := jm.WatchlistSettingsFunc(job.WatchlistID); ok {
 			job.Settings = freshSettings
 		}
 	}
@@ -101,8 +101,8 @@ func (jm *JobManager) processJob(jobID string) {
 	job.Status = StatusDownloading
 	job.UpdatedAt = time.Now()
 	job.StartedAt = time.Now()
-	jm.saveJob(job)
-	jm.notifyJob(job)
+	jm.SaveJob(job)
+	jm.NotifyJob(job)
 
 	outputDir := jm.buildOutputDir(job)
 
@@ -114,8 +114,8 @@ func (jm *JobManager) processJob(jobID string) {
 			job.TotalSize = float64(info.Size()) / 1024 / 1024
 		}
 		job.UpdatedAt = time.Now()
-		jm.saveJob(job)
-		jm.notifyJob(job)
+		jm.SaveJob(job)
+		jm.NotifyJob(job)
 		jm.recordCatalogSkipped(job)
 		jm.maybeGenerateM3U8(job.WatchlistID, job.BatchID)
 		return
@@ -139,10 +139,10 @@ func (jm *JobManager) processJob(jobID string) {
 		// with at the very start of the download, before any bytes had
 		// moved.
 		if time.Since(lastPersisted) >= 2*time.Second {
-			jm.saveJob(job)
+			jm.SaveJob(job)
 			lastPersisted = time.Now()
 		}
-		jm.notifyJob(job)
+		jm.NotifyJob(job)
 	}
 
 	resp, err := backend.ExecuteDownload(req)
@@ -157,8 +157,8 @@ func (jm *JobManager) processJob(jobID string) {
 		job.Status = StatusFailed
 		job.Error = errMsg
 		job.UpdatedAt = time.Now()
-		jm.saveJob(job)
-		jm.notifyJob(job)
+		jm.SaveJob(job)
+		jm.NotifyJob(job)
 		jm.recordCatalogFailed(job)
 		if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil {
 			if isPermanentFailure(errMsg) {
@@ -189,8 +189,8 @@ func (jm *JobManager) processJob(jobID string) {
 			job.Error = err.Error()
 			job.Speed = 0
 			job.UpdatedAt = time.Now()
-			jm.saveJob(job)
-			jm.notifyJob(job)
+			jm.SaveJob(job)
+			jm.NotifyJob(job)
 			jm.recordCatalogFailed(job)
 			if job.WatchlistID != "" && job.SpotifyID != "" && jm.eventHandler != nil &&
 				isPermanentFailure(job.Error) {
@@ -211,8 +211,8 @@ func (jm *JobManager) processJob(jobID string) {
 		}
 	}
 	job.UpdatedAt = time.Now()
-	jm.saveJob(job)
-	jm.notifyJob(job)
+	jm.SaveJob(job)
+	jm.NotifyJob(job)
 	jm.recordCatalogDone(job)
 	slog.Info("[Jobs] Done", "track", job.TrackName)
 
@@ -263,7 +263,7 @@ func (jm *JobManager) recoverPendingJobs() {
 	})
 	for _, job := range toRecover {
 		jobCopy := job
-		jm.saveJob(&jobCopy)
+		jm.SaveJob(&jobCopy)
 		select {
 		case jm.queue <- jobCopy.ID:
 			recovered++

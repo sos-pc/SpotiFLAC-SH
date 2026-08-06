@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,13 +19,13 @@ func TestV1JobsStreamInitialSnapshotScopedToUser(t *testing.T) {
 	jm, hub := newTestJobManagerWithHub(t, false)
 	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
-	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", TrackName: "Song A", UserID: "user-a", Status: StatusDone, UpdatedAt: time.Now()}
-	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", TrackName: "Song B", UserID: "user-b", Status: StatusDone, UpdatedAt: time.Now()}
-	if err := jm.saveJob(userAJob); err != nil {
-		t.Fatalf("saveJob(userAJob): %v", err)
+	userAJob := &jobs.Job{ID: "job-a", SpotifyID: "track-a", TrackName: "Song A", UserID: "user-a", Status: jobs.StatusDone, UpdatedAt: time.Now()}
+	userBJob := &jobs.Job{ID: "job-b", SpotifyID: "track-b", TrackName: "Song B", UserID: "user-b", Status: jobs.StatusDone, UpdatedAt: time.Now()}
+	if err := jm.SaveJob(userAJob); err != nil {
+		t.Fatalf("SaveJob(userAJob): %v", err)
 	}
-	if err := jm.saveJob(userBJob); err != nil {
-		t.Fatalf("saveJob(userBJob): %v", err)
+	if err := jm.SaveJob(userBJob); err != nil {
+		t.Fatalf("SaveJob(userBJob): %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -115,13 +116,13 @@ func TestV1JobsStreamInitialSnapshotAdminSeesEveryone(t *testing.T) {
 	jm, hub := newTestJobManagerWithHub(t, false)
 	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
-	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusDone, UpdatedAt: time.Now()}
-	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", UserID: "user-b", Status: StatusDone, UpdatedAt: time.Now()}
-	if err := jm.saveJob(userAJob); err != nil {
-		t.Fatalf("saveJob(userAJob): %v", err)
+	userAJob := &jobs.Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: jobs.StatusDone, UpdatedAt: time.Now()}
+	userBJob := &jobs.Job{ID: "job-b", SpotifyID: "track-b", UserID: "user-b", Status: jobs.StatusDone, UpdatedAt: time.Now()}
+	if err := jm.SaveJob(userAJob); err != nil {
+		t.Fatalf("SaveJob(userAJob): %v", err)
 	}
-	if err := jm.saveJob(userBJob); err != nil {
-		t.Fatalf("saveJob(userBJob): %v", err)
+	if err := jm.SaveJob(userBJob); err != nil {
+		t.Fatalf("SaveJob(userBJob): %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -165,13 +166,13 @@ func TestV1JobsStreamSnapshotReflectsPersistedProgress(t *testing.T) {
 	jm, hub := newTestJobManagerWithHub(t, false)
 	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
-	job := &Job{
+	job := &jobs.Job{
 		ID: "job-a", SpotifyID: "track-a", UserID: "user-a",
-		Status: StatusDownloading, Speed: 2.5, TotalSize: 10.3,
+		Status: jobs.StatusDownloading, Speed: 2.5, TotalSize: 10.3,
 		UpdatedAt: time.Now(),
 	}
-	if err := jm.saveJob(job); err != nil {
-		t.Fatalf("saveJob: %v", err)
+	if err := jm.SaveJob(job); err != nil {
+		t.Fatalf("SaveJob: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

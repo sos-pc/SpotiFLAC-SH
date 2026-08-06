@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -11,7 +12,7 @@ import (
 type Container struct {
 	DB      *bolt.DB // BoltDB: live queue, watchlists, users, api keys, fetch history
 	Catalog *sql.DB  // SQLite: long-term track/file/playlist history (catalog.db)
-	Jobs    *JobManager
+	Jobs    *jobs.JobManager
 	Auth    *AuthManager
 	Watcher *Watcher
 

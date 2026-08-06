@@ -1,4 +1,4 @@
-package main
+package jobs
 
 import "testing"
 
@@ -10,11 +10,11 @@ func TestClearCompletedJobsScopedToUser(t *testing.T) {
 
 	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusDone}
 	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", UserID: "user-b", Status: StatusDone}
-	if err := jm.saveJob(userAJob); err != nil {
-		t.Fatalf("saveJob(userAJob): %v", err)
+	if err := jm.SaveJob(userAJob); err != nil {
+		t.Fatalf("SaveJob(userAJob): %v", err)
 	}
-	if err := jm.saveJob(userBJob); err != nil {
-		t.Fatalf("saveJob(userBJob): %v", err)
+	if err := jm.SaveJob(userBJob); err != nil {
+		t.Fatalf("SaveJob(userBJob): %v", err)
 	}
 
 	deleted, err := jm.ClearCompletedJobs("user-a", false)
@@ -41,11 +41,11 @@ func TestClearCompletedJobsAdminClearsEveryone(t *testing.T) {
 
 	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusDone}
 	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", UserID: "user-b", Status: StatusDone}
-	if err := jm.saveJob(userAJob); err != nil {
-		t.Fatalf("saveJob(userAJob): %v", err)
+	if err := jm.SaveJob(userAJob); err != nil {
+		t.Fatalf("SaveJob(userAJob): %v", err)
 	}
-	if err := jm.saveJob(userBJob); err != nil {
-		t.Fatalf("saveJob(userBJob): %v", err)
+	if err := jm.SaveJob(userBJob); err != nil {
+		t.Fatalf("SaveJob(userBJob): %v", err)
 	}
 
 	deleted, err := jm.ClearCompletedJobs("user-a", true)
@@ -72,11 +72,11 @@ func TestClearCompletedJobsKeepsWatchlistSkips(t *testing.T) {
 
 	manualSkip := &Job{ID: "job-manual", SpotifyID: "track-1", UserID: "user-a", Status: StatusSkipped}
 	watchlistSkip := &Job{ID: "job-watchlist", SpotifyID: "track-2", UserID: "user-a", WatchlistID: "wl-1", Status: StatusSkipped}
-	if err := jm.saveJob(manualSkip); err != nil {
-		t.Fatalf("saveJob(manualSkip): %v", err)
+	if err := jm.SaveJob(manualSkip); err != nil {
+		t.Fatalf("SaveJob(manualSkip): %v", err)
 	}
-	if err := jm.saveJob(watchlistSkip); err != nil {
-		t.Fatalf("saveJob(watchlistSkip): %v", err)
+	if err := jm.SaveJob(watchlistSkip); err != nil {
+		t.Fatalf("SaveJob(watchlistSkip): %v", err)
 	}
 
 	deleted, err := jm.ClearCompletedJobs("user-a", false)
@@ -98,11 +98,11 @@ func TestClearAllJobsScopedToUser(t *testing.T) {
 
 	userAJob := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusFailed}
 	userBJob := &Job{ID: "job-b", SpotifyID: "track-b", UserID: "user-b", Status: StatusFailed}
-	if err := jm.saveJob(userAJob); err != nil {
-		t.Fatalf("saveJob(userAJob): %v", err)
+	if err := jm.SaveJob(userAJob); err != nil {
+		t.Fatalf("SaveJob(userAJob): %v", err)
 	}
-	if err := jm.saveJob(userBJob); err != nil {
-		t.Fatalf("saveJob(userBJob): %v", err)
+	if err := jm.SaveJob(userBJob); err != nil {
+		t.Fatalf("SaveJob(userBJob): %v", err)
 	}
 
 	deleted, err := jm.ClearAllJobs("user-a", false)
@@ -129,8 +129,8 @@ func TestClearAllJobsLeavesActiveDownloadsAlone(t *testing.T) {
 	downloading := &Job{ID: "job-downloading", SpotifyID: "track-2", UserID: "user-a", Status: StatusDownloading}
 	done := &Job{ID: "job-done", SpotifyID: "track-3", UserID: "user-a", Status: StatusDone}
 	for _, j := range []*Job{pending, downloading, done} {
-		if err := jm.saveJob(j); err != nil {
-			t.Fatalf("saveJob(%s): %v", j.ID, err)
+		if err := jm.SaveJob(j); err != nil {
+			t.Fatalf("SaveJob(%s): %v", j.ID, err)
 		}
 	}
 
@@ -154,22 +154,19 @@ func TestClearAllJobsLeavesActiveDownloadsAlone(t *testing.T) {
 // not a blank stub, so v1JobsStream's existing per-user filter can keep the
 // broadcast scoped instead of notifying every connected client.
 func TestClearJobsBroadcastsOwnerScopedEvents(t *testing.T) {
-	jm, hub := newTestJobManagerWithHub(t, false)
+	jm, sink := newTestJobManagerWithSink(t, false)
 
 	job := &Job{ID: "job-a", SpotifyID: "track-a", UserID: "user-a", Status: StatusDone}
-	if err := jm.saveJob(job); err != nil {
-		t.Fatalf("saveJob: %v", err)
+	if err := jm.SaveJob(job); err != nil {
+		t.Fatalf("SaveJob: %v", err)
 	}
-
-	ch := hub.subscribe()
-	defer hub.unsubscribe(ch)
 
 	if _, err := jm.ClearCompletedJobs("user-a", false); err != nil {
 		t.Fatalf("ClearCompletedJobs: %v", err)
 	}
 
 	select {
-	case event := <-ch:
+	case event := <-sink.events:
 		if event.Type != "job_deleted" {
 			t.Fatalf("event.Type = %q, want job_deleted", event.Type)
 		}

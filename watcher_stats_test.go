@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -28,20 +29,20 @@ var (
 // newTestWatcher builds a Watcher wired the way main.go wires it. Tests used to
 // write `&Watcher{jm: jm}` and reach the catalog through the manager; that field
 // is the manager's own now.
-func newTestWatcher(t *testing.T, withCatalog bool) (*Watcher, *JobManager) {
+func newTestWatcher(t *testing.T, withCatalog bool) (*Watcher, *jobs.JobManager) {
 	t.Helper()
 	jm := newTestJobManager(t, withCatalog)
 	return &Watcher{db: lastTestBolt, catalog: lastTestCatalog, jm: jm}, jm
 }
 
-func newTestJobManager(t *testing.T, withCatalog bool) *JobManager {
+func newTestJobManager(t *testing.T, withCatalog bool) *jobs.JobManager {
 	t.Helper()
 	return newTestJobManagerSink(t, withCatalog, nil)
 }
 
 // newTestJobManagerSink builds the manager with an explicit sink. nil is a
 // supported value: a test that never inspects events does not need a transport.
-func newTestJobManagerSink(t *testing.T, withCatalog bool, hub EventSink) *JobManager {
+func newTestJobManagerSink(t *testing.T, withCatalog bool, hub jobs.EventSink) *jobs.JobManager {
 	t.Helper()
 	f, err := os.CreateTemp("", "spotiflac-test-*.db")
 	if err != nil {
@@ -68,9 +69,9 @@ func newTestJobManagerSink(t *testing.T, withCatalog bool, hub EventSink) *JobMa
 
 	lastTestBolt, lastTestCatalog = boltDB, catalog
 
-	jm, err := NewJobManager(t.TempDir(), boltDB, catalog, hub)
+	jm, err := jobs.NewJobManager(t.TempDir(), boltDB, catalog, hub)
 	if err != nil {
-		t.Fatalf("NewJobManager: %v", err)
+		t.Fatalf("jobs.NewJobManager: %v", err)
 	}
 	t.Cleanup(jm.Close)
 	return jm
@@ -82,7 +83,7 @@ func newTestJobManagerSink(t *testing.T, withCatalog bool, hub EventSink) *JobMa
 // subscribe. Handing back the concrete hub is the whole point of the split —
 // a test that wants to observe events says so, instead of reaching into a
 // field.
-func newTestJobManagerWithHub(t *testing.T, withCatalog bool) (*JobManager, *SSEHub) {
+func newTestJobManagerWithHub(t *testing.T, withCatalog bool) (*jobs.JobManager, *SSEHub) {
 	t.Helper()
 	hub := newSSEHub()
 	return newTestJobManagerSink(t, withCatalog, hub), hub
@@ -130,24 +131,24 @@ func TestGetWatchlistStatsUsesCatalogForSizeAndStatus(t *testing.T) {
 	}
 
 	// A job still present in BoltDB for a track not yet in the catalog.
-	if err := jm.saveJob(&Job{
+	if err := jm.SaveJob(&jobs.Job{
 		ID:          "job-1",
 		SpotifyID:   "job-done",
 		WatchlistID: pl.ID,
-		Status:      StatusDone,
+		Status:      jobs.StatusDone,
 		TotalSize:   12.5, // MB
 		UpdatedAt:   time.Now(),
 	}); err != nil {
-		t.Fatalf("saveJob(job-done): %v", err)
+		t.Fatalf("SaveJob(job-done): %v", err)
 	}
-	if err := jm.saveJob(&Job{
+	if err := jm.SaveJob(&jobs.Job{
 		ID:          "job-2",
 		SpotifyID:   "job-failed",
 		WatchlistID: pl.ID,
-		Status:      StatusFailed,
+		Status:      jobs.StatusFailed,
 		UpdatedAt:   time.Now(),
 	}); err != nil {
-		t.Fatalf("saveJob(job-failed): %v", err)
+		t.Fatalf("SaveJob(job-failed): %v", err)
 	}
 
 	stats, err := w.GetWatchlistStats(pl.ID)

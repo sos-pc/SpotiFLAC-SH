@@ -22,14 +22,15 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 )
 
 type FileService struct {
 	catalog *sql.DB
-	jobs    *JobManager
+	jobs    *jobs.JobManager
 }
 
-func NewFileService(catalog *sql.DB, jobs *JobManager) *FileService {
+func NewFileService(catalog *sql.DB, jobs *jobs.JobManager) *FileService {
 	return &FileService{catalog: catalog, jobs: jobs}
 }
 

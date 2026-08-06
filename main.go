@@ -15,6 +15,7 @@ import (
 	catalogdb "github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -40,7 +41,7 @@ func main() {
 	slog.Info("[Main] Config dir", "path", configDir)
 
 	// ── BoltDB ────────────────────────────────────────────────────────────
-	dbPath := filepath.Join(configDir, dbFile)
+	dbPath := filepath.Join(configDir, jobs.DBFile)
 	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
 		fprintReal("FATAL: cannot open database: %v\n", err)
@@ -85,12 +86,12 @@ func main() {
 	sseHub := newSSEHub()
 
 	// ── Job manager (workers + cleanup) ───────────────────────────────────
-	jobs, err := NewJobManager(configDir, db, catalog, sseHub)
+	jobMgr, err := jobs.NewJobManager(configDir, db, catalog, sseHub)
 	if err != nil {
 		fprintReal("FATAL: cannot init job manager: %v\n", err)
 		os.Exit(1)
 	}
-	defer jobs.Close()
+	defer jobMgr.Close()
 	serverLogs.attachHub(sseHub)
 
 	// ── Auth (Jellyfin + JWT) ─────────────────────────────────────────────
@@ -101,28 +102,28 @@ func main() {
 	}
 
 	// ── Watcher (playlist sync) ───────────────────────────────────────────
-	watcher := NewWatcher(db, catalog, jobs, auth)
+	watcher := NewWatcher(db, catalog, jobMgr, auth)
 	defer watcher.Close()
 
 	// Connecter le Watcher comme handler d'événements du JobManager
-	jobs.SetEventHandler(watcher)
+	jobMgr.SetEventHandler(watcher)
 
 	// ── Container (DI) ───────────────────────────────────────────────────
 	ctr := &Container{
 		DB:       db,
 		Catalog:  catalog,
-		Jobs:     jobs,
+		Jobs:     jobMgr,
 		Auth:     auth,
 		Watcher:  watcher,
 		SSE:      sseHub,
 		System:   &SystemService{},
 		Media:    &MediaService{},
-		History:  NewHistoryService(jobs),
+		History:  NewHistoryService(jobMgr),
 		Audio:    &AudioService{},
 		Metadata: NewMetadataService(auth),
-		Download: NewDownloadService(jobs, auth),
+		Download: NewDownloadService(jobMgr, auth),
 	}
-	ctr.Files = NewFileService(catalog, jobs)
+	ctr.Files = NewFileService(catalog, jobMgr)
 
 	// Proxy auto-discovery used to start here: a goroutine polling
 	// tidal-uptime.geeked.wtf every 6 h to reorder the Tidal proxy list. That
