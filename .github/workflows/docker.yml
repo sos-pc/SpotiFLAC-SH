@@ -19,93 +19,9 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Build frontend (required for go:embed)
-        working-directory: frontend
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      # Runs right after the frontend build with nothing in between — go
-      # test needs the go:embed'd frontend/dist directory (untracked,
-      # gitignored) to still be on disk, and at least one of the linting
-      # actions below was observed wiping it out (fine for go vet/
-      # golangci-lint/govulncheck, which don't need to actually embed file
-      # contents to type-check, but not for a real go test build).
-      # -race is not optional here: backend/spotify's concurrency test documents
-      # that it "must be run with -race" (the detector, or a hard map-write
-      # crash, is what actually proves the token-reset fix — a plain run catches
-      # it only unreliably). It was absent for a long time, so the test wasn't
-      # doing its job. Enabled after a throwaway race-probe branch ran the whole
-      # suite with -race and found nothing across the 56 concurrent files: cost
-      # is ~+53s (76s -> 129s), risk of a surprise failure was measured to be
-      # zero before turning it on here.
-      - name: Run Go tests
-        run: go test ./... -v -race
-
-      - name: go vet
-        run: go vet ./...
-
-      # go.mod/go.sum are only ever tidied inline during the Dockerfile
-      # build (`go mod tidy` right before the binary is compiled) — nothing
-      # checks the committed files themselves, so a manifest that drifted
-      # (a dependency added/removed in code without re-running `go mod
-      # tidy` locally) would go unnoticed until someone happens to look.
-      # Re-run it here and fail if it would change anything.
-      - name: Verify go.mod/go.sum are tidy
-        run: |
-          cp go.mod go.mod.orig
-          cp go.sum go.sum.orig
-          go mod tidy
-          if ! diff -q go.mod.orig go.mod > /dev/null || ! diff -q go.sum.orig go.sum > /dev/null; then
-            echo "::error::go.mod/go.sum are not tidy. Run 'go mod tidy' locally and commit the result."
-            diff -u go.mod.orig go.mod || true
-            diff -u go.sum.orig go.sum || true
-            exit 1
-          fi
-          rm -f go.mod.orig go.sum.orig
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12.2
-
-      # Not golang/govulncheck-action: that action has a default go-version
-      # input baked in that silently wins over go-version-file ("Both
-      # go-version and go-version-file inputs are specified, only go-version
-      # will be used" — a known, still-open bug: golang/go#61343,
-      # golang/go#70036), so it isn't guaranteed to actually run against the
-      # Go version go.mod requires. Running it directly reuses the Go
-      # toolchain "Set up Go" already resolved unambiguously above.
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
-      - name: Frontend lint
-        working-directory: frontend
-        run: bun run lint
-
-      # Equivalent of the go.mod tidy check above, for the frontend:
-      # package.json can accumulate dependencies nobody imports anymore
-      # after a refactor, with nothing to catch it. tailwindcss/
-      # tw-animate-css are real, load-bearing dependencies (see
-      # src/index.css's @import lines) that depcheck can't see because it
-      # only looks for JS/TS import statements, not CSS @import — the only
-      # two false positives found when this check was introduced.
-      - name: Frontend unused dependency check
-        working-directory: frontend
-        run: bunx depcheck --ignores="tailwindcss,tw-animate-css"
+    # The steps live in go-checks.yml so test.yml can run the identical set on
+    # main and on pull requests. Publication triggers are unchanged.
+    uses: ./.github/workflows/go-checks.yml
 
   build-and-push:
     needs: test

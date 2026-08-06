@@ -1,0 +1,35 @@
+name: Tests
+
+# Runs the same checks docker.yml runs, but on the branch the work actually
+# lands on and on every pull request — without building or publishing anything.
+#
+# docker.yml carries those checks, and it triggers only on `feature/**` and on
+# `v*.*.*` tags, because its job is to publish an image and `:latest` should
+# only move on a release. The side effect was that `main` had no CI at all: the
+# v4.0.0 provider removal, the package split, and sixteen untouched dependabot
+# branches all sat there compiled on nobody's machine but the author's — a
+# Windows one, where two path tests fail for platform reasons and are easy to
+# start reading as background noise.
+#
+# Deliberately separate from docker.yml rather than adding `main` to its
+# branches: that would republish `:latest` on every push and change a release
+# policy that was chosen on purpose.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run's answer worthless.
+# Pull requests especially: force-pushes during review would otherwise queue a
+# run per revision. `main` is excluded from cancellation — each commit there is
+# a distinct state someone may need the verdict for.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  checks:
+    uses: ./.github/workflows/go-checks.yml
