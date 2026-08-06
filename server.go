@@ -126,7 +126,7 @@ func (s *Server) checkWatchlistOwnership(watchlistID string, user *auth.JWTClaim
 	if user == nil {
 		return fmt.Errorf("unauthorized")
 	}
-	pl, err := s.ctr.Watcher.getWatchlistByID(watchlistID)
+	pl, err := s.ctr.Watcher.GetWatchlistByID(watchlistID)
 	if err != nil {
 		return fmt.Errorf("watchlist not found")
 	}

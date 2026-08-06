@@ -1,4 +1,4 @@
-package main
+package watcher
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Catalog mirroring + lookup for the watcher.
@@ -27,7 +27,7 @@ import (
 const catalogMirrorTimeout = 10 * time.Second
 
 // catalogLookupTimeout caps the path-resolution query during M3U8 build.
-// Smaller because this is on the hot path of generateM3U8ForPlaylist and
+// Smaller because this is on the hot path of GenerateM3U8ForPlaylist and
 // failing fast lets the existing filesystem fallback kick in.
 const catalogLookupTimeout = 5 * time.Second
 

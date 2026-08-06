@@ -6,6 +6,7 @@ package main
 
 import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	"net/http"
 )
 
@@ -31,7 +32,7 @@ func (s *Server) registerWatchlistRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req AddWatchlistRequest
+		var req watcher.AddWatchlistRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -69,7 +70,7 @@ func (s *Server) registerWatchlistRoutes() {
 			writeV1Error(w, http.StatusForbidden, err.Error())
 			return
 		}
-		var req UpdateWatchlistRequest
+		var req watcher.UpdateWatchlistRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}

@@ -1,4 +1,4 @@
-package main
+package watcher
 
 import (
 	"context"
@@ -130,7 +130,7 @@ func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *jobs.JobManager, auth *auth.Au
 	// Injecter le callback de résolution des settings actuels d'une watchlist.
 	// processJob l'utilise pour ignorer les settings obsolètes figés dans le job.
 	jm.WatchlistSettingsFunc = func(watchlistID string) (jobs.JobSettings, bool) {
-		pl, err := w.getWatchlistByID(watchlistID)
+		pl, err := w.GetWatchlistByID(watchlistID)
 		if err != nil || pl == nil {
 			return jobs.JobSettings{}, false
 		}
@@ -226,11 +226,11 @@ func (w *Watcher) checkAll() {
 // The write itself is atomic, but resolution can legitimately fail for some
 // tracks (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record left —
 // exactly the state of a pre-existing library downloaded before tag
-// embedding existed) — generateM3U8ForPlaylist guards against silently
+// embedding existed) — GenerateM3U8ForPlaylist guards against silently
 // shrinking an already-good file when that happens, so running this
 // unconditionally on every boot is safe.
 func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
-	_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
+	_, _ = w.GenerateM3U8ForPlaylist(pl.ID, false)
 }
 
 // syncPlaylist récupère les métadonnées Spotify, compare avec les tracks déjà
@@ -263,7 +263,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 		return
 	}
 
-	tracks := extractTracksFromMetadata(data)
+	tracks := ExtractTracksFromMetadata(data)
 	if len(tracks) == 0 {
 		slog.Warn("[Watcher] No tracks found", "url", pl.SpotifyURL)
 		return
@@ -365,7 +365,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// Q3: this sync started from a snapshot of pl taken possibly minutes
 	// ago — if the watchlist was removed in the meantime (RemoveWatchlist
 	// is locked too, see above), saving it back here would resurrect it.
-	if _, err := w.getWatchlistByID(pl.ID); err != nil {
+	if _, err := w.GetWatchlistByID(pl.ID); err != nil {
 		w.mu.Unlock()
 		return
 	}
@@ -382,7 +382,7 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// Régénérer le M3U8 systématiquement à chaque sync. La fonction est
 	// idempotente (rename atomique) : si OnBatchComplete tourne ensuite à
 	// la fin du batch, le dernier write gagne et le M3U8 reste cohérent.
-	_, _ = w.generateM3U8ForPlaylist(pl.ID, false)
+	_, _ = w.GenerateM3U8ForPlaylist(pl.ID, false)
 
 	// Notifier le frontend que la sync est terminée
 	w.jm.Publish(jobs.JobEvent{
@@ -516,7 +516,7 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		name = req.SpotifyURL
 	}
 
-	tracks := extractTracksFromMetadata(data)
+	tracks := ExtractTracksFromMetadata(data)
 	trackIDs := make([]string, 0, len(tracks))
 	for _, t := range tracks {
 		if t.SpotifyID != "" {
@@ -665,7 +665,7 @@ func (w *Watcher) GetWatchlists() ([]WatchedPlaylist, error) {
 	return playlists, err
 }
 
-func (w *Watcher) getWatchlistByID(id string) (*WatchedPlaylist, error) {
+func (w *Watcher) GetWatchlistByID(id string) (*WatchedPlaylist, error) {
 	playlists, err := w.GetWatchlists()
 	if err != nil {
 		return nil, err
@@ -714,7 +714,7 @@ func (w *Watcher) saveWatchlist(pl *WatchedPlaylist) error {
 //  2. Retry des jobs failed avec les settings actuels de la watchlist
 //     (corrige les jobs créés avec d'anciens settings obsolètes)
 func (w *Watcher) SyncWatchlist(id string) error {
-	pl, err := w.getWatchlistByID(id)
+	pl, err := w.GetWatchlistByID(id)
 	if err != nil {
 		return err
 	}
@@ -839,7 +839,7 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 	w.mu.Unlock()
 
 	if matchedID != "" {
-		_, _ = w.generateM3U8ForPlaylist(matchedID, false)
+		_, _ = w.GenerateM3U8ForPlaylist(matchedID, false)
 	}
 }
 
@@ -907,7 +907,7 @@ func removeEmptyParents(dir, stopAt string) {
 	}
 }
 
-func extractTracksFromMetadata(data interface{}) []jobs.JobTrack {
+func ExtractTracksFromMetadata(data interface{}) []jobs.JobTrack {
 	raw := toRawBytes(data)
 	if raw == nil {
 		return nil
@@ -1210,7 +1210,7 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 	jm := w.jm
 	stats := WatchlistStats{WatchlistID: watchlistID}
 
-	pl, err := w.getWatchlistByID(watchlistID)
+	pl, err := w.GetWatchlistByID(watchlistID)
 	if err != nil {
 		return stats, err
 	}
@@ -1311,7 +1311,7 @@ type WatchlistFreshnessReport struct {
 // file deleted outside SpotiFLAC is correctly reported as missing rather
 // than trusted at face value.
 func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, error) {
-	pl, err := w.getWatchlistByID(id)
+	pl, err := w.GetWatchlistByID(id)
 	if err != nil {
 		return WatchlistFreshnessReport{}, err
 	}
@@ -1322,7 +1322,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 	if err != nil {
 		return WatchlistFreshnessReport{}, fmt.Errorf("fetch spotify metadata: %w", err)
 	}
-	spotifyTracks := extractTracksFromMetadata(data)
+	spotifyTracks := ExtractTracksFromMetadata(data)
 	spotifyTrackIDs := make([]string, 0, len(spotifyTracks))
 	for _, t := range spotifyTracks {
 		spotifyTrackIDs = append(spotifyTrackIDs, t.SpotifyID)
@@ -1527,7 +1527,7 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // M3U8 generation pour Jellyfin
 // ─────────────────────────────────────────────────────────────────────────────
 
-// generateM3U8ForPlaylist writes the M3U8 file for a watchlist by resolving
+// GenerateM3U8ForPlaylist writes the M3U8 file for a watchlist by resolving
 // each Spotify ID in pl.TrackIDs against the filesystem, via the SPOTIFY_ID
 // tag embedded in audio files at download time. BoltDB jobs are used only
 // as a fallback for legacy files that don't yet carry the tag.
@@ -1544,8 +1544,8 @@ func (w *Watcher) recoverMissingFiles(pl *WatchedPlaylist) {
 // silently destroy a better existing file, an explicit repair should show
 // the true current state even if that state got worse (e.g. a file was
 // deleted outside SpotiFLAC).
-func (w *Watcher) generateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.GenerationResult, error) {
-	pl, err := w.getWatchlistByID(watchlistID)
+func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.GenerationResult, error) {
+	pl, err := w.GetWatchlistByID(watchlistID)
 	if err != nil || pl == nil {
 		return m3u8.GenerationResult{}, fmt.Errorf("watchlist not found: %s", watchlistID)
 	}

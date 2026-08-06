@@ -18,6 +18,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/applog"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -104,11 +105,11 @@ func main() {
 	}
 
 	// ── Watcher (playlist sync) ───────────────────────────────────────────
-	watcher := NewWatcher(db, catalog, jobMgr, auth)
-	defer watcher.Close()
+	wtch := watcher.NewWatcher(db, catalog, jobMgr, auth)
+	defer wtch.Close()
 
 	// Connecter le Watcher comme handler d'événements du JobManager
-	jobMgr.SetEventHandler(watcher)
+	jobMgr.SetEventHandler(wtch)
 
 	// ── Container (DI) ───────────────────────────────────────────────────
 	ctr := &Container{
@@ -116,7 +117,7 @@ func main() {
 		Catalog:  catalog,
 		Jobs:     jobMgr,
 		Auth:     auth,
-		Watcher:  watcher,
+		Watcher:  wtch,
 		SSE:      sseHub,
 		System:   &SystemService{},
 		Media:    &MediaService{},

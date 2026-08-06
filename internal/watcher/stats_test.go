@@ -1,93 +1,13 @@
-package main
+package watcher
 
 import (
 	"context"
-	"database/sql"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
-	bolt "go.etcd.io/bbolt"
 )
-
-// newTestJobManager creates a JobManager backed by a temp BoltDB and,
-// when withCatalog is true, a temp SQLite catalog. Mirrors
-// newTestAuthManager (api_keys_test.go)'s pattern.
-// The handles the most recent newTestJobManagerSink built. Package-level, so
-// these tests must not run in parallel — none call t.Parallel, and the
-// alternative (threading two more return values through three helpers) buys
-// nothing here. A Watcher now holds
-// its own db/catalog rather than borrowing the job manager's, so a test that
-// wants one has to be given the same two — see newTestWatcher.
-var (
-	lastTestBolt    *bolt.DB
-	lastTestCatalog *sql.DB
-)
-
-// newTestWatcher builds a Watcher wired the way main.go wires it. Tests used to
-// write `&Watcher{jm: jm}` and reach the catalog through the manager; that field
-// is the manager's own now.
-func newTestWatcher(t *testing.T, withCatalog bool) (*Watcher, *jobs.JobManager) {
-	t.Helper()
-	jm := newTestJobManager(t, withCatalog)
-	return &Watcher{db: lastTestBolt, catalog: lastTestCatalog, jm: jm}, jm
-}
-
-func newTestJobManager(t *testing.T, withCatalog bool) *jobs.JobManager {
-	t.Helper()
-	return newTestJobManagerSink(t, withCatalog, nil)
-}
-
-// newTestJobManagerSink builds the manager with an explicit sink. nil is a
-// supported value: a test that never inspects events does not need a transport.
-func newTestJobManagerSink(t *testing.T, withCatalog bool, hub jobs.EventSink) *jobs.JobManager {
-	t.Helper()
-	f, err := os.CreateTemp("", "spotiflac-test-*.db")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	f.Close()
-	t.Cleanup(func() { os.Remove(f.Name()) })
-
-	boltDB, err := bolt.Open(f.Name(), 0600, nil)
-	if err != nil {
-		t.Fatalf("bolt.Open: %v", err)
-	}
-	t.Cleanup(func() { boltDB.Close() })
-
-	var catalog *sql.DB
-	if withCatalog {
-		catalogHandle, err := db.Open(t.TempDir())
-		if err != nil {
-			t.Fatalf("db.Open: %v", err)
-		}
-		t.Cleanup(func() { catalogHandle.Close() })
-		catalog = catalogHandle
-	}
-
-	lastTestBolt, lastTestCatalog = boltDB, catalog
-
-	jm, err := jobs.NewJobManager(t.TempDir(), boltDB, catalog, hub)
-	if err != nil {
-		t.Fatalf("jobs.NewJobManager: %v", err)
-	}
-	t.Cleanup(jm.Close)
-	return jm
-}
-
-// newTestJobManagerWithHub is newTestJobManager for the tests that assert on
-// emitted events. The hub is returned rather than reachable through the manager
-// because the manager no longer owns it: it holds an EventSink, which has no
-// subscribe. Handing back the concrete hub is the whole point of the split —
-// a test that wants to observe events says so, instead of reaching into a
-// field.
-func newTestJobManagerWithHub(t *testing.T, withCatalog bool) (*jobs.JobManager, *SSEHub) {
-	t.Helper()
-	hub := newSSEHub()
-	return newTestJobManagerSink(t, withCatalog, hub), hub
-}
 
 // TestGetWatchlistStatsUsesCatalogForSizeAndStatus is the end-to-end
 // regression test for the "15 MB for a 2500-track playlist" bug:
@@ -115,10 +35,10 @@ func TestGetWatchlistStatsUsesCatalogForSizeAndStatus(t *testing.T) {
 	}
 
 	// Seed the catalog: a track whose BoltDB job is long gone, 40 MB file.
-	if err := db.UpsertTrack(context.Background(), lastTestCatalog, &db.Track{SpotifyID: "catalog-only", Name: "Catalog Only"}); err != nil {
+	if err := db.UpsertTrack(context.Background(), w.catalog, &db.Track{SpotifyID: "catalog-only", Name: "Catalog Only"}); err != nil {
 		t.Fatalf("UpsertTrack: %v", err)
 	}
-	if err := db.CreateLibraryFile(context.Background(), lastTestCatalog, &db.LibraryFile{
+	if err := db.CreateLibraryFile(context.Background(), w.catalog, &db.LibraryFile{
 		SpotifyID: "catalog-only",
 		Provider:  "tidal",
 		Quality:   db.QualityLossless,
@@ -237,9 +157,9 @@ func TestOnBatchCompleteSurvivesSyncLogEviction(t *testing.T) {
 
 	w.OnBatchComplete(pl.ID, "the-evicted-batch", 5, 2, 1)
 
-	got, err := w.getWatchlistByID(pl.ID)
+	got, err := w.GetWatchlistByID(pl.ID)
 	if err != nil {
-		t.Fatalf("getWatchlistByID: %v", err)
+		t.Fatalf("GetWatchlistByID: %v", err)
 	}
 	if len(got.SyncLogs) != 20 {
 		t.Fatalf("SyncLogs length = %d, want 20 (cap preserved)", len(got.SyncLogs))

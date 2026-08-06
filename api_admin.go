@@ -25,6 +25,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 )
 
 // retagLegacyResult is the JSON payload returned by POST /api/v1/admin/retag-legacy.
@@ -256,7 +257,7 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pl, err := s.ctr.Watcher.getWatchlistByID(id)
+	pl, err := s.ctr.Watcher.GetWatchlistByID(id)
 	if err != nil || pl == nil {
 		writeV1Error(w, http.StatusNotFound, "watchlist not found")
 		return
@@ -269,7 +270,7 @@ func (s *Server) v1RepairWatchlist(w http.ResponseWriter, r *http.Request) {
 
 // runWatchlistRepair performs the actual repair steps in the background —
 // see v1RepairWatchlist for why this can't run inline in the request.
-func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
+func (s *Server) runWatchlistRepair(pl watcher.WatchedPlaylist) {
 	slog.Info("[Repair] starting", "playlist", pl.Name)
 	result := watchlistRepairResult{}
 
@@ -318,7 +319,7 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 
 	// 3. Force-regenerate the M3U8 with whatever the catalog/retag work
 	// above just improved.
-	m3uResult, m3uErr := s.ctr.Watcher.generateM3U8ForPlaylist(pl.ID, true)
+	m3uResult, m3uErr := s.ctr.Watcher.GenerateM3U8ForPlaylist(pl.ID, true)
 	result.M3U8 = m3uResult
 	if m3uErr != nil {
 		result.M3U8Error = m3uErr.Error()
@@ -831,7 +832,7 @@ func (s *Server) retagOneTrack(ctx context.Context, t db.TrackForRetag) (bool, g
 	if err != nil {
 		return false, diag, fmt.Errorf("fetch spotify metadata: %w", err)
 	}
-	spotifyTracks := extractTracksFromMetadata(data)
+	spotifyTracks := watcher.ExtractTracksFromMetadata(data)
 	if len(spotifyTracks) == 0 {
 		return false, diag, fmt.Errorf("spotify returned no metadata for this track (removed or region-locked?)")
 	}
