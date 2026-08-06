@@ -39,6 +39,12 @@ jobs:
   check:
     name: Is a rebuild needed?
     runs-on: ubuntu-latest
+    # Three small HTTP calls; a successful run finishes in well under a minute.
+    # The bound is deliberate rather than incidental: this job reaches out to
+    # PyPI and to the registry, and neither had a deadline of any kind until the
+    # timeouts below were added. Five minutes is roughly ten times the observed
+    # runtime, so it can only fire on a genuine stall.
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.upstream.outputs.version }}
       stale: ${{ steps.compare.outputs.stale }}
@@ -47,7 +53,7 @@ jobs:
         id: upstream
         run: |
           set -euo pipefail
-          v=$(curl -fsSL https://pypi.org/pypi/SpotiFLAC/json | jq -er .info.version)
+          v=$(curl -fsSL --connect-timeout 10 --max-time 30 https://pypi.org/pypi/SpotiFLAC/json | jq -er .info.version)
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "PyPI: $v"
 
@@ -68,15 +74,15 @@ jobs:
           IMG="${IMAGE_NAME}"
           ACCEPT='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
           v=none
-          if TOKEN=$(curl -fsS "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMG}:pull" | jq -er .token); then
-            if M=$(curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" "https://ghcr.io/v2/${IMG}/manifests/latest"); then
+          if TOKEN=$(curl -fsS --connect-timeout 10 --max-time 30 "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMG}:pull" | jq -er .token); then
+            if M=$(curl -fsSL --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" "https://ghcr.io/v2/${IMG}/manifests/latest"); then
               D=$(echo "$M" | jq -r 'if .manifests then (.manifests[]|select(.platform.architecture=="amd64")|.digest) else empty end' | head -1)
               if [ -n "$D" ]; then
-                M=$(curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" "https://ghcr.io/v2/${IMG}/manifests/${D}") || M=""
+                M=$(curl -fsSL --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" "https://ghcr.io/v2/${IMG}/manifests/${D}") || M=""
               fi
               C=$(echo "$M" | jq -r '.config.digest // empty')
               if [ -n "$C" ]; then
-                v=$(curl -fsSL -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/${IMG}/blobs/${C}" | jq -r '.config.Labels["org.opencontainers.image.version"] // "none"') || v=none
+                v=$(curl -fsSL --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/${IMG}/blobs/${C}" | jq -r '.config.Labels["org.opencontainers.image.version"] // "none"') || v=none
               fi
             fi
           fi
