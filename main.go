@@ -15,6 +15,7 @@ import (
 	catalogdb "github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/isrclookup"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/applog"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	bolt "go.etcd.io/bbolt"
 )
@@ -24,17 +25,17 @@ const port = "6890"
 func main() {
 	// Capture stdout as early as possible so startup logs land in the
 	// in-memory buffer the Debug Logs page reads from too.
-	captureStdout()
-	initLogger()
+	applog.CaptureStdout()
+	applog.InitLogger()
 
 	// ── Config dir ────────────────────────────────────────────────────────
 	configDir, err := util.AppDir()
 	if err != nil {
-		fprintReal("FATAL: cannot determine config dir: %v\n", err)
+		applog.FprintReal("FATAL: cannot determine config dir: %v\n", err)
 		os.Exit(1)
 	}
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		fprintReal("FATAL: cannot create config dir: %v\n", err)
+		applog.FprintReal("FATAL: cannot create config dir: %v\n", err)
 		printPermissionHintIfNeeded(err, configDir)
 		os.Exit(1)
 	}
@@ -44,7 +45,7 @@ func main() {
 	dbPath := filepath.Join(configDir, jobs.DBFile)
 	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
-		fprintReal("FATAL: cannot open database: %v\n", err)
+		applog.FprintReal("FATAL: cannot open database: %v\n", err)
 		printPermissionHintIfNeeded(err, configDir)
 		os.Exit(1)
 	}
@@ -88,16 +89,16 @@ func main() {
 	// ── Job manager (workers + cleanup) ───────────────────────────────────
 	jobMgr, err := jobs.NewJobManager(configDir, db, catalog, sseHub)
 	if err != nil {
-		fprintReal("FATAL: cannot init job manager: %v\n", err)
+		applog.FprintReal("FATAL: cannot init job manager: %v\n", err)
 		os.Exit(1)
 	}
 	defer jobMgr.Close()
-	serverLogs.attachHub(sseHub)
+	applog.ServerLogs.AttachSink(sseHub)
 
 	// ── Auth (Jellyfin + JWT) ─────────────────────────────────────────────
 	auth, err := NewAuthManager(db)
 	if err != nil {
-		fprintReal("FATAL: cannot init auth: %v\n", err)
+		applog.FprintReal("FATAL: cannot init auth: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -198,7 +199,7 @@ func printPermissionHintIfNeeded(err error, configDir string) {
 	if !os.IsPermission(err) {
 		return
 	}
-	fprintReal("HINT: this container runs as a non-root user (uid 1000, see 'user: \"1000:1000\"' in docker-compose.yaml).\n")
-	fprintReal("      The host directory mounted at %s must be owned by that same uid. On the host, run:\n", configDir)
-	fprintReal("      sudo chown -R 1000:1000 /path/to/your/host/config/directory\n")
+	applog.FprintReal("HINT: this container runs as a non-root user (uid 1000, see 'user: \"1000:1000\"' in docker-compose.yaml).\n")
+	applog.FprintReal("      The host directory mounted at %s must be owned by that same uid. On the host, run:\n", configDir)
+	applog.FprintReal("      sudo chown -R 1000:1000 /path/to/your/host/config/directory\n")
 }

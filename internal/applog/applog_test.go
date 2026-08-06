@@ -1,4 +1,4 @@
-package main
+package applog
 
 import (
 	"bytes"
@@ -54,18 +54,18 @@ func TestSlogRingBufferHandlerEnabledRespectsMinLevel(t *testing.T) {
 
 // TestSlogRingBufferHandlerAddsRealLevelToServerLogs is the core regression
 // test for the whole point of this handler: a migrated log call must land
-// in serverLogs with its ACTUAL level, not a guess from classifyLogLevel —
+// in ServerLogs with its ACTUAL level, not a guess from classifyLogLevel —
 // verified here by using a message that classifyLogLevel would misclassify
 // (contains neither "error"/"warn"/"fatal" nor any of its other trigger
 // words) but is logged at Warn.
 func TestSlogRingBufferHandlerAddsRealLevelToServerLogs(t *testing.T) {
-	origServerLogs := serverLogs
+	origServerLogs := ServerLogs
 	origRealStdout := realStdout
 	defer func() {
-		serverLogs = origServerLogs
+		ServerLogs = origServerLogs
 		realStdout = origRealStdout
 	}()
-	serverLogs = &logRingBuffer{}
+	ServerLogs = &logRingBuffer{}
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -79,7 +79,7 @@ func TestSlogRingBufferHandlerAddsRealLevelToServerLogs(t *testing.T) {
 	logger := slog.New(h)
 	logger.Warn("catalog database unavailable, continuing without it", "reason", "disk full")
 
-	snap := serverLogs.snapshot()
+	snap := ServerLogs.Snapshot()
 	if len(snap) != 1 {
 		t.Fatalf("len(snap) = %d, want 1", len(snap))
 	}
@@ -93,19 +93,19 @@ func TestSlogRingBufferHandlerAddsRealLevelToServerLogs(t *testing.T) {
 }
 
 // TestSlogRingBufferHandlerWritesToRealStdoutNotThePipe confirms the
-// handler bypasses captureStdout's pipe entirely (writes straight to
+// handler bypasses CaptureStdout's pipe entirely (writes straight to
 // realStdout) — the doc comment's claim that a migrated line can never be
 // double-classified by processLogChunkSafely depends on this.
 func TestSlogRingBufferHandlerWritesToRealStdoutNotThePipe(t *testing.T) {
-	origServerLogs := serverLogs
+	origServerLogs := ServerLogs
 	origStdout := os.Stdout
 	origRealStdout := realStdout
 	defer func() {
-		serverLogs = origServerLogs
+		ServerLogs = origServerLogs
 		os.Stdout = origStdout
 		realStdout = origRealStdout
 	}()
-	serverLogs = &logRingBuffer{}
+	ServerLogs = &logRingBuffer{}
 
 	// os.Stdout points at a pipe nothing reads from — if the handler wrote
 	// there instead of realStdout, this test would hang once the pipe's
@@ -158,7 +158,7 @@ func TestInitLoggerReadsLogLevelEnv(t *testing.T) {
 	}()
 
 	os.Setenv("LOG_LEVEL", "error")
-	initLogger()
+	InitLogger()
 	h, ok := slog.Default().Handler().(*slogRingBufferHandler)
 	if !ok {
 		t.Fatalf("slog.Default().Handler() = %T, want *slogRingBufferHandler", slog.Default().Handler())
@@ -168,7 +168,7 @@ func TestInitLoggerReadsLogLevelEnv(t *testing.T) {
 	}
 
 	os.Unsetenv("LOG_LEVEL")
-	initLogger()
+	InitLogger()
 	h, _ = slog.Default().Handler().(*slogRingBufferHandler)
 	if h.level != slog.LevelInfo {
 		t.Errorf("level = %v, want %v (default) when LOG_LEVEL is unset", h.level, slog.LevelInfo)

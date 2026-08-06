@@ -20,6 +20,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/providerutil"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/applog"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 )
@@ -94,7 +95,7 @@ func (s *Server) v1GetServerLogs(w http.ResponseWriter, r *http.Request) {
 	if !v1RequireAdmin(w, r) {
 		return
 	}
-	writeV1JSON(w, http.StatusOK, serverLogs.snapshot())
+	writeV1JSON(w, http.StatusOK, applog.ServerLogs.Snapshot())
 }
 
 // v1RetagLegacy walks every Done/Skipped job in BoltDB whose FilePath still

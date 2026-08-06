@@ -1,19 +1,19 @@
-package main
+package applog
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Structured logging — Phase 1 of the fmt.Print* -> real levels migration
 // (see logbuffer.go for the pre-existing capture mechanism this builds on).
 //
 // slogRingBufferHandler is a slog.Handler that writes formatted lines
-// directly to the real stdout (bypassing captureStdout's pipe — the same
-// bypass fprintReal uses) and adds a LogEntry straight to serverLogs with
+// directly to the real stdout (bypassing CaptureStdout's pipe — the same
+// bypass FprintReal uses) and adds a LogEntry straight to ServerLogs with
 // the record's REAL level, instead of going through the pipe +
 // classifyLogLevel guessing path every remaining fmt.Print* call site still
 // uses. Migrated (slog.Info/Warn/Error/Debug) and unmigrated (fmt.Print*)
 // call sites coexist indefinitely — writing to realStdout instead of the
 // piped os.Stdout means this path never re-enters processLogChunkSafely, so
 // there's no risk of a migrated line being classified (and added to
-// serverLogs) twice.
+// ServerLogs) twice.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
@@ -49,7 +49,7 @@ func (h *slogRingBufferHandler) Handle(_ context.Context, r slog.Record) error {
 	}
 	fmt.Fprintln(target, line)
 
-	serverLogs.add(LogEntry{Time: r.Time, Level: levelString(r.Level), Message: line})
+	ServerLogs.add(LogEntry{Time: r.Time, Level: levelString(r.Level), Message: line})
 	return nil
 }
 
@@ -85,12 +85,12 @@ func levelString(l slog.Level) string {
 	}
 }
 
-// initLogger sets the process-wide default slog logger, reading the minimum
+// InitLogger sets the process-wide default slog logger, reading the minimum
 // level from LOG_LEVEL (debug|info|warn|error, case-insensitive; defaults
 // to info). Debug is opt-in — meant for active troubleshooting, too
-// verbose for everyday operation. Must run after captureStdout so
+// verbose for everyday operation. Must run after CaptureStdout so
 // realStdout is already set.
-func initLogger() {
+func InitLogger() {
 	level := slog.LevelInfo
 	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
 	case "debug":

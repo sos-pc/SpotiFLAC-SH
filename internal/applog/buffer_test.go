@@ -1,6 +1,7 @@
-package main
+package applog
 
 import (
+	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"os"
 	"testing"
 	"time"
@@ -27,18 +28,29 @@ func TestLogRingBufferTrimsToCapacity(t *testing.T) {
 	for i := 0; i < serverLogBufferSize+50; i++ {
 		b.add(LogEntry{Time: time.Now(), Level: "info", Message: "line"})
 	}
-	got := b.snapshot()
+	got := b.Snapshot()
 	if len(got) != serverLogBufferSize {
-		t.Fatalf("snapshot length = %d, want %d (buffer must trim oldest entries, not grow unbounded)", len(got), serverLogBufferSize)
+		t.Fatalf("Snapshot length = %d, want %d (buffer must trim oldest entries, not grow unbounded)", len(got), serverLogBufferSize)
+	}
+}
+
+// The sink is a fake rather than the real SSE hub: the buffer takes a
+// jobs.EventSink now, and the hub lives in the package that owns HTTP — which
+// this one deliberately no longer knows about.
+type fakeSink struct{ events chan jobs.JobEvent }
+
+func (f *fakeSink) Publish(ev jobs.JobEvent) {
+	select {
+	case f.events <- ev:
+	default:
 	}
 }
 
 func TestLogRingBufferPublishesToHub(t *testing.T) {
 	b := &logRingBuffer{}
-	hub := newSSEHub()
-	ch := hub.subscribe()
-	defer hub.unsubscribe(ch)
-	b.attachHub(hub)
+	sink := &fakeSink{events: make(chan jobs.JobEvent, 8)}
+	ch := sink.events
+	b.AttachSink(sink)
 
 	b.add(LogEntry{Time: time.Now(), Level: "error", Message: "boom"})
 
@@ -57,20 +69,20 @@ func TestLogRingBufferPublishesToHub(t *testing.T) {
 }
 
 // TestCaptureStdoutTeesAndParsesLines is an end-to-end check of the whole
-// os.Pipe interception: writes to os.Stdout after captureStdout() must
+// os.Pipe interception: writes to os.Stdout after CaptureStdout() must
 // still land on the original fd (docker logs / terminal unaffected) AND
-// show up as complete lines in serverLogs. In-place \r progress updates
+// show up as complete lines in ServerLogs. In-place \r progress updates
 // with no trailing \n must not appear until they're followed by one.
 func TestCaptureStdoutTeesAndParsesLines(t *testing.T) {
 	origStdout := os.Stdout
-	origServerLogs := serverLogs
+	origServerLogs := ServerLogs
 	defer func() {
 		os.Stdout = origStdout
-		serverLogs = origServerLogs
+		ServerLogs = origServerLogs
 	}()
-	serverLogs = &logRingBuffer{}
+	ServerLogs = &logRingBuffer{}
 
-	// captureStdout tees whatever os.Stdout points to when it's called, so
+	// CaptureStdout tees whatever os.Stdout points to when it's called, so
 	// point it at our own pipe first — this both proves the passthrough
 	// side works and keeps the test's output off the real terminal.
 	capturedR, capturedW, err := os.Pipe()
@@ -79,7 +91,7 @@ func TestCaptureStdoutTeesAndParsesLines(t *testing.T) {
 	}
 	defer capturedR.Close()
 	os.Stdout = capturedW
-	captureStdout()
+	CaptureStdout()
 
 	os.Stdout.WriteString("\rDownloading: 1 MB (1/3)")
 	os.Stdout.WriteString("\rDownloading: 2 MB (2/3)")
@@ -88,7 +100,7 @@ func TestCaptureStdoutTeesAndParsesLines(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := serverLogs.snapshot()
+		snap := ServerLogs.Snapshot()
 		if len(snap) >= 2 {
 			if snap[0].Message == "" {
 				t.Fatalf("captured an empty/whitespace-only line: %#v", snap[0])

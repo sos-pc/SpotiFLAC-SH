@@ -1,11 +1,11 @@
-package main
+package applog
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backend log capture — makes fmt.Print* output visible from the web UI
 //
 // Every fmt.Print* call in the backend (60+ scattered call sites) already
 // writes to os.Stdout, which `docker logs` captures but the frontend never
-// sees. Rather than threading a logger through every call site, captureStdout
+// sees. Rather than threading a logger through every call site, CaptureStdout
 // intercepts the process's os.Stdout itself via an os.Pipe: the real fd keeps
 // receiving every byte unchanged (docker logs / terminal output is
 // untouched), and complete \n-terminated lines are also parsed into an
@@ -25,7 +25,7 @@ import (
 )
 
 // LogEntry is one backend log line, exposed via GET /api/v1/admin/logs
-// (snapshot) and the server_log SSE event (live tail).
+// (Snapshot) and the server_log SSE event (live tail).
 type LogEntry struct {
 	Time    time.Time `json:"time"`
 	Level   string    `json:"level"` // info | warning | error
@@ -39,21 +39,25 @@ const serverLogBufferSize = 1000
 type logRingBuffer struct {
 	mu      sync.RWMutex
 	entries []LogEntry
-	hub     *SSEHub
+	sink    jobs.EventSink
 }
 
-// serverLogs is populated as soon as captureStdout runs (before the SSE hub
-// exists), so early startup lines are still in the snapshot even though they
-// couldn't be broadcast live. attachHub wires up live broadcasting once the
+// ServerLogs is populated as soon as CaptureStdout runs (before the SSE hub
+// exists), so early startup lines are still in the Snapshot even though they
+// couldn't be broadcast live. AttachSink wires up live broadcasting once the
 // JobManager (and its hub) is constructed.
-var serverLogs = &logRingBuffer{}
+//
+// Typed as jobs.EventSink rather than *SSEHub: this file only ever publishes,
+// and naming the concrete transport is what would tie the log buffer to the
+// package that owns HTTP. *SSEHub satisfies it.
+var ServerLogs = &logRingBuffer{}
 
-// realStdout is the process's original stdout fd, saved by captureStdout
+// realStdout is the process's original stdout fd, saved by CaptureStdout
 // before os.Stdout gets swapped for the pipe write end. Set once at startup,
 // read-only afterwards — no synchronization needed.
 var realStdout *os.File
 
-// fprintReal writes directly to the real stdout, bypassing captureStdout's
+// FprintReal writes directly to the real stdout, bypassing CaptureStdout's
 // pipe and its async tee goroutine. Use this (instead of fmt.Printf) for any
 // message that must survive an os.Exit called right after it: the tee
 // goroutine drains the pipe on its own schedule, and nothing guarantees it
@@ -62,7 +66,7 @@ var realStdout *os.File
 // goroutine that hasn't finished simply vanishes. This is not theoretical:
 // reproduced locally, a FATAL line printed via plain fmt.Printf immediately
 // before os.Exit(1) was silently dropped in 5/5 runs.
-func fprintReal(format string, args ...interface{}) {
+func FprintReal(format string, args ...interface{}) {
 	target := os.Stdout
 	if realStdout != nil {
 		target = realStdout
@@ -70,9 +74,9 @@ func fprintReal(format string, args ...interface{}) {
 	fmt.Fprintf(target, format, args...)
 }
 
-func (b *logRingBuffer) attachHub(hub *SSEHub) {
+func (b *logRingBuffer) AttachSink(sink jobs.EventSink) {
 	b.mu.Lock()
-	b.hub = hub
+	b.sink = sink
 	b.mu.Unlock()
 }
 
@@ -82,15 +86,15 @@ func (b *logRingBuffer) add(e LogEntry) {
 	if len(b.entries) > serverLogBufferSize {
 		b.entries = b.entries[len(b.entries)-serverLogBufferSize:]
 	}
-	hub := b.hub
+	sink := b.sink
 	b.mu.Unlock()
 
-	if hub != nil {
-		hub.Publish(jobs.JobEvent{Type: "server_log", Data: e})
+	if sink != nil {
+		sink.Publish(jobs.JobEvent{Type: "server_log", Data: e})
 	}
 }
 
-func (b *logRingBuffer) snapshot() []LogEntry {
+func (b *logRingBuffer) Snapshot() []LogEntry {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	out := make([]LogEntry, len(b.entries))
@@ -129,8 +133,8 @@ func containsNonZeroFailure(lower string) bool {
 	return !strings.HasPrefix(rest, "=0") && !strings.HasPrefix(rest, ": 0") && !strings.HasPrefix(rest, ":0")
 }
 
-// captureStdout tees the process's stdout so complete log lines are also
-// captured into serverLogs, without disturbing anything currently writing to
+// CaptureStdout tees the process's stdout so complete log lines are also
+// captured into ServerLogs, without disturbing anything currently writing to
 // os.Stdout — including in-place \r progress updates (Downloaded: X MB),
 // which are passed through byte-for-byte unchanged and simply never form a
 // \n-terminated token, so they never flood the ring buffer/SSE feed; only the
@@ -138,7 +142,7 @@ func containsNonZeroFailure(lower string) bool {
 //
 // Must be called once, as early as possible in main(), before any other
 // goroutine starts writing to stdout.
-func captureStdout() {
+func CaptureStdout() {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return
@@ -181,7 +185,7 @@ func captureStdout() {
 // processLogChunkSafely runs the per-chunk line-parsing body with panic
 // protection scoped to just this chunk, not the whole read loop — a panic
 // here must not stop the loop from continuing to drain the pipe (see the
-// defer in captureStdout for why that matters). Reports through orig
+// defer in CaptureStdout for why that matters). Reports through orig
 // (bypassing the pipe os.Stdout now points at) so the panic message can
 // never itself contribute to the very pipe-buffer-pressure scenario the
 // surrounding defer exists to avoid.
@@ -201,7 +205,7 @@ func processLogChunkSafely(orig *os.File, chunk []byte, pending *[]byte) {
 		line := strings.TrimRight(string((*pending)[:idx]), "\r")
 		*pending = (*pending)[idx+1:]
 		if strings.TrimSpace(line) != "" {
-			serverLogs.add(LogEntry{Time: time.Now(), Level: classifyLogLevel(line), Message: line})
+			ServerLogs.add(LogEntry{Time: time.Now(), Level: classifyLogLevel(line), Message: line})
 		}
 	}
 	// Safety net against a pathological unterminated stream (e.g. a stuck
