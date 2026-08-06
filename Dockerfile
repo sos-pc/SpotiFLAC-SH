@@ -78,7 +78,7 @@ RUN go mod tidy && \
 # no GPL-only codec (x264/x265/...) is used anywhere, so the GPL variant's
 # larger footprint buys nothing here.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df AS ffmpeg-static
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS ffmpeg-static
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
