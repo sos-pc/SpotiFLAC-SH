@@ -52,7 +52,7 @@ func TestCatalogFileSizesForWatchlistOnlyCountsPresentFiles(t *testing.T) {
 		}
 	}
 
-	w := &Watcher{jm: &JobManager{catalog: catalog}}
+	w := &Watcher{catalog: catalog}
 	pl := &WatchedPlaylist{
 		ID:   "watch-1",
 		Name: "Test Playlist",
@@ -85,7 +85,7 @@ func TestCatalogFileSizesForWatchlistOnlyCountsPresentFiles(t *testing.T) {
 }
 
 func TestCatalogFileSizesForWatchlistNilCatalog(t *testing.T) {
-	w := &Watcher{jm: &JobManager{}}
+	w := &Watcher{}
 	pl := &WatchedPlaylist{ID: "watch-1", TrackIDs: []string{"a", "b"}}
 	got := w.catalogFileSizesForWatchlist(pl)
 	if len(got) != 0 {

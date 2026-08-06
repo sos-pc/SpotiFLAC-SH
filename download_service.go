@@ -117,13 +117,17 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		Settings: serverJobSettings(serverSettings, req.Service),
 	}
 
-	// Ajout à la base de données et à la queue via les méthodes thread-safe de JobManager
-	jm.saveJob(job)
-
-	select {
-	case jm.queue <- job.ID:
+	// Persist and enqueue in one call — see JobManager.Submit for why this is
+	// not two.
+	queued, err := jm.Submit(job)
+	if err != nil {
+		// saveJob's failure used to be discarded here — the caller got
+		// "Added to download queue" for a job that was never persisted.
+		return DownloadResponse{}, fmt.Errorf("could not save job: %w", err)
+	}
+	if queued {
 		slog.Info("[Download] Job added to queue", "job_id", job.ID)
-	default:
+	} else {
 		slog.Warn("[Download] Queue full, job will be picked up later", "job_id", job.ID)
 	}
 

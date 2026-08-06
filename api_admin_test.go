@@ -242,7 +242,7 @@ func TestScanRootForRebuildImportsMultipleFiles(t *testing.T) {
 // announced over SSE instead of in the (now long-gone) HTTP response.
 func TestLibraryRebuildAsyncPublishesSSEEvent(t *testing.T) {
 	jm, hub := newTestJobManagerWithHub(t, true)
-	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm, SSE: hub}}
+	s := &Server{ctr: &Container{Catalog: lastTestCatalog, Jobs: jm, SSE: hub}}
 
 	root := t.TempDir()
 	writeTestFlacWithSpotifyID(t, filepath.Join(root, "track.flac"), "spotify:track:a")
@@ -276,7 +276,7 @@ func TestLibraryRebuildAsyncPublishesSSEEvent(t *testing.T) {
 // completion over SSE instead of returning it in the HTTP response).
 func TestRetagIncompleteMetadataAsyncPublishesSSEEvent(t *testing.T) {
 	jm, hub := newTestJobManagerWithHub(t, true)
-	s := &Server{ctr: &Container{Catalog: jm.catalog, Jobs: jm, SSE: hub}}
+	s := &Server{ctr: &Container{Catalog: lastTestCatalog, Jobs: jm, SSE: hub}}
 
 	sub := hub.subscribe()
 	defer hub.unsubscribe(sub)

@@ -33,10 +33,7 @@ const (
 	dbFile     = "jobs.db" // path relative to configDir
 )
 
-var (
-	bucketJobs      = []byte("jobs")
-	bucketWatchlist = []byte("watchlist")
-)
+var bucketJobs = []byte("jobs")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -319,6 +316,28 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSin
 func (jm *JobManager) Publish(ev JobEvent) {
 	if jm.sink != nil {
 		jm.sink.Publish(ev)
+	}
+}
+
+// Submit persists a job and offers it to the worker queue, reporting whether
+// the queue accepted it. A full queue is not an error: the job is saved, and
+// recoverPendingJobs picks it up on the next start — the caller only needs to
+// know which of the two happened so it can say so in the log.
+//
+// This exists because download_service.go did it by hand: jm.saveJob(job)
+// followed by a select on jm.queue, under a comment claiming it used
+// "les méthodes thread-safe de JobManager". Writing to another type's channel
+// is the opposite of that, and it is the one thing that would have forced the
+// queue field to be exported when this package is split out.
+func (jm *JobManager) Submit(job *Job) (queued bool, err error) {
+	if err := jm.saveJob(job); err != nil {
+		return false, err
+	}
+	select {
+	case jm.queue <- job.ID:
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 

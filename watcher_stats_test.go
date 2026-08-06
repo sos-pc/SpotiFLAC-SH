@@ -14,6 +14,26 @@ import (
 // newTestJobManager creates a JobManager backed by a temp BoltDB and,
 // when withCatalog is true, a temp SQLite catalog. Mirrors
 // newTestAuthManager (api_keys_test.go)'s pattern.
+// The handles the most recent newTestJobManagerSink built. Package-level, so
+// these tests must not run in parallel — none call t.Parallel, and the
+// alternative (threading two more return values through three helpers) buys
+// nothing here. A Watcher now holds
+// its own db/catalog rather than borrowing the job manager's, so a test that
+// wants one has to be given the same two — see newTestWatcher.
+var (
+	lastTestBolt    *bolt.DB
+	lastTestCatalog *sql.DB
+)
+
+// newTestWatcher builds a Watcher wired the way main.go wires it. Tests used to
+// write `&Watcher{jm: jm}` and reach the catalog through the manager; that field
+// is the manager's own now.
+func newTestWatcher(t *testing.T, withCatalog bool) (*Watcher, *JobManager) {
+	t.Helper()
+	jm := newTestJobManager(t, withCatalog)
+	return &Watcher{db: lastTestBolt, catalog: lastTestCatalog, jm: jm}, jm
+}
+
 func newTestJobManager(t *testing.T, withCatalog bool) *JobManager {
 	t.Helper()
 	return newTestJobManagerSink(t, withCatalog, nil)
@@ -46,6 +66,8 @@ func newTestJobManagerSink(t *testing.T, withCatalog bool, hub EventSink) *JobMa
 		catalog = catalogHandle
 	}
 
+	lastTestBolt, lastTestCatalog = boltDB, catalog
+
 	jm, err := NewJobManager(t.TempDir(), boltDB, catalog, hub)
 	if err != nil {
 		t.Fatalf("NewJobManager: %v", err)
@@ -75,8 +97,7 @@ func newTestJobManagerWithHub(t *testing.T, withCatalog bool) (*JobManager, *SSE
 // no job" case: with the catalog enabled this must now be Pending (it
 // genuinely hasn't been downloaded), not silently folded into Skipped.
 func TestGetWatchlistStatsUsesCatalogForSizeAndStatus(t *testing.T) {
-	jm := newTestJobManager(t, true)
-	w := &Watcher{jm: jm}
+	w, jm := newTestWatcher(t, true)
 
 	pl := &WatchedPlaylist{
 		ID:   "watch-stats",
@@ -93,10 +114,10 @@ func TestGetWatchlistStatsUsesCatalogForSizeAndStatus(t *testing.T) {
 	}
 
 	// Seed the catalog: a track whose BoltDB job is long gone, 40 MB file.
-	if err := db.UpsertTrack(context.Background(), jm.catalog, &db.Track{SpotifyID: "catalog-only", Name: "Catalog Only"}); err != nil {
+	if err := db.UpsertTrack(context.Background(), lastTestCatalog, &db.Track{SpotifyID: "catalog-only", Name: "Catalog Only"}); err != nil {
 		t.Fatalf("UpsertTrack: %v", err)
 	}
-	if err := db.CreateLibraryFile(context.Background(), jm.catalog, &db.LibraryFile{
+	if err := db.CreateLibraryFile(context.Background(), lastTestCatalog, &db.LibraryFile{
 		SpotifyID: "catalog-only",
 		Provider:  "tidal",
 		Quality:   db.QualityLossless,
@@ -162,8 +183,7 @@ func TestGetWatchlistStatsUsesCatalogForSizeAndStatus(t *testing.T) {
 // reported as pending, since without a catalog there's no way to
 // distinguish the two cases.
 func TestGetWatchlistStatsFallsBackToSkippedWithoutCatalog(t *testing.T) {
-	jm := newTestJobManager(t, false)
-	w := &Watcher{jm: jm}
+	w, _ := newTestWatcher(t, false)
 
 	pl := &WatchedPlaylist{
 		ID:       "watch-nocat",
@@ -197,8 +217,7 @@ func TestGetWatchlistStatsFallsBackToSkippedWithoutCatalog(t *testing.T) {
 // dropped entirely (no save, no fallback). Now a standalone entry must be
 // appended instead.
 func TestOnBatchCompleteSurvivesSyncLogEviction(t *testing.T) {
-	jm := newTestJobManager(t, false)
-	w := &Watcher{jm: jm}
+	w, _ := newTestWatcher(t, false)
 
 	pl := &WatchedPlaylist{ID: "watch-evict", Name: "Busy Playlist"}
 	// Fill SyncLogs to the cap with entries that do NOT carry the batch ID

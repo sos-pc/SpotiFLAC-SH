@@ -44,10 +44,10 @@ const catalogLookupTimeout = 5 * time.Second
 // returns silently — the user-facing watchlist row in BoltDB is the
 // source of truth, the catalog is the long-term audit trail.
 func (w *Watcher) mirrorWatchlistToCatalog(pl *WatchedPlaylist) {
-	if w.jm == nil || w.jm.catalog == nil || pl == nil {
+	if w.catalog == nil || pl == nil {
 		return
 	}
-	catalog := w.jm.catalog
+	catalog := w.catalog
 
 	ctx, cancel := context.WithTimeout(context.Background(), catalogMirrorTimeout)
 	defer cancel()
@@ -98,7 +98,7 @@ func (w *Watcher) mirrorWatchlistToCatalog(pl *WatchedPlaylist) {
 // watchlist is empty, or any query/scan error occurs. Callers fall back
 // to the existing filesystem index + BoltDB resolution.
 func (w *Watcher) catalogPathsForWatchlist(pl *WatchedPlaylist) map[string]string {
-	if w.jm == nil || w.jm.catalog == nil || pl == nil {
+	if w.catalog == nil || pl == nil {
 		return map[string]string{}
 	}
 	if len(pl.TrackIDs) == 0 {
@@ -124,7 +124,7 @@ func (w *Watcher) catalogPathsForWatchlist(pl *WatchedPlaylist) map[string]strin
 		WHERE status = '` + db.StatusPresent + `'
 		  AND spotify_id IN (` + strings.Join(placeholders, ",") + `)`
 
-	rows, err := w.jm.catalog.QueryContext(ctx, query, args...)
+	rows, err := w.catalog.QueryContext(ctx, query, args...)
 	if err != nil {
 		slog.Warn("[Catalog] resolveTrackPaths query failed", "playlist", pl.Name, "err", err)
 		return map[string]string{}
@@ -154,7 +154,7 @@ func (w *Watcher) catalogPathsForWatchlist(pl *WatchedPlaylist) map[string]strin
 // Best-effort: returns an empty map if the catalog is unset, the
 // watchlist is empty, or any query/scan error occurs.
 func (w *Watcher) catalogFileSizesForWatchlist(pl *WatchedPlaylist) map[string]int64 {
-	if w.jm == nil || w.jm.catalog == nil || pl == nil {
+	if w.catalog == nil || pl == nil {
 		return map[string]int64{}
 	}
 	if len(pl.TrackIDs) == 0 {
@@ -177,7 +177,7 @@ func (w *Watcher) catalogFileSizesForWatchlist(pl *WatchedPlaylist) map[string]i
 		WHERE status = '` + db.StatusPresent + `'
 		  AND spotify_id IN (` + strings.Join(placeholders, ",") + `)`
 
-	rows, err := w.jm.catalog.QueryContext(ctx, query, args...)
+	rows, err := w.catalog.QueryContext(ctx, query, args...)
 	if err != nil {
 		slog.Warn("[Catalog] GetWatchlistStats query failed", "playlist", pl.Name, "err", err)
 		return map[string]int64{}

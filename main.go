@@ -101,7 +101,7 @@ func main() {
 	}
 
 	// ── Watcher (playlist sync) ───────────────────────────────────────────
-	watcher := NewWatcher(jobs, auth)
+	watcher := NewWatcher(db, catalog, jobs, auth)
 	defer watcher.Close()
 
 	// Connecter le Watcher comme handler d'événements du JobManager

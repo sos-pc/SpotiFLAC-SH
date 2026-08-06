@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,11 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
 	bolt "go.etcd.io/bbolt"
 )
+
+// bucketWatchlist is the watcher's own BoltDB bucket. It was declared in
+// jobs.go, where the only use was creating it at startup — every read and write
+// is here.
+var bucketWatchlist = []byte("watchlist")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -90,6 +96,14 @@ type AddWatchlistResponse struct {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Watcher struct {
+	// The watcher owns its own storage handles rather than borrowing the job
+	// manager's. bucketWatchlist below is read and written here and nowhere
+	// else, and the three catalog queries in watcher_catalog.go are the
+	// watcher's own work — reaching through w.jm.db and w.jm.catalog to reach
+	// them made the watchlist feature look like part of the job manager.
+	db      *bolt.DB
+	catalog *sql.DB
+
 	jm      *JobManager
 	auth    *AuthManager
 	ctx     context.Context
@@ -99,9 +113,11 @@ type Watcher struct {
 }
 
 // NewWatcher crée et démarre le daemon de surveillance des playlists.
-func NewWatcher(jm *JobManager, auth *AuthManager) *Watcher {
+func NewWatcher(db *bolt.DB, catalog *sql.DB, jm *JobManager, auth *AuthManager) *Watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Watcher{
+		db:      db,
+		catalog: catalog,
 		jm:      jm,
 		auth:    auth,
 		ctx:     ctx,
@@ -618,7 +634,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 	// able to land after this delete and resurrect the record.
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.jm.db.Update(func(tx *bolt.Tx) error {
+	return w.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWatchlist)
 		if b == nil {
 			return nil
@@ -629,7 +645,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 
 func (w *Watcher) GetWatchlists() ([]WatchedPlaylist, error) {
 	var playlists []WatchedPlaylist
-	err := w.jm.db.View(func(tx *bolt.Tx) error {
+	err := w.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWatchlist)
 		if b == nil {
 			return nil
@@ -677,7 +693,7 @@ func (w *Watcher) GetWatchlistsByUser(userID string) ([]WatchedPlaylist, error) 
 }
 
 func (w *Watcher) saveWatchlist(pl *WatchedPlaylist) error {
-	return w.jm.db.Update(func(tx *bolt.Tx) error {
+	return w.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucketWatchlist)
 		if err != nil {
 			return err
@@ -1229,7 +1245,7 @@ func (w *Watcher) GetWatchlistStats(watchlistID string) (WatchlistStats, error) 
 		}
 		j, hasJob := latest[id]
 		if !hasJob {
-			if jm.catalog != nil {
+			if w.catalog != nil {
 				// Le catalogue est actif et n'a rien pour cette track :
 				// elle n'a vraiment pas encore été téléchargée.
 				stats.Pending++
