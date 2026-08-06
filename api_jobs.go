@@ -15,6 +15,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
@@ -156,7 +157,7 @@ func (s *Server) registerJobRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req DownloadRequest
+		var req service.DownloadRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 
 	bolt "go.etcd.io/bbolt"
@@ -28,11 +29,11 @@ type Container struct {
 	// Domain services carved out of the former App god-object (R3). Each holds
 	// only the dependencies it actually needs; stateless ones (System, Media,
 	// Audio) have none.
-	System   *SystemService
-	Media    *MediaService
-	History  *HistoryService
-	Files    *FileService
-	Audio    *AudioService
-	Metadata *MetadataService
-	Download *DownloadService
+	System   *service.SystemService
+	Media    *service.MediaService
+	History  *service.HistoryService
+	Files    *service.FileService
+	Audio    *service.AudioService
+	Metadata *service.MetadataService
+	Download *service.DownloadService
 }

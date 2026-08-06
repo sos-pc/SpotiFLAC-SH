@@ -1,4 +1,4 @@
-package main
+package service
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cross-store sync for File Manager renames.

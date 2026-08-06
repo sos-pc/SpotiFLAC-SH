@@ -1,4 +1,4 @@
-package main
+package service
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MetadataService — Spotify metadata and search, carved out of the former App

@@ -1,4 +1,4 @@
-package main
+package service
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FileService — file-management operations (list, metadata, rename, upload,

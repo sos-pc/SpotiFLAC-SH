@@ -15,6 +15,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
@@ -101,7 +102,7 @@ func (s *Server) registerFileRoutes() {
 		}
 		batchStr := r.URL.Query().Get("batch")
 		batch := batchStr == "true" || batchStr == "1"
-		result, err := s.ctr.Metadata.GetSpotifyMetadata(SpotifyMetadataRequest{URL: url, Batch: batch}, userIDFromContext(r))
+		result, err := s.ctr.Metadata.GetSpotifyMetadata(service.SpotifyMetadataRequest{URL: url, Batch: batch}, userIDFromContext(r))
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -178,7 +179,7 @@ func (s *Server) registerFileRoutes() {
 			}
 		}
 		if searchType != "" {
-			result, err := s.ctr.Metadata.SearchSpotifyByType(SpotifySearchByTypeRequest{
+			result, err := s.ctr.Metadata.SearchSpotifyByType(service.SpotifySearchByTypeRequest{
 				Query:      q,
 				SearchType: searchType,
 				Limit:      limit,
@@ -190,7 +191,7 @@ func (s *Server) registerFileRoutes() {
 			}
 			writeV1JSON(w, http.StatusOK, result)
 		} else {
-			result, err := s.ctr.Metadata.SearchSpotify(SpotifySearchRequest{Query: q, Limit: limit})
+			result, err := s.ctr.Metadata.SearchSpotify(service.SpotifySearchRequest{Query: q, Limit: limit})
 			if err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return
@@ -510,9 +511,9 @@ func (s *Server) registerFileRoutes() {
 			return
 		}
 		var params struct {
-			OutputDir string                      `json:"output_dir"`
-			RootDir   string                      `json:"root_dir"`
-			Tracks    []CheckFileExistenceRequest `json:"tracks"`
+			OutputDir string                              `json:"output_dir"`
+			RootDir   string                              `json:"root_dir"`
+			Tracks    []service.CheckFileExistenceRequest `json:"tracks"`
 		}
 		if !decodeV1JSON(w, r, &params) {
 			return
@@ -610,7 +611,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req ConvertAudioRequest
+		var req service.ConvertAudioRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -638,7 +639,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req LyricsDownloadRequest
+		var req service.LyricsDownloadRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -671,7 +672,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req CoverDownloadRequest
+		var req service.CoverDownloadRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -696,7 +697,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req HeaderDownloadRequest
+		var req service.HeaderDownloadRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -718,7 +719,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req GalleryImageDownloadRequest
+		var req service.GalleryImageDownloadRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}
@@ -740,7 +741,7 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var req AvatarDownloadRequest
+		var req service.AvatarDownloadRequest
 		if !decodeV1JSON(w, r, &req) {
 			return
 		}

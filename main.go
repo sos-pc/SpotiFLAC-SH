@@ -18,6 +18,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/applog"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	bolt "go.etcd.io/bbolt"
 )
@@ -119,14 +120,14 @@ func main() {
 		Auth:     auth,
 		Watcher:  wtch,
 		SSE:      sseHub,
-		System:   &SystemService{},
-		Media:    &MediaService{},
-		History:  NewHistoryService(jobMgr),
-		Audio:    &AudioService{},
-		Metadata: NewMetadataService(auth),
-		Download: NewDownloadService(jobMgr, auth),
+		System:   &service.SystemService{},
+		Media:    &service.MediaService{},
+		History:  service.NewHistoryService(jobMgr),
+		Audio:    &service.AudioService{},
+		Metadata: service.NewMetadataService(auth),
+		Download: service.NewDownloadService(jobMgr, auth),
 	}
-	ctr.Files = NewFileService(catalog, jobMgr)
+	ctr.Files = service.NewFileService(catalog, jobMgr)
 
 	// Proxy auto-discovery used to start here: a goroutine polling
 	// tidal-uptime.geeked.wtf every 6 h to reorder the Tidal proxy list. That

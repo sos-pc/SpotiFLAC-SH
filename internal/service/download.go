@@ -1,4 +1,4 @@
-package main
+package service
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DownloadService — download enqueuing (single track + batch) and the
