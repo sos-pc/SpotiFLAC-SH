@@ -24,6 +24,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // retagLegacyResult is the JSON payload returned by POST /api/v1/admin/retag-legacy.
@@ -292,7 +293,7 @@ func (s *Server) runWatchlistRepair(pl WatchedPlaylist) {
 	// (not every root — this is a scoped, per-playlist repair). Watchlists
 	// follow the owner's global settings now, so that's where their files land.
 	if s.ctr.Catalog != nil {
-		root := EffectiveDownloadSettings(s.ctr.Auth, pl.UserID).DownloadPath
+		root := settings.EffectiveDownloadSettings(s.ctr.Auth, pl.UserID).DownloadPath
 		if root == "" {
 			root = util.GetDefaultMusicPath()
 		}
@@ -370,7 +371,7 @@ func (s *Server) collectScanRoots() []string {
 	if s.ctr.Watcher != nil {
 		if pls, err := s.ctr.Watcher.GetWatchlists(); err == nil {
 			for _, pl := range pls {
-				dp := EffectiveDownloadSettings(s.ctr.Auth, pl.UserID).DownloadPath
+				dp := settings.EffectiveDownloadSettings(s.ctr.Auth, pl.UserID).DownloadPath
 				if dp == "" {
 					continue
 				}

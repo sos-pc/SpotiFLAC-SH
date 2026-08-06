@@ -22,6 +22,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/m3u8"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -66,14 +67,14 @@ type WatchedPlaylist struct {
 // from the copy). Service too follows the global downloader. See
 // docs/settings-source-of-truth.md.
 func (w *Watcher) watchlistJobSettings(pl *WatchedPlaylist) jobs.JobSettings {
-	s := EffectiveDownloadSettings(w.auth, pl.UserID)
-	return serverJobSettings(s, s.Downloader)
+	s := settings.EffectiveDownloadSettings(w.auth, pl.UserID)
+	return settings.ServerJobSettings(s, s.Downloader)
 }
 
 // watchlistOutputRoot is the base download directory for a watchlist's M3U8 and
 // scan operations — the user's global download path (default music dir if unset).
 func (w *Watcher) watchlistOutputRoot(pl *WatchedPlaylist) string {
-	if p := EffectiveDownloadSettings(w.auth, pl.UserID).DownloadPath; p != "" {
+	if p := settings.EffectiveDownloadSettings(w.auth, pl.UserID).DownloadPath; p != "" {
 		return p
 	}
 	return util.GetDefaultMusicPath()
@@ -477,7 +478,7 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 	if oldName == "" {
 		return
 	}
-	if !EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
+	if !settings.EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
 		return
 	}
 	outputDir := w.watchlistOutputRoot(pl)
@@ -604,7 +605,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		}
 
 		// ── Suppression du fichier M3U8 (toujours, indépendamment de SyncDeletions) ──
-		if EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
+		if settings.EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
 			playlistsDir := filepath.Join(outputRoot, "Playlists")
 			// Try both the current (ID-suffixed) and legacy (pre-migration,
 			// no suffix) filenames — a watchlist removed before ever
@@ -756,7 +757,7 @@ func (w *Watcher) OnManualBatchComplete(req jobs.BatchM3U8Request, paths []strin
 	if len(paths) == 0 {
 		return
 	}
-	settings := EffectiveDownloadSettings(w.auth, req.UserID)
+	settings := settings.EffectiveDownloadSettings(w.auth, req.UserID)
 	if !settings.CreateM3u8File {
 		return
 	}
@@ -1668,7 +1669,7 @@ type m3u8Settings struct {
 // loadM3U8Settings returns the user (or global) settings if M3U8 generation is
 // enabled, or nil if it is disabled.
 func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
-	settings := EffectiveDownloadSettings(w.auth, pl.UserID)
+	settings := settings.EffectiveDownloadSettings(w.auth, pl.UserID)
 	if !settings.CreateM3u8File {
 		return nil
 	}

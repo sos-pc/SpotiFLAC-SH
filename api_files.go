@@ -15,6 +15,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ func (s *Server) mediaPlacement(
 	r *http.Request,
 	artistName, albumName, albumArtist, releaseDate, playlistName string,
 ) trackMediaPlacement {
-	settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
+	settings := settings.EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
 	sub := jobs.OutputSubfolder(
 		settings.FolderTemplate, settings.CreatePlaylistFolder, settings.UseFirstArtistOnly,
 		artistName, albumName, albumArtist, releaseDate, playlistName,
@@ -525,7 +526,7 @@ func (s *Server) registerFileRoutes() {
 		// result stays confined to base without needing cleanLibraryPath on any
 		// client input.
 		base := s.libraryRootFor(r)
-		settings := EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
+		settings := settings.EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r))
 		for i := range params.Tracks {
 			t := &params.Tracks[i]
 			// Folder first: outputSubfolder applies the first-artist rule itself,

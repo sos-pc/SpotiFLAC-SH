@@ -22,6 +22,7 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ func isSubPath(root, target string) bool {
 // resolves to the global default, which is also what buildOutputDir
 // (jobs_helpers.go) falls back to when placing downloaded files.
 func (s *Server) libraryRootForUser(userID string) string {
-	if root := EffectiveDownloadSettings(s.ctr.Auth, userID).DownloadPath; root != "" {
+	if root := settings.EffectiveDownloadSettings(s.ctr.Auth, userID).DownloadPath; root != "" {
 		return filepath.Clean(root)
 	}
 	return filepath.Clean(util.GetDefaultMusicPath())

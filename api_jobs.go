@@ -15,6 +15,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ func (s *Server) registerJobRoutes() {
 		// alone — they carry their own per-watchlist settings model
 		// (getWatchlistSettings), a separate source of truth.
 		if req.WatchlistID == "" {
-			req.Settings = serverJobSettings(EffectiveDownloadSettings(s.ctr.Auth, req.UserID), req.Settings.Service)
+			req.Settings = settings.ServerJobSettings(settings.EffectiveDownloadSettings(s.ctr.Auth, req.UserID), req.Settings.Service)
 		}
 		// req.Settings.DownloadPath is now the server download path; confining it
 		// (root-to-itself) keeps S2 for the sanitised subfolders buildOutputDir

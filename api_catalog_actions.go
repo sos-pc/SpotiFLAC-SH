@@ -35,6 +35,7 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // checkDeletedRequest is the body of POST /admin/library-check-deleted.
@@ -299,7 +300,7 @@ func (s *Server) v1RedownloadMissing(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromContext(r)
 	resp, err := s.ctr.Jobs.EnqueueBatch(jobs.EnqueueBatchRequest{
 		Tracks:   tracks,
-		Settings: serverJobSettings(EffectiveDownloadSettings(s.ctr.Auth, userID), ""),
+		Settings: settings.ServerJobSettings(settings.EffectiveDownloadSettings(s.ctr.Auth, userID), ""),
 		UserID:   userID,
 	})
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 type DownloadRequest = backend.DownloadRequest
@@ -88,7 +89,7 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 	// request. buildOutputDir (in the worker) then applies the template on top
 	// of the already-confined base path. Quality/embed flags still come from the
 	// request for now — that's a later step of the same migration.
-	serverSettings := EffectiveDownloadSettings(d.auth, req.UserID)
+	serverSettings := settings.EffectiveDownloadSettings(d.auth, req.UserID)
 
 	// Création du Job
 	job := &jobs.Job{
@@ -116,7 +117,7 @@ func (d *DownloadService) DownloadTrack(req DownloadRequest) (DownloadResponse, 
 		// Fully server-authoritative (step 3): every download setting comes from
 		// the user's server settings; the only per-download override is the
 		// service. The request's quality/embed/path fields are ignored.
-		Settings: serverJobSettings(serverSettings, req.Service),
+		Settings: settings.ServerJobSettings(serverSettings, req.Service),
 	}
 
 	// Persist and enqueue in one call — see JobManager.Submit for why this is

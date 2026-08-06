@@ -19,6 +19,7 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // The JobManager dependency went with them: it was held only to borrow the
@@ -92,7 +93,7 @@ func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest, userID 
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), time.Duration(req.Timeout*float64(time.Second)))
 	defer metaCancel()
 
-	spotFetchAPIURL := EffectiveDownloadSettings(m.auth, userID).SpotFetchAPIURL
+	spotFetchAPIURL := settings.EffectiveDownloadSettings(m.auth, userID).SpotFetchAPIURL
 
 	// Client natif Spotify (TOTP) — avec fallback automatique vers SpotFetch si échec
 	data, nativeErr := spotify.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
