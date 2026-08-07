@@ -45,6 +45,11 @@ jobs:
     # timeouts below were added. Five minutes is roughly ten times the observed
     # runtime, so it can only fire on a genuine stall.
     timeout-minutes: 5
+    # issues: read so Compare can see whether the last build is known to have
+    # failed. Read-only on purpose — this job decides, the report job writes.
+    permissions:
+      contents: read
+      issues: read
     outputs:
       version: ${{ steps.upstream.outputs.version }}
       stale: ${{ steps.compare.outputs.stale }}
@@ -92,9 +97,29 @@ jobs:
 
       - name: Compare
         id: compare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [ "${{ inputs.force }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+          # A failed build never moves the published label, so the comparison
+          # below keeps answering "up to date, nothing to do" and the image is
+          # never rebuilt. The report job then sees a run with no failure in it
+          # and closes the alert. Net effect: a fix that never shipped, and the
+          # alert about it closing itself to say everything is fine. Observed on
+          # 2026-08-07 — a transient GHCR push error opened #32, and the very
+          # next scheduled run would have silently retracted it.
+          #
+          # An open alert means the last attempt is known to have failed, so
+          # there is nothing to compare: rebuild, and keep rebuilding until one
+          # succeeds. That is also what makes the report job's close-on-success
+          # correct, because while an alert is open the build can no longer be
+          # skipped.
+          FAILING=$(gh issue list --repo "$GITHUB_REPOSITORY" --label engine-build \
+                      --state open --json number --jq 'length')
+          if [ "$FAILING" != "0" ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "rebuilding: retrying a previously failed build (engine-build issue is open)"
+          elif [ "${{ inputs.force }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "rebuilding: forced or engine/ changed"
           elif [ "${{ steps.upstream.outputs.version }}" != "${{ steps.published.outputs.version }}" ]; then
@@ -187,7 +212,15 @@ jobs:
   report:
     name: Report status
     needs: [check, build]
-    if: always()
+    # Only where a build actually moves `:latest`. A feature-branch build
+    # publishes its own tag and touches nothing the deployment pulls, so a
+    # failure there says nothing about production — yet this job would have
+    # opened an issue announcing that the server had stopped following upstream,
+    # and a success would have closed a real alert without `:latest` having been
+    # rebuilt at all.
+    if: >-
+      always() && (github.event_name == 'schedule'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -266,8 +299,18 @@ jobs:
           - **\`import check\` failed** — the wheel does not declare a dependency
             it needs. Add it to the image.
           - **the check job failed** — a network read of PyPI or ghcr, not our
-            code. It usually clears by itself; this issue closes on the next
-            green run.
+            code. It usually clears by itself.
+
+          ---
+
+          ### You do not need to retrigger anything
+
+          While this issue is open the scheduled run rebuilds unconditionally,
+          instead of comparing versions and concluding there is nothing to do.
+          A transient failure therefore clears itself within the hour, and a real
+          one keeps this issue current until it is fixed. Closing this by hand
+          stops the retries — so close it only if you have decided not to fix the
+          build.
 
           ---
           *[engine-image.yml](../blob/main/.github/workflows/engine-image.yml) — updated in place, closes itself on recovery*
