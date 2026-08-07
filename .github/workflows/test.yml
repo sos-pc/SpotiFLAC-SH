@@ -24,11 +24,19 @@ on:
 
 # A second push to the same branch makes the first run's answer worthless.
 # Pull requests especially: force-pushes during review would otherwise queue a
-# run per revision. `main` is excluded from cancellation — each commit there is
-# a distinct state someone may need the verdict for.
+# run per revision. `main` is the exception — each commit there is a distinct
+# state someone may need the verdict for.
+#
+# That exception is expressed in the GROUP, not in cancel-in-progress. The
+# obvious form, `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`,
+# was here first and did not work: merging seven dependabot PRs cancelled the
+# runs for three intermediate commits on main, and their verdicts are gone.
+# Giving each main commit its own group makes the cancellation structurally
+# impossible rather than conditional — there is never a second run in the group
+# to cancel — while pull requests keep collapsing to their latest revision.
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: tests-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'shared' }}
+  cancel-in-progress: true
 
 jobs:
   checks:
