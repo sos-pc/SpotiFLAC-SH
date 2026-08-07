@@ -97,13 +97,34 @@ jobs:
           *[upstream-check.yml](../blob/main/.github/workflows/upstream-check.yml)*
           EOF
 
-          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream-sync \
-                       --state open --json number --jq '.[0].number // empty')
+          # The canonical issue is the most recently updated open one carrying
+          # the label; any others are duplicates and get closed. This step has
+          # always claimed "one issue, updated in place" and never enforced it:
+          # `.[0]` takes whatever the API happened to return first, which is not
+          # an ordering guarantee. #21 and #28 both carried this label, and for
+          # three weeks #21 sat announcing an upstream head that had long since
+          # moved while every run silently updated #28.
+          #
+          # Most-recently-updated rather than lowest-numbered: the live issue is
+          # by definition the one this workflow has been writing to, so it
+          # survives with its comment history. Lowest number would have crowned
+          # #21 — the abandoned one — and closed the issue actually in use. The
+          # rule is stable after the first pass, because updating the canonical
+          # issue is what keeps it the most recent.
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream-sync \
+                   --state open --json number,updatedAt \
+                   --jq 'sort_by(.updatedAt) | reverse | .[].number')
+          EXISTING=$(echo "$OPEN" | head -1)
           TITLE="[Upstream] spotbye/SpotiFLAC @ ${UPSTREAM_SHORT}"
 
           if [ -n "$EXISTING" ]; then
             gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue.md
             echo "updated issue #${EXISTING}"
+            for n in $(echo "$OPEN" | tail -n +2); do
+              gh issue close "$n" --repo "$GITHUB_REPOSITORY" --reason "not planned" \
+                --comment "Duplicate of #${EXISTING}, the tracking issue this workflow keeps current."
+              echo "closed duplicate #${n}"
+            done
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
               --body-file /tmp/issue.md --label upstream-sync

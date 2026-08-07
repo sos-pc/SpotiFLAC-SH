@@ -208,14 +208,27 @@ jobs:
           gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" \
             --description "Engine image build is failing" --color B60205 2>/dev/null || true
 
-          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" \
-                       --state open --json number --jq '.[0].number // empty')
+          # The most recently updated open issue with the label is canonical;
+          # anything else is a duplicate to be closed. Not `.[0]`: the API does
+          # not guarantee an order, so it can name a different issue between runs
+          # and quietly abandons the rest. upstream-check.yml used that form and
+          # grew exactly that bug — two labelled issues, one updated forever and
+          # one left announcing a state three weeks out of date. This job was
+          # written by copying that pattern, so it inherited the flaw before it
+          # had ever run.
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" \
+                   --state open --json number,updatedAt \
+                   --jq 'sort_by(.updatedAt) | reverse | .[].number')
+          EXISTING=$(echo "$OPEN" | head -1)
 
           if [ "$CHECK_RESULT" != "failure" ] && [ "$BUILD_RESULT" != "failure" ]; then
             if [ -n "$EXISTING" ]; then
-              gh issue close "$EXISTING" --repo "$GITHUB_REPOSITORY" \
-                --comment "Recovered: the engine image built successfully at [this run]($RUN_URL)."
-              echo "closed #${EXISTING} — build recovered"
+              # All of them: recovery means none of these describe reality any more.
+              for n in $OPEN; do
+                gh issue close "$n" --repo "$GITHUB_REPOSITORY" \
+                  --comment "Recovered: the engine image built successfully at [this run]($RUN_URL)."
+                echo "closed #${n} - build recovered"
+              done
             else
               echo "nothing to report"
             fi
@@ -264,6 +277,11 @@ jobs:
           if [ -n "$EXISTING" ]; then
             gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue.md
             echo "updated #${EXISTING}"
+            for n in $(echo "$OPEN" | tail -n +2); do
+              gh issue close "$n" --repo "$GITHUB_REPOSITORY" --reason "not planned" \
+                --comment "Duplicate of #${EXISTING}, the issue this workflow keeps current."
+              echo "closed duplicate #${n}"
+            done
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
               --body-file /tmp/issue.md --label "$LABEL"
