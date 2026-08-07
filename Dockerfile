@@ -26,16 +26,24 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Sources Go
+# Sources Go. internal/ holds the eight packages split out of the root package;
+# omitting it did not produce a missing-file error but sent `go mod tidy` looking
+# for github.com/sos-pc/SpotiFLAC-SH/internal/applog on the network, which fails
+# with "no matching versions for query latest" — a dependency-resolution message
+# for what is actually our own source not being in the build context.
 COPY *.go ./
 COPY backend/ ./backend/
+COPY internal/ ./internal/
 
 # Frontend buildé (nécessaire pour l'embed)
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Retirer les dépendances wails orphelines + compiler
-RUN go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o spotiflac .
+# No `go mod tidy` here. It was added to drop orphaned wails dependencies, and
+# the wails desktop build is gone. Running it at image-build time meant the
+# binary could be compiled against a different dependency set than the one CI
+# tested, and it required network access to do it; go-checks.yml already fails
+# the build if go.mod/go.sum are untidy, which is where that belongs.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o spotiflac .
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3 — Static ffmpeg
