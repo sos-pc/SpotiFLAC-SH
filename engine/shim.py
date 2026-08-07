@@ -280,9 +280,11 @@ async def _prime_tidal_apis() -> None:
 async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
     """The only engine-specific code. Rewrite this body to swap engines.
 
-    Signature verified 2026-07-23 against AsyncSpotiFLAC.__init__: output_dir,
-    services, quality, enrich_metadata, embed_lyrics all exist; the class is an
-    async context manager; download_track(url) -> list[TrackMetadata].
+    The keywords below are asserted at build time by contract-check.py, which
+    fails the image rather than let an upstream rename reach production. It used
+    to say "signature verified 2026-07-23" here; a date only records that
+    someone looked once, at a version that is no longer the one being built.
+    Add a keyword to this call and add it there too, or it goes unchecked.
 
     Also available upstream if we ever want them: qobuz_token /
     qobuz_local_api_url / tidal_custom_api (BYOT pass-through), allow_fallback

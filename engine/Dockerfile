@@ -109,6 +109,14 @@ RUN SITE="$(python -c 'import SpotiFLAC, pathlib; print(pathlib.Path(SpotiFLAC._
 # before: a dependency the wheel does not declare.
 RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; import nodriver, pydoll; print('import check OK')"
 
+# The import check above proves the package loads. It does not prove upstream
+# still takes the arguments shim.py passes it — and that is the failure this
+# image is most exposed to, because a scheduled build publishes `:latest`
+# without a human reading the changelog. A renamed keyword would build green and
+# fail on the first download. See contract-check.py for the full reasoning.
+COPY contract-check.py /tmp/contract-check.py
+RUN python /tmp/contract-check.py && rm /tmp/contract-check.py
+
 COPY shim.py /app/shim.py
 
 # Non-root, same uid as the Go service so FLACs written to the shared /staging

@@ -174,3 +174,97 @@ jobs:
             echo "- SpotiFLAC \`${{ needs.check.outputs.version }}\`"
             echo "- tags: \`${{ steps.tags.outputs.tags }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # This workflow runs unattended every 30 minutes and publishes `:latest`, so a
+  # red run is the only signal that the deployment has stopped tracking upstream.
+  # It was not a signal at all: two failures sat unnoticed for hours today
+  # because nobody refreshes an Actions tab on a schedule. Automation that has to
+  # be watched is not automation.
+  #
+  # One issue, opened on failure and closed on the next success — the same shape
+  # upstream-check.yml uses. It cannot pile up, and it cannot go stale: if the
+  # next scheduled run succeeds, it closes itself.
+  report:
+    name: Report status
+    needs: [check, build]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or close the failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          VERSION: ${{ needs.check.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          LABEL=engine-build
+
+          # Idempotent: the label may not exist on a fresh repository, and
+          # `gh issue create --label` fails outright if it does not.
+          gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" \
+            --description "Engine image build is failing" --color B60205 2>/dev/null || true
+
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" \
+                       --state open --json number --jq '.[0].number // empty')
+
+          if [ "$CHECK_RESULT" != "failure" ] && [ "$BUILD_RESULT" != "failure" ]; then
+            if [ -n "$EXISTING" ]; then
+              gh issue close "$EXISTING" --repo "$GITHUB_REPOSITORY" \
+                --comment "Recovered: the engine image built successfully at [this run]($RUN_URL)."
+              echo "closed #${EXISTING} — build recovered"
+            else
+              echo "nothing to report"
+            fi
+            exit 0
+          fi
+
+          if [ "$CHECK_RESULT" = "failure" ]; then
+            STAGE="the staleness check (PyPI / registry read)"
+          else
+            STAGE="the image build"
+          fi
+
+          cat > /tmp/issue.md <<EOF
+          ## 🚨 Engine image is not building
+
+          The sidecar deployment tracks \`:latest\`, so while this is broken the
+          server stays on the last image that built — it does not follow upstream.
+
+          **Failed in:** ${STAGE}
+          **Upstream version being built:** \`${VERSION:-unknown}\`
+          **Run:** ${RUN_URL}
+
+          ---
+
+          ### Where to look first
+
+          The build is deliberately strict, and each guard names a different cause:
+
+          - **\`patch\` failed** — upstream changed code one of
+            [\`engine/patches/\`](../blob/main/engine/patches) rewrites. Rebase the
+            patch, or drop it if upstream fixed the bug themselves.
+          - **\`contract check\` failed** — upstream renamed something
+            [\`shim.py\`](../blob/main/engine/shim.py) calls. Fix the call and
+            [\`contract-check.py\`](../blob/main/engine/contract-check.py) together.
+          - **\`import check\` failed** — the wheel does not declare a dependency
+            it needs. Add it to the image.
+          - **the check job failed** — a network read of PyPI or ghcr, not our
+            code. It usually clears by itself; this issue closes on the next
+            green run.
+
+          ---
+          *[engine-image.yml](../blob/main/.github/workflows/engine-image.yml) — updated in place, closes itself on recovery*
+          EOF
+
+          TITLE="[Engine] image build failing (SpotiFLAC ${VERSION:-unknown})"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue.md
+            echo "updated #${EXISTING}"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+              --body-file /tmp/issue.md --label "$LABEL"
+          fi
