@@ -1,11 +1,23 @@
 # Durcissement du déploiement — compose, reverse proxy, conteneur
 
+> **📦 Archivé le 2026-08-07.** Ce document est antérieur au moteur : il ne dit
+> rien de `spotiflac-engine`, de `shm_size`, ni du navigateur embarqué, et son
+> compose n'est plus celui qui tourne. Il est conservé parce qu'il est le seul
+> récit de *pourquoi* le déploiement a la forme qu'il a — la topologie, le déni
+> de service sur le login, et l'ordre d'application des changements.
+>
+> Les décisions encore vivantes (`stop_grace_period: 45s`, `/tmp` sur disque,
+> `TRUST_PROXY_HEADERS`, et le `mem_limit` rejeté par le noyau) ont été reprises
+> dans **[deployment.md § Durcissement](../deployment.md#durcissement)**, qui est
+> la référence à jour. Ce fichier garde l'analyse complète derrière elles.
+
+
 > **🔍 Constat — 2026-07-16.** Revue d'un `docker-compose.yaml` et d'une config SWAG/nginx réels, sur
 > un déploiement de référence. **Vérifié par exécution** : sondes HTTP/2 depuis l'extérieur, tests de
 > ports, lecture du code pour chaque affirmation.
 > **Trois défauts corrigés, deux bugs applicatifs découverts au passage, un point ouvert.**
 > Index : [README.md](README.md). Le durcissement ffmpeg est ailleurs :
-> [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md).
+> [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md).
 >
 > **Volontairement sans identifiants d'hôte.** Ce dépôt est public : les IP, noms de domaine, chemins
 > de disque et clés du déploiement audité n'y ont pas leur place — associés à la liste de trous
@@ -53,10 +65,10 @@ LAN*, ce qui est une hypothèse bien plus coûteuse.
 ## 2. Le DoS sur le login (le défaut sérieux)
 
 `TRUST_PROXY_HEADERS` n'était pas défini. Sans lui, `remoteIP()` ignore `X-Forwarded-For` et renvoie
-**l'IP du proxy pour toute requête externe** ([ratelimit.go:101](../ratelimit.go)).
+**l'IP du proxy pour toute requête externe** ([ratelimit.go:101](../../ratelimit.go)).
 
 Le rate-limiter de login est de **10 tentatives/minute puis blocage 5 minutes, par IP**
-([ratelimit.go:13](../ratelimit.go)). Tous les utilisateurs d'internet partageaient donc **un seul
+([ratelimit.go:13](../../ratelimit.go)). Tous les utilisateurs d'internet partageaient donc **un seul
 compteur** : 10 requêtes suffisaient à **bloquer les connexions de tout le monde**, indéfiniment, à
 ~2 req/min.
 
@@ -80,7 +92,7 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 ```
 
 `$proxy_add_x_forwarded_for` **ajoute** l'IP réelle du client **à droite** de ce que le client a pu
-envoyer. Le code lit le maillon **le plus à droite** ([ratelimit.go:113](../ratelimit.go)). Les deux
+envoyer. Le code lit le maillon **le plus à droite** ([ratelimit.go:113](../../ratelimit.go)). Les deux
 correspondent exactement : un client qui forge `X-Forwarded-For: 1.2.3.4` obtient
 `1.2.3.4, <son-IP-réelle>`, et c'est son IP réelle qui est retenue. **Non forgeable via nginx.**
 
@@ -129,7 +141,7 @@ $ docker port spotiflac
 
 ### 3.1 `stop_grace_period: 45s`, pas 30
 
-[main.go:170](../main.go) fait `context.WithTimeout(ctx, 30*time.Second)` puis
+[main.go:170](../../main.go) fait `context.WithTimeout(ctx, 30*time.Second)` puis
 `httpServer.Shutdown(ctx)`. Un `stop_grace_period: 30s` vaut **exactement** le timeout interne : si
 l'arrêt prend les 30 s pleines, Docker envoie `SIGKILL` au moment même où l'app termine, possiblement
 en pleine écriture BoltDB. 45 s garantit que l'app gagne la course.
@@ -137,7 +149,7 @@ en pleine écriture BoltDB. 45 s garantit que l'app gagne la course.
 ### 3.2 `/tmp` sur disque, pas en tmpfs
 
 `read_only: true` impose de monter `/tmp` quelque part : `handleUpload` écrit via
-`os.CreateTemp(os.TempDir(), ...)` ([server.go:246](../server.go)).
+`os.CreateTemp(os.TempDir(), ...)` ([server.go:246](../../server.go)).
 
 Un tmpfs aurait été un mauvais choix, pour deux raisons **mesurées** :
 
@@ -148,7 +160,7 @@ Un tmpfs aurait été un mauvais choix, pour deux raisons **mesurées** :
 
 Un bind mount sur disque supprime le dimensionnement comme problème. Le dossier doit être créé
 **avant** en `1000:1000`, sinon Docker le crée root et l'app (uid 1000) ne peut pas y écrire — le
-piège que [main.go:188](../main.go) documente déjà.
+piège que [main.go:188](../../main.go) documente déjà.
 
 ## 4. 🔴 OUVERT — `mem_limit` rejeté par le noyau
 
@@ -159,7 +171,7 @@ piège que [main.go:188](../main.go) documente déjà.
 
 **La limite mémoire n'existe pas.** C'est le pire cas : une protection qu'on croit avoir. Et c'est
 précisément celle qui bornerait un ffmpeg qui déraille sur un fichier forgé — le complément
-*déploiement* du durcissement de [ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md), qui ne
+*déploiement* du durcissement de [ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md), qui ne
 réduit pas la probabilité d'une RCE mais dont on voudrait borner l'épuisement de ressources, la
 partie facile à déclencher.
 
@@ -184,7 +196,7 @@ Aucun des deux n'est une régression : tous deux dormaient depuis longtemps, inv
 
 Les deux appelants court-circuitaient le helper `rest()` et faisaient un `fetch("/api/upload", {method,
 body})` **sans le moindre en-tête**. Or `/api/upload` est protégé par `RequireAuth`
-([server.go:147](../server.go)), qui exige `Authorization: Bearer`.
+([server.go:147](../../server.go)), qui exige `Authorization: Bearer`.
 
 **Pourquoi ça a survécu si longtemps** : seul le bypass LAN le masquait — il injecte un JWT admin
 synthétique, et `isLocalIP()` le désactive dès que `X-Forwarded-For` est présent. Donc l'upload
@@ -258,7 +270,7 @@ type — *déduire une propriété du serveur depuis une mesure non contrôlée*
   `body="event: connected\ndata: {\"status\":\"ok\"}\n\n"` — rien après.
 
 C'est la même famille d'erreur que le `FROM scratch` et le faux positif `libstdc++` de
-[ffmpeg-runtime-regression.md](archive/ffmpeg-runtime-regression.md) : **une propriété affirmée sans mesure
+[ffmpeg-runtime-regression.md](ffmpeg-runtime-regression.md) : **une propriété affirmée sans mesure
 contrôlée est une propriété fausse**, y compris quand l'instrument est en cause.
 
 ## 7. Tâches ouvertes
