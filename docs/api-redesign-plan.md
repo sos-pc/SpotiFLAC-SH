@@ -25,7 +25,8 @@
 > mais mort » parce que `v1RequirePermission(…, "admin")` n'est jamais appelé. **C'est faux.** Le niveau
 > transite par `v1RequireAdmin`, qui lit `JWTClaims.IsAdmin` ; pour une clé API celui-ci vaut
 > « la clé porte la permission `admin` **ET** le compte propriétaire est toujours admin », re-vérifié à
-> chaque requête ([api_keys.go:161-180](../api_keys.go), avec garde explicite contre l'escalade et
+> chaque requête ([internal/auth/apikeys.go](../internal/auth/apikeys.go) — `api_keys.go` à la
+> racine jusqu'au découpage en paquets du 2026-08-07, avec garde explicite contre l'escalade et
 > contre un admin rétrogradé). Les trois niveaux fonctionnent. La phase 4 est donc une question de
 > **cohérence**, pas de sécurité.
 >

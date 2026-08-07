@@ -24,7 +24,7 @@ Rangé par **état**. Si tu reprends le travail : §A.
 
 | Chantier | Docs | Où ça en est | Prochain pas |
 |---|---|---|---|
-| **Durcissement du déploiement** | [deployment-hardening.md](deployment-hardening.md) | 🟡 5 corrigés+vérifiés ; 3 points ouverts. ⚠️ Antérieur au moteur : ne dit rien de `spotiflac-engine`, de `shm_size` ni du navigateur embarqué | `grep memory /proc/cgroups` ; logs nginx SWAG (502 `stream-token`) ; durcir le service moteur |
+| **Durcissement du déploiement** | [deployment.md § Durcissement](deployment.md#durcissement) | 🟡 décisions vivantes reprises dans `deployment.md` le 2026-08-07 ; l'analyse d'origine est [archivée](archive/deployment-hardening.md), antérieure au moteur. 2 points ouverts : `mem_limit` ignoré par le noyau, 502 `stream-token` au boot | `grep memory /proc/cgroups` ; logs nginx SWAG ; durcir le service moteur |
 | **Refonte API** | [api-redesign-plan.md](api-redesign-plan.md) | 🟢 phases 1-4 faites+vérifiées prod | 2 décisions posées, non tranchées (catalogue `admin`→`read`, explorateur BoltDB) |
 
 Le **retrait de la couche provider superseded** est terminé : `backend/{qobuz,amazon,deezer,community,songlink}`
@@ -39,7 +39,7 @@ et `util/proxy_config.go` n'existent plus — vérifié fichier par fichier le 2
 | [upstream-tracking-plan.md](upstream-tracking-plan.md) | 📘 | ✅ **en service** — pourquoi il n'y a plus de fork, et comment la CI suit les releases amont (comparaison PyPI ↔ label de notre image). |
 | [api-reference.md](api-reference.md) | 📘 | ✅ **vérifié 2026-08-04** — les 72 routes enregistrées sont documentées, aucune route documentée n'est absente du code. Comparaison automatisée route par route. |
 | [settings-reference.md](settings-reference.md) | 📘 | ✅ **vérifié 2026-08-04** — toutes les clés documentées existent côté frontend (les réglages sont un blob `map[string]interface{}`, le schéma appartient au frontend). |
-| [deployment.md](deployment.md) | 📘+🌍 | ✅ **corrigé 2026-08-04** — décrivait une installation mono-conteneur qui ne télécharge plus rien. Reste « minimal » : lire `deployment-hardening.md` avant mise en ligne. |
+| [deployment.md](deployment.md) | 📘+🌍 | ✅ **corrigé 2026-08-04** — décrivait une installation mono-conteneur qui ne télécharge plus rien. ✅ **complété 2026-08-07** — porte désormais le durcissement et le mécanisme de mise à jour des deux images. |
 | [authentication.md](authentication.md) | 📘 | ❔ non re-vérifié — JWT, clés API, Jellyfin |
 | [tidal-auth.md](tidal-auth.md) | 📘+🌍 | ❔ non re-vérifié — device-code Tidal (toujours utile : c'est le chemin **BYOT**) |
 | [watchlist.md](watchlist.md) | 📘 | ⚠️ à relire — les watchlists suivent les réglages **globaux** |

@@ -4,9 +4,7 @@
 > Le compose d'exemple ci-dessous publie un port et ne définit ni `TRUST_PROXY_HEADERS`, ni
 > `cap_drop`, ni `read_only`. Derrière un reverse proxy, ces choix ont des **conséquences réelles et
 > mesurées** — dont un déni de service trivial sur le login, et un `/api/upload` qui ne peut pas
-> fonctionner. Lire **[deployment-hardening.md](deployment-hardening.md)** avant de mettre en ligne :
-> il porte la configuration vérifiée en production, l'ordre dans lequel appliquer les changements
-> (il compte), et ce qui reste ouvert.
+> fonctionner. Voir **[Durcissement](#durcissement)** plus bas avant de mettre en ligne.
 
 ## Requirements
 
@@ -148,7 +146,7 @@ sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, **reachable from inside the container** (so not `localhost` if Jellyfin runs on the host). |
 | `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates 32 random bytes on first start and writes them to `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas, or to inject one from a secret manager. |
 | `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md). |
-| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for the client IP. Set it **only** behind a proxy you control — see [deployment-hardening.md](deployment-hardening.md). |
+| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for the client IP. Set it **only** behind a proxy you control — see [archive/deployment-hardening.md](archive/deployment-hardening.md). |
 | `LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error`. |
 | `ENGINE_URL` | *(unset)* | Where the download engine's shim listens, e.g. `http://spotiflac-engine:8080`. **Required in practice** — see below. |
 | `ENGINE_SERVICES` | *(unset)* | Providers delegated to the engine, comma-separated: `qobuz,deezer,amazon,tidal`. |
@@ -192,7 +190,7 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 The download queue uses **Server-Sent Events** (`GET /api/v1/jobs/stream`) and the artist-discography search uses another SSE endpoint (`GET /api/v1/search/stream`). Both are long-lived. Your reverse proxy must:
 
 1. Disable response buffering for these endpoints. The server sets `X-Accel-Buffering: no`, which nginx honours on its own — verified against a real SWAG deployment whose `proxy.conf` leaves `proxy_buffers` at its default.
-2. Read timeout: `/api/v1/jobs/stream` emits a `: keepalive` SSE comment every 30s while idle (see `sseHeartbeatInterval` in `sse.go`), so any `proxy_read_timeout` comfortably above 30s is fine — SWAG's default of 240s works untouched. **Before 2026-07-16 there was no heartbeat**, and an idle stream was cut every 240s, silently reconnecting and re-sending the whole 48h job snapshot each time; see [deployment-hardening.md §5.2](deployment-hardening.md). `/api/v1/search/stream` has no heartbeat by design — it streams its results and ends.
+2. Read timeout: `/api/v1/jobs/stream` emits a `: keepalive` SSE comment every 30s while idle (see `sseHeartbeatInterval` in `sse.go`), so any `proxy_read_timeout` comfortably above 30s is fine — SWAG's default of 240s works untouched. **Before 2026-07-16 there was no heartbeat**, and an idle stream was cut every 240s, silently reconnecting and re-sending the whole 48h job snapshot each time; see [archive/deployment-hardening.md §5.2](archive/deployment-hardening.md). `/api/v1/search/stream` has no heartbeat by design — it streams its results and ends.
 
 The Go server itself is configured for indefinite long requests:
 
@@ -241,14 +239,136 @@ Set the **idle timeout to at least 300 s** (CloudFront origin timeout: max 60 s 
 
 ---
 
-## Updating
+## Durcissement
+
+Ces réglages ne sont pas des préférences : chacun corrige un défaut constaté et
+mesuré en production. L'analyse complète — topologie, déni de service sur le
+login, ordre d'application — est archivée dans
+[archive/deployment-hardening.md](archive/deployment-hardening.md) ; elle est
+antérieure au moteur et ne dit rien du sidecar, mais ce qui suit reste exact.
+
+**`stop_grace_period: 45s`, pas 30.** `main.go` accorde 30 s à
+`httpServer.Shutdown`. Un délai Docker de 30 s vaut *exactement* ce timeout : si
+l'arrêt prend les 30 s pleines, `SIGKILL` arrive à l'instant où l'application
+termine, possiblement en pleine écriture BoltDB. 45 s garantit que
+l'application gagne la course.
+
+**`/tmp` sur disque, jamais en tmpfs.** `read_only: true` oblige à monter `/tmp`
+quelque part, car `/api/upload` y écrit. Un tmpfs serait un mauvais choix pour
+deux raisons mesurées : les téléversements sont de vrais fichiers audio
+(`client_max_body_size 500M`), et le convertisseur téléverse en boucle, donc
+plusieurs cohabitent. Surtout, **un tmpfs est décompté du `mem_limit`** — les
+téléversements se paieraient en RAM. Le dossier hôte doit exister **avant** en
+`1000:1000`, sinon Docker le crée en root et l'application ne peut pas y écrire.
+
+**`TRUST_PROXY_HEADERS=true` est correct derrière SWAG — et seulement derrière
+un proxy que vous contrôlez.** `$proxy_add_x_forwarded_for` ajoute l'IP réelle
+**à droite** de ce que le client a pu envoyer, et le code lit le maillon le plus
+à droite : un `X-Forwarded-For` forgé n'a donc aucun effet. Cela suppose **un
+seul saut de proxy**. Ajoutez Cloudflare devant et le maillon droit devient l'IP
+de SWAG : le compteur de limitation redevient partagé entre tous les clients.
+
+**Point ouvert — `mem_limit` est ignoré.** Le noyau répond `Your kernel does not
+support memory limit capabilities or the cgroup is not mounted. Limitation
+discarded.` La limite mémoire n'existe donc pas, ce qui est le pire cas : une
+protection qu'on croit avoir. `pids_limit`, lui, est bien actif. À vérifier avec
+`grep memory /proc/cgroups`.
+
+---
+
+## Mise à jour
+
+Le déploiement tire **deux images indépendantes**, publiées par deux workflows
+différents et qui n'avancent pas au même rythme. C'est la première chose à
+comprendre : « mettre à jour SpotiFLAC » n'est pas une seule opération.
+
+| | image | publiée par | quand elle bouge |
+|---|---|---|---|
+| application | `ghcr.io/sos-pc/spotiflac-sh` | `docker.yml` | tag de version `v*.*.*`, branche `feature/**`, ou lancement manuel |
+| moteur | `ghcr.io/sos-pc/spotiflac-engine` | `engine-image.yml` | **toute seule**, dès qu'une version SpotiFLAC paraît sur PyPI |
+
+### Quelle étiquette utiliser
+
+`:latest` de l'**application** ne se déplace **que sur un tag de version**. Ni un
+merge sur `main`, ni un build de branche ne le touchent — c'est délibéré : une
+release reste une décision, pas un effet de bord.
+
+Les autres étiquettes existent pour tester sans déplacer ce que la production
+tire : `:vX.Y.Z` fige une version, `:main` est produit par un lancement manuel de
+`docker.yml` sur `main`, et une branche `feature/xxx` publie `:feature-xxx`.
+Elles sont additives — pointer le compose dessus n'affecte pas `:latest`, donc le
+retour arrière consiste à remettre la ligne précédente.
+
+`:latest` du **moteur**, lui, avance seul. C'est voulu : le moteur suit l'amont.
+
+### Mettre à jour
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose -f <votre-compose.yaml> pull spotiflac spotiflac-engine
 ```
 
-SpotiFLAC uses the rolling `latest` Docker tag plus per-version `vX.Y.Z` tags. BoltDB schema migrations are applied automatically on first run after upgrade (`InitHistoryDBShared`, bucket creation in `NewJobManager` and `NewAuthManager`).
+```bash
+docker compose -f <votre-compose.yaml> up -d --force-recreate spotiflac spotiflac-engine
+```
+
+**`--force-recreate` n'est pas décoratif.** `pull` met à jour l'image sur le
+disque ; il ne touche pas au conteneur qui tourne. Sans recréation, `docker
+image inspect` montre la nouvelle version pendant que le processus exécute
+toujours l'ancienne, et rien ne le signale. Ce piège a coûté deux diagnostics
+erronés le 2026-08-07 avant que la ligne d'identité du moteur ne le tranche.
+
+Nommer les services évite au passage de redémarrer le solveur, qui n'a aucune
+raison de bouger, et de faire échouer `pull` sur un service construit localement.
+
+Les migrations de schéma BoltDB s'appliquent seules au premier démarrage
+(`InitHistoryDBShared`, création des buckets dans `NewJobManager` et
+`NewAuthManager`).
+
+### Vérifier ce qui tourne réellement
+
+```bash
+docker exec spotiflac-engine python -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:8080/health')))"
+```
+
+Renvoie `engine_version` (la version SpotiFLAC installée) et `revision` (le
+commit qui a construit l'image). Si `revision` n'a pas changé après une mise à
+jour, le conteneur n'a pas été recréé. Si les deux champs sont absents, l'image
+est antérieure à `d0b573a`.
+
+Côté application, la version s'affiche dans l'interface. Elle vient de
+`APP_VERSION`, qui est un **argument de construction** : la valeur est figée dans
+le bundle frontend au moment du build. La renseigner dans `environment:` du
+compose ne fait rien — l'interface affiche l'étiquette de l'image, pas ce que dit
+le compose.
+
+### Ce qui reconstruit le moteur, sans vous
+
+Le workflow interroge PyPI toutes les 30 minutes et compare la version trouvée à
+l'étiquette OCI que porte **notre propre image publiée** — l'artefact est l'état,
+il n'y a pas de fichier à tenir à jour. Quand elles diffèrent, il reconstruit et
+republie `:latest`.
+
+Quatre garde-fous se trouvent entre une publication amont et votre serveur, et
+chacun **fait échouer le build** plutôt que de laisser passer :
+
+1. les patches de `engine/patches/` doivent toujours s'appliquer ;
+2. le paquet doit s'importer, dépendances comprises ;
+3. `engine/contract-check.py` vérifie que l'amont accepte encore les arguments
+   que `shim.py` lui passe — un mot-clé renommé casse ici, pas en production ;
+4. l'image est scannée avant publication.
+
+Si le build échoue, **une issue s'ouvre automatiquement** (label `engine-build`)
+et se referme au premier build réussi. Tant qu'elle est ouverte, le passage
+planifié reconstruit sans comparer les versions : un incident transitoire se
+résorbe donc en moins d'une heure. **Ne la fermez pas à la main** pour faire
+taire la notification — c'est ce qui arrête les tentatives.
+
+### Revenir en arrière
+
+Remettre l'étiquette précédente dans le compose, puis relancer la commande de
+recréation ci-dessus. Chaque image du moteur porte sa version SpotiFLAC dans
+`org.opencontainers.image.version`, donc `:1.5.9` est un point de retour valable
+et lisible avec `docker inspect`.
 
 ### Post-upgrade: back-fill `SPOTIFY_ID` tags on legacy files
 
