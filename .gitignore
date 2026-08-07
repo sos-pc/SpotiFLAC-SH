@@ -62,3 +62,9 @@ temp/
 config/
 *.db
 *.tar.gz
+
+# Python bytecode. engine/ carries shim.py and contract-check.py, and
+# contract-check.py is meant to be run locally — which drops a __pycache__ next
+# to it that would otherwise show up as untracked noise on every status.
+__pycache__/
+*.py[cod]
