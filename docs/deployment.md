@@ -459,10 +459,31 @@ networks:
 
 ## CI/CD
 
-The repository ships with two GitHub Actions workflows:
+### The rule: the event decides, never the branch name
 
-- **`.github/workflows/docker.yml`** — runs on every `v*.*.*` tag. Builds the frontend, runs `go test ./... -v`, builds and pushes a multi-arch Docker image to `ghcr.io/<owner>/spotiflac-sh` with tags `{version}`, `{major}.{minor}` and `latest`. Creates a GitHub Release with auto-generated notes.
-- **`.github/workflows/upstream-check.yml`** — periodic check against `spotbye/SpotiFLAC` upstream. Surfaces drift in tracked source files. See `check-upstream.sh` at the repo root for the local equivalent.
+| what happens | what you get |
+|---|---|
+| you open a **pull request** | the checks run, and both images are built as `:pr-<number>` — deployable, and `:latest` untouched |
+| you push a **`v*.*.*` tag** | the app image publishes `:X.Y.Z`, `:X.Y` and `:latest`, plus a GitHub Release |
+| you merge to **`main`** | the checks run; the engine image republishes `:latest` if `engine/` changed |
+| upstream publishes to **PyPI** | the engine image rebuilds itself within 30 minutes |
+| you run a workflow **by hand** | the image publishes `:<branch>` |
+
+Branch names carry no meaning. They used to: image builds triggered on `feature/**`, which read like a rule and behaved like an allowlist — a change proposed from any other prefix silently got no image to test, which is how two changes shipped in August 2026 with nothing deployable. A pull request is already the event that means "I am proposing a change", so that is what builds the preview.
+
+`:latest` for the app moves **only on a version tag**. Releasing stays a deliberate act, not a side effect of merging.
+
+### The workflows
+
+| file | trigger | what it does |
+|---|---|---|
+| **`test.yml`** | PR, push to `main` | Runs `go-checks.yml`, publishes nothing. Its `checks / test` is the check branch protection requires — the gate every change passes. |
+| **`go-checks.yml`** | called by the two below | The checks themselves: frontend build, `go test`, `go vet`, `go.mod` tidy, golangci-lint, govulncheck, frontend lint and unused-dependency scan. One definition, two callers. |
+| **`docker.yml`** | `v*.*.*` tag, PR, manual | The app image. Runs `go-checks.yml` first, so a release is never built from an untested tree. Smoke-tests that `ffmpeg`/`ffprobe` run inside the image, then scans it. |
+| **`engine-image.yml`** | every 30 min, PR touching `engine/`, push to `main` touching `engine/`, manual | The engine sidecar. Compares PyPI against the label on our own published image, rebuilds when they differ. Four guards fail the build rather than publish: patches must apply, the package must import, `contract-check.py` must pass, the image must scan clean. A failure opens an issue that closes itself on recovery. |
+| **`upstream-check.yml`** | weekly, manual | Watches `spotbye/SpotiFLAC`, the *port source* for the Go code — read for ideas, never merged. Advances its own baseline when nothing watched changed; opens one issue when there is a decision to make. `./check-upstream.sh` is the local equivalent. |
+
+Fork pull requests get a read-only token, so their image build is skipped rather than failing at the push step. The checks still run, which is the part that gates merging.
 
 ---
 
