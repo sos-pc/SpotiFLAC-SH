@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -209,12 +208,6 @@ func (w *Watcher) checkAll() {
 	if err != nil {
 		return
 	}
-
-	// Before syncing, not after: a file the loop below is about to rewrite is
-	// not an orphan, and one no watchlist owns will never be rewritten at all.
-	// Runs on the full list including when it is empty, because removing the
-	// last watchlist still has to remove its file.
-	w.reconcilePlaylistDirs(playlists)
 
 	if len(playlists) == 0 {
 		return
@@ -489,9 +482,10 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 	if oldName == "" {
 		return
 	}
-	if !settings.EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
-		return
-	}
+	// Deliberately NOT gated on CreateM3u8File. The setting says whether to
+	// WRITE playlist files; a file already on disk has to be cleaned up either
+	// way. Gating the delete meant turning the setting off stranded the old file
+	// under the old name permanently, with nothing left that knew to remove it.
 	outputDir := w.watchlistOutputRoot(pl)
 	oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
 	if err := os.Remove(oldM3u8Path); err == nil {
@@ -616,7 +610,12 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		}
 
 		// ── Suppression du fichier M3U8 (toujours, indépendamment de SyncDeletions) ──
-		if settings.EffectiveDownloadSettings(w.auth, pl.UserID).CreateM3u8File {
+		//
+		// Deliberately NOT gated on CreateM3u8File, for the same reason as the
+		// rename cleanup: the setting governs writing, not tidying up. Gating it
+		// is how `all [957f2ab0].m3u8` survived its watchlist by 27 days —
+		// removed while the setting was off, then nothing knew about it again.
+		{
 			playlistsDir := filepath.Join(outputRoot, "Playlists")
 			// Try both the current (ID-suffixed) and legacy (pre-migration,
 			// no suffix) filenames — a watchlist removed before ever
@@ -1567,7 +1566,13 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// a second time — three of the eight playlists on the reference deployment
 	// (2026-08-08) were albums duplicating albums. Tracking, syncing and
 	// downloading are unaffected; only the redundant playlist file stops being
-	// written, and reconcilePlaylistDir removes any already on disk.
+	// written. Files written before this rule existed stay until their watchlist
+	// is removed — there is no sweep to collect them, see the note above
+	// legacyM3U8BaseName for why.
+	//
+	// Note this covers album *watchlists* only. Albums downloaded from the search
+	// bar go through OnManualBatchComplete, which is a different producer and
+	// still writes a playlist for them.
 	if isAlbumWatchlist(pl.SpotifyURL) {
 		return m3u8.GenerationResult{Skipped: true, SkipReason: "album watchlist"}, nil
 	}
@@ -1690,86 +1695,24 @@ func isAlbumWatchlist(spotifyURL string) bool {
 	return strings.Contains(u, "/album/") || strings.Contains(u, ":album:")
 }
 
-// suffixedM3U8Name matches exactly what m3u8BaseName produces: a name, a space,
-// and eight lowercase hex digits in brackets.
-var suffixedM3U8Name = regexp.MustCompile(`^.+ \[[0-9a-f]{8}\]\.m3u8$`)
-
-// reconcilePlaylistDirs deletes playlist files that no live watchlist owns.
+// A reconcilePlaylistDirs pass lived here: every check cycle it deleted any
+// suffixed .m3u8 in a Playlists/ directory that no live watchlist owned. It was
+// unsound, and it destroyed real files on the reference deployment within
+// minutes of shipping.
 //
-// Two ways a file outlives its watchlist, both seen on the reference deployment:
-// RemoveWatchlist only deletes the M3U8 when the createM3u8File setting happens
-// to be enabled at that moment, so removing a watchlist while it was off orphaned
-// the file permanently — `all [957f2ab0].m3u8` sat for 27 days advertising a
-// stale playlist in Jellyfin that way. And an album watchlist that wrote a file
-// before album files stopped being written has nothing left to clean it up.
+// The premise was that watchlists are the only producer of these files. They are
+// not. OnManualBatchComplete writes one for any non-watchlist batch that asks —
+// a download started from the search bar — using the same m3u8BaseName naming.
+// Those files have no watchlist by construction, so "no watchlist owns it" is
+// not evidence of an orphan, and the sweep deleted five of them on the first
+// run. Nothing on disk distinguishes the two producers, so no filename rule can
+// fix this.
 //
-// Grouped by output root because the download path is per-user
-// (watchlistOutputRoot reads it from that user's settings). A file is only an
-// orphan relative to the watchlists sharing its directory; checking one flat set
-// against every directory would delete another user's playlists.
-func (w *Watcher) reconcilePlaylistDirs(lists []WatchedPlaylist) {
-	wanted := make(map[string]map[string]struct{})
-
-	// Every root that has watchlists gets scanned, even if none of them wants a
-	// file — a root whose watchlists are all albums should end up empty.
-	for _, pl := range lists {
-		dir := filepath.Join(w.watchlistOutputRoot(&pl), "Playlists")
-		if _, ok := wanted[dir]; !ok {
-			wanted[dir] = make(map[string]struct{})
-		}
-		if isAlbumWatchlist(pl.SpotifyURL) {
-			continue
-		}
-		wanted[dir][m3u8BaseName(pl.Name, pl.ID)+".m3u8"] = struct{}{}
-	}
-
-	// With no watchlists left there is no root to derive from, yet the files of
-	// the ones just deleted are still on disk. Best effort: the default path.
-	// A deployment that set a custom DownloadPath and then removed its last
-	// watchlist keeps its orphan until a watchlist exists again — acceptable,
-	// because the alternative is guessing at directories to delete from.
-	if def := filepath.Join(util.GetDefaultMusicPath(), "Playlists"); wanted[def] == nil {
-		wanted[def] = make(map[string]struct{})
-	}
-
-	for dir, keep := range wanted {
-		w.reconcileOnePlaylistDir(dir, keep)
-	}
-}
-
-// reconcileOnePlaylistDir removes every suffixed .m3u8 in dir that is not in keep.
-//
-// Conservative on purpose: only files matching m3u8BaseName's shape are
-// candidates. The Playlists directory is ours by convention, not by ownership,
-// and a bare "<name>.m3u8" there is indistinguishable from one the operator put
-// there themselves. Deleting those to tidy up our own mess is not a trade worth
-// making — the legacy unsuffixed names we did write are already handled by the
-// rename and remove paths.
-func (w *Watcher) reconcileOnePlaylistDir(dir string, keep map[string]struct{}) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return // not created yet, or not readable: nothing to reconcile
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !suffixedM3U8Name.MatchString(name) {
-			continue
-		}
-		if _, ok := keep[name]; ok {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err == nil {
-			slog.Info("[Watcher] M3U8 reconcile: removed a file no watchlist owns",
-				"file", name, "dir", dir)
-		} else if !os.IsNotExist(err) {
-			slog.Warn("[Watcher] M3U8 reconcile: cannot remove orphan",
-				"file", name, "err", err)
-		}
-	}
-}
+// Orphan cleanup needs a record of what we wrote and who wrote it. Until that
+// exists, the two places that create orphans are fixed at the source instead:
+// RemoveWatchlist and deleteStaleM3U8OnRename no longer gate their cleanup on
+// the CreateM3u8File setting, which is how the observed orphan survived its
+// watchlist by 27 days.
 
 // legacyM3U8BaseName is the pre-disambiguation filename (sanitized playlist
 // name only, no ID suffix) SpotiFLAC used before m3u8BaseName. Used only to
