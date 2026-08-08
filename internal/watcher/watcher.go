@@ -504,6 +504,13 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		return AddWatchlistResponse{}, fmt.Errorf("spotify URL is required")
 	}
 
+	if existing, err := w.findWatchlistBySource(req.SpotifyURL, req.UserID); err == nil && existing != nil {
+		return AddWatchlistResponse{}, fmt.Errorf(
+			"already watching this: %q, added %s — edit or remove it instead of adding a second copy",
+			existing.Name, existing.CreatedAt.Format("2006-01-02"),
+		)
+	}
+
 	if req.IntervalHours <= 0 {
 		req.IntervalHours = 24
 	}
@@ -1690,6 +1697,51 @@ func m3u8BaseName(playlistName, watchlistID string) string {
 func watchlistIDSuffix(watchlistID string) string {
 	sum := sha256.Sum256([]byte(watchlistID))
 	return hex.EncodeToString(sum[:4])
+}
+
+// sameSpotifySource reports whether two references point at the same Spotify
+// entity, comparing extracted IDs rather than the strings.
+//
+// The stored URL is whatever was pasted, and the same playlist arrives in
+// several shapes: with or without `?si=…` (production carries it), as a
+// `spotify:` URI, or localised. Comparing raw strings would call two of those
+// different.
+//
+// Unrecognised references are never a match. Failing open here costs a
+// duplicate watchlist, which is recoverable; failing closed would refuse a
+// legitimate one for a URL shape nobody anticipated, which reads as the feature
+// being broken.
+func sameSpotifySource(a, b string) bool {
+	kindA, idA := spotify.ParseEntityRef(a)
+	kindB, idB := spotify.ParseEntityRef(b)
+	if idA == "" || idB == "" {
+		return false
+	}
+	return kindA == kindB && idA == idB
+}
+
+// findWatchlistBySource returns this user's watchlist tracking the same Spotify
+// entity, or nil.
+//
+// Scoped per user on purpose: two accounts tracking the same playlist are two
+// legitimate watchlists with their own settings, download paths and files.
+// AddWatchlist had no duplicate check of any kind, which is how a deployment
+// ended up with two entries for one playlist, two IDs, and two M3U8 files —
+// one of which then stopped syncing and sat stale for weeks.
+func (w *Watcher) findWatchlistBySource(spotifyURL, userID string) (*WatchedPlaylist, error) {
+	all, err := w.GetWatchlists()
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if all[i].UserID != userID {
+			continue
+		}
+		if sameSpotifySource(all[i].SpotifyURL, spotifyURL) {
+			return &all[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // isAlbumSource reports whether a Spotify URL points at an album rather than a

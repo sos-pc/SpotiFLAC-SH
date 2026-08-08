@@ -82,20 +82,31 @@ func GetSpotifyDataWithAPI(ctx context.Context, spotifyURL string, useAPI bool, 
 	return data, nil
 }
 
-func parseSpotifyURLToTypeAndID(url string) (string, string) {
+// entityRef matches a Spotify reference in a URL. The optional segment before
+// the type is the locale Spotify puts in shared links —
+// open.spotify.com/intl-fr/playlist/… — which the anchored form of this pattern
+// silently returned nothing for. Query parameters need no handling: the ID is
+// matched by its own character class, so `?si=…` simply falls outside it.
+var entityRef = regexp.MustCompile(`spotify\.com/(?:[a-zA-Z0-9-]+/)?(track|album|playlist|artist)/([a-zA-Z0-9]+)`)
 
-	if strings.HasPrefix(url, "spotify:") {
-		parts := strings.Split(url, ":")
+// ParseEntityRef extracts the entity kind ("track", "album", "playlist",
+// "artist") and its ID from any Spotify reference: a `spotify:…` URI, a plain
+// URL, or a localised one, with or without query parameters. Both values are
+// empty when the reference is not recognised — callers must treat that as
+// "unknown", never as a match.
+func ParseEntityRef(ref string) (kind, id string) {
+	if strings.HasPrefix(ref, "spotify:") {
+		parts := strings.Split(ref, ":")
 		if len(parts) >= 3 {
 			return parts[1], parts[2]
 		}
 	}
-
-	re := regexp.MustCompile(`spotify\.com/(track|album|playlist|artist)/([a-zA-Z0-9]+)`)
-	matches := re.FindStringSubmatch(url)
-	if len(matches) == 3 {
-		return matches[1], matches[2]
+	if m := entityRef.FindStringSubmatch(ref); len(m) == 3 {
+		return m[1], m[2]
 	}
-
 	return "", ""
+}
+
+func parseSpotifyURLToTypeAndID(url string) (string, string) {
+	return ParseEntityRef(url)
 }
