@@ -198,6 +198,10 @@ def health() -> dict[str, str]:
 # of provider endpoints, we ask the engine what it would try.
 
 _PROVIDER_CACHE_TTL = 300.0
+# Nearly 3x the 2.2 s measured on the production engine: long enough that a cold
+# call returns real data, short enough that a hung provider cannot make the
+# status board feel broken in the other direction.
+_PROVIDER_COLD_WAIT = 6.0
 _provider_cache: dict[str, object] = {}
 _provider_lock = asyncio.Lock()
 _provider_refreshing = False
@@ -271,27 +275,46 @@ async def _refresh_providers(services: list[str]) -> None:
 
 @app.get("/providers/health")
 async def providers_health(services: str = "qobuz,deezer,amazon,tidal") -> dict:
-    """Per-provider reachability. Never blocks; refreshes in the background.
+    """Per-provider reachability. Stale-while-revalidate, except when cold.
 
-    Stale-while-revalidate on purpose. The underlying check makes ~51 HTTP
-    requests and takes about ten seconds, and this feeds a status board in the
-    UI: a board that hangs for ten seconds is worse than one showing a value
-    from four minutes ago. So a request returns whatever is cached and triggers
-    a refresh if it is stale; the very first call returns `pending` and the next
-    one has data.
+    A stale answer is served immediately and refreshed behind the request, so a
+    warm call never blocks. A *cold* call waits, briefly, because the
+    alternative was measurably worse: the first status page load after a deploy
+    showed no provider rows at all and cached that emptiness for 30 s, which
+    reads as "the feature does not work" — that is exactly how it was reported
+    the first time it shipped.
+
+    The wait is affordable because the check is not slow. Measured on the
+    production engine 2026-08-08: 2.2 s for 13 real probes. The ten seconds this
+    was originally built around was the cost of importing SpotiFLAC in a
+    throwaway `docker exec`, not the probes — an assumption taken from a
+    stopwatch on the wrong thing.
     """
     global _provider_refreshing
     wanted = [s.strip() for s in services.split(",") if s.strip()]
 
-    cached = _provider_cache.get("data")
-    at = _provider_cache.get("at")
-    fresh = at is not None and (time.monotonic() - float(at)) < _PROVIDER_CACHE_TTL
+    def _read() -> tuple[object, bool]:
+        data = _provider_cache.get("data")
+        at = _provider_cache.get("at")
+        return data, at is not None and (time.monotonic() - float(at)) < _PROVIDER_CACHE_TTL
+
+    cached, fresh = _read()
 
     if not fresh:
         async with _provider_lock:
             if not _provider_refreshing:
                 _provider_refreshing = True
                 asyncio.create_task(_refresh_providers(wanted))
+
+    if cached is None:
+        # Poll the cache rather than await the task: another request may already
+        # own the refresh, in which case there is no handle to await here.
+        deadline = time.monotonic() + _PROVIDER_COLD_WAIT
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+            cached, fresh = _read()
+            if cached is not None:
+                break
 
     if cached is None:
         return {"pending": True, "checked_at": None, "providers": {}}
