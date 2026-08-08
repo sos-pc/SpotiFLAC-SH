@@ -26,6 +26,7 @@ import logging
 import os
 import pathlib
 import shutil
+import time
 import uuid
 from contextlib import redirect_stdout, redirect_stderr
 
@@ -183,6 +184,118 @@ def health() -> dict[str, str]:
     # "what is actually running over there?" without restarting anything to
     # read a startup line.
     return {"status": "ok", **_identity()}
+
+
+# ── Provider reachability ────────────────────────────────────────────────────
+#
+# /health answers "is the sidecar alive". That is not the question an operator
+# has when downloads fail. On 2026-08-07 it answered ok for hours while 45 of
+# Qobuz's 48 mirrors were dead, Deezer's only resolver returned 403 and Amazon's
+# only host refused connections — and finding that out took an hour of manual
+# forensics. This endpoint is that hour, answered in one request.
+#
+# It calls upstream's own checker, which is the point: we do not maintain a list
+# of provider endpoints, we ask the engine what it would try.
+
+_PROVIDER_CACHE_TTL = 300.0
+_provider_cache: dict[str, object] = {}
+_provider_lock = asyncio.Lock()
+_provider_refreshing = False
+
+
+def _summarise(results: list, ext) -> dict:
+    """Fold ~51 endpoint probes into one row per provider.
+
+    Two normalisations, both forced by upstream data rather than chosen:
+
+    - Entries whose URL is not http(s) are dropped. `get_qobuz_endpoints`
+      returns the raw registry value, and the registry holds a *string* for some
+      categories; health_check.py iterates it directly, so every character
+      becomes an "endpoint" (`a/prepare`, `b/prepare`, ...). providers/qobuz.py
+      wraps the same value in a list before using it, which is the handling
+      health_check.py forgot. Filtering here keeps that upstream inconsistency
+      out of our contract without patching their file.
+    - `latency` is -1 on failure, so the reported latency is taken from the
+      reachable probes only; a provider with nothing reachable reports none.
+    """
+    per: dict[str, dict] = {}
+    skipped = 0
+    for r in results:
+        if not str(getattr(r, "url", "")).startswith("http"):
+            skipped += 1
+            continue
+        row = per.setdefault(
+            r.provider, {"reachable": 0, "total": 0, "latency_ms": None, "detail": ""},
+        )
+        row["total"] += 1
+        if r.ok:
+            row["reachable"] += 1
+            lat = int(r.latency) if r.latency >= 0 else None
+            if lat is not None and (row["latency_ms"] is None or lat < row["latency_ms"]):
+                row["latency_ms"] = lat
+        # First failure detail is what an operator needs when nothing is
+        # reachable; a successful probe's detail ("HTTP 410") explains little.
+        if not r.ok and not row["detail"]:
+            row["detail"] = str(r.detail)[:80]
+
+    for row in per.values():
+        row["ok"] = row["reachable"] > 0
+        if row["ok"]:
+            row["detail"] = ""
+
+    return {
+        "checked_at": int(time.time()),
+        "providers": per,
+        "extensions": {
+            "ok": bool(getattr(ext, "ok", False)),
+            "detail": str(getattr(ext, "detail", ""))[:80],
+        },
+        "skipped_malformed": skipped,
+    }
+
+
+async def _refresh_providers(services: list[str]) -> None:
+    global _provider_refreshing
+    try:
+        from SpotiFLAC.core.health_check import run_health_check_with_extensions
+
+        results, ext = await run_health_check_with_extensions(services)
+        _provider_cache["data"] = _summarise(results, ext)
+        _provider_cache["at"] = time.monotonic()
+    except Exception as exc:  # noqa: BLE001 — a diagnostic must not take the engine down
+        _provider_cache["data"] = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+        _provider_cache["at"] = time.monotonic()
+    finally:
+        _provider_refreshing = False
+
+
+@app.get("/providers/health")
+async def providers_health(services: str = "qobuz,deezer,amazon,tidal") -> dict:
+    """Per-provider reachability. Never blocks; refreshes in the background.
+
+    Stale-while-revalidate on purpose. The underlying check makes ~51 HTTP
+    requests and takes about ten seconds, and this feeds a status board in the
+    UI: a board that hangs for ten seconds is worse than one showing a value
+    from four minutes ago. So a request returns whatever is cached and triggers
+    a refresh if it is stale; the very first call returns `pending` and the next
+    one has data.
+    """
+    global _provider_refreshing
+    wanted = [s.strip() for s in services.split(",") if s.strip()]
+
+    cached = _provider_cache.get("data")
+    at = _provider_cache.get("at")
+    fresh = at is not None and (time.monotonic() - float(at)) < _PROVIDER_CACHE_TTL
+
+    if not fresh:
+        async with _provider_lock:
+            if not _provider_refreshing:
+                _provider_refreshing = True
+                asyncio.create_task(_refresh_providers(wanted))
+
+    if cached is None:
+        return {"pending": True, "checked_at": None, "providers": {}}
+    return {"pending": not fresh, **cached}  # type: ignore[dict-item]
 
 
 @app.post("/download", response_model=DownloadResponse)

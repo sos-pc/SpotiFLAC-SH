@@ -111,22 +111,12 @@ func (c *Client) Download(ctx context.Context, spotifyURL string, services []str
 	return &Result{File: dr.File, Log: dr.Log}, nil
 }
 
-// Health probes the engine's /health (for api_status.go).
-func (c *Client) Health(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("engine health HTTP %d", resp.StatusCode)
-	}
-	return nil
-}
+// Health lived here, described as "for api_status.go". api_status.go never
+// called it: it probes the engine's /health URL directly through its own
+// doRequest, the same way it probes every other service on the board, and it now
+// reads /providers/health the same way. A method whose only stated justification
+// was a caller that does not exist is worse than no method — it reads as API
+// surface someone depends on.
 
 func truncate(b []byte, n int) string {
 	if len(b) > n {

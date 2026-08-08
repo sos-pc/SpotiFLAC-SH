@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -165,6 +166,100 @@ func doRequest(ctx context.Context, method, url string) (*http.Response, time.Du
 	start := time.Now()
 	resp, err := http.DefaultClient.Do(req)
 	return resp, time.Since(start), err
+}
+
+// providersHealth mirrors GET /providers/health on the engine shim.
+type providersHealth struct {
+	Pending   bool   `json:"pending"`
+	Error     string `json:"error,omitempty"`
+	Providers map[string]struct {
+		OK        bool   `json:"ok"`
+		Reachable int    `json:"reachable"`
+		Total     int    `json:"total"`
+		LatencyMs *int   `json:"latency_ms"`
+		Detail    string `json:"detail"`
+	} `json:"providers"`
+}
+
+// engineProviderRows turns the engine's provider reachability into one row per
+// delegated provider.
+//
+// The "Engine" row is liveness: it says the sidecar answers. It cannot say
+// whether the providers behind it can deliver, and that distinction is the whole
+// question when a download fails. On 2026-08-07 "Engine" was green for hours
+// while Qobuz had 3 reachable mirrors out of 48, Deezer's only resolver answered
+// 403 and Amazon's only host refused connections — none of which this board
+// could show. Establishing that took an hour of manual forensics; these rows are
+// that hour, answered on page load.
+//
+// Deliberately silent on failure. This is a diagnostic, and an engine too old to
+// have the endpoint, one still gathering its first sample, or a transient blip
+// must produce no rows rather than a wall of red: a status board that cries wolf
+// stops being read, which costs more than the rows are worth.
+func engineProviderRows(baseURL string) []ServiceStatus {
+	// The endpoint is stale-while-revalidate on the engine side, so it answers
+	// from cache immediately and never blocks on the ~51 probes it runs. A short
+	// timeout is therefore generous, not tight.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	url := strings.TrimRight(baseURL, "/") + "/providers/health"
+	resp, _, err := doRequest(ctx, http.MethodGet, url)
+	if err != nil {
+		slog.Debug("[Status] engine provider health unavailable", "err", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Debug("[Status] engine provider health non-200", "code", resp.StatusCode)
+		return nil
+	}
+
+	var ph providersHealth
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&ph); err != nil {
+		slog.Debug("[Status] engine provider health undecodable", "err", err)
+		return nil
+	}
+	if ph.Error != "" {
+		slog.Warn("[Status] engine could not check its providers", "err", ph.Error)
+		return nil
+	}
+
+	names := make([]string, 0, len(ph.Providers))
+	for n := range ph.Providers {
+		names = append(names, n)
+	}
+	sort.Strings(names) // map order is random; a board that reshuffles is unreadable
+
+	now := time.Now().Unix()
+	rows := make([]ServiceStatus, 0, len(names))
+	for _, n := range names {
+		p := ph.Providers[n]
+		label := n
+		if label != "" {
+			label = strings.ToUpper(label[:1]) + label[1:]
+		}
+		row := ServiceStatus{
+			Name:      label + " · engine",
+			URL:       url,
+			Status:    "ok",
+			CheckedAt: now,
+		}
+		if !p.OK {
+			row.Status = "down"
+			// The count first: "0/1" and "3/48" are different kinds of trouble,
+			// and the reason is what the operator acts on.
+			row.Error = fmt.Sprintf("%d/%d reachable", p.Reachable, p.Total)
+			if p.Detail != "" {
+				row.Error += " — " + p.Detail
+			}
+		}
+		if p.LatencyMs != nil {
+			row.LatencyMs = *p.LatencyMs
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // pingURL checks whether a URL is reachable, interpreting the HTTP status code.
@@ -412,6 +507,14 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 		}(i, svc)
 	}
 	wg.Wait()
+
+	// Appended after the fan-out rather than folded into it: one request yields
+	// several rows, which the one-entry-one-probe shape above cannot express. It
+	// costs a round trip on the internal network, not a probe sweep — the engine
+	// answers this endpoint from cache by design.
+	if engineURL := backend.EngineBaseURL(); engineURL != "" {
+		results = append(results, engineProviderRows(engineURL)...)
+	}
 
 	return results
 }

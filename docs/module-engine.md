@@ -82,6 +82,10 @@ swapping the engine is a change to `engine/shim.py` alone, with no Go change.
 POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
              →  {status: "ok"|"error", file, error, log}
 GET|HEAD /health → {status: "ok", engine_version, revision}
+GET /providers/health?services=a,b
+             →  {pending, checked_at, providers{name:{ok, reachable, total,
+                 latency_ms, detail}}, extensions{ok, detail},
+                 skipped_malformed}
 ```
 
 **`status: "ok"` means the file was parsed as audio, not merely produced.** The
@@ -92,6 +96,32 @@ clear that bar.
 
 The extra `/health` fields are additive; a consumer decoding only `{status}` is
 unaffected.
+
+**`/providers/health` answers a different question from `/health`.** `/health` is
+liveness — the sidecar replies. It says nothing about whether the providers
+behind it can deliver, and on 2026-08-07 it read `ok` for hours while Qobuz had
+3 reachable mirrors out of 48, Deezer's only resolver answered `403` and Amazon's
+only host refused connections. `/apis/status` now carries one row per provider
+from this endpoint, so the status board distinguishes "our deployment is broken"
+from "upstream's fleet is down" without anyone running a command.
+
+Three properties are deliberate:
+
+- **It never blocks.** The underlying check makes ~51 HTTP requests and takes
+  about ten seconds. This feeds a UI, so the endpoint is stale-while-revalidate:
+  it answers from a 5-minute cache and refreshes in the background. The first
+  ever call returns `pending: true` with no providers.
+- **It asks the engine what *it* would try.** We do not keep a list of provider
+  hosts; upstream resolves them from a registry fetched at runtime, so any list
+  of ours would be wrong within days.
+- **`skipped_malformed` is not noise, it is a count of an upstream bug.**
+  `get_qobuz_endpoints` returns the raw registry value, which is a *string* for
+  some categories, and `health_check.py` iterates it directly — so every
+  character becomes an "endpoint" (`a/prepare`, `b/prepare`, …). 35 of them on
+  2026-08-07. `providers/qobuz.py` wraps the same value in a list before use,
+  which is the handling `health_check.py` forgot; the shim filters non-`http`
+  entries rather than patching their file, because a patch is a liability at
+  every upstream release and this costs nothing.
 
 **`quality` is canonical, not per-provider.** One of:
 

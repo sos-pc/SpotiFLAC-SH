@@ -230,7 +230,31 @@ Left unchecked the engine reports these as successful, so if you ever see a 0-by
 
 Its host probably died. The engine resolves its endpoints from an encrypted registry fetched **at runtime**, so upstream replaces dead hosts without publishing a release, and the same provider fails differently from one day to the next. Measured 2026-08-04: three of nine Qobuz hosts no longer resolve at all, and Deezer's primary route fails on every attempt with `ext:deezer` carrying the provider.
 
-Confirm it is the host and not your container before digging further:
+**Open Settings → APIs.** There is one row per delegated provider, named
+`Qobuz · engine`, `Deezer · engine` and so on, and it answers the only question
+worth asking first — is it us or is it them?
+
+| what you see | what it means |
+|---|---|
+| provider rows red, `Engine` green | upstream's hosts are down. Nothing to fix here; the row's error carries the count and the reason, e.g. `0/1 reachable — HTTP 403` |
+| `Engine` red | the sidecar itself is unreachable. Your deployment, not upstream — see *Container exits immediately on startup* above |
+| all green but downloads still fail | not reachability. Read the engine log for the per-attempt reason |
+| no provider rows at all | the engine predates the endpoint, or is still gathering its first sample. Reload in a minute |
+
+A row reading `3/48 reachable` is worth noting even when green: the provider works
+through a handful of surviving mirrors and is one outage away from red.
+
+The rows come from the engine asking **itself** which endpoints it would try —
+we do not maintain a list of provider hosts. The engine resolves them from an
+encrypted registry fetched **at runtime**, which is why the same provider fails
+differently from one day to the next without any release being published.
+
+Measured 2026-08-07, with the app reporting `Engine: ok` throughout: Qobuz 3
+reachable out of 48, Deezer 0 of 1 (`HTTP 403`), Amazon 0 of 1 (connection
+refused), Tidal 2 of 2. Establishing that by hand took about an hour, which is
+why the board now shows it.
+
+To rule out container DNS specifically:
 
 ```bash
 docker exec spotiflac-engine python -c "import socket; print(socket.gethostbyname('pypi.org'))"
