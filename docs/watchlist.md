@@ -271,14 +271,22 @@ A watchlist tracking a Spotify album writes no M3U8. Downloads land in `<Artist>
 
 Artist watchlists **do** get one: an artist is a growing collection spanning many releases, which is the case where a flat playlist shows something the folder tree does not.
 
-### Orphaned files are cleaned up automatically
+### Two producers write to `Playlists/`, and nothing records which
 
-Every check cycle, any `<name> [xxxxxxxx].m3u8` in a `Playlists/` directory that no live watchlist owns is deleted. Two ways one appears:
+Worth knowing before you reason about these files:
 
-- `RemoveWatchlist` only deletes the M3U8 when `createM3u8File` happens to be enabled at that moment, so removing a watchlist while it was off left the file behind permanently.
-- An album watchlist that wrote a file before album files stopped being written has nothing left to clean it up.
+- **watchlist syncs** — `GenerateM3U8ForPlaylist`, one file per watchlist
+- **manual batches** — `OnManualBatchComplete`, one file per download started from the search bar that asked for a playlist
 
-Only names matching the suffixed shape are ever removed. `Playlists/` is SpotiFLAC's by convention, not by ownership: a bare `<name>.m3u8` there is indistinguishable from one you put there yourself, so those are left alone.
+Both use the same `<name> [xxxxxxxx].m3u8` naming, and nothing on disk says which produced a given file. A file with no watchlist behind it is therefore **not** evidence of an orphan — it is the normal case for every manual download.
+
+That cost a regression on 2026-08-08: a sweep that deleted "any suffixed file no watchlist owns" ran on the reference deployment and destroyed five legitimate manual-batch playlists within minutes of shipping. It has been removed. Orphan cleanup needs a record of what was written and by whom; until that exists there is no sweep.
+
+### Orphans are prevented at the source instead
+
+Removing or renaming a watchlist deletes its file, and **neither is gated on `createM3u8File`**. The setting governs whether files are written; a file already on disk has to be tidied up either way. Gating it is how one deployment ended up with a playlist that outlived its watchlist by 27 days — removed while the setting was off, with nothing left that knew about it.
+
+A file orphaned some other way stays until you delete it by hand.
 
 ---
 
