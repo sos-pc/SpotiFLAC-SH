@@ -255,9 +255,30 @@ To generate M3U8 files that Jellyfin can read:
 2. Set `jellyfinMusicPath` to the path Jellyfin uses to mount your music library (e.g. `/media/music` if Jellyfin mounts the same folder under that path).
 3. Make sure your watchlist's `downloadPath` is a child of the host folder Jellyfin sees.
 
-Each watchlist gets its own `<downloadPath>/Playlists/<sanitized-name>.m3u8`. Inside the file, every entry has its `downloadPath` prefix replaced by `jellyfinMusicPath`.
+Each watchlist gets its own `<downloadPath>/Playlists/<sanitized-name> [xxxxxxxx].m3u8`, where the bracketed part is eight hex digits derived from the watchlist ID. Inside the file, every entry has its `downloadPath` prefix replaced by `jellyfinMusicPath`.
 
 The M3U8 is regenerated **after every sync** when no new tracks were enqueued, and again when each batch completes (so during a large initial sync, the file gradually fills as tracks finish — no waiting for the entire batch).
+
+### Why the filename carries a code, and why it shows up in Jellyfin
+
+The suffix disambiguates: two watchlists whose names collide once sanitized (`AC/DC Hits` and `AC:DC Hits` both become `AC DC Hits`) would otherwise write to the same file, and whichever synced last would silently overwrite the other on every cycle.
+
+It is visible in Jellyfin because **Jellyfin names a playlist after the file, and has no other source.** The M3U8 format has a `#PLAYLIST:` field for exactly this, and Jellyfin ignores it — [an open feature request](https://features.jellyfin.org/posts/3104/support-playlist-field-in-m3u-playlists). Verified empirically on 2026-08-08: a file named `ZZTest [deadbeef].m3u8` containing `#PLAYLIST:Titre Propre Sans Code` appeared in Jellyfin as `ZZTest [deadbeef]`. So there is no metadata field to hide the code in — the only way to a clean name is a clean filename, which means handling collisions somewhere other than the filename.
+
+### Albums do not get a playlist
+
+A watchlist tracking a Spotify album writes no M3U8. Downloads land in `<Artist>/<Album>/`, which Jellyfin already indexes as an album, so a playlist file put the identical content in the Playlists tab a second time. Tracking, syncing and downloading are unaffected.
+
+Artist watchlists **do** get one: an artist is a growing collection spanning many releases, which is the case where a flat playlist shows something the folder tree does not.
+
+### Orphaned files are cleaned up automatically
+
+Every check cycle, any `<name> [xxxxxxxx].m3u8` in a `Playlists/` directory that no live watchlist owns is deleted. Two ways one appears:
+
+- `RemoveWatchlist` only deletes the M3U8 when `createM3u8File` happens to be enabled at that moment, so removing a watchlist while it was off left the file behind permanently.
+- An album watchlist that wrote a file before album files stopped being written has nothing left to clean it up.
+
+Only names matching the suffixed shape are ever removed. `Playlists/` is SpotiFLAC's by convention, not by ownership: a bare `<name>.m3u8` there is indistinguishable from one you put there yourself, so those are left alone.
 
 ---
 
