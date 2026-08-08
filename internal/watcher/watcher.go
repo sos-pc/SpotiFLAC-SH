@@ -767,6 +767,21 @@ func (w *Watcher) OnManualBatchComplete(req jobs.BatchM3U8Request, paths []strin
 	if len(paths) == 0 {
 		return
 	}
+	// Same rule as the watchlist path: an album already exists as an album in
+	// the library, so a playlist listing exactly its tracks is the same content
+	// filed a second time. This is the producer the operator was actually
+	// looking at — three of the albums in their Playlists tab came from here,
+	// not from watchlists, which the first attempt at this missed entirely.
+	//
+	// SourceID carries the Spotify URL the download started from: App.tsx passes
+	// `spotifyUrl` down as the batch's identity, so the same detection works on
+	// both producers with no new plumbing. An artist discography keeps its
+	// playlist, for the reason given on isAlbumSource.
+	if isAlbumSource(req.SourceID) {
+		slog.Info("[M3U8] manual batch is an album, no playlist written", "name", req.Name)
+		return
+	}
+
 	settings := settings.EffectiveDownloadSettings(w.auth, req.UserID)
 	if !settings.CreateM3u8File {
 		return
@@ -1573,7 +1588,7 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// Note this covers album *watchlists* only. Albums downloaded from the search
 	// bar go through OnManualBatchComplete, which is a different producer and
 	// still writes a playlist for them.
-	if isAlbumWatchlist(pl.SpotifyURL) {
+	if isAlbumSource(pl.SpotifyURL) {
 		return m3u8.GenerationResult{Skipped: true, SkipReason: "album watchlist"}, nil
 	}
 
@@ -1677,8 +1692,9 @@ func watchlistIDSuffix(watchlistID string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-// isAlbumWatchlist reports whether a watchlist tracks a Spotify album rather
-// than a playlist.
+// isAlbumSource reports whether a Spotify URL points at an album rather than a
+// playlist. Used by both M3U8 producers — watchlist syncs and manual batches —
+// which is why it is named for the source and not for either caller.
 //
 // Derived from the URL because WatchedPlaylist has never stored a source type.
 // Adding one would need a migration for every existing watchlist, and the URL is
@@ -1690,7 +1706,7 @@ func watchlistIDSuffix(watchlistID string) string {
 // collection spanning many releases, which is the one case where a flat playlist
 // file shows something the <Artist>/<Album>/ tree does not. Recorded as a
 // decision so it does not read as an oversight later.
-func isAlbumWatchlist(spotifyURL string) bool {
+func isAlbumSource(spotifyURL string) bool {
 	u := strings.ToLower(spotifyURL)
 	return strings.Contains(u, "/album/") || strings.Contains(u, ":album:")
 }
