@@ -33,11 +33,18 @@ const PlaylistsDirName = "Playlists"
 // for callers (the repair endpoint) that need to show the user something
 // more useful than fire-and-forget log lines.
 type GenerationResult struct {
-	Written    bool `json:"written"`    // a file was actually created/updated
-	Skipped    bool `json:"skipped"`    // shrink-guard refused the write (force=false only)
-	Total      int  `json:"total"`      // len(pl.TrackIDs) at generation time
-	Resolved   int  `json:"resolved"`   // tracks successfully resolved to a file on disk
-	Unresolved int  `json:"unresolved"` // Total - Resolved
+	Written bool `json:"written"` // a file was actually created/updated
+	Skipped bool `json:"skipped"` // no file was written, and it was not an error
+	// SkipReason says which deliberate skip happened, because there are now two
+	// and they mean opposite things to whoever is reading: "shrink guard"
+	// withheld a write that would have made an existing file worse, while
+	// "album watchlist" means no file is wanted for this watchlist at all. When
+	// Skipped was the only signal it could only mean the shrink guard; widening
+	// it silently would have left every consumer reading the old meaning.
+	SkipReason string `json:"skip_reason,omitempty"`
+	Total      int    `json:"total"`      // len(pl.TrackIDs) at generation time
+	Resolved   int    `json:"resolved"`   // tracks successfully resolved to a file on disk
+	Unresolved int    `json:"unresolved"` // Total - Resolved
 }
 
 // ShouldSkipShrinkingWrite reports whether a new M3U8 write with newCount
@@ -102,6 +109,7 @@ func WriteToPlaylistsDir(
 			slog.Warn("[M3U8] refusing to shrink, leaving the existing file untouched",
 				"file", baseName+".m3u8", "existing_entries", existingCount, "new_entries", len(paths))
 			result.Skipped = true
+			result.SkipReason = "shrink guard"
 			return result, nil
 		}
 	}

@@ -132,6 +132,112 @@ func TestNeedsFilesystemIndexFallback(t *testing.T) {
 	}
 }
 
+// TestIsAlbumWatchlist covers the URL shapes a watchlist can hold. The artist
+// case is asserted false on purpose: not covering artists is a decision, and a
+// test is where that stays a decision rather than becoming an accident.
+func TestIsAlbumWatchlist(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3", true},
+		{"https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M", false},
+		{"https://open.spotify.com/artist/0OdUWJ0sBjDrqHygGUXeCF", false},
+		{"spotify:album:1DFixLWuPkv3KT3TnV35m3", true},
+		{"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", false},
+		{"https://open.spotify.com/intl-fr/ALBUM/1DFixLWuPkv3KT3TnV35m3", true},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			if got := isAlbumWatchlist(tt.url); got != tt.want {
+				t.Errorf("isAlbumWatchlist(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestReconcileOnePlaylistDir is the safety net for code that deletes files.
+//
+// The rule it protects: only names matching m3u8BaseName's "<name> [8 hex]"
+// shape may ever be removed. The Playlists directory is ours by convention, not
+// by ownership, so an operator's own playlist sitting there must survive a
+// reconcile — losing someone's file while tidying up our own orphan would be a
+// far worse bug than the orphan.
+func TestReconcileOnePlaylistDir(t *testing.T) {
+	dir := t.TempDir()
+
+	files := []string{
+		"Release Radar [830f8305].m3u8", // kept: a live watchlist owns it
+		"all [957f2ab0].m3u8",           // removed: suffixed, unowned
+		"Free Ride [fc8b49be].m3u8",     // removed: suffixed, unowned (album)
+		"My Own Mix.m3u8",               // kept: not suffixed — operator's file
+		"Legacy Playlist.m3u8",          // kept: not suffixed
+		"weird [xyz12345].m3u8",         // kept: bracketed but not 8 hex digits
+		"notes.txt",                     // kept: not an m3u8
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("#EXTM3U\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", f, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "a directory [deadbeef].m3u8"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	keep := map[string]struct{}{"Release Radar [830f8305].m3u8": {}}
+	(&Watcher{}).reconcileOnePlaylistDir(dir, keep)
+
+	wantGone := []string{"all [957f2ab0].m3u8", "Free Ride [fc8b49be].m3u8"}
+	wantKept := []string{
+		"Release Radar [830f8305].m3u8",
+		"My Own Mix.m3u8",
+		"Legacy Playlist.m3u8",
+		"weird [xyz12345].m3u8",
+		"notes.txt",
+		"a directory [deadbeef].m3u8",
+	}
+	for _, f := range wantGone {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Errorf("%q should have been removed as an orphan", f)
+		}
+	}
+	for _, f := range wantKept {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%q should have been left alone, got %v", f, err)
+		}
+	}
+}
+
+// TestReconcileOnePlaylistDirEmptyKeepSet covers the all-albums and
+// last-watchlist-deleted cases: an empty keep set means every suffixed file is
+// unowned, and every one of them must go — while everything else still stays.
+func TestReconcileOnePlaylistDirEmptyKeepSet(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"a [11111111].m3u8", "b [22222222].m3u8", "mine.m3u8"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("#EXTM3U\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", f, err)
+		}
+	}
+
+	(&Watcher{}).reconcileOnePlaylistDir(dir, map[string]struct{}{})
+
+	for _, f := range []string{"a [11111111].m3u8", "b [22222222].m3u8"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Errorf("%q should have been removed with an empty keep set", f)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mine.m3u8")); err != nil {
+		t.Errorf("unsuffixed file must survive an empty keep set, got %v", err)
+	}
+}
+
+// TestReconcileMissingDirIsNotAnError: a deployment that has never generated a
+// playlist has no Playlists directory, and reconcile runs on every check cycle.
+func TestReconcileMissingDirIsNotAnError(t *testing.T) {
+	(&Watcher{}).reconcileOnePlaylistDir(filepath.Join(t.TempDir(), "nope"), map[string]struct{}{})
+}
+
 func TestShouldSkipShrinkingWrite(t *testing.T) {
 	tests := []struct {
 		name          string
