@@ -1112,13 +1112,17 @@ Parallel health check of every external service (cached for 30 seconds).
 
 ```json
 [
-  { "name": "Tidal API",        "url": "https://api.tidal.com",   "status": "ok",   "latency_ms": 45, "checked_at": 1753920000 },
-  { "name": "Deezer",           "url": "https://api.deezer.com",  "status": "ok",   "latency_ms": 62, "checked_at": 1753920000 },
-  { "name": "Download engine",  "url": "http://spotiflac-engine:8080", "status": "ok", "latency_ms": 3, "checked_at": 1753920000 }
+  { "name": "Tidal API",      "url": "https://api.tidal.com",  "status": "ok",   "latency_ms": 45, "checked_at": 1753920000 },
+  { "name": "Deezer",         "url": "https://api.deezer.com", "status": "ok",   "latency_ms": 62, "checked_at": 1753920000 },
+  { "name": "Engine",         "url": "http://spotiflac-engine:8080/health", "status": "ok", "latency_ms": 3, "checked_at": 1753920000 },
+  { "name": "Qobuz · engine", "url": "http://spotiflac-engine:8080/providers/health", "status": "ok",   "latency_ms": 325, "checked_at": 1753920000 },
+  { "name": "Deezer · engine","url": "http://spotiflac-engine:8080/providers/health", "status": "down", "checked_at": 1753920000, "error": "0/1 reachable — HTTP 403" }
 ]
 ```
 
-> **Changed 2026-07-28.** The per-proxy entries (`Tidal · <host>`, `Amazon · <host>`, …) are gone with the proxy lists themselves. The engine entry appears only when `ENGINE_URL` is configured, and it is the probe that says whether delegated providers can run.
+> **Changed 2026-07-28.** The per-proxy entries (`Tidal · <host>`, `Amazon · <host>`, …) are gone with the proxy lists themselves. The `Engine` entry appears only when `ENGINE_URL` is configured.
+
+> **Added 2026-08-08.** One `<Provider> · engine` row per delegated provider, from the engine's own `/providers/health`. `Engine` is **liveness only** — this documentation used to claim it said "whether delegated providers can run", and on 2026-08-07 it read `ok` for hours while Qobuz had 3 reachable mirrors out of 48, Deezer's only resolver answered `403` and Amazon's only host refused connections. The provider rows are what distinguishes "our deployment is broken" from "upstream's fleet is down". A `down` row's `error` carries the count and the reason. No rows appear if the engine predates the endpoint or has not gathered its first sample — see [module-engine.md](module-engine.md).
 
 **Status values:** `ok` · `down` · `ratelimited` · `unconfigured`
 
