@@ -107,10 +107,15 @@ from "upstream's fleet is down" without anyone running a command.
 
 Three properties are deliberate:
 
-- **It never blocks.** The underlying check makes ~51 HTTP requests and takes
-  about ten seconds. This feeds a UI, so the endpoint is stale-while-revalidate:
-  it answers from a 5-minute cache and refreshes in the background. The first
-  ever call returns `pending: true` with no providers.
+- **A warm call never blocks; a cold one waits about two seconds.**
+  Stale-while-revalidate on a 5-minute cache, so a stale answer is served
+  immediately and refreshed behind the request. But a *cold* call waits up to 6 s
+  for the first sample, because the first version did not and the result was a
+  status board that showed no provider rows on the first load after a deploy and
+  cached that emptiness for 30 s — indistinguishable from a broken feature, and
+  reported as one. The wait is affordable: measured 2.2 s for 13 real probes on
+  2026-08-08. The "ten seconds" this was first built around was the cost of
+  importing SpotiFLAC in a throwaway `docker exec`, not the probes.
 - **It asks the engine what *it* would try.** We do not keep a list of provider
   hosts; upstream resolves them from a registry fetched at runtime, so any list
   of ours would be wrong within days.
