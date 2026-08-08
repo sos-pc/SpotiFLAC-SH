@@ -1,16 +1,29 @@
 name: Build & Publish Docker Image
 
+# Two kinds of image, two events, no branch names anywhere:
+#
+#   a version tag  → :X.Y.Z, :X.Y, :latest   a release
+#   a pull request → :pr-<number>            a preview to test before merging
+#   manual dispatch → :<branch>              anything else, on demand
+#
+# `branches: [feature/**]` used to stand in for "a change worth previewing".
+# It was an allowlist masquerading as a rule: any other prefix silently got no
+# image, which is how #35 and #36 shipped from `fix/**` branches with nothing to
+# deploy and test. A pull request is already the event that means someone is
+# proposing a change — it is what gates the tests, and now what builds the
+# preview. Name branches whatever you like.
+#
+# `:latest` still moves on version tags only. Releasing stays a decision.
 on:
   push:
     tags:
       - 'v*.*.*'
-    # One publication branch (main, released by tag) and feature branches, which
-    # each publish their own image so a change can be tested before it lands.
-    # `dev2` was deleted in v4.0.0: it had drifted 218 commits behind the branch
-    # the work was actually happening on, which is what a dev branch that is not
-    # the working branch always does.
-    branches:
-      - 'feature/**'
+  pull_request:
+    # A docs-only PR does not need a 114 MB image built for it.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.kiro/**'
   workflow_dispatch:
 
 env:
@@ -25,6 +38,13 @@ jobs:
 
   build-and-push:
     needs: test
+    # A pull request from a fork gets a read-only token, so `packages: write` is
+    # not grantable and the push would fail at the last step of a five-minute
+    # build. Skip it there rather than produce a red check nobody can fix: the
+    # tests above still run on fork PRs, which is the part that gates merging.
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,6 +69,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=ref,event=pr
             type=ref,event=branch
 
       - name: Set up Docker Buildx

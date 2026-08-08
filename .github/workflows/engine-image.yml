@@ -22,11 +22,18 @@ on:
         type: boolean
         default: false
   push:
-    # main included on purpose: the scheduled check only compares upstream's
-    # PyPI version against the published label, so it cannot notice that OUR
-    # shim, patches or Dockerfile changed. Without this, an engine/ change
-    # merged to main would sit unbuilt until upstream happened to release.
-    branches: [main, "feature/**"]
+    # main only: the scheduled check compares upstream's PyPI version against
+    # the published label, so it cannot notice that OUR shim, patches or
+    # Dockerfile changed. Without this, an engine/ change merged to main would
+    # sit unbuilt until upstream happened to release.
+    branches: [main]
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine-image.yml"
+  # Preview images come from pull requests, not from a branch-name allowlist.
+  # `feature/**` used to sit beside main here and silently covered nothing else,
+  # so an engine change proposed from any other prefix had no image to test.
+  pull_request:
     paths:
       - "engine/**"
       - ".github/workflows/engine-image.yml"
@@ -119,9 +126,11 @@ jobs:
           if [ "$FAILING" != "0" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "rebuilding: retrying a previously failed build (engine-build issue is open)"
-          elif [ "${{ inputs.force }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+          elif [ "${{ inputs.force }}" = "true" ] \
+               || [ "${{ github.event_name }}" = "push" ] \
+               || [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
-            echo "rebuilding: forced or engine/ changed"
+            echo "rebuilding: forced, or engine/ changed on this ref"
           elif [ "${{ steps.upstream.outputs.version }}" != "${{ steps.published.outputs.version }}" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "rebuilding: ${{ steps.published.outputs.version }} -> ${{ steps.upstream.outputs.version }}"
@@ -133,7 +142,13 @@ jobs:
   build:
     name: Build and publish
     needs: check
-    if: needs.check.outputs.stale == 'true'
+    # Fork pull requests get a read-only token, so `packages: write` cannot be
+    # granted and the push would fail after a full image build. Skip rather than
+    # show a red check nobody can fix.
+    if: >-
+      needs.check.outputs.stale == 'true'
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -152,17 +167,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # :latest only moves on the default branch. A build from a feature branch
-      # publishes its own tag so it can be tested without displacing what the
-      # deployment pulls.
+      # :latest only moves on the default branch or a scheduled run — that is
+      # what the deployment pulls. Everything else publishes its own tag so a
+      # change can be tested without displacing production.
       - name: Resolve tags
         id: tags
         run: |
           set -euo pipefail
           V="${{ needs.check.outputs.version }}"
           IMG="${REGISTRY}/${IMAGE_NAME}"
-          if [ "${{ github.ref }}" = "refs/heads/${{ github.event.repository.default_branch }}" ] \
-             || [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # pr-<number>, matching what docker/metadata-action produces for the
+            # app image. Not GITHUB_REF_NAME: on a pull_request that is
+            # "<number>/merge", which would tag the image ":36-merge".
+            P="pr-${{ github.event.pull_request.number }}"
+            echo "tags=${IMG}:${V}-${P},${IMG}:${P}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref }}" = "refs/heads/${{ github.event.repository.default_branch }}" ] \
+               || [ "${{ github.event_name }}" = "schedule" ]; then
             echo "tags=${IMG}:${V},${IMG}:latest" >> "$GITHUB_OUTPUT"
           else
             SAFE=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
