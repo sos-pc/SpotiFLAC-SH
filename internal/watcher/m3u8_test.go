@@ -132,10 +132,14 @@ func TestNeedsFilesystemIndexFallback(t *testing.T) {
 	}
 }
 
-// TestIsAlbumWatchlist covers the URL shapes a watchlist can hold. The artist
-// case is asserted false on purpose: not covering artists is a decision, and a
-// test is where that stays a decision rather than becoming an accident.
-func TestIsAlbumWatchlist(t *testing.T) {
+// TestIsAlbumSource covers the URL shapes both M3U8 producers hand it — a
+// watchlist's SpotifyURL and a manual batch's SourceID are the same thing.
+//
+// The artist case is asserted false on purpose: not covering artists is a
+// decision, and a test is where that stays a decision rather than becoming an
+// accident. The empty case matters too: a batch started with no source URL must
+// still get its playlist rather than be silently classified as an album.
+func TestIsAlbumSource(t *testing.T) {
 	tests := []struct {
 		url  string
 		want bool
@@ -150,8 +154,8 @@ func TestIsAlbumWatchlist(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
-			if got := isAlbumWatchlist(tt.url); got != tt.want {
-				t.Errorf("isAlbumWatchlist(%q) = %v, want %v", tt.url, got, tt.want)
+			if got := isAlbumSource(tt.url); got != tt.want {
+				t.Errorf("isAlbumSource(%q) = %v, want %v", tt.url, got, tt.want)
 			}
 		})
 	}

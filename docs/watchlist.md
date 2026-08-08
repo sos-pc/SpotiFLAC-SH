@@ -265,11 +265,16 @@ The suffix disambiguates: two watchlists whose names collide once sanitized (`AC
 
 It is visible in Jellyfin because **Jellyfin names a playlist after the file, and has no other source.** The M3U8 format has a `#PLAYLIST:` field for exactly this, and Jellyfin ignores it — [an open feature request](https://features.jellyfin.org/posts/3104/support-playlist-field-in-m3u-playlists). Verified empirically on 2026-08-08: a file named `ZZTest [deadbeef].m3u8` containing `#PLAYLIST:Titre Propre Sans Code` appeared in Jellyfin as `ZZTest [deadbeef]`. So there is no metadata field to hide the code in — the only way to a clean name is a clean filename, which means handling collisions somewhere other than the filename.
 
-### Albums do not get a playlist
+### Albums do not get a playlist — from either producer
 
-A watchlist tracking a Spotify album writes no M3U8. Downloads land in `<Artist>/<Album>/`, which Jellyfin already indexes as an album, so a playlist file put the identical content in the Playlists tab a second time. Tracking, syncing and downloading are unaffected.
+Downloads land in `<Artist>/<Album>/`, which Jellyfin already indexes as an album. A playlist listing exactly that album's tracks files the same content a second time, under a heading that is not a playlist. So no M3U8 is written for an album, whether it came from:
 
-Artist watchlists **do** get one: an artist is a growing collection spanning many releases, which is the case where a flat playlist shows something the folder tree does not.
+- a **watchlist** tracking a Spotify album, or
+- a **manual download** started from the search bar on an album page.
+
+Both are decided the same way, from the Spotify URL the download came from. Tracking, syncing and downloading are unaffected — only the redundant file stops being written.
+
+Artists **do** get one, from either producer: an artist is a growing collection spanning many releases, which is the case where a flat playlist shows something the folder tree does not.
 
 ### Two producers write to `Playlists/`, and nothing records which
 
