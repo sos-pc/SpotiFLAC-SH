@@ -81,6 +81,9 @@ interface WatchedPlaylist {
   id: string;
   spotify_url: string;
   name: string;
+  // Set by the user; overrides `name` everywhere a human reads it. Empty or
+  // absent means "whatever Spotify calls it".
+  custom_name?: string;
   interval_hours: number;
   last_sync: string;
   track_ids: string[];
@@ -112,6 +115,8 @@ export function WatchlistPage() {
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editInterval, setEditInterval] = useState("12");
+  const [editName, setEditName] = useState("");
+  const [editNamePlaceholder, setEditNamePlaceholder] = useState("");
   const [editSyncDeletions, setEditSyncDeletions] = useState(false);
 
   const [newUrl, setNewUrl] = useState("");
@@ -283,6 +288,10 @@ export function WatchlistPage() {
     setEditingId(list.id);
     setEditInterval(String(list.interval_hours));
     setEditSyncDeletions(list.sync_deletions);
+    // Only the custom name goes in the field. Spotify's is the placeholder, so
+    // an empty box reads as "use theirs" rather than as a name to be retyped.
+    setEditName(list.custom_name || "");
+    setEditNamePlaceholder(list.name);
   };
 
   const handleEditSave = async () => {
@@ -292,6 +301,8 @@ export function WatchlistPage() {
         id: editingId,
         interval_hours: parseInt(editInterval, 10),
         sync_deletions: editSyncDeletions,
+        // Always sent: "" is how the server is told to go back to Spotify's name.
+        custom_name: editName.trim(),
       });
       toast.success("Watchlist updated");
       setEditingId(null);
@@ -463,7 +474,8 @@ export function WatchlistPage() {
           watchlists.map((list) => {
             const { total, present, absent, pending, sizeMB } =
               getPlaylistStats(list);
-            const displayName = isURL(list.name) ? "Loading..." : list.name;
+            const shownName = list.custom_name || list.name;
+            const displayName = isURL(shownName) ? "Loading..." : shownName;
 
             return (
               <div
@@ -716,6 +728,20 @@ export function WatchlistPage() {
             <DialogTitle>Edit Watchlist</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Playlist name</label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder={editNamePlaceholder}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave empty to follow the name on Spotify. This is what the
+                playlist file is called, so it is also what Jellyfin shows.
+              </p>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Check interval</label>
               <Select value={editInterval} onValueChange={setEditInterval}>

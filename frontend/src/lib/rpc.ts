@@ -273,10 +273,14 @@ export const AddToWatchlist = (req: {
 export const RemoveFromWatchlist = (id: string) =>
   rest<void>("DELETE", `/watchlists/${encodeURIComponent(id)}`);
 export const GetWatchlists = () => rest<WatchedPlaylist[]>("GET", "/watchlists");
+// custom_name is optional and tri-state on the server: omitted leaves the name
+// alone, "" clears it back to Spotify's, a value sets it. A 409 means another
+// watchlist here already writes to that filename.
 export const UpdateWatchlist = (req: {
   id: string;
   interval_hours: number;
   sync_deletions: boolean;
+  custom_name?: string;
 }) => rest<void>("PUT", `/watchlists/${encodeURIComponent(req.id)}`, req);
 export const GetWatchlistStats = (id: string) =>
   rest<WatchlistStats>("GET", `/watchlists/${encodeURIComponent(id)}/stats`);
