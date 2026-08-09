@@ -1307,6 +1307,7 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 	}
 	for _, pl := range playlists {
 		if pl.ID == req.ID {
+			renamed := false
 			if req.CustomName != nil {
 				proposed := pl
 				proposed.CustomName = strings.TrimSpace(*req.CustomName)
@@ -1326,13 +1327,33 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 						return ErrNameTaken
 					}
 				}
+				renamed = pl.CustomName != proposed.CustomName
 				pl.CustomName = proposed.CustomName
 			}
 			if req.IntervalHours > 0 {
 				pl.IntervalHours = req.IntervalHours
 			}
 			pl.SyncDeletions = req.SyncDeletions
-			return w.saveWatchlist(&pl)
+			if err := w.saveWatchlist(&pl); err != nil {
+				return err
+			}
+			// Renaming has to take effect now. The file is only rewritten when
+			// the playlist is regenerated, and that happens on sync — hours
+			// away at a typical interval. Reported on 2026-08-09: the name was
+			// changed in the UI, saved correctly, and nothing appeared to
+			// happen, because nothing had asked for the file to be rewritten.
+			//
+			// Not force: this must not bypass the shrink guard. It is a rename,
+			// not a repair, and it has no business overwriting a more complete
+			// file with a thinner one. Detached because the caller is an HTTP
+			// handler and resolution can walk a large library.
+			if renamed {
+				id := pl.ID
+				util.SafeGo("watcher.renameM3U8["+id+"]", func() {
+					_, _ = w.GenerateM3U8ForPlaylist(id, false)
+				})
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("watchlist not found: %s", req.ID)
@@ -1770,14 +1791,32 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// file it used to own is now stale and nothing else will ever look for it
 	// again. Remove it before writing the new one, using the recorded name
 	// rather than a recomputed guess, which is the whole point of recording it.
-	if desired := baseName + ".m3u8"; pl.M3U8File != "" && pl.M3U8File != desired {
-		old := filepath.Join(outputDir, m3u8.PlaylistsDirName, pl.M3U8File)
+	desired := baseName + ".m3u8"
+	previous := pl.M3U8File
+	if previous == "" {
+		// Nothing recorded yet: either this watchlist has never written a file,
+		// or — the case that matters — it wrote one before M3U8File existed.
+		// The old scheme was deterministic, so the file it would have produced
+		// is computable. Without this the first write after upgrading leaves the
+		// pre-upgrade file behind forever: observed on 2026-08-09, where
+		// `all [ac6d491c].m3u8` survived the move to `all.m3u8` because the
+		// record was still empty at that moment.
+		//
+		// pl.Name, not the effective name: the old scheme never knew about
+		// custom names, so the file on disk carries Spotify's.
+		previous = m3u8BaseName(pl.Name, pl.ID) + ".m3u8"
+	}
+	if previous != desired {
+		// Safe by construction: the computed fallback embeds a hash of this
+		// watchlist's own ID, so it can only ever match a file this watchlist
+		// wrote itself.
+		old := filepath.Join(outputDir, m3u8.PlaylistsDirName, previous)
 		if err := os.Remove(old); err == nil {
 			slog.Info("[Watcher] M3U8: playlist file moved, removed the previous one",
-				"from", pl.M3U8File, "to", desired)
+				"from", previous, "to", desired)
 		} else if !os.IsNotExist(err) {
 			slog.Warn("[Watcher] M3U8: cannot remove the previous file",
-				"file", pl.M3U8File, "err", err)
+				"file", previous, "err", err)
 		}
 	}
 

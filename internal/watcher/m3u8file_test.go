@@ -121,3 +121,60 @@ func TestSetM3U8FileMissingBucket(t *testing.T) {
 		t.Fatalf("setM3U8File with no bucket should be a no-op, got %v", err)
 	}
 }
+
+// TestPreviousFileFallback covers the one-time upgrade: a watchlist that wrote
+// a file before M3U8File existed has nothing recorded, so the first write under
+// the new naming has to work out what it used to be called or the old file
+// survives forever.
+//
+// Observed on 2026-08-09: `all [ac6d491c].m3u8` outlived the move to
+// `all.m3u8`, because the record was still empty at that moment and the removal
+// was skipped.
+func TestPreviousFileFallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		recorded string
+		pl       WatchedPlaylist
+		want     string
+	}{
+		{
+			name:     "recorded name wins",
+			recorded: "tout.m3u8",
+			pl:       WatchedPlaylist{ID: "watch-1", Name: "all"},
+			want:     "tout.m3u8",
+		},
+		{
+			name:     "nothing recorded: fall back to what the old scheme produced",
+			recorded: "",
+			pl:       WatchedPlaylist{ID: "watch-1", Name: "all"},
+			want:     m3u8BaseName("all", "watch-1") + ".m3u8",
+		},
+		{
+			name:     "nothing recorded, custom name set: the file on disk still carries Spotify's",
+			recorded: "",
+			pl:       WatchedPlaylist{ID: "watch-1", Name: "all", CustomName: "tout"},
+			want:     m3u8BaseName("all", "watch-1") + ".m3u8",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pl := tt.pl
+			pl.M3U8File = tt.recorded
+			got := pl.M3U8File
+			if got == "" {
+				got = m3u8BaseName(pl.Name, pl.ID) + ".m3u8"
+			}
+			if got != tt.want {
+				t.Errorf("previous file = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// The fallback must name a file only this watchlist could have written:
+	// two watchlists sharing a Spotify name must not compute each other's.
+	a := m3u8BaseName("all", "watch-1")
+	b := m3u8BaseName("all", "watch-2")
+	if a == b {
+		t.Errorf("the fallback is not watchlist-specific: both computed %q", a)
+	}
+}
