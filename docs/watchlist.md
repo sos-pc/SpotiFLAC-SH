@@ -43,6 +43,21 @@ The implementation lives in `watcher.go` (the `Watcher` struct). It owns its own
 
 **Via UI:** Sidebar → Watchlists → Add Watchlist → paste Spotify playlist URL.
 
+> **One watchlist per source.** Adding a playlist you already track is refused,
+> naming the existing watchlist and when it was added. The comparison is on the
+> Spotify **ID**, not the URL string: the same playlist arrives with or without
+> `?si=…`, as a `spotify:` URI, or localised (`/intl-fr/`), and those are the
+> same thing. Scoped per user — two accounts tracking one playlist are two
+> legitimate watchlists.
+>
+> A reference that cannot be parsed is never treated as a match, so an
+> unrecognised URL shape gets you a second watchlist rather than a refusal you
+> cannot act on.
+>
+> There was no check at all before 2026-08-08, which is how one deployment ended
+> up with two entries for the same playlist — two IDs, two M3U8 files, one of
+> which stopped syncing and sat stale for four weeks.
+
 **Via API:**
 
 ```bash
