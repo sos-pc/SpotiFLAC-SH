@@ -306,6 +306,10 @@ That cost a regression on 2026-08-08: a sweep that deleted "any suffixed file no
 
 Removing or renaming a watchlist deletes its file, and **neither is gated on `createM3u8File`**. The setting governs whether files are written; a file already on disk has to be tidied up either way. Gating it is how one deployment ended up with a playlist that outlived its watchlist by 27 days — removed while the setting was off, with nothing left that knew about it.
 
+**Each watchlist records the file it owns** (`m3u8_file`). Every cleanup used to *recompute* the filename from the playlist's name and ID, which is only correct while nothing it derives from has changed — a Spotify rename moved the target while the file stayed put, so the cleanup deleted nothing and the old file was orphaned with no trace it had ever existed. Now the write path compares the name it is about to use against the recorded one and removes the previous file when they differ.
+
+The recorded name is preferred everywhere; the recomputed forms remain as fallbacks for watchlists created before the field existed. Nothing to migrate — watchlists are stored as JSON, so old records simply decode with an empty value and fill it on their next write.
+
 A file orphaned some other way stays until you delete it by hand.
 
 ---

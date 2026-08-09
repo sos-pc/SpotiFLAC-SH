@@ -57,6 +57,22 @@ type WatchedPlaylist struct {
 	SyncDeletions bool             `json:"sync_deletions"`
 	SyncLogs      []SyncLog        `json:"sync_logs,omitempty"`
 	UserID        string           `json:"user_id,omitempty"`
+	// M3U8File is the playlist file this watchlist currently owns, as a bare
+	// filename inside <downloadPath>/Playlists/. Empty means none has been
+	// written yet, or the record predates this field.
+	//
+	// It exists because every other place that needed to find that file was
+	// *recomputing* the name from the playlist's name and ID, and a recomputed
+	// name is only right while nothing it derives from has changed. A rename on
+	// Spotify, and later a change in how the name is built, both move the target
+	// while the file on disk stays where it was — the cleanup then deletes
+	// nothing and the old file is orphaned with no record that it ever existed.
+	// Storing what was written turns "guess where it probably is" into "look".
+	//
+	// Costs nothing to add: watchlists are already persisted as JSON in BoltDB,
+	// so existing records simply decode with an empty value and fill it on their
+	// next write.
+	M3U8File string `json:"m3u8_file,omitempty"`
 }
 
 // watchlistJobSettings returns the JobSettings a watchlist's downloads run with.
@@ -487,7 +503,22 @@ func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
 	// way. Gating the delete meant turning the setting off stranded the old file
 	// under the old name permanently, with nothing left that knew to remove it.
 	outputDir := w.watchlistOutputRoot(pl)
-	oldM3u8Path := filepath.Join(outputDir, "Playlists", m3u8BaseName(oldName, pl.ID)+".m3u8")
+
+	// Prefer the recorded filename: it is what was actually written, whereas
+	// recomputing from oldName is only right if the naming rule has not changed
+	// since. The computed form stays as the fallback for watchlists that
+	// predate M3U8File.
+	//
+	// pl is the sync's own copy and saveWatchlist persists it a few lines later
+	// (see the ordering rationale at the call site), so clearing the field here
+	// is recorded with the rename rather than needing its own write.
+	oldFile := pl.M3U8File
+	if oldFile == "" {
+		oldFile = m3u8BaseName(oldName, pl.ID) + ".m3u8"
+	}
+	pl.M3U8File = ""
+
+	oldM3u8Path := filepath.Join(outputDir, "Playlists", oldFile)
 	if err := os.Remove(oldM3u8Path); err == nil {
 		slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
 	} else if !os.IsNotExist(err) {
@@ -624,14 +655,20 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 		// removed while the setting was off, then nothing knew about it again.
 		{
 			playlistsDir := filepath.Join(outputRoot, "Playlists")
-			// Try both the current (ID-suffixed) and legacy (pre-migration,
-			// no suffix) filenames — a watchlist removed before ever
-			// re-syncing after the naming-collision fix could still only
-			// have the legacy file on disk.
-			for _, m3u8Path := range []string{
+			// The recorded filename first, because it is the only one that is
+			// certainly right. The two computed forms follow as fallbacks for
+			// watchlists that predate M3U8File: the current naming rule, and
+			// the pre-disambiguation one for a watchlist removed before it ever
+			// re-synced after that migration. Removing a file that does not
+			// exist is free, so trying all three costs nothing.
+			candidates := []string{
 				filepath.Join(playlistsDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8"),
 				filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
-			} {
+			}
+			if pl.M3U8File != "" {
+				candidates = append([]string{filepath.Join(playlistsDir, pl.M3U8File)}, candidates...)
+			}
+			for _, m3u8Path := range candidates {
 				if err := os.Remove(m3u8Path); err == nil {
 					slog.Info("[Watcher] Deleted M3U8 (watchlist removed)", "path", m3u8Path)
 				} else if !os.IsNotExist(err) {
@@ -710,6 +747,45 @@ func (w *Watcher) GetWatchlistsByUser(userID string) ([]WatchedPlaylist, error) 
 		}
 	}
 	return filtered, nil
+}
+
+// setM3U8File records which playlist file this watchlist owns, touching only
+// that field.
+//
+// Read-modify-write inside one transaction rather than saveWatchlist, because
+// the caller is GenerateM3U8ForPlaylist: it works on a copy it loaded itself,
+// and runs from four places including a startup hook and a batch-completion
+// handler, either of which can overlap a running sync. Writing the whole struct
+// back from there would persist a snapshot that is stale in TrackIDs, LastSync
+// and everything else the sync just updated. BoltDB serialises writers, so
+// re-reading inside the Update is enough to be safe.
+//
+// A watchlist removed between the read and this call is left alone rather than
+// resurrected — the same hazard saveWatchlist's caller guards against.
+func (w *Watcher) setM3U8File(watchlistID, filename string) error {
+	return w.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketWatchlist)
+		if b == nil {
+			return nil
+		}
+		raw := b.Get([]byte(watchlistID))
+		if raw == nil {
+			return nil
+		}
+		var cur WatchedPlaylist
+		if err := json.Unmarshal(raw, &cur); err != nil {
+			return err
+		}
+		if cur.M3U8File == filename {
+			return nil
+		}
+		cur.M3U8File = filename
+		data, err := json.Marshal(&cur)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(watchlistID), data)
+	})
 }
 
 func (w *Watcher) saveWatchlist(pl *WatchedPlaylist) error {
@@ -1639,6 +1715,23 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// and "AC:DC Hits") get distinct files instead of silently overwriting
 	// each other every sync.
 	baseName := m3u8BaseName(pl.Name, pl.ID)
+
+	// If the name this watchlist should write to has moved since last time —
+	// Spotify renamed the playlist, or the naming rule changed under it — the
+	// file it used to own is now stale and nothing else will ever look for it
+	// again. Remove it before writing the new one, using the recorded name
+	// rather than a recomputed guess, which is the whole point of recording it.
+	if desired := baseName + ".m3u8"; pl.M3U8File != "" && pl.M3U8File != desired {
+		old := filepath.Join(outputDir, m3u8.PlaylistsDirName, pl.M3U8File)
+		if err := os.Remove(old); err == nil {
+			slog.Info("[Watcher] M3U8: playlist file moved, removed the previous one",
+				"from", pl.M3U8File, "to", desired)
+		} else if !os.IsNotExist(err) {
+			slog.Warn("[Watcher] M3U8: cannot remove the previous file",
+				"file", pl.M3U8File, "err", err)
+		}
+	}
+
 	if result.Unresolved > 0 {
 		slog.Warn("[Watcher] M3U8: tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them",
 			"playlist", pl.Name, "unresolved", result.Unresolved, "total", len(pl.TrackIDs))
@@ -1656,6 +1749,14 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 		return result, nil
 	}
 	slog.Info("[Watcher] M3U8 written", "file", baseName+".m3u8", "entries", len(paths))
+
+	// Record what was written, now that it exists. Only this field is touched —
+	// see setM3U8File for why the whole record must not be saved from here.
+	if err := w.setM3U8File(pl.ID, baseName+".m3u8"); err != nil {
+		slog.Warn("[Watcher] M3U8: written but not recorded, cleanup will fall back to guessing",
+			"file", baseName+".m3u8", "err", err)
+	}
+
 	playlistDir := filepath.Join(outputDir, m3u8.PlaylistsDirName)
 	m3u8Path := filepath.Join(playlistDir, baseName+".m3u8")
 
