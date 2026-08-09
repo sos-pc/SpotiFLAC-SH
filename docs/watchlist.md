@@ -274,7 +274,27 @@ Each watchlist gets its own `<downloadPath>/Playlists/<sanitized-name> [xxxxxxxx
 
 The M3U8 is regenerated **after every sync** when no new tracks were enqueued, and again when each batch completes (so during a large initial sync, the file gradually fills as tracks finish — no waiting for the entire batch).
 
-### Why the filename carries a code, and why it shows up in Jellyfin
+### Naming: you own it, and the code only appears when it has to
+
+The playlist file is named after the watchlist, and **Jellyfin shows that filename** — so it is worth controlling. Edit a watchlist and set **Playlist name** to whatever you want; leave it empty to follow Spotify's.
+
+The name Spotify gives it cannot be edited directly, because every sync overwrites it from Spotify. Your name is stored separately and wins.
+
+When two watchlists in the same download directory would produce the same filename, a distinction is added, in this order:
+
+```
+Release Radar.m3u8                  nothing else claims that name
+Release Radar (methammer).m3u8      another account's watchlist claims it
+Release Radar [830f8305].m3u8       the same account claims it twice
+```
+
+Most watchlists get the first line — a clean name and nothing else. The suffix used to be unconditional, which is why every file carried eight hex digits nobody could read.
+
+It was never pointless, though: Spotify's personalised playlists (Release Radar, Discover Weekly) are **per account**, so two accounts produce two genuinely different playlists sharing one name. Without a distinction one would overwrite the other on every sync. The account label says which is which; the hash appears only where no readable distinction exists.
+
+**Renaming to a name already in use is refused** (HTTP 409) rather than silently disambiguated: you are at the keyboard and can pick another. At *creation* the opposite applies — the name came from Spotify, you did not choose it, so the ladder resolves it quietly instead of blocking an add you cannot fix.
+
+### Why the filename is what Jellyfin shows
 
 The suffix disambiguates: two watchlists whose names collide once sanitized (`AC/DC Hits` and `AC:DC Hits` both become `AC DC Hits`) would otherwise write to the same file, and whichever synced last would silently overwrite the other on every cycle.
 

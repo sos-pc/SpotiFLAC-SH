@@ -5,6 +5,7 @@ package main
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
+	"errors"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	"net/http"
@@ -76,6 +77,14 @@ func (s *Server) registerWatchlistRoutes() {
 		}
 		req.ID = id
 		if err := s.ctr.Watcher.UpdateWatchlist(req); err != nil {
+			// A name already in use is the caller's input being wrong, not the
+			// server failing — and the UI shows this message verbatim, so a 500
+			// would read as a bug rather than as something to fix by typing
+			// something else.
+			if errors.Is(err, watcher.ErrNameTaken) {
+				writeV1Error(w, http.StatusConflict, err.Error())
+				return
+			}
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}

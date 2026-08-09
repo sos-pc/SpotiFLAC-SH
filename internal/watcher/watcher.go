@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -73,6 +74,22 @@ type WatchedPlaylist struct {
 	// so existing records simply decode with an empty value and fill it on their
 	// next write.
 	M3U8File string `json:"m3u8_file,omitempty"`
+	// CustomName overrides Name for anything a human reads: the playlist file,
+	// and the label in the UI. Empty means "use whatever Spotify calls it".
+	//
+	// It cannot live in Name, because syncPlaylist overwrites that from Spotify
+	// on every cycle (see the rename detection in syncPlaylist) — a name typed
+	// here would survive until the next sync and no longer.
+	CustomName string `json:"custom_name,omitempty"`
+}
+
+// EffectiveName is the name to show and to build the playlist filename from:
+// what the user chose, or what Spotify calls it.
+func (pl *WatchedPlaylist) EffectiveName() string {
+	if pl.CustomName != "" {
+		return pl.CustomName
+	}
+	return pl.Name
 }
 
 // watchlistJobSettings returns the JobSettings a watchlist's downloads run with.
@@ -411,7 +428,9 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 			"watchlist_id": pl.ID,
 			"new_tracks":   len(newTracks),
 			"deleted":      deletedCount,
-			"name":         pl.Name,
+			// The name a human reads, so the toast this feeds says what the UI
+			// list says rather than reverting to Spotify's on every sync.
+			"name": pl.EffectiveName(),
 		},
 	})
 }
@@ -662,7 +681,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 			// re-synced after that migration. Removing a file that does not
 			// exist is free, so trying all three costs nothing.
 			candidates := []string{
-				filepath.Join(playlistsDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8"),
+				filepath.Join(playlistsDir, w.m3u8NameFor(&pl)+".m3u8"),
 				filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
 			}
 			if pl.M3U8File != "" {
@@ -1264,7 +1283,16 @@ type UpdateWatchlistRequest struct {
 	ID            string `json:"id"`
 	IntervalHours int    `json:"interval_hours"`
 	SyncDeletions bool   `json:"sync_deletions"`
+	// CustomName is a pointer so the three states stay distinct: absent leaves
+	// the name alone, "" clears it back to Spotify's, and a value sets it. A
+	// plain string could not express "clear" without meaning "unchanged".
+	CustomName *string `json:"custom_name,omitempty"`
 }
+
+// ErrNameTaken is returned when a rename would give two watchlists in the same
+// directory the same filename. Mapped to 409 by the HTTP layer, because it is
+// the caller's input that is wrong, not the server.
+var ErrNameTaken = errors.New("a watchlist with that name already exists here — pick another")
 
 func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 	// Locked (Q3): without this, a settings change landing mid-sync could be
@@ -1279,6 +1307,27 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 	}
 	for _, pl := range playlists {
 		if pl.ID == req.ID {
+			if req.CustomName != nil {
+				proposed := pl
+				proposed.CustomName = strings.TrimSpace(*req.CustomName)
+				// Refuse rather than silently disambiguate. At creation the name
+				// comes from Spotify and nobody chose it, so the escalation
+				// ladder resolves it quietly; here a human just typed it and can
+				// be told. Compared on the resulting filename, not the raw text,
+				// because that is what actually has to be unique.
+				want := w.m3u8NameFor(&proposed)
+				root := w.watchlistOutputRoot(&proposed)
+				for i := range playlists {
+					other := &playlists[i]
+					if other.ID == pl.ID || isAlbumSource(other.SpotifyURL) {
+						continue
+					}
+					if w.watchlistOutputRoot(other) == root && w.m3u8NameFor(other) == want {
+						return ErrNameTaken
+					}
+				}
+				pl.CustomName = proposed.CustomName
+			}
 			if req.IntervalHours > 0 {
 				pl.IntervalHours = req.IntervalHours
 			}
@@ -1449,7 +1498,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 	var m3u8Exists bool
 	if m3u8Enabled {
 		playlistDir := filepath.Join(outputDir, "Playlists")
-		m3u8Path := filepath.Join(playlistDir, m3u8BaseName(pl.Name, pl.ID)+".m3u8")
+		m3u8Path := filepath.Join(playlistDir, w.m3u8NameFor(pl)+".m3u8")
 		m3u8Count, m3u8Exists = m3u8.CountEntries(m3u8Path)
 	}
 
@@ -1714,7 +1763,7 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// watchlists whose names collide after sanitization (e.g. "AC/DC Hits"
 	// and "AC:DC Hits") get distinct files instead of silently overwriting
 	// each other every sync.
-	baseName := m3u8BaseName(pl.Name, pl.ID)
+	baseName := w.m3u8NameFor(pl)
 
 	// If the name this watchlist should write to has moved since last time —
 	// Spotify renamed the playlist, or the naming rule changed under it — the
@@ -1843,6 +1892,117 @@ func (w *Watcher) findWatchlistBySource(spotifyURL, userID string) (*WatchedPlay
 		}
 	}
 	return nil, nil
+}
+
+// sanitizedEmpty is whatever SanitizeFilename produces for nothing at all.
+// Read from the function rather than written out, so it cannot drift from it.
+var sanitizedEmpty = util.SanitizeFilename("")
+
+// m3u8NameIn returns the .m3u8-free filename for pl, given every watchlist that
+// exists and a way to resolve a user ID to a display label.
+//
+// The suffix is now applied only when it is needed, in escalating order:
+//
+//	Release Radar                    nothing else claims that name
+//	Release Radar (methammer)        another account's watchlist claims it
+//	Release Radar [830f8305]         the same account claims it twice
+//
+// It used to be unconditional, which is why every filename carried eight hex
+// digits nobody could read. The suffix was never noise though — Spotify's
+// personalised playlists (Release Radar, Discover Weekly) are per-account, so
+// two accounts genuinely produce two different playlists with one name, and
+// without disambiguation one would silently overwrite the other every sync. The
+// account label says which is which; the hash only appears where no readable
+// distinction exists.
+//
+// Only watchlists sharing this one's output directory can collide with it: the
+// download path is per-user, so two accounts writing to different roots are not
+// in each other's way. Album watchlists write no file at all and are skipped.
+//
+// Making the name depend on the live set of watchlists is safe only because
+// each watchlist records the file it owns (M3U8File): when the set changes and
+// a name moves, the write path removes the file it used to have. Without that
+// record this would strand a file on every collision.
+func m3u8NameIn(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
+	rootOf func(*WatchedPlaylist) string, labelOf func(userID string) string) string {
+
+	safe := util.SanitizeFilename(pl.EffectiveName())
+	if safe == "" {
+		safe = "playlist"
+	}
+
+	sameName, sameNameAndUser := false, false
+	for i := range all {
+		other := &all[i]
+		if other.ID == pl.ID || isAlbumSource(other.SpotifyURL) {
+			continue
+		}
+		if rootOf(other) != root {
+			continue
+		}
+		otherSafe := util.SanitizeFilename(other.EffectiveName())
+		if otherSafe == "" {
+			otherSafe = "playlist"
+		}
+		if otherSafe != safe {
+			continue
+		}
+		sameName = true
+		if other.UserID == pl.UserID {
+			sameNameAndUser = true
+		}
+	}
+
+	switch {
+	case sameNameAndUser:
+		return fmt.Sprintf("%s [%s]", safe, watchlistIDSuffix(pl.ID))
+	case sameName:
+		// Both halves matter. SanitizeFilename never returns an empty string —
+		// it substitutes a placeholder — so testing its output alone would hand
+		// every unlabelled user the same word and collide the very files this
+		// is disambiguating. Caught by TestM3U8NameEscalation, which is why the
+		// raw label is checked first and the sanitised one is compared against
+		// that placeholder rather than against "".
+		if raw := labelOf(pl.UserID); raw != "" {
+			if label := util.SanitizeFilename(raw); label != sanitizedEmpty {
+				return fmt.Sprintf("%s (%s)", safe, label)
+			}
+		}
+		// No usable label — fall back rather than collide.
+		return fmt.Sprintf("%s [%s]", safe, watchlistIDSuffix(pl.ID))
+	default:
+		return safe
+	}
+}
+
+// m3u8NameFor is m3u8NameIn with the watcher's own lookups wired in.
+func (w *Watcher) m3u8NameFor(pl *WatchedPlaylist) string {
+	all, err := w.GetWatchlists()
+	if err != nil {
+		// Without the set there is no way to know about collisions. The
+		// unconditional suffix is the pre-2026-08-08 behaviour: ugly, and
+		// correct. Guessing "no collision" here could silently merge two
+		// playlists into one file.
+		slog.Warn("[Watcher] M3U8: cannot read watchlists to check for name collisions, keeping the unique suffix", "err", err)
+		return m3u8BaseName(pl.EffectiveName(), pl.ID)
+	}
+	return m3u8NameIn(pl, all, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel)
+}
+
+// userLabel resolves a user ID to something readable for a filename, or "" when
+// it cannot — an unknown user must not become the string "unknown" in a name.
+func (w *Watcher) userLabel(userID string) string {
+	if userID == "" || w.auth == nil {
+		return ""
+	}
+	u, err := w.auth.GetUser(userID)
+	if err != nil || u == nil {
+		return ""
+	}
+	if u.Name != "" {
+		return u.Name
+	}
+	return u.DisplayName
 }
 
 // isAlbumSource reports whether a Spotify URL points at an album rather than a
