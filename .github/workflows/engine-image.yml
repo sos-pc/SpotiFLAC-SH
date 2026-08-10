@@ -61,13 +61,109 @@ jobs:
       version: ${{ steps.upstream.outputs.version }}
       stale: ${{ steps.compare.outputs.stale }}
     steps:
-      - name: Latest version on PyPI
+      # The newest version upstream has FINISHED publishing — not simply the
+      # newest on PyPI.
+      #
+      # An upstream release is two artifacts landing at different moments: the
+      # wheel on PyPI, and a `vX.Y.Z` tag in SpotiFLAC-Module-Version carrying
+      # the requirements.txt the Dockerfile fetches (see engine/Dockerfile — the
+      # wheel under-declares its dependencies, so that file is not optional).
+      # Asking PyPI alone means catching the window where they disagree: on
+      # 2026-08-10 1.6.7 was on PyPI with no matching tag, every build 404'd at
+      # the fetch, and #48 opened for what was a race rather than a breakage.
+      #
+      # Walking down to the newest COMPLETE release fixes both halves at once:
+      # no false alarm, and the deployment still advances (that day it would
+      # have moved 1.6.4 -> 1.6.6 immediately instead of sitting at 1.6.4).
+      # Nothing else has to change — the Dockerfile already builds whatever
+      # SPOTIFLAC_VERSION it is handed and derives the tag from what actually
+      # installed, so pinning an older version keeps the image self-consistent.
+      - name: Newest fully published upstream release
         id: upstream
         run: |
           set -euo pipefail
-          v=$(curl -fsSL --connect-timeout 10 --max-time 30 https://pypi.org/pypi/SpotiFLAC/json | jq -er .info.version)
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "PyPI: $v"
+          python3 - <<'PY'
+          import calendar, json, os, sys, time, urllib.error, urllib.request
+
+          # Duplicated from engine/Dockerfile, which is the dependency of this
+          # probe: if upstream ever moves the repository, BOTH have to change.
+          # The failure mode is contained on purpose — see "fail open" below.
+          REQ = "https://raw.githubusercontent.com/BartolomeoRusso9/SpotiFLAC-Module-Version/v{}/requirements.txt"
+          MAX_CANDIDATES = 5       # further back than this is not a race
+          GRACE_S = 24 * 3600      # past this, upstream forgot rather than raced
+
+          def parse(v):
+              """Numeric key, or None for anything not X.Y.Z — sorting these as
+              strings would rank 1.6.9 above 1.6.10."""
+              try:
+                  return tuple(int(p) for p in v.split("."))
+              except ValueError:
+                  return None
+
+          with urllib.request.urlopen(
+                  "https://pypi.org/pypi/SpotiFLAC/json", timeout=30) as r:
+              data = json.load(r)
+
+          releases = []
+          for version, files in data["releases"].items():
+              key = parse(version)
+              if key is None or not files:
+                  continue
+              releases.append((key, version, files[0]["upload_time"]))
+          releases.sort(reverse=True)
+          if not releases:
+              sys.exit("no parseable release on PyPI")
+
+          def ready(version):
+              """True when the requirements tag exists.
+
+              Fails OPEN: only a definite 404 means "not published yet". A
+              timeout, DNS failure or moved repository returns True so the build
+              runs and decides for itself. Failing closed here would silently
+              freeze every engine update for as long as the probe was broken —
+              worse than the race this step exists to absorb."""
+              req = urllib.request.Request(REQ.format(version), method="HEAD")
+              try:
+                  urllib.request.urlopen(req, timeout=20).close()
+                  return True
+              except urllib.error.HTTPError as e:
+                  if e.code == 404:
+                      return False
+                  return True
+              except Exception:
+                  return True
+
+          newest = releases[0][1]
+          chosen = None
+          for _, version, _ in releases[:MAX_CANDIDATES]:
+              if ready(version):
+                  chosen = version
+                  break
+              print(f"skipping {version}: requirements tag not published yet")
+
+          if chosen is None:
+              sys.exit(f"no complete release in the newest {MAX_CANDIDATES} "
+                       f"versions (newest: {newest}) — needs a human")
+
+          if chosen != newest:
+              # timegm, not mktime: PyPI's upload_time is naive UTC, and mktime
+              # would read it as local time. The usual "mktime() - time.timezone"
+              # patch is wrong under DST (time.timezone ignores it) and happens
+              # to work on the runner only because its clock is UTC.
+              age = time.time() - calendar.timegm(time.strptime(
+                  releases[0][2], "%Y-%m-%dT%H:%M:%S"))
+              if age > GRACE_S:
+                  print(f"::warning::upstream {newest} has been on PyPI for "
+                        f"{age / 3600:.0f}h with no requirements tag — this is "
+                        f"no longer a release race. Building {chosen} instead.")
+              else:
+                  print(f"{newest} still publishing ({age / 60:.0f} min old); "
+                        f"building {chosen}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"version={chosen}\n")
+          print(f"PyPI: {newest}   buildable: {chosen}")
+          PY
 
       - name: Version inside our published image
         id: published
