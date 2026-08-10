@@ -1,8 +1,9 @@
 name: Build & Publish Docker Image
 
-# Two kinds of image, two events, no branch names anywhere:
+# What each event produces:
 #
 #   a version tag  → :X.Y.Z, :X.Y, :latest   a release
+#   a push to main → :main                   what the deployment tracks
 #   a pull request → :pr-<number>            a preview to test before merging
 #   manual dispatch → :<branch>              anything else, on demand
 #
@@ -13,9 +14,25 @@ name: Build & Publish Docker Image
 # proposing a change — it is what gates the tests, and now what builds the
 # preview. Name branches whatever you like.
 #
+# `main` is here because production runs `:main`, and that tag used to move only
+# when someone remembered to dispatch this workflow by hand. Merging changed
+# nothing on the server and said nothing about it: on 2026-08-10 the deployment
+# was pulled expecting the merge of #46 and quietly kept running the image built
+# from 87decbc, twelve hours older. Nothing was broken that time — #46 touched
+# only an engine patch, which never enters this image — but the next Go change to
+# merge would have sat unpublished the same way, with no signal anywhere.
+#
+# No paths-ignore on this trigger, deliberately, even though a docs-only merge
+# now rebuilds 114 MB for nothing. A `paths` filter inside `push` applies to the
+# tag patterns too, so cutting a release from a commit that only touched docs
+# would silently publish no image at all. A few wasted minutes on a rare event
+# beats a release that isn't there.
+#
 # `:latest` still moves on version tags only. Releasing stays a decision.
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
   pull_request:
@@ -25,6 +42,15 @@ on:
       - '**.md'
       - '.kiro/**'
   workflow_dispatch:
+
+# Two merges landing close together race, and the loser is whichever build
+# finishes second — which may be the older commit, leaving `:main` pointing at
+# code that is no longer main. Grouping per ref makes the newer push cancel the
+# older build instead. Tags and pull requests each get their own group from
+# github.ref, so a release build can never be cancelled by a merge.
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
