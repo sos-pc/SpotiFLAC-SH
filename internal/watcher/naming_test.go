@@ -2,10 +2,10 @@ package watcher
 
 import "testing"
 
-// nameIn calls m3u8NameIn with every watchlist in one root and a fixed label
+// nameIn calls decideM3U8Name with every watchlist in one root and a fixed label
 // per user, which is the arrangement the escalation is about.
 func nameIn(pl *WatchedPlaylist, all []WatchedPlaylist, labels map[string]string) string {
-	return m3u8NameIn(pl, all,
+	return decideM3U8Name(pl, all,
 		"/music",
 		func(*WatchedPlaylist) string { return "/music" },
 		func(uid string) string { return labels[uid] },
@@ -92,7 +92,7 @@ func TestM3U8NameIgnoresNonColliders(t *testing.T) {
 		t.Errorf("an album watchlist writes no file and must not force a suffix, got %q", got)
 	}
 
-	got := m3u8NameIn(&mine, []WatchedPlaylist{mine, elsewhere}, "/music",
+	got := decideM3U8Name(&mine, []WatchedPlaylist{mine, elsewhere}, "/music",
 		func(p *WatchedPlaylist) string {
 			if p.ID == "w3" {
 				return "/other-music"

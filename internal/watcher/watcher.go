@@ -395,8 +395,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// saveWatchlist refait détecter le rename au prochain sync (retry
 	// naturel) ; un crash après ce bloc mais avant saveWatchlist ne fait
 	// qu'un os.Remove redondant et sans danger sur un fichier déjà absent.
-	w.deleteStaleM3U8OnRename(&pl, oldName)
-
 	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
 	w.mu.Lock()
 	// Q3: this sync started from a snapshot of pl taken possibly minutes
@@ -405,6 +403,20 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	if _, err := w.GetWatchlistByID(pl.ID); err != nil {
 		w.mu.Unlock()
 		return
+	}
+	// Spotify renamed the playlist: the third and last moment a filename is
+	// decided. Only when the user has not chosen a name of their own — theirs
+	// wins, and Spotify renaming something must not overwrite a deliberate
+	// choice. Under the lock and before the save, so the decided name is
+	// persisted with everything else this sync changed.
+	//
+	// This replaced a delete-then-wait: the old file was removed here and the
+	// new one only appeared at the next generation, leaving a window where the
+	// playlist was simply absent from Jellyfin. applyM3U8Name renames instead.
+	if oldName != "" && pl.CustomName == "" {
+		if all, err := w.GetWatchlists(); err == nil {
+			w.applyM3U8Name(&pl, all)
+		}
 	}
 	pl.TrackIDs = append(pl.TrackIDs, newIDs...)
 	pl.LastSync = time.Now()
@@ -508,43 +520,6 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 	return deletedCount
 }
 
-// deleteStaleM3U8OnRename removes the old M3U8 file after a playlist was
-// renamed on Spotify (oldName is the previous name, "" when there was no
-// rename). Must run before saveWatchlist persists the new name — see the call
-// site in syncPlaylist for the crash-ordering rationale. Extracted from
-// syncPlaylist (R4).
-func (w *Watcher) deleteStaleM3U8OnRename(pl *WatchedPlaylist, oldName string) {
-	if oldName == "" {
-		return
-	}
-	// Deliberately NOT gated on CreateM3u8File. The setting says whether to
-	// WRITE playlist files; a file already on disk has to be cleaned up either
-	// way. Gating the delete meant turning the setting off stranded the old file
-	// under the old name permanently, with nothing left that knew to remove it.
-	outputDir := w.watchlistOutputRoot(pl)
-
-	// Prefer the recorded filename: it is what was actually written, whereas
-	// recomputing from oldName is only right if the naming rule has not changed
-	// since. The computed form stays as the fallback for watchlists that
-	// predate M3U8File.
-	//
-	// pl is the sync's own copy and saveWatchlist persists it a few lines later
-	// (see the ordering rationale at the call site), so clearing the field here
-	// is recorded with the rename rather than needing its own write.
-	oldFile := pl.M3U8File
-	if oldFile == "" {
-		oldFile = m3u8BaseName(oldName, pl.ID) + ".m3u8"
-	}
-	pl.M3U8File = ""
-
-	oldM3u8Path := filepath.Join(outputDir, "Playlists", oldFile)
-	if err := os.Remove(oldM3u8Path); err == nil {
-		slog.Info("[Watcher] Playlist renamed, old M3U8 deleted", "old_name", oldName, "new_name", pl.Name)
-	} else if !os.IsNotExist(err) {
-		slog.Warn("[Watcher] Playlist renamed, failed to delete old M3U8", "old_name", oldName, "new_name", pl.Name, "err", err)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CRUD watchlist
 // ─────────────────────────────────────────────────────────────────────────────
@@ -597,6 +572,18 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 		CreatedAt:     time.Now(),
 		SyncDeletions: req.SyncDeletions,
 		UserID:        req.UserID,
+	}
+
+	// Decide the filename now, while the set of watchlists is in hand and a
+	// collision can be resolved once. Nothing recomputes it afterwards, so a
+	// watchlist added later cannot silently move this one's file.
+	//
+	// No refusal here: the name came from Spotify and the caller did not choose
+	// it, so the ladder disambiguates quietly. Refusing would block an add that
+	// the user has no way to fix.
+	if existing, err := w.GetWatchlists(); err == nil {
+		pl.M3U8File = decideM3U8Name(pl, existing, w.watchlistOutputRoot(pl),
+			w.watchlistOutputRoot, w.userLabel) + ".m3u8"
 	}
 
 	if err := w.saveWatchlist(pl); err != nil {
@@ -681,7 +668,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 			// re-synced after that migration. Removing a file that does not
 			// exist is free, so trying all three costs nothing.
 			candidates := []string{
-				filepath.Join(playlistsDir, w.m3u8NameFor(&pl)+".m3u8"),
+				filepath.Join(playlistsDir, pl.m3u8FileFor()),
 				filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
 			}
 			if pl.M3U8File != "" {
@@ -1307,26 +1294,32 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 	}
 	for _, pl := range playlists {
 		if pl.ID == req.ID {
-			if req.CustomName != nil {
-				proposed := pl
-				proposed.CustomName = strings.TrimSpace(*req.CustomName)
+			if req.CustomName != nil && strings.TrimSpace(*req.CustomName) != pl.CustomName {
+				pl.CustomName = strings.TrimSpace(*req.CustomName)
+
 				// Refuse rather than silently disambiguate. At creation the name
-				// comes from Spotify and nobody chose it, so the escalation
-				// ladder resolves it quietly; here a human just typed it and can
-				// be told. Compared on the resulting filename, not the raw text,
-				// because that is what actually has to be unique.
-				want := w.m3u8NameFor(&proposed)
-				root := w.watchlistOutputRoot(&proposed)
+				// comes from Spotify and nobody chose it, so the ladder resolves
+				// it quietly; here a human just typed it and can be told.
+				//
+				// Compared against the names already decided, not against names
+				// recomputed for every other watchlist: those are stored, so
+				// this is one pass over a list already in hand.
+				want := decideM3U8Name(&pl, playlists, w.watchlistOutputRoot(&pl),
+					w.watchlistOutputRoot, w.userLabel) + ".m3u8"
+				root := w.watchlistOutputRoot(&pl)
 				for i := range playlists {
 					other := &playlists[i]
 					if other.ID == pl.ID || isAlbumSource(other.SpotifyURL) {
 						continue
 					}
-					if w.watchlistOutputRoot(other) == root && w.m3u8NameFor(other) == want {
+					if w.watchlistOutputRoot(other) == root && other.m3u8FileFor() == want {
 						return ErrNameTaken
 					}
 				}
-				pl.CustomName = proposed.CustomName
+				// Moves the file straight away. The name is what Jellyfin shows,
+				// so a rename that only takes effect at the next sync — hours
+				// away — reads as having done nothing at all.
+				w.applyM3U8Name(&pl, playlists)
 			}
 			if req.IntervalHours > 0 {
 				pl.IntervalHours = req.IntervalHours
@@ -1498,7 +1491,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 	var m3u8Exists bool
 	if m3u8Enabled {
 		playlistDir := filepath.Join(outputDir, "Playlists")
-		m3u8Path := filepath.Join(playlistDir, w.m3u8NameFor(pl)+".m3u8")
+		m3u8Path := filepath.Join(playlistDir, pl.m3u8FileFor())
 		m3u8Count, m3u8Exists = m3u8.CountEntries(m3u8Path)
 	}
 
@@ -1763,7 +1756,7 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// watchlists whose names collide after sanitization (e.g. "AC/DC Hits"
 	// and "AC:DC Hits") get distinct files instead of silently overwriting
 	// each other every sync.
-	baseName := w.m3u8NameFor(pl)
+	baseName := strings.TrimSuffix(pl.m3u8FileFor(), ".m3u8")
 
 	// If the name this watchlist should write to has moved since last time —
 	// Spotify renamed the playlist, or the naming rule changed under it — the
@@ -1923,7 +1916,7 @@ var sanitizedEmpty = util.SanitizeFilename("")
 // each watchlist records the file it owns (M3U8File): when the set changes and
 // a name moves, the write path removes the file it used to have. Without that
 // record this would strand a file on every collision.
-func m3u8NameIn(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
+func decideM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
 	rootOf func(*WatchedPlaylist) string, labelOf func(userID string) string) string {
 
 	safe := util.SanitizeFilename(pl.EffectiveName())
@@ -1975,18 +1968,50 @@ func m3u8NameIn(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
 	}
 }
 
-// m3u8NameFor is m3u8NameIn with the watcher's own lookups wired in.
-func (w *Watcher) m3u8NameFor(pl *WatchedPlaylist) string {
-	all, err := w.GetWatchlists()
-	if err != nil {
-		// Without the set there is no way to know about collisions. The
-		// unconditional suffix is the pre-2026-08-08 behaviour: ugly, and
-		// correct. Guessing "no collision" here could silently merge two
-		// playlists into one file.
-		slog.Warn("[Watcher] M3U8: cannot read watchlists to check for name collisions, keeping the unique suffix", "err", err)
-		return m3u8BaseName(pl.EffectiveName(), pl.ID)
+// m3u8FileFor is the file this watchlist owns.
+//
+// The name is decided at three moments — creation, an explicit rename, and
+// Spotify renaming the playlist — and stored. Everywhere else just reads it.
+// It used to be recomputed from the live set of watchlists on every write,
+// which made one watchlist's filename a function of what the others were doing
+// and cost a full scan per call.
+//
+// The fallback covers watchlists that predate the field: the old scheme was
+// deterministic, so what their file is called is recoverable rather than lost.
+func (pl *WatchedPlaylist) m3u8FileFor() string {
+	if pl.M3U8File != "" {
+		return pl.M3U8File
 	}
-	return m3u8NameIn(pl, all, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel)
+	return m3u8BaseName(pl.Name, pl.ID) + ".m3u8"
+}
+
+// applyM3U8Name decides this watchlist's filename, moves the file on disk if it
+// changed, and records it. Returns the name in use.
+//
+// os.Rename rather than delete-and-rewrite: the content is already correct, and
+// renaming keeps the playlist present in Jellyfin throughout instead of making
+// it vanish until the next generation.
+//
+// Callers hold w.mu — every one of them is already mutating the watchlist.
+func (w *Watcher) applyM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist) string {
+	want := decideM3U8Name(pl, all, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
+	current := pl.m3u8FileFor()
+	if current == want {
+		pl.M3U8File = want
+		return want
+	}
+
+	dir := filepath.Join(w.watchlistOutputRoot(pl), m3u8.PlaylistsDirName)
+	if err := os.Rename(filepath.Join(dir, current), filepath.Join(dir, want)); err == nil {
+		slog.Info("[Watcher] M3U8 renamed", "from", current, "to", want)
+	} else if !os.IsNotExist(err) {
+		// Not fatal: the next generation writes to the new name regardless. Say
+		// so, because the old file is then left behind and someone has to know.
+		slog.Warn("[Watcher] M3U8: could not rename, the previous file may remain",
+			"from", current, "to", want, "err", err)
+	}
+	pl.M3U8File = want
+	return want
 }
 
 // userLabel resolves a user ID to something readable for a filename, or "" when
@@ -2014,14 +2039,19 @@ func (w *Watcher) userLabel(userID string) string {
 // already authoritative and immutable — it is what the watchlist was created
 // from and cannot drift from it.
 //
+// Through spotify.ParseEntityRef, not a substring match. This was
+// `strings.Contains(url, "/album/")` until the parser existed; two ways to read
+// a Spotify URL in one package is how they drift, and the loose one matched any
+// URL with that text anywhere in it.
+//
 // Artist watchlists (`/artist/`) are deliberately NOT covered. The same "an
 // album is not a playlist" argument would apply, but an artist is a growing
 // collection spanning many releases, which is the one case where a flat playlist
 // file shows something the <Artist>/<Album>/ tree does not. Recorded as a
 // decision so it does not read as an oversight later.
 func isAlbumSource(spotifyURL string) bool {
-	u := strings.ToLower(spotifyURL)
-	return strings.Contains(u, "/album/") || strings.Contains(u, ":album:")
+	kind, _ := spotify.ParseEntityRef(spotifyURL)
+	return kind == "album"
 }
 
 // A reconcilePlaylistDirs pass lived here: every check cycle it deleted any
@@ -2039,7 +2069,7 @@ func isAlbumSource(spotifyURL string) bool {
 //
 // Orphan cleanup needs a record of what we wrote and who wrote it. Until that
 // exists, the two places that create orphans are fixed at the source instead:
-// RemoveWatchlist and deleteStaleM3U8OnRename no longer gate their cleanup on
+// RemoveWatchlist no longer gates its cleanup on
 // the CreateM3u8File setting, which is how the observed orphan survived its
 // watchlist by 27 days.
 
