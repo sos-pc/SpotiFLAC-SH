@@ -280,6 +280,10 @@ The playlist file is named after the watchlist, and **Jellyfin shows that filena
 
 The name Spotify gives it cannot be edited directly, because every sync overwrites it from Spotify. Your name is stored separately and wins.
 
+**The name is decided once and stored**, at the only three moments a decision makes sense: when the watchlist is created, when you rename it, and when Spotify renames the playlist (unless you have set a name of your own — yours wins). Everything else reads what was decided.
+
+It is not recomputed on every write. Doing that made one watchlist's filename a function of what every other watchlist was doing, cost a full scan of them per call, and — inside the global lock — turned a rename into a quadratic sweep. It also meant the file on disk and the name in the code could disagree for hours.
+
 When two watchlists in the same download directory would produce the same filename, a distinction is added, in this order:
 
 ```
