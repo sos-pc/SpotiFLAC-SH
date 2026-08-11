@@ -9,6 +9,7 @@ docker-entrypoint.sh  starts Xvfb, then hands over to uvicorn
 shim.py               the engine-agnostic HTTP adapter the Go app calls
 requirements.txt      the shim's own deps
 patches/*.patch       applied to the installed package at build time
+hooks/*.py            runtime wrappers loaded by shim.py at startup
 ```
 
 ## The image must carry a browser
@@ -96,15 +97,6 @@ cleanly while silently going stale — a worse failure than a conflict.
 
 ## Patches currently carried
 
-- **`solver-fallback-desktop.patch`** — `signed_session_desktop.py`: when stdin
-  is not a TTY (a container), try the external solver at `TURNSTILE_SOLVER_URL`
-  before giving up. Interactive behaviour is untouched when a TTY exists.
-
-  The same change for `signed_session_mobile.py` was carried here too, until
-  upstream adopted it independently in `dc35550b` (2026-07-28) — same function,
-  same call site, reformatted. It was dropped rather than duplicated. The
-  desktop one may well go the same way; no PR was opened for either.
-
 - **`amazon-songlink-unformatted-url.patch`** — `amazon.py`: `source_url` is a
   module-level template, `"https://open.spotify.com/track/{track_id}"`, and
   nothing calls `.format()` on it. Amazon resolution step 4 therefore put the
@@ -117,8 +109,24 @@ cleanly while silently going stale — a worse failure than a conflict.
   and still 400s, so this removes a route that could not work rather than
   guaranteeing one that does.
 
+## Runtime hooks
+
+Behaviour that must happen *inside* an upstream function, but where a textual
+patch would be fragile (the function moves, the surrounding lines change), lives
+in `hooks/` as Python modules loaded by `shim.py` at startup.
+
+- **`solver_fallback.py`** — wraps `run_community_verification` in
+  `signed_session_desktop.py` to try the external solver at
+  `TURNSTILE_SOLVER_URL` when upstream's own modes (GUI browser, internal
+  solver.py) have both failed. Survives line shifts — only breaks if the
+  function is renamed, removed, or its signature changes incompatibly.
+
 **When upstream adopts a patch**, `patch --dry-run` reports "Reversed (or
 previously applied)" and the build fails. That is the signal to delete the file.
+
+**When a hook stops applying**, it logs a warning at import time and degrades
+gracefully — the build succeeds, the image is published, only the fallback is
+unavailable. The build log records whether each hook applied or skipped.
 
 ## Adding or updating a patch
 
