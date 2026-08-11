@@ -170,35 +170,54 @@ place the filesystem is walked, and it is walked because someone asked.
 `checkM3U8Integrity` disappears: it is an unrequested global `reconcile` on every
 boot.
 
-### 5.1 The counters, while we are here
+### 5.1 The counters — corrected 2026-08-11
 
-The playlist card mixes three coordinate systems that share field names:
+**The first version of this section was wrong.** It claimed the card renders
+three coordinate systems together "which is why nothing adds up", inferred from
+the TypeScript interfaces sharing field names (`downloaded`, `skipped`, `failed`
+appear in both `SyncLog` and `WatchlistStats`). Reading the render instead of
+the declarations says otherwise.
 
-| Source | `downloaded` / `skipped` / `failed` mean |
-|---|---|
-| `SyncLog` | what **one batch** did — a delta |
-| `WatchlistStats` | a **partition of the playlist** — always sums to `total_tracks` |
-| `WatchlistFreshnessReport` | a **diff against Spotify** |
+The names do collide. Their use does not:
 
-All three are rendered together, which is why nothing adds up. A second cause is
-independent of the naming: `GetWatchlistStats` checks the catalog *first* and
-`continue`s, so a track whose latest job **failed** but whose file exists counts
-as `Downloaded` — while the History tab lists the failure. Both numbers are
-correct in their own frame.
+- The card's summary is computed in one place from one source
+  (`WatchlistPage.tsx:425-427`): `present = downloaded + skipped`,
+  `absent = failed`, `pending`. Those three sum to `total_tracks` **by
+  construction** — `GetWatchlistStats` walks `pl.TrackIDs` and every iteration
+  increments exactly one counter, with all five job statuses covered.
+- The per-batch deltas are rendered in a **separate** section, the sync-log
+  list below, and are never added to the summary.
+- `loadWatchlists` refreshes lists and stats together every 30 s, so the two
+  cannot drift apart for long either.
 
-`diagnose` returning one report with one denominator resolves this by
-construction.
+What survives, and is real but narrower than "the numbers do not add up":
+
+**Stats and History answer different questions and look like they disagree.**
+`GetWatchlistStats` checks the catalog first and `continue`s, so a track whose
+latest job failed while its file exists counts as `Downloaded` — the card can
+show `0 failed` while the History tab lists failures. `latest[]` also collapses
+retries, so three failures then a success is one row in the summary and four in
+History. Both are correct in their own frame; neither is arithmetic.
+
+That is a labelling problem, not a counting one, and it does not justify a new
+endpoint. What a merged `diagnose` would still buy is one round trip instead of
+two and one place to state which frame each number belongs to — worth doing, not
+urgent, and no longer the reason phase 5 exists.
 
 ## 6. Sequencing
 
 Each phase ships on its own and is verifiable in production before the next
 starts. No phase requires the one after it.
 
-> **Status, 2026-08-11.** Phases 1–3 are merged (#55, #56, #57). The substance
-> is done: the index has a writer, generation no longer reads the library to
-> place a track, and one resolver answers for every consumer. Phases 4 and 5 are
-> the surface — the API shape and the counters — and were always worth doing
-> only after the substance held.
+> **Status, 2026-08-11 — closed.** Phases 1–3 are merged (#55, #56, #57) and
+> verified in production: the first verification pass found six rows claiming
+> `present` for files that were gone, generation no longer walks the library,
+> and one resolver answers for generation and deletion alike.
+>
+> Phase 4 is **withdrawn** and phase 5 **downgraded** — in both cases because
+> the earlier phases removed the problem they existed to solve, which is the
+> outcome a plan should want. The reasoning is recorded below rather than
+> deleted, so the next person does not re-derive it.
 
 **Phase 1 — make `present` mean something.** Wire `library-check-deleted` into a
 scheduled pass and into `reconcile`. Nothing reads differently yet; the point is
@@ -229,14 +248,35 @@ stops trusting `job.FilePath`. *Verifiable:* rename a file in File Manager,
 remove it from the playlist, and watch it actually get deleted — the case that
 leaked files forever.
 
-**Phase 4 — three verbs.** Collapse the ten endpoints. Old routes stay as thin
-redirects for one release. `checkM3U8Integrity` is removed.
+**Phase 4 — three verbs.** *Withdrawn 2026-08-11, before it was written.* Both
+of its justifications had been removed by the phases before it:
 
-**Phase 5 — one denominator.** Merge `stats` and `freshness` into `diagnose`,
-and update the card.
+- *"`checkM3U8Integrity` is an unrequested global reconcile on every boot."* It
+  is not one any more. Phase 2 took the library walk out of generation, so what
+  remains is a cheap idempotent regeneration from the catalog — measured on the
+  reference deployment, the three playlists are written with no gap after the
+  listening line.
+- *"Overlapping implementations that will drift."* They no longer overlap.
+  `retagJobs`, `scanRootForRebuild` and `VerifyLibraryStatuses` each have
+  exactly the callers they should, and `repair` is already
+  `reconcile(scope=watchlist)` composed from them. Phase 1 absorbed the last
+  duplication.
 
-Phases 1–3 are the substance. 4 and 5 are the surface, and are worth doing only
-after the substance holds.
+What remained was renaming routes and rewriting six frontend call sites, in a
+repo whose CI runs no frontend tests — real risk against an aesthetic gain, on
+buttons that work. The three-verb model stays the right way to *describe* this
+surface, and is worth applying the day the routes are touched for another
+reason. It is not worth touching them for.
+
+**Phase 5 — one denominator.** Downgraded by §5.1: the counters were found to be
+a sound partition, not three systems mixed. What is left is labelling — stats
+and History answering different questions — plus one round trip saved by merging
+`stats` and `freshness`. Worth doing, no longer urgent.
+
+Phases 1–3 were the substance and are done. 4 is withdrawn, 5 is smaller than it
+looked. **The plan has finished the work that mattered**; what remains should be
+picked up when something else makes it cheap, not driven to completion for its
+own sake.
 
 ## 7. What this plan does not do
 
