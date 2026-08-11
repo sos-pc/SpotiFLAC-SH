@@ -27,10 +27,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/db"
@@ -116,52 +114,25 @@ func (s *Server) v1CheckDeletedFiles(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), checkDeletedTimeout)
 	defer cancel()
 
-	files, err := db.ListCheckableLibraryFiles(ctx, s.ctr.Catalog)
+	// The pass itself lives in internal/jobs, because the daily background loop
+	// runs the identical thing and two copies of "reconcile status with disk"
+	// would drift. This handler is the manual, inspectable entry point to it;
+	// the loop is the reason the column can be trusted between clicks.
+	res, err := jobs.VerifyLibraryStatuses(ctx, s.ctr.Catalog, req.Apply, checkDeletedSampleLimit)
 	if err != nil {
 		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	result := checkDeletedResult{Applied: req.Apply}
-	for _, f := range files {
-		if ctx.Err() != nil {
-			result.TimedOut = true
-			break
-		}
-		result.Checked++
-
-		onDisk, err := statLibraryFile(f.FilePath)
-		if err != nil {
-			// Could not tell. Leaving the row alone is the conservative
-			// choice: an unreadable mount must not be recorded as a library
-			// that lost every file.
-			result.Failed++
-			continue
-		}
-
-		switch {
-		case !onDisk && f.Status != db.StatusMissing:
-			result.WentMissing++
-			if len(result.MissingSample) < checkDeletedSampleLimit {
-				result.MissingSample = append(result.MissingSample, f.FilePath)
-			}
-			if req.Apply {
-				if err := db.UpdateLibraryFileStatus(ctx, s.ctr.Catalog, f.ID, db.StatusMissing); err != nil {
-					slog.Warn("[Library] check-deleted: could not mark missing", "id", f.ID, "err", err)
-					result.Failed++
-				}
-			}
-		case onDisk && f.Status == db.StatusMissing:
-			result.CameBack++
-			if req.Apply {
-				if err := db.UpdateLibraryFileStatus(ctx, s.ctr.Catalog, f.ID, db.StatusPresent); err != nil {
-					slog.Warn("[Library] check-deleted: could not mark present", "id", f.ID, "err", err)
-					result.Failed++
-				}
-			}
-		default:
-			result.Unchanged++
-		}
+	result := checkDeletedResult{
+		Applied:       req.Apply,
+		Checked:       res.Checked,
+		WentMissing:   res.WentMissing,
+		CameBack:      res.CameBack,
+		Unchanged:     res.Unchanged,
+		Failed:        res.Failed,
+		MissingSample: res.MissingSample,
+		TimedOut:      res.TimedOut,
 	}
 
 	slog.Info("[Library] Check deleted files",
@@ -170,27 +141,6 @@ func (s *Server) v1CheckDeletedFiles(w http.ResponseWriter, r *http.Request) {
 		"failed", result.Failed, "timed_out", result.TimedOut)
 
 	writeV1JSON(w, http.StatusOK, result)
-}
-
-// statLibraryFile reports whether path is an existing file, keeping "not
-// there" and "could not tell" apart — the two must lead to different
-// decisions: the first is a finding, the second is a reason to do nothing.
-//
-// Deliberately not util.FileExists, which returns a bare bool and so folds a
-// permission error into "absent". Here that would record an unreadable mount
-// as a library that lost every one of its files.
-func statLibraryFile(path string) (bool, error) {
-	if path == "" {
-		return false, fmt.Errorf("empty path")
-	}
-	info, err := os.Stat(path)
-	if err == nil {
-		return !info.IsDir(), nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
