@@ -277,7 +277,9 @@ func (w *Watcher) checkM3U8Integrity(pl WatchedPlaylist) {
 
 // syncPlaylist récupère les métadonnées Spotify, compare avec les tracks déjà
 // connus, et enqueue uniquement les nouveaux.
-// FIX #2 — mu.Lock() autour des écritures sur TrackIDs + saveWatchlist
+//
+// pl is a snapshot taken by the caller; see the merge under w.mu near the end
+// for what that means and which fields it is allowed to write back.
 func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// Empêcher les exécutions concurrentes pour la même playlist
 	w.mu.Lock()
@@ -357,7 +359,8 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 
 	slog.Info("[Watcher] New tracks to download", "playlist", playlistName, "count", len(newTracks))
 
-	// FIX #4 — EnqueueBatch avant generateM3U8 (était inversé)
+	// Before the SyncLog below, which records this batch's ID: enqueuing is what
+	// produces it.
 	var batchID string
 	if len(newTracks) > 0 {
 		result, err := w.jm.EnqueueBatch(jobs.EnqueueBatchRequest{
@@ -403,7 +406,6 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// saveWatchlist refait détecter le rename au prochain sync (retry
 	// naturel) ; un crash après ce bloc mais avant saveWatchlist ne fait
 	// qu'un os.Remove redondant et sans danger sur un fichier déjà absent.
-	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
 	w.mu.Lock()
 	// This sync started from a snapshot of pl taken possibly hours ago — the
 	// Spotify fetch and EnqueueBatch sit between the copy and here, and with one
@@ -646,10 +648,17 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 	// No refusal here: the name came from Spotify and the caller did not choose
 	// it, so the ladder disambiguates quietly. Refusing would block an add that
 	// the user has no way to fix.
-	if existing, err := w.GetWatchlists(); err == nil {
-		pl.M3U8File = decideM3U8Name(pl.EffectiveName(), pl.UserID, pl.ID,
-			existing, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
+	// Failing the add is deliberate. Swallowing the error left M3U8File empty,
+	// and an empty M3U8File is not "decide it later" — nothing recomputes it, so
+	// m3u8FileFor falls back to the legacy scheme and the playlist wears a hash
+	// suffix for the rest of its life over one transient read. Nothing has been
+	// written at this point, so the user simply adds it again.
+	existing, err := w.GetWatchlists()
+	if err != nil {
+		return AddWatchlistResponse{}, fmt.Errorf("cannot read watchlists to name this one: %w", err)
 	}
+	pl.M3U8File = decideM3U8Name(pl.EffectiveName(), pl.UserID, pl.ID,
+		existing, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
 
 	if err := w.saveWatchlist(pl); err != nil {
 		return AddWatchlistResponse{}, fmt.Errorf("failed to save watchlist: %v", err)
@@ -808,6 +817,13 @@ func (w *Watcher) GetWatchlists() ([]WatchedPlaylist, error) {
 		return b.ForEach(func(k, v []byte) error {
 			var pl WatchedPlaylist
 			if err := json.Unmarshal(v, &pl); err != nil {
+				// Skipping is right — one unreadable record must not hide every
+				// other watchlist — but doing it in silence is not. A watchlist
+				// that stops syncing, vanishes from the UI and leaves its files
+				// behind, with nothing anywhere saying why, is indistinguishable
+				// from one the user deleted.
+				slog.Error("[Watcher] Unreadable watchlist record, skipped",
+					"key", string(k), "err", err)
 				return nil
 			}
 			playlists = append(playlists, pl)
@@ -974,10 +990,6 @@ func (w *Watcher) SyncWatchlist(id string) error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers — parsing de la réponse GetFilteredSpotifyData
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
 // JobEventHandler — implémentation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1085,7 +1097,7 @@ func (w *Watcher) OnManualBatchComplete(req jobs.BatchM3U8Request, paths []strin
 // OnBatchComplete implémente JobEventHandler.
 // Trouve le SyncLog par BatchID, met à jour ses compteurs, génère le M3U8.
 func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipped, failed int) {
-	// Locked (Q3): same reasoning as UpdateWatchlist — this read-modify-write
+	// Locked: same reasoning as UpdateWatchlist — this read-modify-write
 	// of the watchlist record must not interleave with syncPlaylist's own
 	// end-of-sync save. Scoped to just the BoltDB read/save, same as
 	// syncPlaylist itself, so the slower M3U8 regeneration below doesn't
@@ -1173,7 +1185,15 @@ func (w *Watcher) RemoveTrackID(watchlistID, spotifyID string) {
 		}
 	}
 	pl.TrackIDs = newIDs
-	_ = w.saveWatchlist(pl)
+	// The whole point of this function is that the track comes back on the next
+	// sync. If the save fails it does not, and the caller — OnPermanentFailure —
+	// has no return value to check, so an unlogged failure means a track quietly
+	// never retried again.
+	if err := w.saveWatchlist(pl); err != nil {
+		slog.Error("[Watcher] Could not drop the failed track, it will not be retried",
+			"spotify_id", spotifyID, "playlist", pl.Name, "err", err)
+		return
+	}
 	slog.Debug("[Watcher] Track removed from TrackIDs, will retry next sync", "spotify_id", spotifyID, "playlist", pl.Name)
 }
 
@@ -1342,7 +1362,9 @@ func ExtractTracksFromMetadata(data interface{}) []jobs.JobTrack {
 	return nil
 }
 
-// FIX #7 — extractPlaylistName retourne le nom de la playlist, pas le owner
+// extractPlaylistName returns the playlist's own name, never its owner's.
+// The distinction needs stating because the field it ends up reading is called
+// Owner.Name and holds the playlist name anyway — see the fallback below.
 func extractPlaylistName(data interface{}) string {
 	raw := toRawBytes(data)
 	if raw == nil {
@@ -1377,7 +1399,6 @@ func extractPlaylistName(data interface{}) string {
 		return ""
 	}
 
-	// FIX #7 — priorité au nom de la playlist sur le nom du owner
 	// PlaylistInfo.Owner.Name contient le nom de la playlist (pas PlaylistInfo.Name)
 	if result.PlaylistInfo.Owner.Name != "" {
 		return result.PlaylistInfo.Owner.Name
@@ -1472,7 +1493,7 @@ type UpdateWatchlistRequest struct {
 var ErrNameTaken = errors.New("a watchlist with that name already exists here — pick another")
 
 func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
-	// Locked (Q3): without this, a settings change landing mid-sync could be
+	// Locked: without this, a settings change landing mid-sync could be
 	// silently overwritten by syncPlaylist's own end-of-sync save of its
 	// stale in-memory copy of this same record.
 	w.mu.Lock()
@@ -1770,7 +1791,7 @@ type WatchlistHistoryItem struct {
 	Error      string  `json:"error,omitempty"`
 }
 
-// FIX #6 — sort.Slice à la place du tri O(n²)
+// GetWatchlistHistory lists this watchlist's download attempts, newest first.
 func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryItem, error) {
 	jobList, err := w.jm.GetAllJobs()
 	if err != nil {
@@ -1792,7 +1813,6 @@ func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryIte
 			Error:      j.Error,
 		})
 	}
-	// FIX #6 — O(n log n) au lieu de O(n²)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt > items[j].UpdatedAt
 	})
