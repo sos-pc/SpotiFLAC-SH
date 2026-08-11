@@ -489,7 +489,6 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 	for _, id := range currentTrackIDs {
 		currentSet[id] = true
 	}
-	jm := w.jm
 	// A read failure here used to be discarded, and an empty map reads exactly
 	// like "no other watchlist wants any of these tracks" — so a transient
 	// BoltDB error turned into deleting audio files that another watchlist was
@@ -511,29 +510,14 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 		}
 	}
 
-	// Indexed once, ahead of the loop. This used to be a GetAllJobs() *inside*
-	// it: every removed track re-decoded the entire jobs bucket to find the one
-	// or two records naming it. 164 records on the reference deployment, so a
-	// few milliseconds today — and quadratic by construction, so a playlist
-	// losing 500 tracks would have decoded the bucket 500 times.
+	// The same lookup generation uses, resolved once ahead of the loop.
 	//
-	// A read failure here is not the same hazard as the one above: without the
-	// job list no file is found, so nothing is deleted. Incomplete, not
-	// destructive — warn and carry on rather than abandon the pass.
-	jobsBySpotifyID := make(map[string][]jobs.Job)
-	if jm != nil {
-		jobList, jobsErr := jm.GetAllJobs()
-		if jobsErr != nil {
-			slog.Warn("[Watcher] Cannot list jobs, no file will be deleted this pass",
-				"playlist", pl.Name, "err", jobsErr)
-		}
-		for _, job := range jobList {
-			if job.WatchlistID != pl.ID || job.FilePath == "" || job.SpotifyID == "" {
-				continue
-			}
-			jobsBySpotifyID[job.SpotifyID] = append(jobsBySpotifyID[job.SpotifyID], job)
-		}
-	}
+	// It used to read job.FilePath directly, which is how a File Manager rename
+	// leaked files: the rename updated the catalog, the job kept the old path,
+	// and os.Remove on a path nothing is at fails with ErrNotExist — deletion
+	// reported success while the real file stayed on disk forever. Sharing one
+	// resolver is what makes that impossible rather than patched.
+	files := w.resolveTrackFiles(pl)
 	// Invariant across the loop: it reads pl, which nothing here changes. It was
 	// resolved inside the innermost branch, so every deleted file re-read the
 	// user's settings to compute the same path.
@@ -561,25 +545,21 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 		inOtherPlaylist := otherWatchlistIDs[knownID]
 		if inOtherPlaylist {
 			slog.Debug("[Watcher] Track removed from playlist but present in another watchlist, skipping file deletion", "spotify_id", knownID, "playlist", pl.Name)
-		} else {
-			for _, job := range jobsBySpotifyID[knownID] {
-				if err := os.Remove(job.FilePath); err != nil {
-					if !os.IsNotExist(err) {
-						slog.Warn("[Watcher] Failed to delete file", "path", job.FilePath, "err", err)
-					}
-					continue
+		} else if path := files[knownID]; path != "" {
+			if err := os.Remove(path); err != nil {
+				if !os.IsNotExist(err) {
+					slog.Warn("[Watcher] Failed to delete file", "path", path, "err", err)
 				}
-				slog.Info("[Watcher] Deleted file", "path", job.FilePath)
-				removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
-				// The file is gone, so the job must stop pointing at it.
-				job.FilePath = ""
-				job.UpdatedAt = time.Now()
-				if err := jm.SaveJob(&job); err != nil {
-					slog.Warn("[Watcher] Deleted the file but could not clear its job record",
-						"spotify_id", job.SpotifyID, "err", err)
-				}
-				deletedCount++
+				continue
 			}
+			slog.Info("[Watcher] Deleted file", "spotify_id", knownID, "path", path)
+			removeEmptyParents(filepath.Dir(path), outputRoot)
+			deletedCount++
+			// The job record keeps pointing at where it put the file, and that
+			// stays true: it did put it there. Clearing it was necessary while
+			// job.FilePath was consulted as a location; it no longer is, and
+			// every read of it stat-checks, so a path to a deleted file resolves
+			// to nothing on its own.
 		}
 	}
 	pl.TrackIDs = remainingIDs
@@ -737,33 +717,34 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 	outputRoot := w.watchlistOutputRoot(pl)
 
 	// ── Audio files, only when the watchlist was set to sync deletions ──
+	//
+	// Resolved the same way generation and syncDeletions resolve, rather than by
+	// walking jobs for their FilePath: one lookup, one answer, so removing a
+	// watchlist cannot delete a different file from the one its playlist listed.
+	//
+	// Keyed on pl.TrackIDs rather than on every job that ever named this
+	// watchlist. Those are the tracks it owns at the moment it is removed; a
+	// track dropped earlier already went through syncDeletions, which either
+	// deleted its file or deliberately kept it for another watchlist.
 	if pl.SyncDeletions {
-		jobList, err := w.jm.GetAllJobs()
-		if err != nil {
-			slog.Warn("[Watcher] Cannot list jobs, audio files left in place", "playlist", pl.Name, "err", err)
-		}
-		for _, job := range jobList {
-			if job.WatchlistID != id || job.FilePath == "" {
+		files := w.resolveTrackFiles(pl)
+		for _, spotifyID := range pl.TrackIDs {
+			path := files[spotifyID]
+			if path == "" {
 				continue
 			}
-			if otherIDs[job.SpotifyID] {
-				slog.Debug("[Watcher] Track in another watchlist, skipping file deletion", "spotify_id", job.SpotifyID)
+			if otherIDs[spotifyID] {
+				slog.Debug("[Watcher] Track in another watchlist, skipping file deletion", "spotify_id", spotifyID)
 				continue
 			}
-			if err := os.Remove(job.FilePath); err != nil {
+			if err := os.Remove(path); err != nil {
 				if !os.IsNotExist(err) {
-					slog.Warn("[Watcher] Failed to delete file (watchlist removed)", "path", job.FilePath, "err", err)
+					slog.Warn("[Watcher] Failed to delete file (watchlist removed)", "path", path, "err", err)
 				}
 				continue
 			}
-			slog.Info("[Watcher] Deleted file (watchlist removed)", "path", job.FilePath)
-			removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
-			job.FilePath = ""
-			job.UpdatedAt = time.Now()
-			if err := w.jm.SaveJob(&job); err != nil {
-				slog.Warn("[Watcher] Deleted the file but could not clear its job record",
-					"spotify_id", job.SpotifyID, "err", err)
-			}
+			slog.Info("[Watcher] Deleted file (watchlist removed)", "spotify_id", spotifyID, "path", path)
+			removeEmptyParents(filepath.Dir(path), outputRoot)
 		}
 	}
 
@@ -2379,40 +2360,62 @@ func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
 // repair, not to every write of a playlist file. See
 // docs/watchlist-consistency-plan.md §6.
 func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) (paths []string, unresolved []string) {
-	catalogPaths := w.catalogPathsForWatchlist(pl)
-
-	validCatalog := make(map[string]string, len(catalogPaths))
-	for _, spotifyID := range pl.TrackIDs {
-		path := catalogPaths[spotifyID]
-		if path == "" {
-			continue
-		}
-		if _, statErr := os.Stat(path); statErr == nil {
-			validCatalog[spotifyID] = path
-		}
-		// Else: stale catalog row — the file is no longer where it says. Left
-		// out rather than written into the M3U8 as a broken entry. The daily
-		// verification pass marks the row missing; library-rebuild repairs it
-		// if the file merely moved.
-	}
-
-	legacy := w.legacyJobPaths(pl.ID)
-
+	files := w.resolveTrackFiles(pl)
 	paths = make([]string, 0, len(pl.TrackIDs))
 	for _, spotifyID := range pl.TrackIDs {
-		if path := validCatalog[spotifyID]; path != "" {
+		if path := files[spotifyID]; path != "" {
 			paths = append(paths, path)
 			continue
-		}
-		if path := legacy[spotifyID]; path != "" {
-			if _, statErr := os.Stat(path); statErr == nil {
-				paths = append(paths, path)
-				continue
-			}
 		}
 		unresolved = append(unresolved, spotifyID)
 	}
 	return paths, unresolved
+}
+
+// resolveTrackFiles answers "where is this watchlist's file for this track",
+// for every track it holds. Absent from the map means no existing file could be
+// found; the value is always a path that stat'd successfully at lookup time.
+//
+// This is the single answer everything is supposed to share. It was not:
+// generation resolved catalog-then-jobs while deletion read job.FilePath alone,
+// so the two could name different files for one track — and the codebase already
+// paid for that. UpdateJobFilePathsForRename exists because a File Manager
+// rename updated only the catalog, leaving os.Remove(job.FilePath) pointing at a
+// path that no longer existed: the deletion silently failed and "leaked the
+// actual (renamed) file on disk forever" (internal/jobs/storage.go). The answer
+// then was to write the new path into every store; the answer here is to stop
+// having stores that can disagree. See docs/watchlist-consistency-plan.md §4.
+//
+// Sources, in order, each stat-checked:
+//
+//  1. The catalog — the index of what is on disk, maintained by
+//     recordCatalogDone and by the daily verification pass.
+//  2. BoltDB job paths — for files downloaded before the catalog existed, or
+//     whose row was cleaned up. Not an authority on location; a leftover.
+func (w *Watcher) resolveTrackFiles(pl *WatchedPlaylist) map[string]string {
+	catalogPaths := w.catalogPathsForWatchlist(pl)
+	legacy := w.legacyJobPaths(pl.ID)
+
+	files := make(map[string]string, len(pl.TrackIDs))
+	for _, spotifyID := range pl.TrackIDs {
+		if path := catalogPaths[spotifyID]; path != "" {
+			if _, statErr := os.Stat(path); statErr == nil {
+				files[spotifyID] = path
+				continue
+			}
+			// Stale row — the file is no longer where it says. Fall through
+			// rather than hand back a path nothing is at: writing it into an
+			// M3U8 makes a broken entry, and handing it to os.Remove deletes
+			// nothing while reporting success. The daily verification pass
+			// marks the row missing; library-rebuild repairs a moved file.
+		}
+		if path := legacy[spotifyID]; path != "" {
+			if _, statErr := os.Stat(path); statErr == nil {
+				files[spotifyID] = path
+			}
+		}
+	}
+	return files
 }
 
 // unresolvedSampleLimit caps how many unresolved Spotify IDs a generation logs.
