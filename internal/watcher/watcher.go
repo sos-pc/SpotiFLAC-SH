@@ -32,6 +32,11 @@ import (
 // is here.
 var bucketWatchlist = []byte("watchlist")
 
+// maxSyncLogs caps the per-watchlist sync history. Two writers trim it —
+// applySyncResult and OnBatchComplete — and they have to agree, so the bound is
+// named rather than repeated.
+const maxSyncLogs = 20
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -375,15 +380,18 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	deletedCount := w.syncDeletions(&pl, currentTrackIDs)
 
 	// ── SyncLog ──
+	// Built here, appended under the lock below onto the record as it exists
+	// by then — never onto this copy. OnBatchComplete writes the download
+	// counters into SyncLogs while this sync is still draining its queue, and
+	// appending here would carry those counters away at save time. That loss is
+	// what the "standalone entry" fallback in OnBatchComplete was written to
+	// paper over; with the save below merging instead of replacing, the entry it
+	// looks for is still there.
 	syncLog := SyncLog{
 		Time:      time.Now(),
 		BatchID:   batchID,
 		NewTracks: len(newTracks),
 		Deleted:   deletedCount,
-	}
-	pl.SyncLogs = append(pl.SyncLogs, syncLog)
-	if len(pl.SyncLogs) > 20 {
-		pl.SyncLogs = pl.SyncLogs[len(pl.SyncLogs)-20:]
 	}
 
 	// Rename Spotify : supprimer l'ancien M3U8 (le nouveau sera créé juste
@@ -397,30 +405,48 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 	// qu'un os.Remove redondant et sans danger sur un fichier déjà absent.
 	// FIX #2 — verrou autour de la mise à jour de TrackIDs + save
 	w.mu.Lock()
-	// Q3: this sync started from a snapshot of pl taken possibly minutes
-	// ago — if the watchlist was removed in the meantime (RemoveWatchlist
-	// is locked too, see above), saving it back here would resurrect it.
-	if _, err := w.GetWatchlistByID(pl.ID); err != nil {
+	// This sync started from a snapshot of pl taken possibly hours ago — the
+	// Spotify fetch and EnqueueBatch sit between the copy and here, and with one
+	// job worker a large playlist drains slowly. Anything the user changed in
+	// the meantime is newer than what this copy holds, so the record is re-read
+	// and only the fields this sync owns are carried onto it.
+	//
+	// Saving the snapshot wholesale is what put `tout.m3u8` back on 2026-08-10:
+	// a rename had moved the file and recorded the new name, and the sync
+	// running at the time wrote the old name over it, orphaning the renamed file
+	// and making the next generation recreate the old one. Same mechanism
+	// reverted CustomName, IntervalHours, SyncDeletions and the SyncLogs
+	// counters OnBatchComplete had just written.
+	//
+	// The existence check this replaced guarded one consequence of the same
+	// staleness — resurrecting a watchlist deleted mid-sync — and a nil record
+	// still covers it: there is nothing to merge onto, so nothing is written.
+	fresh, err := w.GetWatchlistByID(pl.ID)
+	if err != nil || fresh == nil {
 		w.mu.Unlock()
 		return
 	}
+	applySyncResult(fresh, &pl, newIDs, syncLog)
+
 	// Spotify renamed the playlist: the third and last moment a filename is
 	// decided. Only when the user has not chosen a name of their own — theirs
 	// wins, and Spotify renaming something must not overwrite a deliberate
-	// choice. Under the lock and before the save, so the decided name is
-	// persisted with everything else this sync changed.
+	// choice. Read from `fresh`, so a custom name typed during this sync is
+	// seen; reading it from the snapshot would decide against a name the user
+	// has already replaced.
 	//
 	// This replaced a delete-then-wait: the old file was removed here and the
 	// new one only appeared at the next generation, leaving a window where the
 	// playlist was simply absent from Jellyfin. applyM3U8Name renames instead.
-	if oldName != "" && pl.CustomName == "" {
+	if oldName != "" && fresh.CustomName == "" {
 		if all, err := w.GetWatchlists(); err == nil {
-			w.applyM3U8Name(&pl, all)
+			w.applyM3U8Name(fresh, all)
 		}
 	}
-	pl.TrackIDs = append(pl.TrackIDs, newIDs...)
-	pl.LastSync = time.Now()
-	w.saveWatchlist(&pl)
+	w.saveWatchlist(fresh)
+	// Everything below this lock reads pl; hand it the record that was actually
+	// persisted rather than the snapshot that was not.
+	pl = *fresh
 	w.mu.Unlock()
 
 	// Mirror current state into the SQLite catalog: track stubs,
@@ -766,6 +792,40 @@ func (w *Watcher) GetWatchlistsByUser(userID string) ([]WatchedPlaylist, error) 
 // and everything else the sync just updated. BoltDB serialises writers, so
 // re-reading inside the Update is enough to be safe.
 //
+// applySyncResult carries onto `fresh` the fields a sync owns, and nothing else.
+//
+// It exists because syncPlaylist works from a snapshot taken before a Spotify
+// fetch and a batch enqueue — hours, on a large playlist with one job worker —
+// and used to save that snapshot whole. Everything the user or another handler
+// changed in between was reverted: the filename and custom name (which is how
+// `tout.m3u8` came back on 2026-08-10), the interval, the deletion toggle, and
+// the download counters OnBatchComplete writes into SyncLogs.
+//
+// Three fields transfer, and only because the sync recomputed them from the two
+// sources that decide them:
+//
+//   - Name: what Spotify calls the playlist now.
+//   - TrackIDs: recoverMissingFiles and syncDeletions have already rebuilt this
+//     from the disk and from Spotify's current contents, so the snapshot's copy
+//     is the newer one despite being older. newIDs are the tracks just enqueued.
+//   - LastSync: this sync is the event being recorded.
+//
+// The SyncLog is appended to `fresh`'s list rather than the snapshot's, so an
+// entry OnBatchComplete updated while this sync ran survives to be found.
+//
+// Nothing here reads `fresh` before overwriting it, so it is safe to call with
+// the two pointing at the same record.
+func applySyncResult(fresh, snapshot *WatchedPlaylist, newIDs []string, log SyncLog) {
+	fresh.Name = snapshot.Name
+	fresh.TrackIDs = append(snapshot.TrackIDs, newIDs...)
+	fresh.LastSync = time.Now()
+
+	fresh.SyncLogs = append(fresh.SyncLogs, log)
+	if len(fresh.SyncLogs) > maxSyncLogs {
+		fresh.SyncLogs = fresh.SyncLogs[len(fresh.SyncLogs)-maxSyncLogs:]
+	}
+}
+
 // A watchlist removed between the read and this call is left alone rather than
 // resurrected — the same hazard saveWatchlist's caller guards against.
 func (w *Watcher) setM3U8File(watchlistID, filename string) error {
@@ -940,8 +1000,8 @@ func (w *Watcher) OnBatchComplete(watchlistID, batchID string, downloaded, skipp
 				Skipped:    skipped,
 				Failed:     failed,
 			})
-			if len(pl.SyncLogs) > 20 {
-				pl.SyncLogs = pl.SyncLogs[len(pl.SyncLogs)-20:]
+			if len(pl.SyncLogs) > maxSyncLogs {
+				pl.SyncLogs = pl.SyncLogs[len(pl.SyncLogs)-maxSyncLogs:]
 			}
 		}
 		if saveErr := w.saveWatchlist(&pl); saveErr != nil {
@@ -1792,11 +1852,25 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	}
 	slog.Info("[Watcher] M3U8 written", "file", baseName+".m3u8", "entries", len(paths))
 
-	// Record what was written, now that it exists. Only this field is touched —
-	// see setM3U8File for why the whole record must not be saved from here.
-	if err := w.setM3U8File(pl.ID, baseName+".m3u8"); err != nil {
-		slog.Warn("[Watcher] M3U8: written but not recorded, cleanup will fall back to guessing",
-			"file", baseName+".m3u8", "err", err)
+	// Backfill only, for records written before M3U8File existed: their name
+	// came from m3u8FileFor's fallback, and recording it turns the next
+	// cleanup's guess into a lookup. Only this field is touched — see
+	// setM3U8File for why the whole record must not be saved from here.
+	//
+	// Deliberately not a write in the general case. Generating does not DECIDE
+	// the name — creation, an explicit rename and a Spotify rename do, which is
+	// what m3u8FileFor documents — and baseName above is simply what those
+	// decided, read back. Writing it unconditionally made generation a fourth
+	// writer of a field with three deciders, and one that works from a value
+	// read before the file was written: a rename landing in between was
+	// reverted here. Equivalent whenever the record already has a name, since
+	// setM3U8File returns early on an unchanged value; the difference is only
+	// that the stale case can no longer overwrite a newer decision.
+	if pl.M3U8File == "" {
+		if err := w.setM3U8File(pl.ID, baseName+".m3u8"); err != nil {
+			slog.Warn("[Watcher] M3U8: written but not recorded, cleanup will fall back to guessing",
+				"file", baseName+".m3u8", "err", err)
+		}
 	}
 
 	playlistDir := filepath.Join(outputDir, m3u8.PlaylistsDirName)
