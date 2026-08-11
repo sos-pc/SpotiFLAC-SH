@@ -1761,6 +1761,7 @@ func computeFreshnessReport(
 // ─────────────────────────────────────────────────────────────────────────────
 
 type WatchlistHistoryItem struct {
+	SpotifyID  string  `json:"spotify_id,omitempty"`
 	TrackName  string  `json:"track_name"`
 	ArtistName string  `json:"artist_name"`
 	AlbumName  string  `json:"album_name"`
@@ -1769,28 +1770,79 @@ type WatchlistHistoryItem struct {
 	UpdatedAt  int64   `json:"updated_at"`
 	FilePath   string  `json:"file_path"`
 	Error      string  `json:"error,omitempty"`
+
+	// Superseded marks an attempt a later one for the same track replaced. A
+	// track that failed twice before succeeding is three rows here and one
+	// track in the summary; without this the two read as contradicting each
+	// other.
+	Superseded bool `json:"superseded,omitempty"`
+	// StillTracked is false when the track has since left the playlist. Its
+	// attempts stay in the log — they happened — but they are not counted by
+	// anything that describes the playlist as it is now.
+	StillTracked bool `json:"still_tracked"`
 }
 
 // GetWatchlistHistory lists this watchlist's download attempts, newest first.
+//
+// Every row is an attempt, not a track: retries appear once each, and a track
+// that left the playlist keeps the attempts it had. That is what an attempt log
+// should do, and it is also why the summary on the card looks like it disagrees
+// — the card partitions the *tracks currently in the playlist*, so "0 failed"
+// next to a list containing failures is two correct answers to two questions.
+//
+// Superseded and StillTracked say which rows still describe the present, so the
+// two views can be read together instead of against each other.
 func (w *Watcher) GetWatchlistHistory(watchlistID string) ([]WatchlistHistoryItem, error) {
 	jobList, err := w.jm.GetAllJobs()
 	if err != nil {
 		return nil, err
 	}
+
+	// Newest attempt per track, to mark the older ones. Absent SpotifyID cannot
+	// be grouped, so those rows are never marked — better unlabelled than
+	// wrongly labelled.
+	newest := make(map[string]time.Time)
+	for _, j := range jobList {
+		if j.WatchlistID != watchlistID || j.SpotifyID == "" {
+			continue
+		}
+		if prev, ok := newest[j.SpotifyID]; !ok || j.UpdatedAt.After(prev) {
+			newest[j.SpotifyID] = j.UpdatedAt
+		}
+	}
+
+	// The playlist as it stands. A failure to read it must not silently turn
+	// every row into "no longer tracked", so the flag is left true — the
+	// pre-existing reading — rather than inverted on a transient error.
+	tracked := make(map[string]bool)
+	knowTracked := false
+	if pl, plErr := w.GetWatchlistByID(watchlistID); plErr == nil && pl != nil {
+		knowTracked = true
+		for _, id := range pl.TrackIDs {
+			tracked[id] = true
+		}
+	} else {
+		slog.Warn("[Watcher] History: cannot read the watchlist, rows will not say whether the track is still tracked",
+			"watchlist_id", watchlistID, "err", plErr)
+	}
+
 	var items []WatchlistHistoryItem
 	for _, j := range jobList {
 		if j.WatchlistID != watchlistID {
 			continue
 		}
 		items = append(items, WatchlistHistoryItem{
-			TrackName:  j.TrackName,
-			ArtistName: j.ArtistName,
-			AlbumName:  j.AlbumName,
-			Status:     string(j.Status),
-			TotalSize:  j.TotalSize,
-			UpdatedAt:  j.UpdatedAt.Unix(),
-			FilePath:   j.FilePath,
-			Error:      j.Error,
+			SpotifyID:    j.SpotifyID,
+			TrackName:    j.TrackName,
+			ArtistName:   j.ArtistName,
+			AlbumName:    j.AlbumName,
+			Status:       string(j.Status),
+			TotalSize:    j.TotalSize,
+			UpdatedAt:    j.UpdatedAt.Unix(),
+			FilePath:     j.FilePath,
+			Error:        j.Error,
+			Superseded:   j.SpotifyID != "" && j.UpdatedAt.Before(newest[j.SpotifyID]),
+			StillTracked: !knowTracked || tracked[j.SpotifyID],
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
