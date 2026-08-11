@@ -522,3 +522,108 @@ func (jm *JobManager) recordCatalogDedupSkip(track JobTrack, req EnqueueBatchReq
 		slog.Warn("[Catalog] CreateDownloadAttempt(dedup-skip) failed", "spotify_id", track.SpotifyID, "err", err)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Library status verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+// LibraryVerifyResult is what one verification pass saw.
+type LibraryVerifyResult struct {
+	Checked       int
+	WentMissing   int
+	CameBack      int
+	Unchanged     int
+	Failed        int
+	TimedOut      bool
+	MissingSample []string
+}
+
+// Changed reports whether the pass found anything worth saying out loud.
+func (r LibraryVerifyResult) Changed() bool { return r.WentMissing > 0 || r.CameBack > 0 }
+
+// VerifyLibraryStatuses walks every non-deleted library_files row and reconciles
+// its status with what is actually on disk. With apply=false it only counts.
+//
+// This is the writer library_files.status never had. The column has carried a
+// five-state lifecycle since it was introduced, and nothing outside tests ever
+// wrote StatusMissing — so every row claimed "present" whether or not the file
+// was still there. Consumers that needed a path met an index they could not
+// trust, and each grew its own fallback: BoltDB job paths, a full filesystem tag
+// scan. Those fallbacks are the drift this repairs at the source. See
+// docs/watchlist-consistency-plan.md.
+//
+// Errors from stat leave the row untouched and count as Failed. That is the
+// conservative direction on purpose: an unreadable mount must not be recorded as
+// a library that lost every file, which is exactly the state this function
+// would otherwise write in one pass.
+//
+// sampleLimit caps MissingSample. A library that lost thousands of files should
+// not produce a response of thousands of paths.
+func VerifyLibraryStatuses(ctx context.Context, catalog db.Querier, apply bool, sampleLimit int) (LibraryVerifyResult, error) {
+	var result LibraryVerifyResult
+	if catalog == nil {
+		return result, fmt.Errorf("catalog database is not available")
+	}
+
+	files, err := db.ListCheckableLibraryFiles(ctx, catalog)
+	if err != nil {
+		return result, err
+	}
+
+	for _, f := range files {
+		if ctx.Err() != nil {
+			result.TimedOut = true
+			break
+		}
+		result.Checked++
+
+		onDisk, statErr := statLibraryFile(f.FilePath)
+		if statErr != nil {
+			result.Failed++
+			continue
+		}
+
+		switch {
+		case !onDisk && f.Status != db.StatusMissing:
+			result.WentMissing++
+			if len(result.MissingSample) < sampleLimit {
+				result.MissingSample = append(result.MissingSample, f.FilePath)
+			}
+			if apply {
+				if err := db.UpdateLibraryFileStatus(ctx, catalog, f.ID, db.StatusMissing); err != nil {
+					slog.Warn("[Catalog] verify: could not mark missing", "id", f.ID, "err", err)
+					result.Failed++
+				}
+			}
+		case onDisk && f.Status == db.StatusMissing:
+			result.CameBack++
+			if apply {
+				if err := db.UpdateLibraryFileStatus(ctx, catalog, f.ID, db.StatusPresent); err != nil {
+					slog.Warn("[Catalog] verify: could not mark present", "id", f.ID, "err", err)
+					result.Failed++
+				}
+			}
+		default:
+			result.Unchanged++
+		}
+	}
+	return result, nil
+}
+
+// statLibraryFile reports whether path is an existing file, keeping "not there"
+// (nil error, false) distinct from "could not tell" (non-nil error). The caller
+// acts on that distinction: absent means the row is wrong, unreadable means the
+// row is left alone.
+func statLibraryFile(path string) (bool, error) {
+	if path == "" {
+		return false, fmt.Errorf("empty path")
+	}
+	info, err := os.Stat(path)
+	if err == nil {
+		return !info.IsDir(), nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}

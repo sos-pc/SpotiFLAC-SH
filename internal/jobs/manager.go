@@ -299,6 +299,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSin
 	}
 
 	util.SafeGo("jobs.cleanupLoop", jm.cleanupLoop)
+	util.SafeGo("jobs.verifyLibraryLoop", jm.verifyLibraryLoop)
 
 	slog.Info("[Jobs] Manager started", "workers", jobWorkers, "db", filepath.Join(configDir, DBFile))
 	return jm, nil
@@ -377,6 +378,78 @@ func (jm *JobManager) runCleanupSafely() {
 	if deleted, _, err := jm.CleanupOldJobs(); err == nil && deleted > 0 {
 		slog.Info("[Jobs] Cleanup: old jobs deleted", "count", deleted)
 	}
+}
+
+const (
+	// libraryVerifyEvery is how often library_files.status is reconciled with
+	// the disk. A pass is one stat() per non-deleted row — 2589 of them on the
+	// reference deployment, against a 104 ms directory walk — so daily costs
+	// nothing and bounds how long a file deleted outside the app can keep
+	// claiming "present".
+	libraryVerifyEvery = 24 * time.Hour
+	// libraryVerifyTimeout bounds a pass. Deliberately far more generous than
+	// the HTTP endpoint's, which has a caller waiting on it: this one has
+	// nobody waiting, and the failure it guards against is a stalled mount, not
+	// a slow one.
+	libraryVerifyTimeout = 10 * time.Minute
+	// libraryVerifySampleLimit caps the sample kept for the log line.
+	libraryVerifySampleLimit = 10
+)
+
+// verifyLibraryLoop keeps library_files.status honest. Same shape as
+// cleanupLoop, and for the same reasons: a delay before the first run so it does
+// not compete with startup, then a fixed interval, with per-run recovery so one
+// failure skips a pass instead of killing the goroutine for the life of the
+// process.
+//
+// It exists because the column had no writer at all — see VerifyLibraryStatuses.
+// Everything that reads the catalog is downstream of this loop running.
+func (jm *JobManager) verifyLibraryLoop() {
+	select {
+	case <-time.After(5 * time.Minute):
+	case <-jm.ctx.Done():
+		return
+	}
+	jm.runVerifyLibrarySafely()
+	ticker := time.NewTicker(libraryVerifyEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-jm.ctx.Done():
+			return
+		case <-ticker.C:
+			jm.runVerifyLibrarySafely()
+		}
+	}
+}
+
+func (jm *JobManager) runVerifyLibrarySafely() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("[Catalog] PANIC recovered in library verify", "recover", r, "stack", string(debug.Stack()))
+		}
+	}()
+	if jm.catalog == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(jm.ctx, libraryVerifyTimeout)
+	defer cancel()
+
+	// apply=true: a pass that only counted would leave the column exactly as
+	// untrustworthy as it was.
+	result, err := VerifyLibraryStatuses(ctx, jm.catalog, true, libraryVerifySampleLimit)
+	if err != nil {
+		slog.Warn("[Catalog] library verify failed", "err", err)
+		return
+	}
+	if result.Changed() || result.Failed > 0 || result.TimedOut {
+		slog.Info("[Catalog] Library verified",
+			"checked", result.Checked, "went_missing", result.WentMissing,
+			"came_back", result.CameBack, "failed", result.Failed,
+			"timed_out", result.TimedOut, "sample", result.MissingSample)
+		return
+	}
+	slog.Debug("[Catalog] Library verified, nothing changed", "checked", result.Checked)
 }
 
 // Close shuts down workers gracefully.
