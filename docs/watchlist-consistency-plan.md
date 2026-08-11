@@ -194,6 +194,12 @@ construction.
 Each phase ships on its own and is verifiable in production before the next
 starts. No phase requires the one after it.
 
+> **Status, 2026-08-11.** Phases 1–3 are merged (#55, #56, #57). The substance
+> is done: the index has a writer, generation no longer reads the library to
+> place a track, and one resolver answers for every consumer. Phases 4 and 5 are
+> the surface — the API shape and the counters — and were always worth doing
+> only after the substance held.
+
 **Phase 1 — make `present` mean something.** Wire `library-check-deleted` into a
 scheduled pass and into `reconcile`. Nothing reads differently yet; the point is
 that after this, the catalog's `status` has a writer for the first time.
