@@ -75,6 +75,12 @@ interface HistoryItem {
   updated_at: number;
   file_path: string;
   error: string;
+  // Every row here is an attempt, while the card's summary partitions the
+  // tracks currently in the playlist. These two say which rows still describe
+  // the present, so "0 failed" above a list containing failures reads as two
+  // answers to two questions rather than a contradiction.
+  superseded?: boolean;
+  still_tracked?: boolean;
 }
 
 interface WatchedPlaylist {
@@ -678,7 +684,17 @@ export function WatchlistPage() {
                       (history[list.id] || []).map((item, i) => (
                         <div
                           key={i}
-                          className="flex items-center gap-2 text-xs py-0.5 border-b last:border-0"
+                          // Dimmed when the row no longer describes the
+                          // playlist as it stands: a retry that a later attempt
+                          // replaced, or a track that has since left. Those are
+                          // exactly the rows that made the summary above look
+                          // wrong — it counts current tracks, this counts
+                          // attempts.
+                          className={`flex items-center gap-2 text-xs py-0.5 border-b last:border-0 ${
+                            item.superseded || item.still_tracked === false
+                              ? "opacity-50"
+                              : ""
+                          }`}
                         >
                           {item.status === "done" && (
                             <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
@@ -692,6 +708,22 @@ export function WatchlistPage() {
                           <div className="min-w-0 flex-1">
                             <span className="truncate block font-medium">
                               {item.track_name}
+                              {item.superseded && (
+                                <span
+                                  className="ml-1 font-normal text-muted-foreground"
+                                  title="A later attempt for this track replaced this one — the summary above counts the track once, by its current state."
+                                >
+                                  · retried since
+                                </span>
+                              )}
+                              {item.still_tracked === false && (
+                                <span
+                                  className="ml-1 font-normal text-muted-foreground"
+                                  title="This track has left the playlist. Its attempts stay in the log but nothing above counts it."
+                                >
+                                  · no longer in the playlist
+                                </span>
+                              )}
                             </span>
                             <span className="text-muted-foreground truncate block">
                               {item.artist_name}
