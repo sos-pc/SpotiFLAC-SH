@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sos-pc/SpotiFLAC-SH/backend/meta"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
 	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
@@ -1690,7 +1689,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 	}
 
 	outputDir := w.watchlistOutputRoot(pl)
-	resolved := w.resolveTrackPaths(pl, outputDir)
+	resolved, _ := w.resolveTrackPaths(pl, outputDir)
 
 	var pending, failed int
 	if stats, statsErr := w.GetWatchlistStats(id); statsErr == nil {
@@ -1934,11 +1933,11 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 
 	outputDir := w.watchlistOutputRoot(pl)
 
-	paths := w.resolveTrackPaths(pl, outputDir)
+	paths, unresolvedIDs := w.resolveTrackPaths(pl, outputDir)
 	result := m3u8.GenerationResult{
 		Total:      len(pl.TrackIDs),
 		Resolved:   len(paths),
-		Unresolved: len(pl.TrackIDs) - len(paths),
+		Unresolved: len(unresolvedIDs),
 	}
 	if len(paths) == 0 {
 		if result.Total > 0 {
@@ -1985,8 +1984,19 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	}
 
 	if result.Unresolved > 0 {
-		slog.Warn("[Watcher] M3U8: tracks unresolved (no catalog entry, no SPOTIFY_ID tag, no BoltDB job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them",
-			"playlist", pl.Name, "unresolved", result.Unresolved, "total", len(pl.TrackIDs))
+		// The IDs, not just how many. A count says a problem exists and gives
+		// nothing to act on: "1 unresolved" sat in this deployment's logs for
+		// days while the track behind it went unidentified, and until this
+		// commit it also triggered a full library walk on every generation.
+		// Capped, because a library that lost its catalog should not print
+		// thousands of lines.
+		sample := unresolvedIDs
+		if len(sample) > unresolvedSampleLimit {
+			sample = sample[:unresolvedSampleLimit]
+		}
+		slog.Warn("[Watcher] M3U8: tracks unresolved (no catalog row, no job record); run POST /api/v1/admin/retag-legacy then POST /api/v1/admin/library-rebuild to recover them",
+			"playlist", pl.Name, "unresolved", result.Unresolved, "total", len(pl.TrackIDs),
+			"spotify_ids", sample)
 	}
 
 	// The shrink guard applies only when tracks failed to resolve: a
@@ -2342,28 +2352,33 @@ func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
 	return &m3u8Settings{JellyfinPath: settings.JellyfinMusicPath}
 }
 
-// resolveTrackPaths returns the ordered list of file paths matching pl.TrackIDs.
-// Resolution order per ID:
-//  1. Catalog active library_file (fast SQL JOIN, source of truth once
-//     populated by recordCatalogDone or future library-rebuild). Survives
-//     BoltDB cleanup and reflects manual file moves once the rescan flow
-//     has updated the row.
-//  2. Filesystem index built from SPOTIFY_ID tags under outputDir.
-//     Covers files just downloaded but not yet mirrored to the catalog,
-//     and tagged legacy files the catalog has not learned about yet.
-//  3. BoltDB job FilePath (legacy fallback for files without the tag).
+// resolveTrackPaths returns the ordered list of file paths matching pl.TrackIDs,
+// and the IDs it could not place. Resolution order per ID:
 //
-// Tracks that resolve to no existing file are skipped silently. We only
-// build the filesystem index lazily — when at least one ID needs it,
-// because its catalog entry is either missing OR stale (fails os.Stat) — to
-// avoid a recursive walk on populated libraries. Gating this on stale-ness
-// as well as absence matters: a single renamed/moved file whose catalog row
-// still exists but points at a dead path must still trigger the fallback
-// scan, even if every OTHER track in the playlist resolves fine via the
-// catalog (a count-only check would leave exactly that one track
-// unresolved forever, since "catalog row count == TrackIDs count" looks
-// satisfied even though one of those rows is dead).
-func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []string {
+//  1. Catalog active library_file, stat-checked. The index of what is on disk,
+//     maintained by recordCatalogDone and by the daily verification pass.
+//  2. BoltDB job FilePath, stat-checked. Legacy fallback for files downloaded
+//     before the catalog existed, or whose row was cleaned up.
+//
+// It no longer walks the library reading SPOTIFY_ID tags. That walk was the
+// third source, and it cost ~15 s cold over 2744 files on the reference
+// deployment — on *every* generation, because it fired whenever any track was
+// unresolved, and a single track that was never downloaded is unresolved
+// forever. After each sync, after each batch, once per watchlist at startup.
+//
+// It was doing almost nothing for that price. Measured on the reference
+// deployment before removing it: of 2621 tracks across three watchlists, 12 had
+// no catalog row, 11 of those were covered by a job record, and the twelfth
+// resolved to nothing at all — so the walk placed zero tracks and the M3U8 keeps
+// exactly the entries it had.
+//
+// What it did cover, and now does not: a file present on disk with a
+// SPOTIFY_ID tag but with neither a catalog row nor a job record — a library
+// imported from outside SpotiFLAC. That is what library-rebuild is for, and the
+// warning on an unresolved track says so. Recovering it belongs to an explicit
+// repair, not to every write of a playlist file. See
+// docs/watchlist-consistency-plan.md §6.
+func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) (paths []string, unresolved []string) {
 	catalogPaths := w.catalogPathsForWatchlist(pl)
 
 	validCatalog := make(map[string]string, len(catalogPaths))
@@ -2375,57 +2390,41 @@ func (w *Watcher) resolveTrackPaths(pl *WatchedPlaylist, outputDir string) []str
 		if _, statErr := os.Stat(path); statErr == nil {
 			validCatalog[spotifyID] = path
 		}
-		// Else: stale catalog row — file no longer at recorded path. Left
-		// out of validCatalog, which is what needsFilesystemIndexFallback
-		// below checks for, rather than emitting a broken M3U8 entry.
-	}
-
-	var index map[string]string
-	if needsFilesystemIndexFallback(pl.TrackIDs, validCatalog) {
-		var err error
-		index, err = meta.BuildSpotifyIDIndex(outputDir)
-		if err != nil {
-			slog.Warn("[Watcher] M3U8: index build failed", "playlist", pl.Name, "err", err)
-			index = map[string]string{}
-		}
+		// Else: stale catalog row — the file is no longer where it says. Left
+		// out rather than written into the M3U8 as a broken entry. The daily
+		// verification pass marks the row missing; library-rebuild repairs it
+		// if the file merely moved.
 	}
 
 	legacy := w.legacyJobPaths(pl.ID)
 
-	paths := make([]string, 0, len(pl.TrackIDs))
+	paths = make([]string, 0, len(pl.TrackIDs))
 	for _, spotifyID := range pl.TrackIDs {
 		if path := validCatalog[spotifyID]; path != "" {
-			paths = append(paths, path)
-			continue
-		}
-		if path := index[spotifyID]; path != "" {
 			paths = append(paths, path)
 			continue
 		}
 		if path := legacy[spotifyID]; path != "" {
 			if _, statErr := os.Stat(path); statErr == nil {
 				paths = append(paths, path)
+				continue
 			}
 		}
+		unresolved = append(unresolved, spotifyID)
 	}
-	return paths
+	return paths, unresolved
 }
 
-// needsFilesystemIndexFallback reports whether at least one ID in trackIDs
-// has no valid (already stat-checked) entry in validCatalog — meaning the
-// filesystem SPOTIFY_ID-tag index must be built as a fallback source.
-// Comparing lengths this way correctly catches BOTH a missing catalog row
-// and a stale one (absent from validCatalog either way), unlike comparing
-// raw catalog row counts against trackIDs, which stays satisfied even when
-// one of those rows points at a dead path.
-func needsFilesystemIndexFallback(trackIDs []string, validCatalog map[string]string) bool {
-	return len(validCatalog) < len(trackIDs)
-}
+// unresolvedSampleLimit caps how many unresolved Spotify IDs a generation logs.
+const unresolvedSampleLimit = 10
 
 // legacyJobPaths returns the SpotifyID→FilePath map from BoltDB jobs for a
 // given watchlist, used as fallback for files that don't yet carry the
 // SPOTIFY_ID tag (downloaded before this change).
 func (w *Watcher) legacyJobPaths(watchlistID string) map[string]string {
+	if w.jm == nil {
+		return map[string]string{}
+	}
 	jobList, err := w.jm.GetAllJobs()
 	if err != nil {
 		return map[string]string{}

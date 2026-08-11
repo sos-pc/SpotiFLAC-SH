@@ -3,8 +3,6 @@ package meta
 import (
 	"fmt"
 	"io"
-	"io/fs"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,43 +99,6 @@ func ReadSpotifyID(path string) (string, error) {
 		return "", nil
 	}
 	return readSpotifyIDFromFile(path, ext)
-}
-
-// BuildSpotifyIDIndex walks rootDir recursively, reads the SPOTIFY_ID tag from
-// every supported audio file it finds, and returns a map from Spotify track ID
-// to absolute file path. Files without the tag are silently skipped.
-//
-// This is the source of truth for M3U8 generation: it answers "for this
-// SpotifyID, where is the file on disk?" without depending on BoltDB job state.
-//
-// If two files share the same SPOTIFY_ID, the path encountered last during
-// the walk wins. Walk errors on individual entries are logged then skipped so
-// one unreadable file never aborts the whole index.
-func BuildSpotifyIDIndex(rootDir string) (map[string]string, error) {
-	index := make(map[string]string)
-	err := filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			slog.Warn("[SpotifyIndex] Skipping path", "path", path, "err", walkErr)
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if !supportedAudioExtensions[ext] {
-			return nil
-		}
-		spotifyID, readErr := readSpotifyIDFromFile(path, ext)
-		if readErr != nil || spotifyID == "" {
-			return nil
-		}
-		index[spotifyID] = path
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk %s: %w", rootDir, err)
-	}
-	return index, nil
 }
 
 // readSpotifyIDFromFile returns the SPOTIFY_ID tag value, or empty string if

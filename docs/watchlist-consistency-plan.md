@@ -199,18 +199,29 @@ scheduled pass and into `reconcile`. Nothing reads differently yet; the point is
 that after this, the catalog's `status` has a writer for the first time.
 *Verifiable:* rows change status when a file is deleted outside the app.
 
-**Phase 2 — one resolver.** Extract the path resolution used by generation into
-a single function, and route `syncDeletions`, `RemoveWatchlist` and
-`recoverMissingFiles` through it. Deletion stops trusting `job.FilePath`.
-*Verifiable:* rename a file in File Manager, remove it from the playlist, and
-watch it actually get deleted — the case that leaked files forever.
+**Phase 2 — take the scan out of the hot path.** `resolveTrackPaths` stops
+walking the library and returns the IDs it could not place, so an unresolved
+track becomes something to act on rather than a reason to read 2744 files.
+*Verifiable:* generation for the 2561-track playlist no longer spends ~15 s on a
+walk, and the warning names the tracks.
 
-**Phase 3 — take the scan out of the hot path.** With Phase 1 giving a
-trustworthy index, `resolveTrackPaths` stops walking the library and reports
-unresolved tracks instead. The walk moves into `reconcile`, where it is
-explicit. *Verifiable:* generation time for the 2561-track playlist drops from
-~15 s to sub-second; the `unresolved` count still appears, now as a diagnosis
-rather than a trigger.
+> **Swapped with Phase 3 on 2026-08-11, before either was written.**
+>
+> The original order had deletion adopt generation's resolver first. But
+> agreeing on where a file is means reading the same sources — so deletion would
+> have inherited the 15-second walk that the *next* phase removes. A regression
+> scheduled on purpose is still a regression.
+>
+> Measured before swapping, on the reference deployment: across three watchlists
+> and 2621 tracks, 12 had no catalog row; 11 of those were covered by a job
+> record and the twelfth resolved to nothing at all. The walk placed **zero**
+> tracks. Removing it first costs nothing and makes the merge below free.
+
+**Phase 3 — one resolver.** Route `syncDeletions`, `RemoveWatchlist` and
+`recoverMissingFiles` through the same resolution generation uses. Deletion
+stops trusting `job.FilePath`. *Verifiable:* rename a file in File Manager,
+remove it from the playlist, and watch it actually get deleted — the case that
+leaked files forever.
 
 **Phase 4 — three verbs.** Collapse the ten endpoints. Old routes stay as thin
 redirects for one release. `checkM3U8Integrity` is removed.
