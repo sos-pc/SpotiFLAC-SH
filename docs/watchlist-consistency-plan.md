@@ -240,21 +240,63 @@ of the stale-save race #50 fixed. It stays.
 are French. Fixing that alone rewrites the `git blame` of the whole file for no
 functional gain; it happens where code is being rewritten anyway.
 
-## 8. Open questions
+## 8. Decisions
 
-1. **Does `job.FilePath` stay?** Phase 2 stops resolving against it. Keeping it
-   as a breadcrumb costs nothing and helps forensics; removing it eliminates a
-   registry that can drift. Recommendation: keep, stop trusting, revisit after
-   Phase 3.
+Answered 2026-08-11. Recorded here because each one changes what gets built.
 
-2. **How often should `reconcile` run unattended?** Phase 1 needs a cadence. A
-   full verify is 2745 `os.Stat` calls — cheap — plus the tag walk only when
-   repairing moves. Daily seems right; it is a settings decision.
+**`job.FilePath` stays, and stops being trusted.** Phase 2 routes every
+resolution through the index; the field keeps being written because knowing
+where a download put its file is worth having when something disappears. The
+risk is that someone reads it and resolves against it again — the comment on the
+field says not to, and Phase 2's single resolver is the thing that makes it
+unnecessary.
 
-3. **What happens to a track that never resolves?** Today it silently shortens
-   the M3U8 and triggers the scan forever. Under Phase 3 it becomes a reported
-   number. Whether `diagnose` should name the tracks is a UX question.
+**`reconcile` runs daily, unattended.** A full verify is 2745 `os.Stat` calls
+against a 104 ms directory walk — cheap enough that daily costs nothing, and it
+bounds how long a file deleted outside the app can keep claiming `present`. The
+tag walk still only happens when repairing moves, not on the verify pass.
 
-4. **`GetWatchlistsByUser` returns records with an empty `UserID` to every
-   user.** Deliberate legacy accommodation or an access-control gap? Out of
-   scope here, but it wants an answer.
+**`diagnose` names the unresolved tracks, not just their count.** "1 unresolved"
+is the message that has been in the logs for two days and it is not actionable;
+"1 unresolved: <title> — <artist>" would have let the operator remove the
+offending track in ten seconds instead of paying the 15-second scan on every
+generation since. The title is already in the catalog or in the Spotify payload.
+
+**An ownerless watchlist becomes impossible to create.** `AddWatchlist` rejects
+a request with an empty `UserID`, and the `|| pl.UserID == ""` clause in
+`GetWatchlistsByUser` goes with it.
+
+### 8.1 Where ownerless records came from
+
+Worth recording, because the answer says the hole is already closed at its
+source and this is cleanup rather than defence.
+
+`POST /api/v1/watchlists` stores `userIDFromContext(r)`, which is empty only when
+the caller's claims carry no `UserID`. On the reference deployment three of four
+API keys have `user_id: ""` — `admin-cli` (11:00:38), `admin-cli-2` (11:05:05)
+and `dev` (11:24:05), all created 2026-07-13. The fourth, created two days
+later, has one.
+
+`caa44ee`, committed 2026-07-13 at **11:40:08**, explains the gap:
+`GetOrCreateUser` refreshed a returning profile's name and admin flag but never
+re-derived its `ID` from the BoltDB lookup key, so a profile written before that
+field existed stayed permanently `ID=""` — and *"any API key they created
+inherited UserID='' from JWTClaims"*. All three keys predate the fix by under
+forty minutes.
+
+The same commit notes the other half: `ValidateAPIKey` calls `GetUser("")`, which
+always fails, so those keys were *"silently downgrading every admin-scoped key
+they ever created to non-admin"*. They have claimed permissions they do not get
+for a month.
+
+So no new ownerless key can be minted today. What remains is three stale keys
+that can still create ownerless watchlists, and two rules that disagree about
+what to do with one: `GetWatchlistsByUser` shows it to everyone, while
+`checkWatchlistOwnership` lets only admins touch it. The decision above settles
+that by removing the case rather than reconciling the two rules.
+
+## 9. Still open
+
+**Whether the three ownerless API keys are deleted or re-owned.** Neither is
+required by the plan — the `AddWatchlist` guard makes them harmless either way —
+and it is the operator's call. They last authenticated on 2026-07-13.
