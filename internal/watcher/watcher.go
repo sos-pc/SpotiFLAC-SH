@@ -489,7 +489,17 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 		currentSet[id] = true
 	}
 	jm := w.jm
-	allPlaylists, _ := w.GetWatchlists()
+	// A read failure here used to be discarded, and an empty map reads exactly
+	// like "no other watchlist wants any of these tracks" — so a transient
+	// BoltDB error turned into deleting audio files that another watchlist was
+	// still using. There is no safe way to proceed without this answer: refuse
+	// the whole deletion pass and let the next sync retry it.
+	allPlaylists, err := w.GetWatchlists()
+	if err != nil {
+		slog.Warn("[Watcher] Cannot read watchlists, skipping deletion pass rather than risk deleting shared files",
+			"playlist", pl.Name, "err", err)
+		return 0
+	}
 	otherWatchlistIDs := make(map[string]bool)
 	for _, other := range allPlaylists {
 		if other.ID == pl.ID {
@@ -608,8 +618,8 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 	// it, so the ladder disambiguates quietly. Refusing would block an add that
 	// the user has no way to fix.
 	if existing, err := w.GetWatchlists(); err == nil {
-		pl.M3U8File = decideM3U8Name(pl, existing, w.watchlistOutputRoot(pl),
-			w.watchlistOutputRoot, w.userLabel) + ".m3u8"
+		pl.M3U8File = decideM3U8Name(pl.EffectiveName(), pl.UserID, pl.ID,
+			existing, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
 	}
 
 	if err := w.saveWatchlist(pl); err != nil {
@@ -639,97 +649,124 @@ func (w *Watcher) AddWatchlist(req AddWatchlistRequest) (AddWatchlistResponse, e
 	}, nil
 }
 
+// RemoveWatchlist deletes the record first, then cleans up the files it owned.
+//
+// That order is the point. Cleaning up first left a window in which a sync or a
+// batch completion — both of which regenerate the M3U8 from the record — could
+// rewrite the file between its deletion and the record's, leaving a playlist in
+// Jellyfin that nothing owned any more. Deleting the record first closes the
+// window structurally rather than by widening the lock: every producer resolves
+// the watchlist before writing, and none of them find it.
+//
+// Only the record deletion holds w.mu. The cleanup below can remove thousands of
+// audio files, and holding the watchlist lock across that would stall every
+// other watchlist operation for its duration.
 func (w *Watcher) RemoveWatchlist(id string) error {
-	playlists, _ := w.GetWatchlists()
-	for _, pl := range playlists {
-		if pl.ID != id {
+	w.mu.Lock()
+	playlists, err := w.GetWatchlists()
+	if err != nil {
+		w.mu.Unlock()
+		// Deleting the record while unable to read it would strand its files
+		// and its M3U8 with nothing left that knows they existed.
+		return fmt.Errorf("cannot read watchlists to remove %s: %w", id, err)
+	}
+	var pl *WatchedPlaylist
+	otherIDs := make(map[string]bool)
+	for i := range playlists {
+		if playlists[i].ID == id {
+			pl = &playlists[i]
 			continue
 		}
-
-		outputRoot := w.watchlistOutputRoot(&pl)
-
-		// ── Suppression des fichiers audio (seulement si SyncDeletions) ────────
-		if pl.SyncDeletions {
-			otherIDs := make(map[string]bool)
-			for _, other := range playlists {
-				if other.ID == id {
-					continue
-				}
-				for _, tid := range other.TrackIDs {
-					otherIDs[tid] = true
-				}
-			}
-			jobs, _ := w.jm.GetAllJobs()
-			for _, job := range jobs {
-				if job.WatchlistID != id || job.FilePath == "" {
-					continue
-				}
-				if otherIDs[job.SpotifyID] {
-					slog.Debug("[Watcher] Track in another watchlist, skipping file deletion", "spotify_id", job.SpotifyID)
-					continue
-				}
-				if err := os.Remove(job.FilePath); err == nil {
-					slog.Info("[Watcher] Deleted file (watchlist removed)", "path", job.FilePath)
-					removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
-					// Nettoyer le FilePath dans BoltDB
-					job.FilePath = ""
-					job.UpdatedAt = time.Now()
-					_ = w.jm.SaveJob(&job)
-				}
-			}
+		for _, tid := range playlists[i].TrackIDs {
+			otherIDs[tid] = true
 		}
-
-		// ── Suppression du fichier M3U8 (toujours, indépendamment de SyncDeletions) ──
-		//
-		// Deliberately NOT gated on CreateM3u8File, for the same reason as the
-		// rename cleanup: the setting governs writing, not tidying up. Gating it
-		// is how `all [957f2ab0].m3u8` survived its watchlist by 27 days —
-		// removed while the setting was off, then nothing knew about it again.
-		{
-			playlistsDir := filepath.Join(outputRoot, "Playlists")
-			// The recorded filename first, because it is the only one that is
-			// certainly right. The two computed forms follow as fallbacks for
-			// watchlists that predate M3U8File: the current naming rule, and
-			// the pre-disambiguation one for a watchlist removed before it ever
-			// re-synced after that migration. Removing a file that does not
-			// exist is free, so trying all three costs nothing.
-			candidates := []string{
-				filepath.Join(playlistsDir, pl.m3u8FileFor()),
-				filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
-			}
-			if pl.M3U8File != "" {
-				candidates = append([]string{filepath.Join(playlistsDir, pl.M3U8File)}, candidates...)
-			}
-			for _, m3u8Path := range candidates {
-				if err := os.Remove(m3u8Path); err == nil {
-					slog.Info("[Watcher] Deleted M3U8 (watchlist removed)", "path", m3u8Path)
-				} else if !os.IsNotExist(err) {
-					slog.Warn("[Watcher] Failed to delete M3U8 (watchlist removed)", "path", m3u8Path, "err", err)
-				}
-			}
-			// Nettoyer le dossier Playlists/ s'il est vide
-			if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
-				if err := os.Remove(playlistsDir); err == nil {
-					slog.Info("[Watcher] Deleted empty Playlists dir", "path", playlistsDir)
-				}
-			}
-		}
-
-		break
 	}
-
-	// Locked (Q3): if a sync for this same watchlist is mid-flight, its
-	// end-of-sync save (also locked, see syncPlaylist) would otherwise be
-	// able to land after this delete and resurrect the record.
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.db.Update(func(tx *bolt.Tx) error {
+	if pl == nil {
+		w.mu.Unlock()
+		return nil // already gone: deleting twice is not an error
+	}
+	if err := w.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWatchlist)
 		if b == nil {
 			return nil
 		}
 		return b.Delete([]byte(id))
-	})
+	}); err != nil {
+		w.mu.Unlock()
+		return err
+	}
+	w.mu.Unlock()
+
+	outputRoot := w.watchlistOutputRoot(pl)
+
+	// ── Audio files, only when the watchlist was set to sync deletions ──
+	if pl.SyncDeletions {
+		jobList, err := w.jm.GetAllJobs()
+		if err != nil {
+			slog.Warn("[Watcher] Cannot list jobs, audio files left in place", "playlist", pl.Name, "err", err)
+		}
+		for _, job := range jobList {
+			if job.WatchlistID != id || job.FilePath == "" {
+				continue
+			}
+			if otherIDs[job.SpotifyID] {
+				slog.Debug("[Watcher] Track in another watchlist, skipping file deletion", "spotify_id", job.SpotifyID)
+				continue
+			}
+			if err := os.Remove(job.FilePath); err != nil {
+				if !os.IsNotExist(err) {
+					slog.Warn("[Watcher] Failed to delete file (watchlist removed)", "path", job.FilePath, "err", err)
+				}
+				continue
+			}
+			slog.Info("[Watcher] Deleted file (watchlist removed)", "path", job.FilePath)
+			removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
+			job.FilePath = ""
+			job.UpdatedAt = time.Now()
+			if err := w.jm.SaveJob(&job); err != nil {
+				slog.Warn("[Watcher] Deleted the file but could not clear its job record",
+					"spotify_id", job.SpotifyID, "err", err)
+			}
+		}
+	}
+
+	// ── The M3U8, always, regardless of SyncDeletions ──
+	//
+	// Deliberately NOT gated on CreateM3u8File, for the same reason as the
+	// rename cleanup: the setting governs writing, not tidying up. Gating it
+	// is how `all [957f2ab0].m3u8` survived its watchlist by 27 days —
+	// removed while the setting was off, then nothing knew about it again.
+	playlistsDir := filepath.Join(outputRoot, m3u8.PlaylistsDirName)
+	// The recorded name when there is one — it is the only name that is
+	// certainly right. Otherwise the two computed forms, for watchlists that
+	// predate M3U8File: the current rule and the pre-disambiguation one, for a
+	// watchlist removed before it ever re-synced after that migration. Removing
+	// a file that does not exist is free, so trying both costs nothing.
+	//
+	// Not three candidates: m3u8FileFor() returns M3U8File verbatim when it is
+	// set, so listing both asked the filesystem to delete the same path twice.
+	var candidates []string
+	if pl.M3U8File != "" {
+		candidates = []string{filepath.Join(playlistsDir, pl.M3U8File)}
+	} else {
+		candidates = []string{
+			filepath.Join(playlistsDir, pl.m3u8FileFor()),
+			filepath.Join(playlistsDir, legacyM3U8BaseName(pl.Name)+".m3u8"),
+		}
+	}
+	for _, m3u8Path := range candidates {
+		if err := os.Remove(m3u8Path); err == nil {
+			slog.Info("[Watcher] Deleted M3U8 (watchlist removed)", "path", m3u8Path)
+		} else if !os.IsNotExist(err) {
+			slog.Warn("[Watcher] Failed to delete M3U8 (watchlist removed)", "path", m3u8Path, "err", err)
+		}
+	}
+	if entries, err := os.ReadDir(playlistsDir); err == nil && len(entries) == 0 {
+		if err := os.Remove(playlistsDir); err == nil {
+			slog.Info("[Watcher] Deleted empty Playlists dir", "path", playlistsDir)
+		}
+	}
+	return nil
 }
 
 func (w *Watcher) GetWatchlists() ([]WatchedPlaylist, error) {
@@ -781,17 +818,6 @@ func (w *Watcher) GetWatchlistsByUser(userID string) ([]WatchedPlaylist, error) 
 	return filtered, nil
 }
 
-// setM3U8File records which playlist file this watchlist owns, touching only
-// that field.
-//
-// Read-modify-write inside one transaction rather than saveWatchlist, because
-// the caller is GenerateM3U8ForPlaylist: it works on a copy it loaded itself,
-// and runs from four places including a startup hook and a batch-completion
-// handler, either of which can overlap a running sync. Writing the whole struct
-// back from there would persist a snapshot that is stale in TrackIDs, LastSync
-// and everything else the sync just updated. BoltDB serialises writers, so
-// re-reading inside the Update is enough to be safe.
-//
 // applySyncResult carries onto `fresh` the fields a sync owns, and nothing else.
 //
 // It exists because syncPlaylist works from a snapshot taken before a Spotify
@@ -826,6 +852,17 @@ func applySyncResult(fresh, snapshot *WatchedPlaylist, newIDs []string, log Sync
 	}
 }
 
+// setM3U8File records which playlist file this watchlist owns, touching only
+// that field.
+//
+// Read-modify-write inside one transaction rather than saveWatchlist, because
+// the caller is GenerateM3U8ForPlaylist: it works on a copy it loaded itself,
+// and runs from four places including a startup hook and a batch-completion
+// handler, either of which can overlap a running sync. Writing the whole struct
+// back from there would persist a snapshot that is stale in TrackIDs, LastSync
+// and everything else the sync just updated. BoltDB serialises writers, so
+// re-reading inside the Update is enough to be safe.
+//
 // A watchlist removed between the read and this call is left alone rather than
 // resurrected — the same hazard saveWatchlist's caller guards against.
 func (w *Watcher) setM3U8File(watchlistID, filename string) error {
@@ -931,6 +968,24 @@ func (w *Watcher) OnManualBatchComplete(req jobs.BatchM3U8Request, paths []strin
 		return
 	}
 
+	// A playlist that is already watched has an owner, and it is not this batch.
+	// The watchlist's own generation resolves every track it knows about; a
+	// manual batch only ever holds the subset just downloaded, so writing from
+	// here produced a second, poorer file beside the first — two entries in
+	// Jellyfin for one playlist, which is what "why are there two /all?" was.
+	// Regenerating the watchlist's file is the useful thing to do instead: the
+	// tracks that just landed are exactly what it was missing.
+	if existing, err := w.findWatchlistBySource(req.SourceID, req.UserID); err != nil {
+		slog.Warn("[M3U8] cannot tell whether this source is watched, writing nothing",
+			"name", req.Name, "err", err)
+		return
+	} else if existing != nil {
+		slog.Info("[M3U8] source already watched, refreshing its playlist instead of writing a second one",
+			"name", req.Name, "watchlist", existing.Name)
+		_, _ = w.GenerateM3U8ForPlaylist(existing.ID, false)
+		return
+	}
+
 	settings := settings.EffectiveDownloadSettings(w.auth, req.UserID)
 	if !settings.CreateM3u8File {
 		return
@@ -939,7 +994,31 @@ func (w *Watcher) OnManualBatchComplete(req jobs.BatchM3U8Request, paths []strin
 	if root == "" {
 		root = util.GetDefaultMusicPath()
 	}
-	baseName := m3u8BaseName(req.Name, req.SourceID)
+
+	// The same escalation ladder the watchlists use, instead of an unconditional
+	// hash suffix. m3u8BaseName always appended one, which is why every playlist
+	// downloaded from the search bar arrived in Jellyfin wearing eight hex digits
+	// — the very thing the watchlist path was changed to stop doing, left in
+	// place on the other producer.
+	//
+	// The key is the Spotify entity, not req.SourceID verbatim: the raw URL
+	// carries a `?si=…` that changes between shares, and hashing that would give
+	// the same playlist a different name each time it collided.
+	_, entityID := spotify.ParseEntityRef(req.SourceID)
+	selfKey := "manual-" + entityID
+	all, err := w.GetWatchlists()
+	if err != nil {
+		slog.Warn("[M3U8] cannot read watchlists to check for a name collision, writing nothing",
+			"name", req.Name, "err", err)
+		return
+	}
+	// root as-is, not filepath.Clean'd: decideM3U8Name compares it against what
+	// watchlistOutputRoot returns for the other watchlists, and that is the raw
+	// setting. Cleaning one side only would make "/music/" and "/music" look
+	// like different roots and let a real collision through. The write below
+	// still cleans it, which is where it matters.
+	baseName := decideM3U8Name(req.Name, req.UserID, selfKey,
+		all, root, w.watchlistOutputRoot, w.userLabel)
 	result, err := m3u8.WriteToPlaylistsDir(
 		filepath.Clean(root), baseName, settings.JellyfinMusicPath, paths, len(paths), true,
 	)
@@ -1364,8 +1443,8 @@ func (w *Watcher) UpdateWatchlist(req UpdateWatchlistRequest) error {
 				// Compared against the names already decided, not against names
 				// recomputed for every other watchlist: those are stored, so
 				// this is one pass over a list already in hand.
-				want := decideM3U8Name(&pl, playlists, w.watchlistOutputRoot(&pl),
-					w.watchlistOutputRoot, w.userLabel) + ".m3u8"
+				want := decideM3U8Name(pl.EffectiveName(), pl.UserID, pl.ID,
+					playlists, w.watchlistOutputRoot(&pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
 				root := w.watchlistOutputRoot(&pl)
 				for i := range playlists {
 					other := &playlists[i]
@@ -1965,8 +2044,20 @@ func (w *Watcher) findWatchlistBySource(spotifyURL, userID string) (*WatchedPlay
 // Read from the function rather than written out, so it cannot drift from it.
 var sanitizedEmpty = util.SanitizeFilename("")
 
-// m3u8NameIn returns the .m3u8-free filename for pl, given every watchlist that
-// exists and a way to resolve a user ID to a display label.
+// decideM3U8Name returns the .m3u8-free filename for a playlist, given every
+// watchlist that exists and a way to resolve a user ID to a display label.
+//
+// It takes the three values it needs rather than a *WatchedPlaylist, because
+// both M3U8 producers have to reach the same answer and only one of them has a
+// watchlist: a manual batch has a display name, an owner and a Spotify entity,
+// and nothing else. Passing a struct forced that caller to fabricate one, or —
+// as it did until now — to skip this function entirely and name its files by a
+// different rule.
+//
+// selfKey identifies the caller so it does not collide with itself: a
+// watchlist's ID, or a stable key derived from the manual batch's entity. It is
+// also what the hash suffix is derived from, so the same playlist keeps the same
+// name across runs.
 //
 // The suffix is now applied only when it is needed, in escalating order:
 //
@@ -1990,10 +2081,10 @@ var sanitizedEmpty = util.SanitizeFilename("")
 // each watchlist records the file it owns (M3U8File): when the set changes and
 // a name moves, the write path removes the file it used to have. Without that
 // record this would strand a file on every collision.
-func decideM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
+func decideM3U8Name(displayName, ownerID, selfKey string, all []WatchedPlaylist, root string,
 	rootOf func(*WatchedPlaylist) string, labelOf func(userID string) string) string {
 
-	safe := util.SanitizeFilename(pl.EffectiveName())
+	safe := util.SanitizeFilename(displayName)
 	if safe == "" {
 		safe = "playlist"
 	}
@@ -2001,7 +2092,7 @@ func decideM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
 	sameName, sameNameAndUser := false, false
 	for i := range all {
 		other := &all[i]
-		if other.ID == pl.ID || isAlbumSource(other.SpotifyURL) {
+		if other.ID == selfKey || isAlbumSource(other.SpotifyURL) {
 			continue
 		}
 		if rootOf(other) != root {
@@ -2015,14 +2106,14 @@ func decideM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
 			continue
 		}
 		sameName = true
-		if other.UserID == pl.UserID {
+		if other.UserID == ownerID {
 			sameNameAndUser = true
 		}
 	}
 
 	switch {
 	case sameNameAndUser:
-		return fmt.Sprintf("%s [%s]", safe, watchlistIDSuffix(pl.ID))
+		return fmt.Sprintf("%s [%s]", safe, watchlistIDSuffix(selfKey))
 	case sameName:
 		// Both halves matter. SanitizeFilename never returns an empty string —
 		// it substitutes a placeholder — so testing its output alone would hand
@@ -2030,13 +2121,13 @@ func decideM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist, root string,
 		// is disambiguating. Caught by TestM3U8NameEscalation, which is why the
 		// raw label is checked first and the sanitised one is compared against
 		// that placeholder rather than against "".
-		if raw := labelOf(pl.UserID); raw != "" {
+		if raw := labelOf(ownerID); raw != "" {
 			if label := util.SanitizeFilename(raw); label != sanitizedEmpty {
 				return fmt.Sprintf("%s (%s)", safe, label)
 			}
 		}
 		// No usable label — fall back rather than collide.
-		return fmt.Sprintf("%s [%s]", safe, watchlistIDSuffix(pl.ID))
+		return fmt.Sprintf("%s [%s]", safe, watchlistIDSuffix(selfKey))
 	default:
 		return safe
 	}
@@ -2066,9 +2157,16 @@ func (pl *WatchedPlaylist) m3u8FileFor() string {
 // renaming keeps the playlist present in Jellyfin throughout instead of making
 // it vanish until the next generation.
 //
-// Callers hold w.mu — every one of them is already mutating the watchlist.
+// Callers hold w.mu, and must also have read `pl` under that same lock. Holding
+// the lock is not on its own enough: it serialises writers, it does not refresh
+// a record read before it was taken. syncPlaylist satisfied the first half and
+// not the second for months — decided a name against a snapshot hours old, and
+// the save that followed reverted a rename the user had made in between.
+//
+// It records the decision on pl but does not persist it; the caller's save does.
 func (w *Watcher) applyM3U8Name(pl *WatchedPlaylist, all []WatchedPlaylist) string {
-	want := decideM3U8Name(pl, all, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
+	want := decideM3U8Name(pl.EffectiveName(), pl.UserID, pl.ID,
+		all, w.watchlistOutputRoot(pl), w.watchlistOutputRoot, w.userLabel) + ".m3u8"
 	current := pl.m3u8FileFor()
 	if current == want {
 		pl.M3U8File = want
