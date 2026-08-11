@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 # ── The ONE place the concrete engine is named. Swap here; contract unchanged. ──
 from SpotiFLAC import AsyncSpotiFLAC  # noqa: E402
+import hooks.solver_fallback  # noqa: F401 — applies runtime patches
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".opus"}
 

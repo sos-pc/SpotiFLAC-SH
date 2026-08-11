@@ -89,12 +89,13 @@ RUN if [ -n "$SPOTIFLAC_VERSION" ]; then SPEC="SpotiFLAC==$SPOTIFLAC_VERSION"; e
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Patches applied to the installed package, in site-packages.
+# Build-time patches applied to the installed package, in site-packages.
 #
-# This is what replaces carrying a fork. A patch that stops applying fails the
-# build, loudly, right here — the property a scheduled drift-checker was meant to
-# provide, obtained for free and sooner. --dry-run first so a bad patch cannot
-# leave a half-modified tree behind. An empty patches/ is fine: the loop no-ops.
+# Runtime behaviour that must happen inside an upstream function belongs in
+# hooks/ (below), not here — a patch that stops applying blocks the entire
+# update chain, while a hook that cannot wrap degrades gracefully.  Patches
+# remain the right shape for bug fixes the upstream source needs corrected.
+# --dry-run first so a bad patch cannot leave a half-modified tree behind.
 COPY patches/ /tmp/patches/
 RUN SITE="$(python -c 'import SpotiFLAC, pathlib; print(pathlib.Path(SpotiFLAC.__file__).parent.parent)')" \
     && for p in /tmp/patches/*.patch; do \
@@ -103,6 +104,12 @@ RUN SITE="$(python -c 'import SpotiFLAC, pathlib; print(pathlib.Path(SpotiFLAC._
          patch -p1 -d "$SITE" --dry-run < "$p" && patch -p1 -d "$SITE" < "$p"; \
        done \
     && rm -rf /tmp/patches
+
+# Runtime hooks — loaded by shim.py at startup.  Unlike patches they do not
+# modify source files and survive upstream line shifts.  A hook that cannot
+# wrap logs a warning and degrades; the build still succeeds.
+COPY hooks/ /app/hooks/
+RUN python -c "import hooks.solver_fallback; print(f'hook solver_fallback: {\"applied\" if hooks.solver_fallback._applied else \"skipped\"}')"
 
 # Fail the build rather than ship an image that cannot import its own core.
 # Cheap, and it catches the exact class of breakage that reached production
