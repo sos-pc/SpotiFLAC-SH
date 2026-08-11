@@ -510,6 +510,34 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 		}
 	}
 
+	// Indexed once, ahead of the loop. This used to be a GetAllJobs() *inside*
+	// it: every removed track re-decoded the entire jobs bucket to find the one
+	// or two records naming it. 164 records on the reference deployment, so a
+	// few milliseconds today — and quadratic by construction, so a playlist
+	// losing 500 tracks would have decoded the bucket 500 times.
+	//
+	// A read failure here is not the same hazard as the one above: without the
+	// job list no file is found, so nothing is deleted. Incomplete, not
+	// destructive — warn and carry on rather than abandon the pass.
+	jobsBySpotifyID := make(map[string][]jobs.Job)
+	if jm != nil {
+		jobList, jobsErr := jm.GetAllJobs()
+		if jobsErr != nil {
+			slog.Warn("[Watcher] Cannot list jobs, no file will be deleted this pass",
+				"playlist", pl.Name, "err", jobsErr)
+		}
+		for _, job := range jobList {
+			if job.WatchlistID != pl.ID || job.FilePath == "" || job.SpotifyID == "" {
+				continue
+			}
+			jobsBySpotifyID[job.SpotifyID] = append(jobsBySpotifyID[job.SpotifyID], job)
+		}
+	}
+	// Invariant across the loop: it reads pl, which nothing here changes. It was
+	// resolved inside the innermost branch, so every deleted file re-read the
+	// user's settings to compute the same path.
+	outputRoot := w.watchlistOutputRoot(pl)
+
 	deletedCount := 0
 	remainingIDs := make([]string, 0, len(pl.TrackIDs))
 	for _, knownID := range pl.TrackIDs {
@@ -532,23 +560,24 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 		inOtherPlaylist := otherWatchlistIDs[knownID]
 		if inOtherPlaylist {
 			slog.Debug("[Watcher] Track removed from playlist but present in another watchlist, skipping file deletion", "spotify_id", knownID, "playlist", pl.Name)
-		} else if jm != nil {
-			jobs, _ := jm.GetAllJobs()
-			for _, job := range jobs {
-				if job.SpotifyID == knownID && job.WatchlistID == pl.ID && job.FilePath != "" {
-					if err := os.Remove(job.FilePath); err == nil {
-						slog.Info("[Watcher] Deleted file", "path", job.FilePath)
-						outputRoot := w.watchlistOutputRoot(pl)
-						removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
-						// Nettoyer le FilePath dans BoltDB (le fichier n'existe plus)
-						job.FilePath = ""
-						job.UpdatedAt = time.Now()
-						_ = jm.SaveJob(&job)
-						deletedCount++
-					} else if !os.IsNotExist(err) {
+		} else {
+			for _, job := range jobsBySpotifyID[knownID] {
+				if err := os.Remove(job.FilePath); err != nil {
+					if !os.IsNotExist(err) {
 						slog.Warn("[Watcher] Failed to delete file", "path", job.FilePath, "err", err)
 					}
+					continue
 				}
+				slog.Info("[Watcher] Deleted file", "path", job.FilePath)
+				removeEmptyParents(filepath.Dir(job.FilePath), outputRoot)
+				// The file is gone, so the job must stop pointing at it.
+				job.FilePath = ""
+				job.UpdatedAt = time.Now()
+				if err := jm.SaveJob(&job); err != nil {
+					slog.Warn("[Watcher] Deleted the file but could not clear its job record",
+						"spotify_id", job.SpotifyID, "err", err)
+				}
+				deletedCount++
 			}
 		}
 	}
@@ -788,17 +817,39 @@ func (w *Watcher) GetWatchlists() ([]WatchedPlaylist, error) {
 	return playlists, err
 }
 
+// GetWatchlistByID reads one record by key.
+//
+// It used to load every watchlist and scan the slice, which meant decoding all
+// of them — 73 KB on the reference deployment, most of it one playlist's 2561
+// track IDs — to return one. That is invisible at three watchlists and stops
+// being invisible as they accumulate, and this sits on hot paths: the job
+// manager resolves a watchlist's settings through it once per download.
+//
+// A record that fails to decode now surfaces its error instead of reading as
+// "not found", which is what the slice scan did: GetWatchlists skips undecodable
+// rows silently, so a corrupted watchlist looked exactly like an absent one.
 func (w *Watcher) GetWatchlistByID(id string) (*WatchedPlaylist, error) {
-	playlists, err := w.GetWatchlists()
-	if err != nil {
-		return nil, err
-	}
-	for _, pl := range playlists {
-		if pl.ID == id {
-			return &pl, nil
+	var pl WatchedPlaylist
+	found := false
+	err := w.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketWatchlist)
+		if b == nil {
+			return nil
 		}
+		raw := b.Get([]byte(id))
+		if raw == nil {
+			return nil
+		}
+		found = true
+		return json.Unmarshal(raw, &pl)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("watchlist %s: %w", id, err)
 	}
-	return nil, fmt.Errorf("watchlist not found: %s", id)
+	if !found {
+		return nil, fmt.Errorf("watchlist not found: %s", id)
+	}
+	return &pl, nil
 }
 
 func (w *Watcher) GetWatchlistsByUser(userID string) ([]WatchedPlaylist, error) {
