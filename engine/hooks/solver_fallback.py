@@ -14,7 +14,16 @@ import os
 import re
 import urllib.request
 
-logger = logging.getLogger(__name__)
+# uvicorn's logger, not this module's, for the same reason _log_identity in
+# shim.py uses it: nothing configures `hooks.solver_fallback`, so its records
+# fall to the root logger's default level and an info() is dropped. That is
+# what happened on the first deployment of this hook — it applied, said so,
+# and the line never reached the container log.
+#
+# Which matters more here than for a normal module. A patch that stops applying
+# fails the build, loudly; a hook that stops applying is silent by construction,
+# so the one line saying it worked is the only evidence there is.
+logger = logging.getLogger("uvicorn.error")
 
 _applied = False
 
