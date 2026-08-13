@@ -239,14 +239,32 @@ func (w *Watcher) checkAllSafely() {
 	w.checkAll()
 }
 
-// checkAll parcourt toutes les playlists et lance une sync si nécessaire.
+// checkAll syncs every playlist whose interval has elapsed, one after another.
+//
+// It used to spawn a goroutine per due playlist, with nothing capping how many.
+// Three watchlists made that invisible; the number that matters is how many come
+// due at once, and after any downtime longer than the interval that is all of
+// them — the daemon runs this pass immediately on start, before its first tick.
+// Thirty watchlists would have meant thirty simultaneous Spotify fetches from
+// one address, thirty walks calling os.Stat once per track, and thirty
+// goroutines contending for w.mu at their end.
+//
+// The concurrency bought nothing. Downloads are serialised downstream anyway —
+// jobWorkers is 1 — so parallel syncs only overlap the metadata fetch before
+// funnelling into a single queue. Nobody waits on these: they run on 24-hour
+// intervals in the background, so their latency is not a property worth paying
+// for.
+//
+// Serial also makes overlap impossible by construction rather than by a guard:
+// time.Ticker drops ticks while the receiver is busy, so a slow pass simply
+// skips the next one instead of stacking on top of it.
+//
+// Each sync keeps its own panic recovery. Without it, serialising would trade an
+// unbounded goroutine count for a worse property — one bad playlist aborting the
+// pass for every playlist behind it.
 func (w *Watcher) checkAll() {
 	playlists, err := w.GetWatchlists()
 	if err != nil {
-		return
-	}
-
-	if len(playlists) == 0 {
 		return
 	}
 
@@ -255,10 +273,24 @@ func (w *Watcher) checkAll() {
 		if interval <= 0 {
 			interval = 24 * time.Hour
 		}
-		if time.Since(pl.LastSync) >= interval {
-			util.SafeGo("watcher.syncPlaylist["+pl.ID+"]", func() { w.syncPlaylist(pl) })
+		if time.Since(pl.LastSync) < interval {
+			continue
 		}
+		w.syncOneSafely(pl)
 	}
+}
+
+// syncOneSafely runs one sync so a panic inside it skips that playlist instead
+// of the rest of the pass. Same shape as the startup integrity check in
+// NewWatcher, and the reason checkAll can afford to be sequential.
+func (w *Watcher) syncOneSafely(pl WatchedPlaylist) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("[Watcher] PANIC recovered syncing playlist",
+				"playlist", pl.Name, "recover", r, "stack", string(debug.Stack()))
+		}
+	}()
+	w.syncPlaylist(pl)
 }
 
 // checkM3U8Integrity is a startup-only recovery hook: regenerate every
@@ -1677,7 +1709,7 @@ func (w *Watcher) CheckWatchlistFreshness(id string) (WatchlistFreshnessReport, 
 		pending, failed = stats.Pending, stats.Failed
 	}
 
-	m3u8Enabled := w.loadM3U8Settings(pl) != nil
+	_, m3u8Enabled := w.m3u8Target(pl)
 	var m3u8Count int
 	var m3u8Exists bool
 	if m3u8Enabled {
@@ -1959,8 +1991,8 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 		return m3u8.GenerationResult{Skipped: true, SkipReason: "album watchlist"}, nil
 	}
 
-	settings := w.loadM3U8Settings(pl)
-	if settings == nil {
+	jellyfinPath, enabled := w.m3u8Target(pl)
+	if !enabled {
 		return m3u8.GenerationResult{}, fmt.Errorf("M3U8 generation is disabled (createM3u8File setting)")
 	}
 
@@ -2035,7 +2067,7 @@ func (w *Watcher) GenerateM3U8ForPlaylist(watchlistID string, force bool) (m3u8.
 	// The shrink guard applies only when tracks failed to resolve: a
 	// fully-resolved shorter list means the playlist genuinely shrank, and
 	// sync_deletions has already pruned pl.TrackIDs before we get here.
-	result, err = m3u8.WriteToPlaylistsDir(outputDir, baseName, settings.JellyfinPath,
+	result, err = m3u8.WriteToPlaylistsDir(outputDir, baseName, jellyfinPath,
 		paths, len(pl.TrackIDs), result.Unresolved > 0 && !force)
 	if err != nil {
 		return result, fmt.Errorf("failed to create %s: %w", pl.Name, err)
@@ -2370,19 +2402,24 @@ func legacyM3U8BaseName(playlistName string) string {
 	return safeName
 }
 
-// m3u8Settings holds the user settings relevant to M3U8 generation.
-type m3u8Settings struct {
-	JellyfinPath string
-}
-
-// loadM3U8Settings returns the user (or global) settings if M3U8 generation is
-// enabled, or nil if it is disabled.
-func (w *Watcher) loadM3U8Settings(pl *WatchedPlaylist) *m3u8Settings {
-	settings := settings.EffectiveDownloadSettings(w.auth, pl.UserID)
-	if !settings.CreateM3u8File {
-		return nil
+// m3u8Target reports where playlist entries should be rooted for this
+// watchlist's owner, and whether playlist files are written at all.
+//
+// It replaced a one-field struct returned by pointer, where nil doubled as
+// "generation is disabled" — a struct pointer standing in for a boolean, so
+// callers wanting only the flag wrote `loadM3U8Settings(pl) != nil`. The struct
+// also renamed the setting on its way through, JellyfinMusicPath becoming
+// JellyfinPath, which is how the audit came to chase a difference between the
+// two M3U8 producers that did not exist: they pass the same value under two
+// names.
+//
+// Two answers to two questions, and the setting keeps its own name.
+func (w *Watcher) m3u8Target(pl *WatchedPlaylist) (jellyfinPath string, enabled bool) {
+	s := settings.EffectiveDownloadSettings(w.auth, pl.UserID)
+	if !s.CreateM3u8File {
+		return "", false
 	}
-	return &m3u8Settings{JellyfinPath: settings.JellyfinMusicPath}
+	return s.JellyfinMusicPath, true
 }
 
 // resolveTrackPaths returns the ordered list of file paths matching pl.TrackIDs,
