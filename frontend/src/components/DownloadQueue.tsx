@@ -3,7 +3,8 @@ import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ClearCompletedDownloads, ClearAllDownloads, ExportFailedDownloads } from "@/lib/rpc";
+import { ClearCompletedDownloads, ClearAllDownloads } from "@/lib/rpc";
+import { exportFailedDownloadsToFile } from "@/lib/exportFailed";
 import { useDownloadQueueData, type QueueItem } from "@/hooks/useDownloadQueueData";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface DownloadQueueProps {
@@ -53,20 +54,11 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     };
     const handleExportFailed = async () => {
         try {
-            const message = await ExportFailedDownloads();
-            if (message.startsWith("EXPORT:")) {
-                const csv = message.slice(7);
-                const blob = new Blob([csv], { type: "text/csv" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "failed_downloads.csv";
-                a.click();
-                URL.revokeObjectURL(url);
+            const result = await exportFailedDownloadsToFile();
+            if (result.saved)
                 toast.success("Failures exported");
-            } else {
-                toast.info(message);
-            }
+            else
+                toast.info(result.message);
         } catch (error) {
             console.error("Failed to export:", error);
             toast.error(`Failed to export: ${error}`);

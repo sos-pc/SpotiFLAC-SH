@@ -1,8 +1,8 @@
 package service
 
 import (
-	"fmt"
-	"strings"
+	"bytes"
+	"encoding/csv"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
@@ -32,42 +32,71 @@ func (h *HistoryService) ClearAllDownloads(userID string, isAdmin bool) {
 	}
 }
 
-func (h *HistoryService) ExportFailedDownloads(userID string, isAdmin bool) (string, error) {
+// FailedDownloadsExport is what the export endpoint answers with: either a CSV
+// to save, or a message to show. Exactly one is ever set.
+//
+// It replaces a single string carrying both meanings, told apart by an
+// "EXPORT:" prefix that the client stripped with slice(7). Two fields cost
+// nothing here — the response was already a JSON object — and remove a
+// discriminator that lived inside the payload it was discriminating.
+type FailedDownloadsExport struct {
+	CSV     string `json:"csv,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+const noFailedDownloads = "No failed downloads to export"
+
+func (h *HistoryService) ExportFailedDownloads(userID string, isAdmin bool) (FailedDownloadsExport, error) {
 	jm := h.jobs
 	if jm == nil {
-		return "No failed downloads", nil
+		return FailedDownloadsExport{Message: noFailedDownloads}, nil
 	}
 	jobList, err := jm.GetAllJobs()
 	if err != nil {
-		return "", err
+		return FailedDownloadsExport{}, err
 	}
-	var failedItems []string
-	hasFailed := false
+	return failedDownloadsExport(jobList, userID, isAdmin)
+}
+
+// failedDownloadsExport is the whole of the above except the DB read, split out
+// so it can be tested against a []jobs.Job literal instead of a Bolt file.
+func failedDownloadsExport(jobList []jobs.Job, userID string, isAdmin bool) (FailedDownloadsExport, error) {
+	records := [][]string{}
 	for _, job := range jobList {
 		if !isAdmin && job.UserID != userID {
 			continue
 		}
-		if job.Status == jobs.StatusFailed {
-			hasFailed = true
-			break
-		}
-	}
-	if !hasFailed {
-		return "No failed downloads to export", nil
-	}
-	failedItems = append(failedItems, "Track,Artist,Album,Error")
-	for _, job := range jobList {
-		if !isAdmin && job.UserID != userID {
+		if job.Status != jobs.StatusFailed {
 			continue
 		}
-		if job.Status == jobs.StatusFailed {
-			row := fmt.Sprintf("%q,%q,%q,%q",
-				job.TrackName, job.ArtistName, job.AlbumName, job.Error)
-			failedItems = append(failedItems, row)
-		}
+		records = append(records, []string{
+			job.TrackName, job.ArtistName, job.AlbumName, job.Error,
+		})
 	}
-	csvContent := strings.Join(failedItems, "\n")
-	return "EXPORT:" + csvContent, nil
+	if len(records) == 0 {
+		return FailedDownloadsExport{Message: noFailedDownloads}, nil
+	}
+
+	var buf bytes.Buffer
+	// A BOM, because this file exists to be opened in a spreadsheet: Excel on
+	// Windows reads a BOM-less file as the system codepage and turns every
+	// non-ASCII title into mojibake. This library is largely non-ASCII.
+	buf.WriteString("\uFEFF")
+
+	// encoding/csv rather than fmt.Sprintf("%q,%q,%q,%q"), which is what this
+	// did. %q is Go's quoting, not CSV's: it escapes an embedded quote as \"
+	// where CSV requires "". Engine failures quote the path they are about —
+	//   "/staging/Foo.flac" is not a valid FLAC file
+	// — so the Error column, the only reason to export at all, was the one
+	// that came out unparseable.
+	w := csv.NewWriter(&buf)
+	if err := w.Write([]string{"Track", "Artist", "Album", "Error"}); err != nil {
+		return FailedDownloadsExport{}, err
+	}
+	if err := w.WriteAll(records); err != nil {
+		return FailedDownloadsExport{}, err
+	}
+	return FailedDownloadsExport{CSV: buf.String()}, nil
 }
 func (h *HistoryService) GetDownloadHistory(userID string) ([]backend.HistoryItem, error) {
 	return backend.GetHistoryItems(userID)
