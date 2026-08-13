@@ -25,8 +25,20 @@ export interface Job {
   playlist_name?: string;
 }
 
+// The panel's own vocabulary, not the server's: Job.status says pending/done,
+// these say queued/completed. Named rather than written inline because the view
+// keys three exhaustive records off it — icon, badge variant, label — so adding
+// a state here is a compile error in every place that has to say something
+// about it, instead of a row that silently renders blank.
+export type QueueStatus =
+  | "queued"
+  | "downloading"
+  | "completed"
+  | "failed"
+  | "skipped";
+
 export interface QueueItem extends Omit<Job, "status" | "speed"> {
-  status: "queued" | "downloading" | "completed" | "failed" | "skipped";
+  status: QueueStatus;
   error_message: string;
   speed: number;
 }

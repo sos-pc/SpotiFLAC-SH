@@ -5,12 +5,44 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, } from "@/components/
 import { Badge } from "@/components/ui/badge";
 import { ClearCompletedDownloads, ClearAllDownloads } from "@/lib/rpc";
 import { exportFailedDownloadsToFile } from "@/lib/exportFailed";
-import { useDownloadQueueData, type QueueItem } from "@/hooks/useDownloadQueueData";
+import { useDownloadQueueData, type QueueItem, type QueueStatus } from "@/hooks/useDownloadQueueData";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface DownloadQueueProps {
     isOpen: boolean;
     onClose: () => void;
 }
+// What the user reads. It was written out at each of the four counters and,
+// separately, not written at all in the two places that printed the raw status
+// instead: the badge on every row, and the empty-filter message, which said
+//     No downloads with status "queued"
+// while the control the user had just clicked said "Queued". One source, so
+// they cannot drift, and Record<QueueStatus, …> means a new state cannot be
+// added without naming it.
+const STATUS_LABEL: Record<QueueStatus, string> = {
+    queued: "Queued",
+    downloading: "Downloading",
+    completed: "Completed",
+    failed: "Failed",
+    skipped: "Skipped",
+};
+const STATUS_ICON: Record<QueueStatus, ReactNode> = {
+    downloading: <Download className="h-4 w-4 text-blue-500 animate-bounce"/>,
+    completed: <CheckCircle2 className="h-4 w-4 text-green-500"/>,
+    failed: <XCircle className="h-4 w-4 text-red-500"/>,
+    skipped: <FileCheck className="h-4 w-4 text-yellow-500"/>,
+    queued: <Clock className="h-4 w-4 text-muted-foreground"/>,
+};
+const STATUS_BADGE_VARIANT: Record<QueueStatus, "default" | "secondary" | "destructive" | "outline"> = {
+    downloading: "default",
+    completed: "outline",
+    failed: "destructive",
+    skipped: "secondary",
+    queued: "outline",
+};
+// "all" is the absence of a filter, not a sixth status, so it is added here
+// rather than to QueueStatus — nothing else in the app should be able to hold
+// a QueueItem whose status is "all".
+type StatusFilter = QueueStatus | "all";
 export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     const queueInfo = useDownloadQueueData();
     // Both of these used to report failure to the console only. A button that
@@ -64,34 +96,14 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
             toast.error(`Failed to export: ${error}`);
         }
     };
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case "downloading":
-                return <Download className="h-4 w-4 text-blue-500 animate-bounce"/>;
-            case "completed":
-                return <CheckCircle2 className="h-4 w-4 text-green-500"/>;
-            case "failed":
-                return <XCircle className="h-4 w-4 text-red-500"/>;
-            case "skipped":
-                return <FileCheck className="h-4 w-4 text-yellow-500"/>;
-            case "queued":
-                return <Clock className="h-4 w-4 text-muted-foreground"/>;
-            default:
-                return null;
-        }
-    };
-    const getStatusBadge = (status: string) => {
-        const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-            downloading: "default",
-            completed: "outline",
-            failed: "destructive",
-            skipped: "secondary",
-            queued: "outline",
-        };
-        return (<Badge variant={variants[status] || "outline"} className="text-xs">
-      {status}
+    // Both took a bare `string` and defended themselves against values the
+    // union never contained — a `default: return null` and a `|| "outline"`
+    // that no call could reach, since the only argument either ever gets is
+    // item.status. Typed to QueueStatus, the lookups are total and the
+    // defences are gone.
+    const getStatusBadge = (status: QueueStatus) => (<Badge variant={STATUS_BADGE_VARIANT[status]} className="text-xs">
+      {STATUS_LABEL[status]}
     </Badge>);
-    };
     // Takes whole seconds, already computed by useDownloadQueueData. It used to
     // take a start timestamp and subtract Date.now() itself — which is how a
     // fractional epoch turned into "1.0179998874664307s" on screen, since only
@@ -112,8 +124,11 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
             return `${seconds}s`;
         }
     };
-    const [filterStatus, setFilterStatus] = useState<string>("all");
-    const toggleFilter = (status: string) => {
+    // Was useState<string>, so toggleFilter("complete") — or any other typo in
+    // the four onClick handlers below — compiled, and filtered the list down to
+    // nothing with no way to tell why.
+    const [filterStatus, setFilterStatus] = useState<StatusFilter>("all");
+    const toggleFilter = (status: QueueStatus) => {
         setFilterStatus(prev => prev === status ? "all" : status);
     };
     const filteredQueue = queueInfo.queue.filter((item) => {
@@ -137,7 +152,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     // The status filters hunt individual tracks across every batch, so a filter
     // shows the flat list it always showed. Grouping is the unfiltered view's
     // job: an overview of what was asked for, not a way to find one track.
-    const renderItem = (item: QueueItem) => (<QueueRow key={item.id} item={item} icon={getStatusIcon(item.status)} badge={getStatusBadge(item.status)}/>);
+    const renderItem = (item: QueueItem) => (<QueueRow key={item.id} item={item} icon={STATUS_ICON[item.status]} badge={getStatusBadge(item.status)}/>);
     return (<Dialog open={isOpen} onOpenChange={onClose}>
     <DialogContent className="max-w-[1200px] w-[95vw] max-h-[80vh] flex flex-col p-0 gap-0 [&>button]:hidden">
       <DialogHeader className="px-6 pt-6 pb-4 border-b space-y-0">
@@ -176,22 +191,22 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
         <div className="flex items-center gap-4 text-sm">
           <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'queued' ? 'bg-secondary px-2 py-0.5 rounded-md ring-1 ring-border' : ''}`} onClick={() => toggleFilter('queued')}>
             <Clock className="h-3.5 w-3.5 text-muted-foreground"/>
-            <span className="text-muted-foreground">Queued:</span>
+            <span className="text-muted-foreground">{STATUS_LABEL.queued}:</span>
             <span className="font-semibold">{queueInfo.queued_count}</span>
           </div>
           <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'completed' ? 'bg-green-500/10 px-2 py-0.5 rounded-md ring-1 ring-green-500/20' : ''}`} onClick={() => toggleFilter('completed')}>
             <CheckCircle2 className="h-3.5 w-3.5 text-green-500"/>
-            <span className="text-muted-foreground">Completed:</span>
+            <span className="text-muted-foreground">{STATUS_LABEL.completed}:</span>
             <span className="font-semibold">{queueInfo.completed_count}</span>
           </div>
           <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'skipped' ? 'bg-yellow-500/10 px-2 py-0.5 rounded-md ring-1 ring-yellow-500/20' : ''}`} onClick={() => toggleFilter('skipped')}>
             <FileCheck className="h-3.5 w-3.5 text-yellow-500"/>
-            <span className="text-muted-foreground">Skipped:</span>
+            <span className="text-muted-foreground">{STATUS_LABEL.skipped}:</span>
             <span className="font-semibold">{queueInfo.skipped_count}</span>
           </div>
           <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'failed' ? 'bg-red-500/10 px-2 py-0.5 rounded-md ring-1 ring-red-500/20' : ''}`} onClick={() => toggleFilter('failed')}>
             <XCircle className="h-3.5 w-3.5 text-red-500"/>
-            <span className="text-muted-foreground">Failed:</span>
+            <span className="text-muted-foreground">{STATUS_LABEL.failed}:</span>
             <span className="font-semibold">{queueInfo.failed_count}</span>
           </div>
         </div>
@@ -232,7 +247,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
             <Download className="h-12 w-12 mx-auto mb-3 opacity-20"/>
             <p>No downloads in queue</p>
           </div>) : filteredQueue.length === 0 ? (<div className="text-center py-12 text-muted-foreground">
-             <p>No downloads with status "{filterStatus}"</p>
+             <p>No {filterStatus === "all" ? "" : STATUS_LABEL[filterStatus].toLowerCase() + " "}downloads</p>
              <Button variant="link" onClick={() => setFilterStatus("all")}>Clear filter</Button>
             </div>) : filterStatus !== "all" ? (filteredQueue.map(renderItem)) : (queueInfo.groups.map((group) => group.total === 1 ? (
             // A single track downloaded from the search bar is not a batch.
