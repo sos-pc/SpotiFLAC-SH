@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive, Zap, Timer, FileDown, ChevronRight } from "lucide-react";
+import { useState, useEffect, type ReactNode } from "react";
+import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive, Zap, Timer, FileDown, ChevronRight, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -12,21 +12,43 @@ interface DownloadQueueProps {
 }
 export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     const queueInfo = useDownloadQueueData();
+    // Both of these used to report failure to the console only. A button that
+    // does nothing and explains itself somewhere the user will never look is
+    // indistinguishable from a button that is broken.
+    //
+    // Neither announces success: the list visibly empties, and a toast saying
+    // so would only repeat what just happened on screen.
     const handleClearHistory = async () => {
         try {
             await ClearCompletedDownloads();
         }
         catch (error) {
             console.error("Failed to clear history:", error);
+            toast.error(`Could not clear history: ${error}`);
         }
     };
-    const handleReset = async () => {
+    const [confirmReset, setConfirmReset] = useState(false);
+    // Disarms itself, so a queue left armed by a stray click does not stay one
+    // click from being wiped for the rest of the session.
+    useEffect(() => {
+        if (!confirmReset)
+            return;
+        const t = setTimeout(() => setConfirmReset(false), 4000);
+        return () => clearTimeout(t);
+    }, [confirmReset]);
+    const handleResetClick = async () => {
+        if (!confirmReset) {
+            setConfirmReset(true);
+            return;
+        }
+        setConfirmReset(false);
         try {
             await ClearAllDownloads();
             toast.success("Download queue reset");
         }
         catch (error) {
             console.error("Failed to reset queue:", error);
+            toast.error(`Could not reset the queue: ${error}`);
         }
     };
     const handleExportFailed = async () => {
@@ -128,11 +150,25 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     <DialogContent className="max-w-[1200px] w-[95vw] max-h-[80vh] flex flex-col p-0 gap-0 [&>button]:hidden">
       <DialogHeader className="px-6 pt-6 pb-4 border-b space-y-0">
         <div className="flex items-center justify-between mb-4">
-          <DialogTitle className="text-lg font-semibold hover:text-primary transition-colors cursor-pointer" onClick={handleReset}>Download Queue</DialogTitle>
+          {/* A title, not a button. It used to carry onClick={handleReset} —
+              ClearAllDownloads, which wipes the queue including jobs still
+              running — with no label, no confirmation, and nothing but a
+              cursor change to suggest it did anything at all. The visible,
+              labelled control was the safe one; the destructive one looked
+              like a heading. */}
+          <DialogTitle className="text-lg font-semibold">Download Queue</DialogTitle>
           <div className="flex items-center gap-2">
             {(queueInfo.completed_count > 0 || queueInfo.failed_count > 0 || queueInfo.skipped_count > 0) && (<Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={handleClearHistory}>
               <Trash2 className="h-3 w-3"/>
               Clear History
+            </Button>)}
+            {/* Two-step rather than a confirmation dialog: this project has no
+                AlertDialog primitive, and pulling one in for a single button is
+                more surface than the button is worth. Arms on the first click,
+                disarms itself after a few seconds. */}
+            {queueInfo.queue.length > 0 && (<Button variant={confirmReset ? "destructive" : "ghost"} size="sm" className="h-7 text-xs gap-1.5" onClick={handleResetClick}>
+              <RotateCcw className="h-3 w-3"/>
+              {confirmReset ? "Confirm reset" : "Reset queue"}
             </Button>)}
             {queueInfo.failed_count > 0 && (<Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={handleExportFailed}>
               <FileDown className="h-3 w-3"/>
