@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive, Zap, Timer, FileDown } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive, Zap, Timer, FileDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ClearCompletedDownloads, ClearAllDownloads, ExportFailedDownloads } from "@/lib/rpc";
-import { useDownloadQueueData } from "@/hooks/useDownloadQueueData";
+import { useDownloadQueueData, type QueueItem } from "@/hooks/useDownloadQueueData";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 interface DownloadQueueProps {
     isOpen: boolean;
@@ -107,6 +107,23 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
             return true;
         return item.status === filterStatus;
     });
+    // Collapsed by default. A batch of 2561 tracks is the case this view exists
+    // for, and expanding it is a deliberate act rather than the starting state.
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+    const toggleGroup = (key: string) => {
+        setExpandedGroups(prev => {
+            const next = new Set(prev);
+            if (next.has(key))
+                next.delete(key);
+            else
+                next.add(key);
+            return next;
+        });
+    };
+    // The status filters hunt individual tracks across every batch, so a filter
+    // shows the flat list it always showed. Grouping is the unfiltered view's
+    // job: an overview of what was asked for, not a way to find one track.
+    const renderItem = (item: QueueItem) => (<QueueRow key={item.id} item={item} icon={getStatusIcon(item.status)} badge={getStatusBadge(item.status)}/>);
     return (<Dialog open={isOpen} onOpenChange={onClose}>
     <DialogContent className="max-w-[1200px] w-[95vw] max-h-[80vh] flex flex-col p-0 gap-0 [&>button]:hidden">
       <DialogHeader className="px-6 pt-6 pb-4 border-b space-y-0">
@@ -189,64 +206,95 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
           </div>) : filteredQueue.length === 0 ? (<div className="text-center py-12 text-muted-foreground">
              <p>No downloads with status "{filterStatus}"</p>
              <Button variant="link" onClick={() => setFilterStatus("all")}>Clear filter</Button>
-            </div>) : (filteredQueue.map((item) => (<div key={item.id} className="border rounded-lg p-3 hover:bg-muted/30 transition-colors">
-            <div className="flex items-start gap-3">
-              <div className="mt-1">{getStatusIcon(item.status)}</div>
-
+            </div>) : filterStatus !== "all" ? (filteredQueue.map(renderItem)) : (queueInfo.groups.map((group) => group.total === 1 ? (
+            // A single track downloaded from the search bar is not a batch.
+            // Wrapping it in collapsible chrome would invent a grouping the
+            // user never made.
+            renderItem(group.items[0])
+          ) : (<div key={group.key} className="border rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleGroup(group.key)}
+              className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/30 transition-colors"
+            >
+              <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${expandedGroups.has(group.key) ? "rotate-90" : ""}`}/>
               <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{item.track_name}</p>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {item.artist_name}
-                      {item.album_name && ` • ${item.album_name}`}
-                    </p>
-                  </div>
-                  {getStatusBadge(item.status)}
-                </div>
-
-
-                {item.status === "downloading" && (<div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground font-mono">
-                  <span>
-                    {item.total_size > 0
-                    ? `${item.total_size.toFixed(2)} MB`
-                    : queueInfo.is_downloading
-                        ? "Downloading..."
-                        : "Starting..."}
-                  </span>
-                  <span>
-                    {item.speed > 0
-                    ? `${item.speed.toFixed(2)} MB/s`
-                    : queueInfo.current_speed > 0
-                        ? `${queueInfo.current_speed.toFixed(2)} MB/s`
-                        : "—"}
-                  </span>
-                </div>)}
-
-
-                {item.status === "completed" && (<div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                  <span className="font-mono">{item.total_size > 0 ? `${item.total_size.toFixed(2)} MB` : "—"}</span>
-                </div>)}
-
-
-                {item.status === "skipped" && (<div className="mt-1.5 text-xs text-muted-foreground">
-                  File already exists
-                </div>)}
-
-
-                {item.status === "failed" && item.error_message && (<div className="mt-1.5 text-xs text-red-500 bg-red-50 dark:bg-red-950/20 rounded px-2 py-1">
-                  {item.error_message}
-                </div>)}
-
-
-                {(item.status === "completed" || item.status === "skipped") && item.file_path && (<div className="mt-1.5 text-xs text-muted-foreground truncate font-mono">
-                  {item.file_path}
-                </div>)}
+                <p className="font-medium truncate">{group.label}</p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  {group.completed + group.skipped}/{group.total} done
+                  {group.failed > 0 && <span className="text-red-500"> · {group.failed} failed</span>}
+                  {group.downloading > 0 && <span className="text-blue-500"> · downloading</span>}
+                  {group.sizeMB > 0 && ` · ${group.sizeMB.toFixed(2)} MB`}
+                </p>
               </div>
-            </div>
+              {/* Same denominator as the line above, deliberately different
+                  numerator: the text counts what succeeded, the bar counts what
+                  is settled — failures included, which is why it turns red
+                  rather than stalling short of the end on a batch that is over. */}
+              <div className="w-24 shrink-0 h-1.5 rounded-full bg-muted overflow-hidden" aria-hidden="true">
+                <div
+                  className={group.failed > 0 ? "h-full bg-red-500/60" : "h-full bg-green-500/60"}
+                  style={{ width: `${Math.min(100, Math.round(((group.completed + group.skipped + group.failed) / group.total) * 100))}%` }}
+                />
+              </div>
+            </button>
+            {expandedGroups.has(group.key) && (<div className="border-t p-2 space-y-2 bg-muted/10">
+              {group.items.map(renderItem)}
+            </div>)}
           </div>)))}
         </div>
       </div>
     </DialogContent>
   </Dialog>);
+}
+
+// One row. Extracted so the grouped view and the filtered flat view render an
+// item identically — two copies of this would drift the moment either changed.
+function QueueRow({ item, icon, badge }: { item: QueueItem; icon: ReactNode; badge: ReactNode }) {
+    return (<div className="border rounded-lg p-3 hover:bg-muted/30 transition-colors">
+      <div className="flex items-start gap-3">
+        <div className="mt-1">{icon}</div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium truncate">{item.track_name}</p>
+              <p className="text-sm text-muted-foreground truncate">
+                {item.artist_name}
+                {item.album_name && ` • ${item.album_name}`}
+              </p>
+            </div>
+            {badge}
+          </div>
+
+          {/* The row's own numbers only. This used to fall back to the queue's
+              global is_downloading / current_speed when the item reported
+              nothing — but current_speed is the max across downloading jobs and
+              there is a single worker, so the "other" job it borrowed from was
+              always this one. The fallback restated the same value by a longer
+              route, and would have shown a different track's speed the day that
+              stopped being true. */}
+          {item.status === "downloading" && (<div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground font-mono">
+            <span>{item.total_size > 0 ? `${item.total_size.toFixed(2)} MB` : "Starting…"}</span>
+            <span>{item.speed > 0 ? `${item.speed.toFixed(2)} MB/s` : "—"}</span>
+          </div>)}
+
+          {item.status === "completed" && (<div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+            <span className="font-mono">{item.total_size > 0 ? `${item.total_size.toFixed(2)} MB` : "—"}</span>
+          </div>)}
+
+          {item.status === "skipped" && (<div className="mt-1.5 text-xs text-muted-foreground">
+            File already exists
+          </div>)}
+
+          {item.status === "failed" && item.error_message && (<div className="mt-1.5 text-xs text-red-500 bg-red-50 dark:bg-red-950/20 rounded px-2 py-1">
+            {item.error_message}
+          </div>)}
+
+          {(item.status === "completed" || item.status === "skipped") && item.file_path && (<div className="mt-1.5 text-xs text-muted-foreground truncate font-mono">
+            {item.file_path}
+          </div>)}
+        </div>
+      </div>
+    </div>);
 }
