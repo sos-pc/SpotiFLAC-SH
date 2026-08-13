@@ -29,7 +29,7 @@ sharing that household fairly and safely, not about walling people off.
 
 ## 1. A user's own setting is their own confinement root
 
-**Severity: highest. Fix before onboarding anyone.**
+**Fix before onboarding anyone.**
 
 `libraryRootForUser` (`api_v1.go:95`) resolves the root that confines a request
 by reading that same user's `downloadPath` override:
@@ -50,10 +50,32 @@ that a user's `downloadPath` lies inside an operator-defined boundary —
 verbatim.
 
 So any authenticated user can `PUT /api/v1/settings` with `downloadPath: "/"`
-and then read the container filesystem through `GET /api/v1/files` and
-`GET /api/v1/files/audio`, both of which require only `read`
-(`api_files.go:277`, `api_files.go:294`). That includes `/config`: the Bolt
-databases, the JWT signing secret, and the provider credentials.
+and lift their own confinement to the whole container filesystem.
+
+**What that actually opens, checked route by route** — the first draft of this
+section claimed it exposed the Bolt databases and the JWT signing secret. It
+does not, and the difference matters:
+
+| Route | Guard | What it does |
+|---|---|---|
+| `GET /api/v1/files` (`:277`) | `read` | **lists** a directory |
+| `GET /api/v1/files/audio` (`:294`) | `read` | **lists** audio files in a directory |
+| `GET /api/v1/files/metadata` | `v1RequireAdmin` | reads tags at an arbitrary path — correctly gated |
+| every mutating file route (`:315`+) | `v1RequireAdmin` | delete/move/rename |
+| `GET /api/v1/jobs/{id}/download` (`api_jobs.go:89`) | `manage` + owner check | serves `job.FilePath` — a **server-chosen** path, not a client one |
+
+There is no arbitrary-file-read primitive for a non-admin. The two `read`
+routes enumerate; they do not return contents. So the real exposure is:
+
+- **Filesystem enumeration** anywhere in the container — layout, other users'
+  library trees, `/staging`, `/tmp`.
+- **Writes landing outside the intended library**, since the same value is the
+  download destination. On the reference deployment `read_only: true` confines
+  those writes to the mounted volumes, which still includes the config volume.
+
+That is a boundary violation worth fixing before onboarding, not a secret
+disclosure. Ranked first because it is the only finding here that a user can
+trigger deliberately.
 
 **Reproduced**, not reasoned about — a non-admin user, their own settings, and
 the two functions above, with no HTTP involved:
@@ -66,14 +88,13 @@ ACCEPTE : C:\config\jobs.db     (refuse sous la racine operateur)
 ACCEPTE : C:\etc\passwd         (refuse sous la racine operateur)
 ```
 
-The exploit is not "a user chose a folder". It is that the root meant to
-*contain* them ends up containing the operator's own. In the container those
-paths are `/config/jobs.db` and friends.
+The point is not "a user chose a folder". It is that the root meant to
+*contain* them ends up containing the operator's own — on the reference
+deployment, everything under `/`, including the config volume mounted at
+`/home/nonroot/.SpotiFLAC`.
 
-Note what is *not* affected: every mutating file route (delete, move, rename)
-is `v1RequireAdmin` (`api_files.go:315` onward). This is a read escalation, not
-a write one. It is also not exploitable today, because the only user is the
-admin — which is exactly why it has to be fixed before that stops being true.
+Not exploitable today, because the only user is the admin — which is exactly
+why it has to be fixed before that stops being true.
 
 The probe that produced the output above should ship with the fix, inverted:
 asserting that a user's override can no longer widen their root.
@@ -210,8 +231,18 @@ can see every user's jobs and purge them.
   non-admin** identity, not an admin — and that identity should be
   operator-configured, so its downloads land somewhere attributable.
 
-*To verify before choosing: whether `DISABLE_AUTH_ON_LAN` is actually set in the
-live compose. It is absent from both example files, so it is false by default.*
+**Settled by the live compose (2026-08-13): `DISABLE_AUTH_ON_LAN=false`, and the
+service publishes no `ports:` at all — it is reachable only through nginx on the
+`swagstack_default` network.** Both halves of the exposure are therefore closed
+today, and `TRUST_PROXY_HEADERS=true` is correct for a single proxy hop
+(`ratelimit.go:84`).
+
+So this section is not a fix, it is a decision to record: the middleware is dead
+code on this deployment. Deleting it removes a class of problem permanently and
+costs nothing; keeping it means keeping a code path whose only failure mode is
+silent and severe. Recommendation: delete it, and if a headless client is ever
+needed, give it a scoped API key — which already exists and is already
+permission-scoped.
 
 ## 6. Shared by design — to be surfaced, not fixed
 
@@ -280,10 +311,14 @@ rewriting the picker when OAuth lands.
 
 **OAuth prerequisites, in order.** An HTTPS redirect URI is mandatory —
 loopback does not help, since the redirect runs in the user's browser, not on
-the server. Each deployment must register its own Spotify application; a shared
-client ID would cap the entire project at Spotify's 25-user development-mode
-limit and hang it on one person's developer account. Use Authorization Code +
-PKCE so no client secret is stored; only refresh tokens are, per user.
+the server. **Cleared on the reference deployment**, which is served over TLS by
+SWAG at `spotiflac.redstack.fr`; the redirect URI would be
+`https://spotiflac.redstack.fr/api/v1/spotify/callback`.
+
+Each deployment must register its own Spotify application; a shared client ID
+would cap the entire project at Spotify's 25-user development-mode limit and
+hang it on one person's developer account. Use Authorization Code + PKCE so no
+client secret is stored; only refresh tokens are, per user.
 
 The one UI detail that decides whether this works for anyone but its author: the
 redirect URI must be displayed **pre-filled from the origin the admin is
@@ -301,7 +336,8 @@ URL, and the entire watcher is keyed on `SpotifyURL`.
 2. **§3, with §4 falling out of it.** Establish first *why* `jobWorkers` is 1 —
    that answer decides whether fairness is enough or throughput must also be
    addressed.
-3. **§5 and §7.** Small, independent, and §5 may be a deletion.
+3. **§7.** Small and independent. **§5 is now a deletion**, not a fix — the
+   bypass is off and unreachable on this deployment.
 4. **§8.** The playlist picker, bulk add, and the declared path. OAuth after,
    as a second source behind the same interface.
 
