@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { Trash2, Copy, Check, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logger, type LogEntry } from "@/lib/logger";
-import { ExportFailedDownloads, GetServerLogs } from "@/lib/rpc";
+import { GetServerLogs } from "@/lib/rpc";
+import { exportFailedDownloadsToFile } from "@/lib/exportFailed";
 import { getUser } from "@/lib/auth";
 import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
@@ -102,13 +103,11 @@ export function DebugLoggerPage() {
     };
     const handleExportFailed = async () => {
         try {
-            const message = await ExportFailedDownloads();
-            if (message.startsWith("Successfully")) {
-                toast.success(message);
-            }
-            else if (message !== "Export cancelled") {
-                toast.info(message);
-            }
+            const result = await exportFailedDownloadsToFile();
+            if (result.saved)
+                toast.success("Failures exported");
+            else
+                toast.info(result.message);
         }
         catch (error) {
             console.error("Failed to export:", error);

@@ -288,11 +288,11 @@ func (s *Server) registerJobRoutes() {
 			return
 		}
 		user := auth.GetUserFromContext(r)
-		message, err := s.ctr.History.ExportFailedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
+		result, err := s.ctr.History.ExportFailedDownloads(userIDFromContext(r), user != nil && user.IsAdmin)
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeV1JSON(w, http.StatusOK, map[string]string{"message": message})
+		writeV1JSON(w, http.StatusOK, result)
 	}))
 }

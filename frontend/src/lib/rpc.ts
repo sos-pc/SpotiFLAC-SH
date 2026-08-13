@@ -201,10 +201,11 @@ export const ClearFetchHistoryByType = (itemType: string) =>
   rest<void>("DELETE", `/history/fetch?type=${encodeURIComponent(itemType)}`);
 export const DeleteFetchHistoryItem = (id: string) =>
   rest<void>("DELETE", `/history/fetch/${encodeURIComponent(id)}`);
+// Answers with a CSV to save or a message to show, never both. It used to
+// answer with one string and let the caller tell them apart by an "EXPORT:"
+// prefix.
 export const ExportFailedDownloads = () =>
-  rest<{ message: string }>("GET", "/history/downloads/export").then(
-    (r) => r.message,
-  );
+  rest<{ csv?: string; message?: string }>("GET", "/history/downloads/export");
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
