@@ -78,15 +78,13 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
       {status}
     </Badge>);
     };
-    const formatDuration = (startTimestamp: number) => {
-        if (startTimestamp === 0)
+    // Takes whole seconds, already computed by useDownloadQueueData. It used to
+    // take a start timestamp and subtract Date.now() itself — which is how a
+    // fractional epoch turned into "1.0179998874664307s" on screen, since only
+    // one side of that subtraction was rounded.
+    const formatDuration = (durationSeconds: number) => {
+        if (durationSeconds <= 0)
             return "—";
-        // An elapsed-time label a few seconds stale between renders is
-        // imperceptible here — not worth a ticking-clock state just to
-        // satisfy strict render-purity analysis.
-        // eslint-disable-next-line react-hooks/purity
-        const now = Math.floor(Date.now() / 1000);
-        const durationSeconds = now - startTimestamp;
         const hours = Math.floor(durationSeconds / 3600);
         const minutes = Math.floor((durationSeconds % 3600) / 60);
         const seconds = durationSeconds % 60;
@@ -175,7 +173,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
             <Timer className="h-3.5 w-3.5 text-muted-foreground"/>
             <span className="text-muted-foreground">Duration:</span>
             <span className="font-semibold font-mono">
-              {queueInfo.session_start_time > 0 ? formatDuration(queueInfo.session_start_time) : "—"}
+              {formatDuration(queueInfo.duration_seconds)}
             </span>
           </div>
         </div>
