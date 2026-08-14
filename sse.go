@@ -182,14 +182,23 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 	// Résoudre le user AVANT le snapshot pour appliquer le filtre dès la connexion
 	user := auth.GetUserFromContext(r)
 
-	// Snapshot initial — envoyer les jobs récents (actifs + terminaux des 48h)
-	// Filtré par userID pour éviter les fuites de données entre utilisateurs
+	// Snapshot initial — envoyer les jobs récents (actifs + terminaux des 48h).
+	//
+	// Filtré sur le demandeur, ADMIN COMPRIS. Le filtre ne s'appliquait qu'aux
+	// non-admins : un admin recevait la file de tout le monde, et depuis le
+	// regroupement par lot il voyait les lots des autres sans rien qui dise à
+	// qui ils appartenaient. Cet écran est un plan de travail personnel, pas une
+	// console d'administration — et les watchlists filtraient déjà toujours, y
+	// compris pour un admin, donc le même compte voyait « mes watchlists » et
+	// « la file de tout le monde ».
+	//
+	// Une vue globale reste légitime, mais elle mérite son propre écran plutôt
+	// que d'être mélangée en silence à celui-ci.
 	cutoff := time.Now().Add(-48 * time.Hour)
 	if jobList, err := s.ctr.Jobs.GetAllJobs(); err == nil {
 		for i := range jobList {
 			j := &jobList[i]
-			// Filtre utilisateur : non-admin ne voit que ses propres jobs
-			if user != nil && !user.IsAdmin && j.UserID != "" && j.UserID != user.UserID {
+			if !jobVisibleTo(user, j.UserID) {
 				continue
 			}
 			// Borne temporelle : jobs actifs toujours inclus, terminaux limités à 48h
@@ -236,9 +245,7 @@ func (s *Server) v1JobsStream(w http.ResponseWriter, r *http.Request) {
 				if user == nil || !user.IsAdmin {
 					continue
 				}
-			} else if user != nil && !user.IsAdmin && event.Job != nil &&
-				// Filtrer par userID si non-admin (uniquement pour les events job)
-				event.Job.UserID != "" && event.Job.UserID != user.UserID {
+			} else if event.Job != nil && !jobVisibleTo(user, event.Job.UserID) {
 				continue
 			}
 			// Envoyer Job ou Data selon le type d'événement
