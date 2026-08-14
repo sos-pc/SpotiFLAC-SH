@@ -6,6 +6,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	"net/http"
@@ -29,6 +30,51 @@ func (s *Server) registerWatchlistRoutes() {
 		writeV1JSON(w, http.StatusOK, result)
 	}))
 
+	// Bulk add, for the playlist picker. Ticking twelve boxes and getting
+	// twelve round-trips — each able to fail on its own, with no way to say
+	// which — is the experience this avoids.
+	//
+	// Always 200 with per-item outcomes, never a single error: a bulk add is
+	// partially successful by nature, and eleven watchlists that worked must
+	// not be reported as a failure because the twelfth had a dead URL.
+	s.mux.Handle("POST /api/v1/watchlists/batch", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "manage") {
+			return
+		}
+		var body struct {
+			SpotifyURLs   []string `json:"spotify_urls"`
+			IntervalHours int      `json:"interval_hours"`
+			SyncDeletions bool     `json:"sync_deletions"`
+		}
+		if !decodeV1JSON(w, r, &body) {
+			return
+		}
+		if len(body.SpotifyURLs) == 0 {
+			writeV1Error(w, http.StatusBadRequest, "spotify_urls must not be empty")
+			return
+		}
+		// A ceiling, because this walks every playlist's metadata before it
+		// returns and the request would otherwise be unbounded. The picker
+		// shows one profile at a time; the largest seen has 57.
+		const maxBatch = 200
+		if len(body.SpotifyURLs) > maxBatch {
+			writeV1Error(w, http.StatusBadRequest,
+				fmt.Sprintf("too many playlists in one request (%d, max %d)", len(body.SpotifyURLs), maxBatch))
+			return
+		}
+		userID := userIDFromContext(r)
+		reqs := make([]watcher.AddWatchlistRequest, 0, len(body.SpotifyURLs))
+		for _, u := range body.SpotifyURLs {
+			reqs = append(reqs, watcher.AddWatchlistRequest{
+				SpotifyURL:    u,
+				IntervalHours: body.IntervalHours,
+				SyncDeletions: body.SyncDeletions,
+				UserID:        userID,
+			})
+		}
+		writeV1JSON(w, http.StatusOK, s.ctr.Watcher.AddWatchlists(reqs))
+	}))
+
 	s.mux.Handle("POST /api/v1/watchlists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		if !v1RequirePermission(w, r, "manage") {
 			return
@@ -38,13 +84,13 @@ func (s *Server) registerWatchlistRoutes() {
 			return
 		}
 		req.UserID = userIDFromContext(r)
-		// AddWatchlist stores req.Settings.DownloadPath on the watchlist and
-		// feeds it straight into every future sync's EnqueueBatch call
-		// (watcher.go) — those internal calls never go through the HTTP
-		// layer, so the same confinement applied to /downloads/track and
-		// /jobs has to be enforced here too, at watchlist creation, or
-		// every downstream sync would silently inherit an unconfined
-		// download path (S2 — watchlist creation isn't admin-gated).
+		// Kept as defence in depth, but read its history before trusting the
+		// old justification: this used to say the stored path "feeds every
+		// future sync's EnqueueBatch call". It does not — watchlistJobSettings
+		// resolves from the user's settings and ignores WatchedPlaylist.Settings,
+		// whose own doc comment calls that copy legacy. And downloadPath became
+		// instance-scoped, so libraryRootFor now returns the operator's root
+		// rather than one the caller chose for themselves.
 		if req.Settings.DownloadPath != "" {
 			cleaned, err := cleanLibraryPath(s.libraryRootFor(r), req.Settings.DownloadPath)
 			if err != nil {
