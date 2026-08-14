@@ -186,3 +186,36 @@ func mustQuery(t *testing.T, raw string) url.Values {
 	}
 	return u.Query()
 }
+
+// The first real connection stored spotify_id and display_name empty, with
+// nothing anywhere saying why, because currentUser swallowed its own failure.
+// EnsureIdentity is what reaches those records without anyone knowing to
+// reconnect — so it must leave an already-known identity alone, and must not
+// invent one when the lookup fails.
+func TestEnsureIdentityKeepsWhatIsAlreadyKnown(t *testing.T) {
+	s := newTestStore(t)
+	c := Connection{UserID: "u1", SpotifyID: "already-known", DisplayName: "Me"}
+	if err := s.Save(c); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// An empty token would fail any lookup; it must not be attempted at all.
+	if got := s.EnsureIdentity(t.Context(), &c, ""); got != "already-known" {
+		t.Errorf("EnsureIdentity = %q, want the stored id untouched", got)
+	}
+}
+
+func TestEnsureIdentityReportsNothingRatherThanGuessing(t *testing.T) {
+	s := newTestStore(t)
+	c := Connection{UserID: "u1"} // the shape the first connection produced
+
+	// No token, so /v1/me cannot answer. The account must stay unidentified
+	// rather than acquire a made-up id — every playlist reading as "followed"
+	// is recoverable, a wrong owner is not.
+	if got := s.EnsureIdentity(t.Context(), &c, ""); got != "" {
+		t.Errorf("EnsureIdentity = %q, want empty when the lookup cannot answer", got)
+	}
+	if c.SpotifyID != "" {
+		t.Errorf("SpotifyID = %q, want it left empty", c.SpotifyID)
+	}
+}

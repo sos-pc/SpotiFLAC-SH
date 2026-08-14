@@ -30,9 +30,8 @@ export function InstanceScoped({
       <p className="mb-3 flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>
-          {what} belong to this SpotiFLAC instance, not to your account — they
-          decide where files land in the shared library. Only an administrator
-          can change them.
+          {what} — configured once for this whole SpotiFLAC instance rather
+          than per account. Only an administrator can change this.
         </span>
       </p>
       {children}
