@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { PlaylistPicker } from "@/components/PlaylistPicker";
 import {
-  AddToWatchlist,
   RemoveFromWatchlist,
   GetWatchlists,
   SyncWatchlist,
@@ -12,7 +11,6 @@ import {
   type WatchlistRepairResult,
   CheckWatchlistFreshness,
 } from "@/lib/rpc";
-import { getSettings } from "@/lib/settings";
 import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { Button } from "@/components/ui/button";
@@ -22,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -111,7 +108,6 @@ function isURL(str: string): boolean {
 export function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<WatchedPlaylist[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
   const [repairing, setRepairing] = useState<Set<string>>(new Set());
@@ -127,9 +123,6 @@ export function WatchlistPage() {
   const [editNamePlaceholder, setEditNamePlaceholder] = useState("");
   const [editSyncDeletions, setEditSyncDeletions] = useState(false);
 
-  const [newUrl, setNewUrl] = useState("");
-  const [newInterval, setNewInterval] = useState("12");
-  const [newSyncDeletions, setNewSyncDeletions] = useState(false);
 
   const loadWatchlists = async () => {
     if (!localStorage.getItem("spotiflac_token")) return;
@@ -236,51 +229,6 @@ export function WatchlistPage() {
     }
   });
 
-  const handleAdd = async () => {
-    if (!newUrl.trim()) {
-      toast.error("Please enter a Spotify URL");
-      return;
-    }
-    if (!newUrl.includes("spotify.com")) {
-      toast.error("Please enter a valid Spotify URL");
-      return;
-    }
-    try {
-      const settings = getSettings();
-      const res = await AddToWatchlist({
-        spotify_url: newUrl.trim(),
-        interval_hours: parseInt(newInterval, 10),
-        sync_deletions: newSyncDeletions,
-        settings: {
-          downloadPath: settings.downloadPath,
-          downloader: settings.downloader,
-          folderTemplate: settings.folderTemplate,
-          filenameTemplate: settings.filenameTemplate,
-          trackNumber: settings.trackNumber,
-          embedLyrics: settings.embedLyrics,
-          embedMaxQualityCover: settings.embedMaxQualityCover,
-          tidalQuality: settings.tidalQuality,
-          qobuzQuality: settings.qobuzQuality,
-          amazonQuality: settings.amazonQuality,
-          autoOrder: settings.autoOrder,
-          autoQuality: settings.autoQuality,
-          allowFallback: settings.allowFallback,
-          createPlaylistFolder: settings.createPlaylistFolder,
-          useFirstArtistOnly: settings.useFirstArtistOnly,
-          useSingleGenre: settings.useSingleGenre,
-          embedGenre: settings.embedGenre,
-        },
-      });
-      toast.success(res?.message || `Watching '${res?.name}'`);
-      setIsAddModalOpen(false);
-      setNewUrl("");
-      setNewInterval("12");
-      setNewSyncDeletions(false);
-      loadWatchlists();
-    } catch (err) {
-      toast.error(`Failed to add watchlist: ${err}`);
-    }
-  };
 
   const handleRemove = async (id: string) => {
     try {
@@ -452,9 +400,14 @@ export function WatchlistPage() {
             />
             Sync All
           </Button>
-          <Button onClick={() => setIsAddModalOpen(true)}>
+          {/* The picker used to be reachable ONLY from the empty state, so
+              anyone already watching a playlist had no way to open it at all —
+              this button opened the paste-one-URL dialog it replaces. The
+              picker covers that as its "A link" tab, and carries the interval
+              and sync-deletions options the old dialog had. */}
+          <Button onClick={() => setPickerOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Add Playlist
+            Add Playlists
           </Button>
         </div>
       </div>
@@ -830,70 +783,6 @@ export function WatchlistPage() {
       </Dialog>
 
       {/* Modal add */}
-      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Watch a Spotify Playlist</DialogTitle>
-            <DialogDescription>
-              SpotiFLAC will periodically check this playlist for new tracks and
-              download them automatically.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Spotify URL</label>
-              <input
-                className="w-full px-3 py-2 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder="https://open.spotify.com/playlist/..."
-                value={newUrl}
-                onChange={(e) => setNewUrl(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Check interval</label>
-              <Select value={newInterval} onValueChange={setNewInterval}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">Every 1 hour</SelectItem>
-                  <SelectItem value="6">Every 6 hours</SelectItem>
-                  <SelectItem value="12">Every 12 hours</SelectItem>
-                  <SelectItem value="24">Daily (24h)</SelectItem>
-                  <SelectItem value="168">Weekly</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2 border rounded-md p-3 bg-muted/30">
-              <label className="text-sm font-medium">Options</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="sync-deletions"
-                  checked={newSyncDeletions}
-                  onChange={(e) => setNewSyncDeletions(e.target.checked)}
-                  className="rounded"
-                />
-                <label
-                  htmlFor="sync-deletions"
-                  className="text-sm cursor-pointer"
-                >
-                  Sync deletions{" "}
-                  <span className="text-xs text-muted-foreground">
-                    (delete file if removed from Spotify)
-                  </span>
-                </label>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAdd}>Start Watching</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <PlaylistPicker
         isOpen={pickerOpen}
         onClose={() => setPickerOpen(false)}

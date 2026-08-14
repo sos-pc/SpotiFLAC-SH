@@ -140,6 +140,24 @@ export function PlaylistPicker({
     });
   }, [playlists, filter, needle]);
 
+  // What "Watch 12 playlists" is actually about to do. The plan asked for this
+  // before the button, because bulk add is the easiest gesture in the app and
+  // also the one that fills the household's queue for hours. Only the connected
+  // account's source reports counts, so the total is stated as a minimum rather
+  // than invented for the sources that cannot say.
+  const selectedCost = useMemo(() => {
+    let known = 0;
+    let tracks = 0;
+    for (const p of playlists) {
+      if (!selected.has(playlistURL(p))) continue;
+      if (p.track_count !== undefined) {
+        known++;
+        tracks += p.track_count;
+      }
+    }
+    return { known, tracks, partial: known < selected.size };
+  }, [playlists, selected]);
+
   const toggle = (p: PickerPlaylist) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -178,6 +196,12 @@ export function PlaylistPicker({
     }
   }, []);
 
+  // Carried by the whole batch. The dialog this replaced offered both, and
+  // dropping them would have been a quiet loss of capability rather than a
+  // simplification.
+  const [intervalHours, setIntervalHours] = useState(24);
+  const [syncDeletions, setSyncDeletions] = useState(false);
+
   const [adding, setAdding] = useState(false);
   const submit = useCallback(
     async (urls: string[]) => {
@@ -186,8 +210,8 @@ export function PlaylistPicker({
       try {
         const res = await AddWatchlistsBatch({
           spotify_urls: urls,
-          interval_hours: 24,
-          sync_deletions: false,
+          interval_hours: intervalHours,
+          sync_deletions: syncDeletions,
         });
         // Every outcome is reported, not just the count: "3 of 12 failed" with
         // no names leaves comparing the list by hand as the only recovery.
@@ -214,7 +238,7 @@ export function PlaylistPicker({
         setAdding(false);
       }
     },
-    [onAdded, onClose],
+    [onAdded, onClose, intervalHours, syncDeletions],
   );
 
   useEffect(() => {
@@ -557,21 +581,50 @@ export function PlaylistPicker({
           )}
         </div>
 
+        <div className="flex flex-wrap items-center gap-4 border-t pt-3 text-sm">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="batch-interval" className="text-xs">
+              Check every
+            </Label>
+            <select
+              id="batch-interval"
+              value={intervalHours}
+              onChange={(e) => setIntervalHours(Number(e.target.value))}
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+            >
+              <option value={6}>6 hours</option>
+              <option value={12}>12 hours</option>
+              <option value={24}>24 hours</option>
+              <option value={168}>Weekly</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="batch-sync-deletions"
+              checked={syncDeletions}
+              onCheckedChange={(v) => setSyncDeletions(v === true)}
+            />
+            <Label htmlFor="batch-sync-deletions" className="text-xs font-normal">
+              Also remove tracks dropped from the playlist
+            </Label>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between gap-3 border-t pt-3">
           {/* Announced, because a count that only changes visually does not
               exist for anyone using a screen reader. */}
           <p aria-live="polite" className="text-sm text-muted-foreground">
             {selected.size === 0
               ? "Nothing selected"
-              : `${selected.size} playlist${selected.size === 1 ? "" : "s"} selected`}
+              : selectedCost.tracks > 0
+                ? `${selected.size} playlist${selected.size === 1 ? "" : "s"} — ${selectedCost.partial ? "at least " : ""}${selectedCost.tracks} tracks`
+                : `${selected.size} playlist${selected.size === 1 ? "" : "s"} selected`}
           </p>
           <Button
             disabled={adding || selected.size === 0}
             onClick={() => void submit([...selected])}
           >
-            {adding
-              ? "Adding…"
-              : `Watch ${selected.size || ""} playlist${selected.size === 1 ? "" : "s"}`.trim()}
+            {adding ? "Adding…" : "Watch"}
           </Button>
         </div>
       </DialogContent>
