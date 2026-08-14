@@ -1,6 +1,6 @@
 module github.com/sos-pc/SpotiFLAC-SH
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/bogem/id3v2/v2 v2.1.4
