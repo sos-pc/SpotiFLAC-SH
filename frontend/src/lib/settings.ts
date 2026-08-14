@@ -33,6 +33,10 @@ export interface Settings {
     useFirstArtistOnly: boolean;
     useSingleGenre: boolean;
     embedGenre: boolean;
+    // Instance-scoped: the Spotify application this deployment authenticates
+    // against. Public by design in OAuth — it appears in every authorize URL —
+    // so it is owned by the operator rather than kept secret.
+    spotifyClientId: string;
 }
 export const FOLDER_PRESETS: Record<FolderPreset, {
     label: string;
@@ -109,7 +113,8 @@ export const DEFAULT_SETTINGS: Settings = {
     jellyfinMusicPath: "",
     useFirstArtistOnly: false,
     useSingleGenre: false,
-    embedGenre: true
+    embedGenre: true,
+    spotifyClientId: ""
 };
 export const FONT_OPTIONS: {
     value: FontFamily;

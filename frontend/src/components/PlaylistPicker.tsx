@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Link2, User, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,8 +14,11 @@ import {
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
   AddWatchlistsBatch,
+  GetMyPlaylists,
   GetProfilePlaylists,
+  GetSpotifyConnection,
   SearchSpotifyProfiles,
+  StartSpotifyConnection,
   type PickerPlaylist,
   type SpotifyProfile,
 } from "@/lib/rpc";
@@ -24,12 +27,11 @@ import {
 // and repeating. Twelve times for twelve playlists. This is the same operation
 // with the list in front of you.
 //
-// Three sources were designed (see docs/multi-user-readiness-plan.md §8): your
-// own playlists over OAuth, someone's public profile, and a URL. Only the last
-// two exist — OAuth needs a Spotify application declared by the operator, which
-// has not happened — so the first is shown and explained rather than hidden.
-// Hiding it would make the picker look complete and leave the operator with no
-// hint that connecting an account is what unlocks private playlists.
+// Three sources (see docs/multi-user-readiness-plan.md §8): your own playlists
+// over OAuth, someone's public profile, and a URL. All three work now; the
+// first one explains itself when the operator has registered no Spotify
+// application, or when this account has not connected yet, rather than showing
+// a dead tab.
 
 type Source = "mine" | "profile" | "url";
 type OwnerFilter = "all" | "owned" | "followed";
@@ -76,6 +78,39 @@ export function PlaylistPicker({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<OwnerFilter>("all");
   const [needle, setNeedle] = useState("");
+
+  // ── My own playlists ──────────────────────────────────────────────────────
+  // The only source that reports a track count, and the only one that sees
+  // private and collaborative playlists.
+  const [mineState, setMineState] = useState<
+    "loading" | "unconfigured" | "disconnected" | "ready" | "error"
+  >("loading");
+  const [mineError, setMineError] = useState("");
+
+  const loadMine = useCallback(async () => {
+    setMineState("loading");
+    try {
+      const conn = await GetSpotifyConnection();
+      if (!conn.configured) {
+        setMineState("unconfigured");
+        return;
+      }
+      if (!conn.connected) {
+        setMineState("disconnected");
+        return;
+      }
+      setPlaylists(await GetMyPlaylists());
+      setSelected(new Set());
+      setMineState("ready");
+    } catch (e) {
+      // A 401 from Spotify surfaces here as a 502 and means the account was
+      // disconnected on their side. Offering to reconnect is the useful answer;
+      // a stack trace is not.
+      setMineError(String(e));
+      setMineState("error");
+    }
+  }, []);
+
 
   const openProfile = useCallback(async (p: SpotifyProfile) => {
     setProfile(p);
@@ -135,6 +170,14 @@ export function PlaylistPicker({
   // ── URL source ────────────────────────────────────────────────────────────
   const [url, setUrl] = useState("");
 
+  const connectSpotify = useCallback(async () => {
+    try {
+      window.location.href = await StartSpotifyConnection();
+    } catch (e) {
+      toast.error(`Could not start the connection: ${e}`);
+    }
+  }, []);
+
   const [adding, setAdding] = useState(false);
   const submit = useCallback(
     async (urls: string[]) => {
@@ -173,6 +216,14 @@ export function PlaylistPicker({
     },
     [onAdded, onClose],
   );
+
+  useEffect(() => {
+    if (!isOpen || source !== "mine") return;
+    // External-system sync when the tab becomes active, same shape as the
+    // settings tabs' own loads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadMine();
+  }, [isOpen, source, loadMine]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -222,17 +273,56 @@ export function PlaylistPicker({
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-[280px]">
-          {source === "mine" && (
+          {source === "mine" && mineState === "loading" && (
+            <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Reading your Spotify account…
+            </p>
+          )}
+
+          {source === "mine" && mineState === "unconfigured" && (
             <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
               <p className="mb-1 font-medium text-foreground">
-                Connecting your Spotify account is not available yet
+                No Spotify application is configured for this instance
               </p>
               <p>
-                It is what would let you pick from your own playlists, including
-                private and collaborative ones. Until then, a public profile or
-                a link works — and an administrator has to register a Spotify
-                application before any account can be connected.
+                An administrator registers one, once, in Settings → APIs. Until
+                then a public profile or a link works — they just cannot reach
+                private playlists.
               </p>
+            </div>
+          )}
+
+          {source === "mine" && mineState === "disconnected" && (
+            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              <p className="mb-1 font-medium text-foreground">
+                Your Spotify account is not connected
+              </p>
+              <p className="mb-4">
+                Connecting it shows your own playlists here, private and
+                collaborative ones included, with their track counts.
+              </p>
+              <Button onClick={() => void connectSpotify()}>
+                Connect Spotify
+              </Button>
+            </div>
+          )}
+
+          {source === "mine" && mineState === "error" && (
+            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              <p className="mb-1 font-medium text-foreground">
+                Spotify would not answer for this account
+              </p>
+              {/* The likely cause, stated: a refresh token that expired or was
+                  revoked looks exactly like this, and reconnecting is the fix. */}
+              <p className="mb-4">
+                Often an expired connection — they last 180 days here.
+                Reconnecting usually resolves it.
+              </p>
+              <p className="mb-4 font-mono text-xs">{mineError}</p>
+              <Button variant="outline" onClick={() => void connectSpotify()}>
+                Reconnect
+              </Button>
             </div>
           )}
 
@@ -310,8 +400,9 @@ export function PlaylistPicker({
             </div>
           )}
 
-          {source === "profile" && profile && (
+          {(source === "mine" ? mineState === "ready" : source === "profile" && !!profile) && (
             <div className="space-y-3">
+              {profile && (
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm">
                   <span className="font-medium">{profile.display_name}</span>
@@ -333,6 +424,7 @@ export function PlaylistPicker({
                   Another profile
                 </Button>
               </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-2">
                 <Label htmlFor="playlist-filter" className="sr-only">
@@ -401,6 +493,11 @@ export function PlaylistPicker({
                             <span className="min-w-0 flex-1 truncate text-sm">
                               {p.name}
                             </span>
+                            {p.track_count !== undefined && (
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {p.track_count} track{p.track_count === 1 ? "" : "s"}
+                              </span>
+                            )}
                             {!p.owned && (
                               <span className="shrink-0 text-xs text-muted-foreground">
                                 followed
