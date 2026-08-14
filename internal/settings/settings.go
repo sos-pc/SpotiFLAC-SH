@@ -144,14 +144,59 @@ func ServerJobSettings(s DownloadSettings, serviceOverride string) jobs.JobSetti
 // returned by GET /api/v1/settings, yet silently ignored by those four call
 // sites in favor of the operator's global value.
 func EffectiveDownloadSettings(auth *auth.AuthManager, userID string) DownloadSettings {
-	var raw map[string]interface{}
-	if userID != "" && auth != nil {
-		if profile, err := auth.GetUser(userID); err == nil && profile != nil && len(profile.Settings) > 0 {
-			raw = profile.Settings
+	return ParseDownloadSettings(EffectiveBlob(auth, userID))
+}
+
+// defaultBlob is the value a deployment starts from, before the operator or
+// anyone else has saved anything.
+//
+// Only one entry, and that is not an oversight: every other key's intended
+// default IS its zero value, and the substitutions that turn an empty template
+// into "title-artist" live downstream on purpose — they guard persisted job
+// records, not this resolution (see backend/util's default constants).
+//
+// createM3u8File is different because its intended default is true, which the
+// old design could not express at all: settings arrived as an untyped map and a
+// missing key read as false, so "on unless told otherwise" was unreachable.
+func defaultBlob() map[string]interface{} {
+	return map[string]interface{}{
+		"createM3u8File": true,
+	}
+}
+
+// EffectiveBlob resolves the settings governing userID, as layers:
+//
+//	defaults  ←  instance store  ←  the user's own patch (user-scoped keys only)
+//
+// Each layer overrides only the keys it actually sets. That is the whole point,
+// and it is what the previous version did not do: it took the user's map
+// *instead of* the instance one whenever the user had saved anything at all, so
+// a single stored key sent every other setting to its zero value. Nothing had
+// noticed because the settings screen always sends the blob back whole — the
+// system was correct only for as long as the client kept being polite.
+//
+// The instance layer applies to every key, not just instance-scoped ones, so an
+// operator can set a house-wide default for a personal setting and have it
+// reach anyone who has not chosen otherwise. The user layer is filtered to
+// user-scoped keys, which is what makes a stale per-user downloadPath — every
+// profile written before this shipped has one — stop being honoured.
+func EffectiveBlob(am *auth.AuthManager, userID string) map[string]interface{} {
+	merged := defaultBlob()
+
+	if instance, err := config.LoadSettingsFile(); err == nil {
+		for k, v := range instance {
+			merged[k] = v
 		}
 	}
-	if raw == nil {
-		raw, _ = config.LoadSettingsFile()
+
+	if userID != "" && am != nil {
+		if profile, err := am.GetUser(userID); err == nil && profile != nil {
+			for k, v := range profile.Settings {
+				if ScopeOf(k) == ScopeUser {
+					merged[k] = v
+				}
+			}
+		}
 	}
-	return ParseDownloadSettings(raw)
+	return merged
 }

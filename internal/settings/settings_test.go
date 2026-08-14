@@ -90,27 +90,40 @@ func TestParseDownloadSettingsPassesThroughValidValues(t *testing.T) {
 	}
 }
 
-// TestEffectiveDownloadSettingsPrefersPerUserOverGlobal is the regression
-// test for the R8 bug: libraryRoot, the download-request settings filler
-// (ApplySettingsFallbacks, since removed as vestigial) and the
-// spotFetchAPIUrl readers used to call SystemService.LoadSettings()
-// directly, ignoring a signed-in user's own saved settings entirely — even
-// though GET /api/v1/settings already correctly returned them. A user who
-// saved a custom downloadPath would have it silently ignored by every path
-// confinement check. EffectiveDownloadSettings is the single resolver that
-// now backs all of those call sites.
-func TestEffectiveDownloadSettingsPrefersPerUserOverGlobal(t *testing.T) {
+// TestEffectiveDownloadSettingsPrefersPerUserOverGlobal used to assert that a
+// user's own downloadPath won over the instance one. It was the regression test
+// for the R8 bug, where four call sites read the global file directly and
+// ignored a signed-in user's saved settings entirely.
+//
+// That fix was right for a single-user deployment and is wrong for a shared
+// one. A user's downloadPath is also the root that confines them, so honouring
+// it let a non-admin choose their own boundary; and a file's location being
+// per-user fragments one shared library into several. downloadPath is now
+// instance-scoped, and a stored per-user copy — which every profile written
+// before that change has — is ignored on read rather than merely refused on
+// write.
+//
+// The half of R8 that survives is the half that was really about resolution:
+// a user's own USER-scoped settings must reach every backend call site, not
+// just GET /api/v1/settings. That is what this now asserts.
+func TestEffectiveDownloadSettingsAppliesUserScopedKeys(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	am := newTestAuthManager(t)
 
 	if err := am.SaveUserSettings("u1", map[string]interface{}{
-		"downloadPath": "/home/u1/Music",
+		"tidalQuality": "HI_RES_LOSSLESS", // theirs
+		"downloadPath": "/home/u1/Music",  // not theirs to set
 	}); err != nil {
 		t.Fatalf("auth.SaveUserSettings: %v", err)
 	}
 
 	got := EffectiveDownloadSettings(am, "u1")
-	if got.DownloadPath != "/home/u1/Music" {
-		t.Errorf("DownloadPath = %q, want the user's own saved path (per-user settings must win over global)", got.DownloadPath)
+	if got.TidalQuality != "HI_RES_LOSSLESS" {
+		t.Errorf("TidalQuality = %q, want the user's own saved value", got.TidalQuality)
+	}
+	if got.DownloadPath == "/home/u1/Music" {
+		t.Error("a stored per-user downloadPath is still honoured; it is instance-scoped now")
 	}
 }
 

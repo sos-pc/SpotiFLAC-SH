@@ -209,7 +209,18 @@ export const ExportFailedDownloads = () =>
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
-export const LoadSettings = () => rest<Settings>("GET", "/settings");
+// The backend answers with the resolved values plus who may write what:
+// instance-scoped keys (download path, templates, the Jellyfin path) belong
+// to the deployment and only an admin may change them.
+export interface SettingsEnvelope {
+  values: Settings;
+  writableScope: "all" | "user";
+  instanceKeys: string[];
+}
+export const LoadSettingsEnvelope = () =>
+  rest<SettingsEnvelope>("GET", "/settings");
+export const LoadSettings = () =>
+  LoadSettingsEnvelope().then((e) => e.values);
 export const SaveSettings = (settings: Settings) =>
   rest<void>("PUT", "/settings", settings);
 // `os` is the server's runtime.GOOS ("linux"/"windows"/"darwin") — used to

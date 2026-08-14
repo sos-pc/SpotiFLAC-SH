@@ -1,8 +1,6 @@
 package service
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"runtime"
 
@@ -27,30 +25,13 @@ func (s *SystemService) GetConfigPath() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
+// SaveSettings delegates for the same reason LoadSettings does, and because the
+// scope migration in internal/settings has to write the instance store too —
+// internal/settings cannot import this package (this one imports it), so the
+// atomic write moved to internal/config where both can reach it rather than
+// being written twice.
 func (s *SystemService) SaveSettings(settings map[string]interface{}) error {
-	configPath, err := s.GetConfigPath()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(configPath)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Atomic write (Q7): same temp-file + rename pattern as CreateM3U8File
-	// below — a crash or concurrent save mid-write can no longer leave
-	// config.json truncated/corrupted on disk.
-	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return os.Rename(tmpPath, configPath)
+	return config.SaveSettingsFile(settings)
 }
 
 // LoadSettings delegates to loadSettingsFile so that callers who only need the

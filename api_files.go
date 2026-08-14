@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -226,41 +227,115 @@ func (s *Server) registerFileRoutes() {
 		if !v1RequirePermission(w, r, "read") {
 			return
 		}
+		// The values are now resolved in layers — defaults, then the instance
+		// store, then this caller's own user-scoped keys — instead of returning
+		// the caller's blob *instead of* the instance one whenever they had
+		// saved anything, which is how one stored key sent every other setting
+		// to its zero value.
+		//
+		// They move under "values" rather than staying at the top level. That is
+		// a wire change and the client follows it, but the alternative was
+		// smuggling metadata in among the settings under reserved key names, in
+		// a blob whose whole contract is that the backend passes through keys it
+		// does not know.
 		user := auth.GetUserFromContext(r)
-		if user != nil && s.ctr.Auth != nil {
-			if profile, err := s.ctr.Auth.GetUser(user.UserID); err == nil && len(profile.Settings) > 0 {
-				writeV1JSON(w, http.StatusOK, profile.Settings)
-				return
-			}
+		userID := ""
+		if user != nil {
+			userID = user.UserID
 		}
-		settings, err := s.ctr.System.LoadSettings()
-		if err != nil {
-			writeV1Error(w, http.StatusInternalServerError, err.Error())
-			return
+		blob := settings.EffectiveBlob(s.ctr.Auth, userID)
+
+		// Alongside them, what this caller may actually write. The screen needs
+		// it to disable the instance-scoped fields for a non-admin *and say
+		// why*, rather than accepting an edit the PUT will then refuse.
+		writable := "all"
+		if user == nil || !user.IsAdmin {
+			writable = "user"
 		}
-		writeV1JSON(w, http.StatusOK, settings)
+		writeV1JSON(w, http.StatusOK, map[string]interface{}{
+			"values":        blob,
+			"writableScope": writable,
+			"instanceKeys":  settings.InstanceKeys(),
+		})
 	}))
 
 	s.mux.Handle("PUT /api/v1/settings", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
 		if !v1RequirePermission(w, r, "manage") {
 			return
 		}
-		var settings map[string]interface{}
-		if !decodeV1JSON(w, r, &settings) {
+		var submitted map[string]interface{}
+		if !decodeV1JSON(w, r, &submitted) {
 			return
 		}
 		user := auth.GetUserFromContext(r)
-		if user != nil && s.ctr.Auth != nil {
-			if err := s.ctr.Auth.SaveUserSettings(user.UserID, settings); err != nil {
+		isAdmin := user != nil && user.IsAdmin
+
+		// Split rather than reject: the settings screen sends one object holding
+		// both kinds, so refusing the whole submission would stop a non-admin
+		// changing their own theme because the same form carries the download
+		// path.
+		instancePart, userPart := settings.SplitByScope(submitted)
+
+		stored, err := s.ctr.System.LoadSettings()
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if stored == nil {
+			stored = map[string]interface{}{}
+		}
+
+		if len(instancePart) > 0 {
+			// Only what actually CHANGES needs the admin right. The settings
+			// screen sends the whole blob on every save, so a non-admin
+			// adjusting their theme submits all nine instance keys too — at
+			// their current values. Refusing on presence would make every save
+			// fail for them; refusing on difference refuses exactly the edits
+			// that are not theirs to make.
+			changed := make([]string, 0, len(instancePart))
+			for k, v := range instancePart {
+				if !settings.SameValue(stored[k], v) {
+					changed = append(changed, k)
+				}
+			}
+			if len(changed) > 0 && !isAdmin {
+				// Named, not silently dropped. A setting that appears to save
+				// and then reads back unchanged is worse than a refusal.
+				sort.Strings(changed)
+				writeV1Error(w, http.StatusForbidden,
+					"these settings belong to the whole instance and only an administrator can change them: "+strings.Join(changed, ", "))
+				return
+			}
+			if len(changed) == 0 {
+				instancePart = nil
+			}
+		}
+		if len(instancePart) > 0 {
+			// Merged, not replaced: a submission carrying three instance keys
+			// must not delete the other six.
+			for k, v := range instancePart {
+				stored[k] = v
+			}
+			if err := s.ctr.System.SaveSettings(stored); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
-			return
 		}
-		if err := s.ctr.System.SaveSettings(settings); err != nil {
-			writeV1Error(w, http.StatusInternalServerError, err.Error())
-			return
+
+		if user != nil && s.ctr.Auth != nil {
+			if err := s.ctr.Auth.SaveUserSettings(user.UserID, userPart); err != nil {
+				writeV1Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		} else if len(userPart) > 0 {
+			// No authenticated user: there is no profile to write to, so the
+			// operator's instance store is the only sensible home. This is the
+			// DISABLE_AUTH_ON_LAN path, which is off on the reference
+			// deployment.
+			if err := s.ctr.System.SaveSettings(userPart); err != nil {
+				writeV1Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
