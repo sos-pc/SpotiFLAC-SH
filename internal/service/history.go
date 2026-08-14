@@ -20,15 +20,23 @@ func NewHistoryService(jobs *jobs.JobManager) *HistoryService {
 	return &HistoryService{jobs: jobs}
 }
 
-func (h *HistoryService) ClearCompletedDownloads(userID string, isAdmin bool) {
+// These three serve the download-queue panel, which shows the caller their own
+// work and nobody else's. So they act on their own work too: isAdmin is passed
+// as false deliberately, and the parameter is gone from these signatures.
+//
+// An operator clearing every account's history is a legitimate thing to want,
+// but not from a screen that shows them three rows and deletes thirty.
+// JobManager keeps the capability for the administration screen that will
+// need it.
+func (h *HistoryService) ClearCompletedDownloads(userID string) {
 	if jm := h.jobs; jm != nil {
-		jm.ClearCompletedJobs(userID, isAdmin)
+		jm.ClearCompletedJobs(userID, false)
 	}
 }
 
-func (h *HistoryService) ClearAllDownloads(userID string, isAdmin bool) {
+func (h *HistoryService) ClearAllDownloads(userID string) {
 	if jm := h.jobs; jm != nil {
-		jm.ClearAllJobs(userID, isAdmin)
+		jm.ClearAllJobs(userID, false)
 	}
 }
 
@@ -46,7 +54,7 @@ type FailedDownloadsExport struct {
 
 const noFailedDownloads = "No failed downloads to export"
 
-func (h *HistoryService) ExportFailedDownloads(userID string, isAdmin bool) (FailedDownloadsExport, error) {
+func (h *HistoryService) ExportFailedDownloads(userID string) (FailedDownloadsExport, error) {
 	jm := h.jobs
 	if jm == nil {
 		return FailedDownloadsExport{Message: noFailedDownloads}, nil
@@ -55,15 +63,22 @@ func (h *HistoryService) ExportFailedDownloads(userID string, isAdmin bool) (Fai
 	if err != nil {
 		return FailedDownloadsExport{}, err
 	}
-	return failedDownloadsExport(jobList, userID, isAdmin)
+	return failedDownloadsExport(jobList, userID)
 }
 
 // failedDownloadsExport is the whole of the above except the DB read, split out
 // so it can be tested against a []jobs.Job literal instead of a Bolt file.
-func failedDownloadsExport(jobList []jobs.Job, userID string, isAdmin bool) (FailedDownloadsExport, error) {
+//
+// It took an isAdmin flag that let it aggregate every account's failures. The
+// only caller is the download-queue panel's Export button, which now acts on
+// the caller's own rows like everything else on that screen, so the flag was
+// always false. An instance-wide export is a reasonable thing to want from an
+// administration screen; it can grow an owner column then, which it would need
+// anyway to be readable.
+func failedDownloadsExport(jobList []jobs.Job, userID string) (FailedDownloadsExport, error) {
 	records := [][]string{}
 	for _, job := range jobList {
-		if !isAdmin && job.UserID != userID {
+		if job.UserID != userID {
 			continue
 		}
 		if job.Status != jobs.StatusFailed {
