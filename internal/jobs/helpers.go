@@ -520,13 +520,8 @@ func (jm *JobManager) RequeueFailedJobs(watchlistID string, currentSettings JobS
 		}
 		jm.NotifyJob(&job)
 
-		select {
-		case jm.queue <- job.ID:
-			requeued++
-		default:
-			slog.Warn("[Jobs] Queue full, failed job will be picked up later", "job_id", job.ID)
-			requeued++
-		}
+		jm.queue.push(job.UserID, job.ID)
+		requeued++
 	}
 	if requeued > 0 {
 		slog.Info("[Jobs] Requeued failed jobs", "count", requeued, "watchlist_id", watchlistID)

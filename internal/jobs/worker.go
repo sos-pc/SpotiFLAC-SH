@@ -22,23 +22,20 @@ func (jm *JobManager) worker(id int) {
 	defer jm.wg.Done()
 	slog.Info("[Jobs] Worker started", "worker_id", id)
 
+	// No select on jm.ctx here: take() already waits on it, and a second
+	// check before it could only ever be a stale one.
 	for {
-		select {
-		case <-jm.ctx.Done():
+		jobID, ok := jm.queue.take(jm.ctx)
+		if !ok {
 			slog.Info("[Jobs] Worker stopped", "worker_id", id)
 			return
-		case jobID, ok := <-jm.queue:
-			if !ok {
-				slog.Info("[Jobs] Worker queue closed", "worker_id", id)
-				return
-			}
-			jm.processJobSafely(jobID)
 		}
+		jm.processJobSafely(jobID)
 	}
 }
 
 // processJobSafely runs processJob with panic protection scoped to a
-// single job, not the whole worker goroutine. jobWorkers is 1 by default
+// single job, not the whole worker goroutine. jobWorkers is 1
 // (see its doc comment) — recovering only at the top of worker() would
 // still keep the process alive, but the panic would permanently kill the
 // sole worker goroutine (nothing restarts it), silently stalling the
@@ -264,11 +261,8 @@ func (jm *JobManager) recoverPendingJobs() {
 	for _, job := range toRecover {
 		jobCopy := job
 		jm.SaveJob(&jobCopy)
-		select {
-		case jm.queue <- jobCopy.ID:
-			recovered++
-		default:
-		}
+		jm.queue.push(jobCopy.UserID, jobCopy.ID)
+		recovered++
 	}
 	if recovered > 0 {
 		slog.Info("[Jobs] Recovered interrupted jobs", "count", recovered)

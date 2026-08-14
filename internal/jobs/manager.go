@@ -29,7 +29,16 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 const (
-	jobWorkers = 1         // parallel download workers
+	// jobWorkers is 1 because the ENGINE cannot take concurrent downloads,
+	// not because one felt safer. Its /download handler wraps the work in
+	// redirect_stdout/redirect_stderr, which swap a process-global and
+	// restore it on exit; two overlapping calls interleave their
+	// save-and-restore and leave the process writing every subsequent log
+	// line into an abandoned buffer.
+	//
+	// So raising this is not the answer to one user monopolising the queue —
+	// fairQueue is. Fix the engine first if throughput is ever the goal.
+	jobWorkers = 1
 	DBFile     = "jobs.db" // path relative to configDir
 )
 
@@ -212,7 +221,7 @@ type EventSink interface {
 type JobManager struct {
 	db           *bolt.DB
 	catalog      *sql.DB // SQLite catalog: tracks, library_files, download_attempts
-	queue        chan string
+	queue        *fairQueue
 	isrcClient   *isrclookup.Client
 	eventHandler JobEventHandler
 	// Injected, not constructed: whoever owns the transport keeps the concrete
@@ -279,7 +288,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSin
 	jm := &JobManager{
 		db:           db,
 		catalog:      catalog,
-		queue:        make(chan string, 10000),
+		queue:        newFairQueue(),
 		isrcClient:   isrclookup.Shared(),
 		sink:         sink,
 		ctx:          ctx,
@@ -331,12 +340,8 @@ func (jm *JobManager) Submit(job *Job) (queued bool, err error) {
 	if err := jm.SaveJob(job); err != nil {
 		return false, err
 	}
-	select {
-	case jm.queue <- job.ID:
-		return true, nil
-	default:
-		return false, nil
-	}
+	jm.queue.push(job.UserID, job.ID)
+	return true, nil
 }
 
 // NotifyJob publishes a job_update event to all connected SSE clients.
@@ -458,7 +463,7 @@ func (jm *JobManager) Close() {
 	jm.closedOnce.Do(func() {
 		slog.Info("[Jobs] Shutting down...")
 		jm.cancel()
-		close(jm.queue)
+		jm.queue.close()
 		jm.wg.Wait()
 		slog.Info("[Jobs] Shutdown complete")
 	})
@@ -566,13 +571,8 @@ func (jm *JobManager) EnqueueBatch(req EnqueueBatchRequest) (EnqueueBatchRespons
 		}
 		jm.NotifyJob(job)
 
-		select {
-		case jm.queue <- job.ID:
-			enqueued++
-		default:
-			slog.Warn("[Jobs] Queue full, job will be picked up on next poll", "job_id", job.ID)
-			enqueued++
-		}
+		jm.queue.push(job.UserID, job.ID)
+		enqueued++
 	}
 
 	// Counters are registered for MANUAL batches too, not just watchlists:
