@@ -401,3 +401,122 @@ func SearchProfiles(ctx context.Context, query string, limit int) ([]ProfileSumm
 	}
 	return parseProfileSearch(data)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The connected account's own playlists
+// ─────────────────────────────────────────────────────────────────────────────
+
+const myPlaylistsURL = "https://api.spotify.com/v1/me/playlists?limit=50"
+
+// myPlaylistsPage is one page of GET /v1/me/playlists.
+//
+// This is the OFFICIAL API, and the difference from the profile endpoint is the
+// point of connecting an account at all: it returns private and collaborative
+// playlists, it carries tracks.total, and its pagination is honest — a `next`
+// link that is null at the end, rather than a total that drifts between calls
+// and pages shorter than the limit for reasons of its own.
+type myPlaylistsPage struct {
+	Next  string `json:"next"`
+	Items []struct {
+		URI    string `json:"uri"`
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Images []struct {
+			URL string `json:"url"`
+		} `json:"images"`
+		Owner struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+			URI         string `json:"uri"`
+		} `json:"owner"`
+		Tracks struct {
+			Total int `json:"total"`
+		} `json:"tracks"`
+	} `json:"items"`
+}
+
+// parseMyPlaylistsPage turns one page into rows, and reports where the next one
+// is. Pure, so the walk can be tested without a network.
+func parseMyPlaylistsPage(body []byte, selfID string) ([]PlaylistEntry, string, error) {
+	var page myPlaylistsPage
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, "", fmt.Errorf("%w: my playlists page: %v", SpotifyError, err)
+	}
+	entries := make([]PlaylistEntry, 0, len(page.Items))
+	for _, it := range page.Items {
+		if it.ID == "" {
+			continue
+		}
+		image := ""
+		// The smallest image, as with profile search: this is a list of
+		// thumbnails, and Spotify orders them widest first.
+		if n := len(it.Images); n > 0 {
+			image = it.Images[n-1].URL
+		}
+		total := it.Tracks.Total
+		entries = append(entries, PlaylistEntry{
+			URI:       it.URI,
+			ID:        it.ID,
+			Name:      it.Name,
+			ImageURL:  image,
+			OwnerName: it.Owner.DisplayName,
+			OwnerURI:  it.Owner.URI,
+			Owned:     selfID != "" && strings.EqualFold(it.Owner.ID, selfID),
+			// The whole reason this source exists alongside the profile one.
+			TrackCount: &total,
+		})
+	}
+	return entries, page.Next, nil
+}
+
+// ListMyPlaylists returns every playlist the connected account can see —
+// private and collaborative included.
+//
+// selfID marks which are the account's own rather than followed; pass the
+// Spotify user id from the connection. Empty is tolerated: everything then
+// reads as followed, which is the safe way to be wrong here — it under-claims
+// ownership rather than inviting someone to watch a follow by mistake.
+func ListMyPlaylists(ctx context.Context, accessToken, selfID string) ([]PlaylistEntry, error) {
+	if accessToken == "" {
+		return nil, fmt.Errorf("%w: no access token", SpotifyError)
+	}
+	var (
+		all  []PlaylistEntry
+		next = myPlaylistsURL
+	)
+	// Bounded like the profile walk, for the same reason: an endpoint that
+	// never stops handing out a next link must not loop forever.
+	for page := 0; page < 60 && next != ""; page++ {
+		req, err := http.NewRequestWithContext(ctx, "GET", next, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode != http.StatusOK {
+			// 401 here means the refresh produced a token Spotify will not
+			// accept — the account was disconnected on their side, or the
+			// application lost its authorization. Partial results would look
+			// like an emptying library, so this fails instead.
+			return nil, fmt.Errorf("%w: my playlists: HTTP %d", SpotifyError, resp.StatusCode)
+		}
+
+		entries, nextURL, err := parseMyPlaylistsPage(body, selfID)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, entries...)
+		next = nextURL
+	}
+	return all, nil
+}

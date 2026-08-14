@@ -136,6 +136,43 @@ func (s *Server) registerSpotifyRoutes() {
 		http.Redirect(w, r, "/?spotify=connected", http.StatusSeeOther)
 	})
 
+	// The connected account's own playlists — private and collaborative
+	// included, and the only source that can report a track count.
+	//
+	// Every failure here is 502 rather than 500 for the same reason as the
+	// profile walk, plus one specific to this route: a 401 from Spotify means
+	// the refresh produced a token it will not accept, which is the account
+	// having been disconnected on their side. That is upstream's answer, and
+	// the screen should offer to reconnect rather than report a bug.
+	s.mux.Handle("GET /api/v1/spotify/me/playlists", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequirePermission(w, r, "read") {
+			return
+		}
+		userID := userIDFromContext(r)
+		conn, err := s.ctr.SpotifyOAuth.Get(userID)
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if conn == nil {
+			// Not an error state to be logged: it is simply what a user who has
+			// not connected looks like, and the picker asks before it knows.
+			writeV1Error(w, http.StatusPreconditionRequired, "this account is not connected to Spotify")
+			return
+		}
+		token, err := s.ctr.SpotifyOAuth.AccessToken(r.Context(), s.instanceClientID(), userID)
+		if err != nil {
+			writeV1Error(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		entries, err := spotify.ListMyPlaylists(r.Context(), token, conn.SpotifyID)
+		if err != nil {
+			writeV1Error(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, map[string]interface{}{"playlists": entries})
+	}))
+
 	// Finding SOMEONE ELSE. It is a poor way to find yourself — display names
 	// are not unique and ids are opaque, so "marc" answers with ten profiles
 	// most of which are literally named Marc — and it is unnecessary for that
