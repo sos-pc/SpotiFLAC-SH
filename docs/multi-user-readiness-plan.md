@@ -3,8 +3,10 @@
 > **🧭 Plan, 2026-08-13.** The operator intends every Jellyfin account to use
 > SpotiFLAC, not just the admin. This audits what that changes. It was triggered
 > by a feature request — connect a Spotify account to pick playlists from a list
-> — which is deferred to §6 because the features it would expose are not ready
-> to be shared. Companions: [authentication.md](authentication.md) ·
+> — which is deferred to §8 because what it would expose is not ready to be
+> shared. OAuth is required, not optional, by the operator's decision; §8a and
+> §8b cover the user flow and the accessibility baseline it must be built
+> against. Companions: [authentication.md](authentication.md) ·
 > [settings-reference.md](settings-reference.md) ·
 > [watchlist-consistency-plan.md](watchlist-consistency-plan.md).
 
@@ -99,19 +101,17 @@ why it has to be fixed before that stops being true.
 The probe that produced the output above should ship with the fix, inverted:
 asserting that a user's override can no longer widen their root.
 
-**Resolution.** An operator-owned boundary that per-user overrides may only
-narrow, never widen:
+**Resolution — remove the class, do not contain it.** The first version of this
+section proposed an operator-owned boundary that per-user overrides could only
+narrow. §2a supersedes it: **make `downloadPath` instance-level**, writable by
+an admin only. There is then no user-chosen root to validate, `libraryRootFor`
+collapses back into `libraryRoot`, and the finding cannot recur.
 
-- Add `libraryRootBoundary` to the instance settings (§2), defaulting to the
-  global `downloadPath`.
-- `libraryRootForUser` returns the user's override only if `isSubPath(boundary,
-  override)`; otherwise it returns the boundary and logs the rejection.
-- Reject the write too, at `PUT /api/v1/settings`, so the user is told rather
-  than silently confined elsewhere than they asked.
+That is less code than the boundary, and §2a shows it is also the *correct*
+answer for a shared library rather than merely the cheaper one.
 
-Validating on read *and* on write is deliberate: the write check is the good
-error message, the read check is the one that still holds for values already
-stored in Bolt before this ships.
+Keep one thing from the boundary idea: values already stored in Bolt from before
+this ships must stop being honoured on read, not only rejected on write.
 
 ## 2. Settings fork on first save, and instance keys fork with them
 
@@ -134,10 +134,11 @@ globally and it reaches nobody who has ever opened the settings page.
 |---|---|
 | `spotFetchAPIUrl` | the engine sidecar; a user repointing it aims the server's requests at a host of their choosing |
 | `jellyfinMusicPath` | where M3U8 files are written for one shared Jellyfin |
-| `downloadPath` | per-user by design, but only within §1's boundary |
+| `downloadPath` | see §2a — it decides where a file lands in a shared library |
+| `folderTemplate`, `createPlaylistFolder`, `useFirstArtistOnly`, `filenameTemplate` | same, see §2a |
 
-The rest — quality, templates, `autoOrder`, tagging toggles — are legitimately
-personal and should stay that way.
+The rest — quality, `autoOrder`, tagging toggles — are personal. `autoQuality`
+and the per-provider qualities are a special case; see §2b.
 
 Worth saying plainly: making `spotFetchAPIUrl` resolve per user was a
 *deliberate* change, and `EffectiveDownloadSettings`' own docstring
@@ -156,8 +157,79 @@ here; it is a decision that does not survive the new context.
   the user's personal keys — so an operator change reaches everyone
   immediately, and the fork stops existing.
 
-This also creates the admin write path that §6 needs for the Spotify client ID,
+This also creates the admin write path that §8 needs for the Spotify client ID,
 which currently has nowhere to live.
+
+## 2a. A shared library, fragmented by personal settings
+
+This is why the table above changed, and it is the strongest argument in the
+plan for a boundary the operator owns.
+
+A file's location is not a property of the library. It is computed from the
+settings of whoever enqueued the job:
+
+```go
+func (jm *JobManager) buildOutputDir(job *Job) string {
+	s := job.Settings                    // snapshot of the enqueuing user's settings
+	base := s.DownloadPath
+	...
+	sub := OutputSubfolder(s.FolderTemplate, s.CreatePlaylistFolder,
+		s.UseFirstArtistOnly, ...)
+```
+
+And `checkFileExists` (`internal/jobs/helpers.go:303`) — which is the *entire*
+deduplication mechanism, the thing that turns a job into `skipped` instead of
+downloading again — looks in that directory, using that same user's
+`FilenameTemplate`.
+
+So deduplication is keyed on five personal settings. Two users who differ on
+**any one of them** download the same FLAC twice, to two paths, into a library
+Jellyfin will show as duplicates. It works today only because everyone inherits
+one global value; it is correct by accident, not by construction.
+
+**Resolution.** In a shared-library deployment, every key that determines where
+a file lands is instance-level. That is the §2 table. The personal settings that
+remain are the ones that do not touch the path.
+
+If per-user libraries are ever genuinely wanted, that is a different product —
+it needs its own catalog scoping and its own Jellyfin story, and it is not this
+plan.
+
+## 2b. Quality is shared in outcome, whatever each user asked for
+
+A consequence of the same mechanism, called out separately because it is a
+policy question rather than a bug.
+
+The skip check asks "is there a file here", not "is there a file here at the
+quality this user wants". So if one user fetches a track at `LOSSLESS`, the next
+user watching the same playlist is skipped onto that file — their `HI_RES`
+preference silently never applies to anything someone else got there first.
+
+The catalog carries `quality_rank` (`library_files`), so an upgrade path may
+already exist for some flows. **To establish before deciding**, not to assume.
+
+Three defensible answers, and the operator picks: keep the first file and say so
+in the UI; upgrade in place when a better rank is requested; or make quality
+instance-level too, which is the honest reading if the library is shared. What
+is not defensible is the current state, where a user sets a preference the
+system quietly cannot honour.
+
+## 2c. Records with no owner are visible to everyone
+
+`GetWatchlistsByUser` (`internal/watcher/watcher.go:883`) returns a watchlist
+when `pl.UserID == userID` **or `pl.UserID == ""`**. The same `!= ""` escape
+appears in the SSE filter (`sse.go:192`) and on the job download route
+(`api_jobs.go:102`).
+
+That was the migration path from the pre-authentication era, and at one user it
+is invisible. With several, every record created before auth existed is visible
+to all of them.
+
+**Resolution.** A one-time backfill assigning ownerless records to the admin,
+after which all three `== ""` special cases can be deleted. Doing the backfill
+without deleting the cases leaves the hole open for the next ownerless record;
+deleting the cases without the backfill hides existing watchlists from their
+owner. Both, in that order, in one change.
 
 ## 3. One worker, strict FIFO, no fairness
 
@@ -280,13 +352,62 @@ The feature that started this. Deferred to last on purpose — it brings more
 people into a queue that has no fairness (§3) and a settings store that cannot
 hold its instance-level client ID (§2).
 
+**OAuth is required, by the operator's decision (2026-08-13), not optional.**
+An earlier draft framed it as a later phase behind a "declared profile" path.
+It is now the engine of the default source, and the declared path survives with
+a *different job* — see the three sources below. That is cleaner than the draft,
+where the two competed for the same use.
+
+### Three sources, one picker, entered from where the need arises
+
+Account association is not a settings chore. It is the first step of the first
+source, and it belongs where a user goes to add something to watch — the
+Watchlist tab — not buried in Settings.
+
+| Source | What it is for | Backed by |
+|---|---|---|
+| **My playlists** | the default | OAuth. `/v1/me/playlists`, which also returns `tracks.total` |
+| **A profile** | watching *someone else's* public playlists — a friend, a curator | the anonymous token; profile search + the profile endpoint |
+| **A URL** | a playlist shared by link that no search will find | today's path, kept |
+
+When the account is not connected, the **My playlists** panel does not show an
+error. It shows the connect button and one line saying what it unlocks. The
+association happens without leaving the panel, and the user lands back on the
+list — not on the home screen.
+
+Settings keeps a mirror — *Connected as X*, Disconnect — to **manage** the
+association, never to acquire it.
+
+### Profile search, and why it is not for finding yourself
+
+The operator asked for a search box instead of pasting a URL. Measured: the
+`searchDesktop` operation already wired into this codebase
+(`backend/spotify/metadata.go:1402`) returns a `users` section alongside tracks
+and albums, carrying `displayName`, `id`, `uri` and an avatar at 64 and 300 px.
+No OAuth needed.
+
+But display names are not unique and ids are opaque:
+
+```
+"marc"       → MARCA (diariomarca), Marc (wh89i7prv934tvupeicfd8a3p),
+               Marc (ng8r4defqi9ow2mfxpiksxe55), Marc C (hed4sev…), … 10 results
+"methammer"  → methammer (methammer)                                 1 result
+```
+
+So search is *worse* than a URL for finding **yourself**, unless your handle is
+rare — and it is moot anyway now that OAuth is required, since the connected
+account already knows who you are. Its real value is the second source: finding
+**other people's** profiles, where the URL is exactly what you do not have.
+
+The avatar is the only discriminator between ten identical names. That has an
+accessibility consequence — see §8b.
+
 **Two levels, one identity.** Presenting "public profile" versus "OAuth" as a
 choice asks the user a question they cannot answer. It is one thing — your
 Spotify identity — at two levels:
 
-- **Declared**: paste a profile URL. No setup, works immediately, public
-  playlists only. Stored per user, so it is asked once.
-- **Verified**: connect the account. Everything, including private and
+- **Declared**: a profile, yours or someone else's. Public playlists only.
+- **Verified**: your connected account. Everything, including private and
   collaborative playlists — and `tracks.total`, which the declared path cannot
   provide.
 
@@ -328,18 +449,102 @@ message when that origin is not HTTPS.
 Out of scope for a first version: Liked Songs. They are not a playlist, have no
 URL, and the entire watcher is keyed on `SpotifyURL`.
 
+## 8a. The flow starts at an empty state that is currently a dead end
+
+This is what a new Jellyfin user sees on their first visit to the Watchlist tab
+(`frontend/src/components/WatchlistPage.tsx:474`):
+
+> 👁 *No playlists are being watched.*
+> *Add a Spotify playlist to start auto-syncing new tracks.*
+
+It says what to do and offers **no way to do it** — no button, nothing. The user
+has to go and find the control somewhere else. At one user, who wrote the app,
+that is invisible. It is now the first screen of every person being onboarded,
+and it is where the whole feature should begin: this empty state should carry
+*Connect your Spotify account*, with the other two sources behind it.
+
+**Bulk add must show its cost before it commits.** `AddWatchlist`
+(`internal/watcher/watcher.go:678`) enqueues the entire playlist immediately, in
+a goroutine, on add. Ticking twelve boxes therefore enqueues everything at once
+— which, until §3 lands, is the easiest gesture in the application and also the
+one that blocks the household's queue for hours. The picker's confirm step
+should read *"12 playlists, ~3400 tracks"*, not *"Add"*.
+
+**Failure paths to design, because these are what make a feature look broken:**
+
+| Situation | What the user must see |
+|---|---|
+| Admin has not registered the Spotify app | why the button cannot work — not a greyed-out control |
+| User declines authorisation on Spotify | a page that receives them, not a raw error |
+| Refresh token later revoked | an offer to reconnect, not a silently empty list |
+| Profile shares no public playlists | "this profile shares none publicly" — information, not failure |
+| Search returns nothing | a reminder that display names are not unique |
+| Playlist already watched | shown as such and not tickable — **per user**; another user watching it is not this user's business |
+
+**A question the operator has to settle before onboarding, not after:** the UI is
+entirely in English (`<html lang="en">`, all strings), and the household being
+invited is French-speaking. That is not a defect — it is consistent with the
+existing app — but it is a decision. Translation is a real project and does not
+belong inside this feature.
+
+## 8b. Accessibility: the current baseline, measured
+
+The picker is the largest interactive surface this app will have gained in one
+go. Building it the way the existing components are built would multiply an
+existing problem, so here is the measured baseline.
+
+| Measurement | Result |
+|---|---|
+| `eslint-plugin-jsx-a11y` in the config | **absent** — nothing catches any of this |
+| clickable `<div onClick>` in `src/components` | **12**, across 6 files |
+| …of those, with `role`, `tabIndex` or a key handler | **0** |
+| icon-only buttons (`size="icon"`) | **40** |
+| …of those, with `aria-label` or `title` | **0** |
+
+Concretely, for the four status filters in the download queue — refactored twice
+in #65 and #69 without this being noticed: they cannot be reached by keyboard at
+all, so a user who does not use a mouse **cannot filter the queue**; a screen
+reader does not announce them as actionable; and the active filter is conveyed
+by a background tint with no `aria-pressed`, so its state does not exist for
+assistive technology.
+
+One thing is right, and became right by accident: status is no longer
+colour-only. #69's `STATUS_LABEL` gave every badge a text label beside icons of
+differing shape.
+
+**Resolution — the lint rule first, before the picker is written.** Adding
+`eslint-plugin-jsx-a11y` would have caught all 52 items above, and more to the
+point it prevents the picker from adding to them. Remediating the 40 existing
+buttons is a separate cleanup and should not gate this feature.
+
+**What the picker itself must do**, none of which is optional:
+
+- Real checkboxes with associated `<label>`s — shadcn ships one.
+- Profile results as a list of choices, not `<div onClick>`.
+- Avatar `alt` text carrying the **id**, not just the display name. With ten
+  profiles called "Marc", `alt="Marc"` ten times conveys nothing, and the avatar
+  was the only discriminator — so the list becomes unusable for anyone reading
+  text rather than seeing images.
+- The selection count in an `aria-live` region. "12 selected" changing silently
+  is information that exists only for people who can see it.
+
 ## 9. Sequence
 
-1. **§1 and §2 together.** They are one change: an instance/user settings
-   boundary. §1 is why it is urgent; §2 is the mechanism, and it creates the
-   admin write path everything later needs.
+1. **§1, §2 and §2a together.** They are one change: an instance/user settings
+   boundary. §2a is the reason it is the right shape, §1 is why it is urgent,
+   and §2 is the mechanism — which also creates the admin write path everything
+   later needs. §2c (the ownerless backfill) rides along; it is small and it
+   touches the same question of who owns what.
 2. **§3, with §4 falling out of it.** Establish first *why* `jobWorkers` is 1 —
    that answer decides whether fairness is enough or throughput must also be
-   addressed.
-3. **§7.** Small and independent. **§5 is now a deletion**, not a fix — the
-   bypass is off and unreachable on this deployment.
-4. **§8.** The playlist picker, bulk add, and the declared path. OAuth after,
-   as a second source behind the same interface.
+   addressed. §8a's bulk add is unsafe to ship before this.
+3. **§7, and the §8b lint rule.** Small, independent, and the lint rule has to
+   land before the picker is written rather than after. **§5 is now a
+   deletion**, not a fix — the bypass is off and unreachable on this deployment.
+4. **§8.** OAuth and *My playlists* first, since it is the default source; then
+   *A profile* behind the same interface; the URL path already exists. §2b
+   (quality policy) needs an answer before the picker promises anything about
+   quality.
 
 ## 10. Explicitly not in this plan
 
