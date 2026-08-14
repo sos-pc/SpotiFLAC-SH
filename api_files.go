@@ -340,6 +340,36 @@ func (s *Server) registerFileRoutes() {
 		writeV1JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 
+	// ── House defaults ────────────────────────────────────────────────────
+	//
+	// Separate from PUT /settings on purpose. That one routes a user-scoped key
+	// to the caller's own profile, always — which is right, and which is also
+	// why an operator had no way to change a house default after the migration
+	// seeded it. These two are the way.
+	s.mux.Handle("GET /api/v1/settings/defaults", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
+		defaults, err := settings.HouseDefaults()
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, map[string]interface{}{"values": defaults})
+	}))
+
+	s.mux.Handle("POST /api/v1/settings/defaults", s.v1Auth(func(w http.ResponseWriter, r *http.Request) {
+		if !v1RequireAdmin(w, r) {
+			return
+		}
+		written, err := settings.PublishHouseDefaults(s.ctr.Auth, userIDFromContext(r))
+		if err != nil {
+			writeV1Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeV1JSON(w, http.StatusOK, map[string]int{"updated": written})
+	}))
+
 	// ── Files ─────────────────────────────────────────────────────────────
 	// Every route below that accepts a client-supplied filesystem path uses
 	// cleanLibraryPath(s.libraryRootFor(r), ...) instead of the bare

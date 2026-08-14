@@ -163,3 +163,75 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 	}
 	return nil
 }
+
+// HouseDefaults returns the instance store's USER-scoped keys: the values a new
+// account starts from before it has chosen anything.
+//
+// Instance-scoped keys are excluded because they are not defaults — they are the
+// value, for everyone, and no account can override them.
+func HouseDefaults() (map[string]interface{}, error) {
+	instance, err := config.LoadSettingsFile()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]interface{}{}
+	for k, v := range instance {
+		if ScopeOf(k) == ScopeUser {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// PublishHouseDefaults makes the caller's own personal settings the starting
+// point for accounts that have not chosen otherwise. Returns how many keys were
+// written.
+//
+// This is the migration's seeding step, made repeatable. It exists because
+// after that seeding there was no way to change a house default at all: an
+// admin's PUT sends user-scoped keys to their own profile, by design, so the
+// instance store's copy stayed frozen at whatever the migration found.
+//
+// It publishes the caller's EFFECTIVE values rather than their stored patch —
+// what they see on their own settings screen is what they mean by "my
+// settings", and a key they never touched still has a value they are used to.
+//
+// Deliberately not a second settings form. The alternative was a screen
+// duplicating all fifteen personal settings so an operator could set a house
+// default different from their own preference, and nobody has wanted that: the
+// real gesture is "set the app up the way I like it, then make that the
+// starting point for everyone else". If the divergent case ever turns up, that
+// editor can be built then, on top of this.
+func PublishHouseDefaults(am *auth.AuthManager, userID string) (int, error) {
+	if am == nil || userID == "" {
+		return 0, nil
+	}
+	instance, err := config.LoadSettingsFile()
+	if err != nil {
+		return 0, err
+	}
+	if instance == nil {
+		instance = map[string]interface{}{}
+	}
+
+	mine := EffectiveBlob(am, userID)
+	written := 0
+	for k, v := range mine {
+		if ScopeOf(k) != ScopeUser {
+			continue
+		}
+		if SameValue(instance[k], v) {
+			continue
+		}
+		instance[k] = v
+		written++
+	}
+	if written == 0 {
+		return 0, nil
+	}
+	if err := config.SaveSettingsFile(instance); err != nil {
+		return 0, err
+	}
+	slog.Info("[Settings] House defaults published", "keys", written, "from_user", userID)
+	return written, nil
+}

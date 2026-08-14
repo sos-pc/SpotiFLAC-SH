@@ -217,6 +217,16 @@ export interface SettingsEnvelope {
   writableScope: "all" | "user";
   instanceKeys: string[];
 }
+// The values a new account starts from, and the one action that changes them.
+// Separate from the settings endpoints because PUT /settings always routes a
+// personal key to the caller's own profile — which is why an operator had no
+// way to change a house default once the migration had seeded it.
+export const LoadHouseDefaults = () =>
+  rest<{ values: Record<string, unknown> }>("GET", "/settings/defaults").then(
+    (r) => r.values,
+  );
+export const PublishHouseDefaults = () =>
+  rest<{ updated: number }>("POST", "/settings/defaults").then((r) => r.updated);
 export const LoadSettingsEnvelope = () =>
   rest<SettingsEnvelope>("GET", "/settings");
 export const LoadSettings = () =>
