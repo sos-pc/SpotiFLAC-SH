@@ -1,4 +1,5 @@
 import { type Dispatch, type SetStateAction } from "react";
+import { InstanceScoped } from "./InstanceScoped";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,12 +28,18 @@ import {
 interface FilesTabProps {
   tempSettings: SettingsType;
   setTempSettings: Dispatch<SetStateAction<SettingsType>>;
+  // Every setting on this tab is instance-scoped — folder structure, filename
+  // template, the Jellyfin path — so the whole thing is gated rather than
+  // individual fields. The two preset selectors are not read by the backend at
+  // all, but they write the templates that are, so they follow.
+  canEditInstance: boolean;
 }
 
 // FilesTab — folder-structure and filename-template configuration. Controlled
 // component sharing tempSettings with the parent (see GeneralTab).
-export function FilesTab({ tempSettings, setTempSettings }: FilesTabProps) {
+export function FilesTab({ tempSettings, setTempSettings, canEditInstance }: FilesTabProps) {
   return (
+    <InstanceScoped canEdit={canEditInstance} what="Folder and filename settings">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-4">
               <div className="space-y-2">
@@ -290,5 +297,6 @@ export function FilesTab({ tempSettings, setTempSettings }: FilesTabProps) {
               )}
             </div>
           </div>
+    </InstanceScoped>
   );
 }

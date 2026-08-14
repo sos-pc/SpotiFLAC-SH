@@ -225,6 +225,7 @@ export function SettingsPage({
       <div className="flex-1 overflow-y-auto pt-4">
         {activeTab === "general" && (
           <GeneralTab
+            canEditInstance={isAdmin}
             tempSettings={tempSettings}
             setTempSettings={setTempSettings}
             isDark={isDark}
@@ -233,7 +234,7 @@ export function SettingsPage({
         )}
 
         {activeTab === "files" && (
-          <FilesTab tempSettings={tempSettings} setTempSettings={setTempSettings} />
+          <FilesTab tempSettings={tempSettings} setTempSettings={setTempSettings} canEditInstance={isAdmin} />
         )}
 
         {activeTab === "keys" && <ApiKeysTab isAdmin={isAdmin} />}
