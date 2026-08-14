@@ -390,6 +390,7 @@ func (s *Server) registerV1Routes() {
 	s.registerFileRoutes()
 
 	// ── Admin maintenance ─────────────────────────────────────────────────
+	s.registerSpotifyRoutes()
 	s.registerAdminRoutes()
 
 	// ── Admin read access to the SQLite catalog ───────────────────────────

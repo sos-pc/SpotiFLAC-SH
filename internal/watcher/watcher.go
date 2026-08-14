@@ -2544,3 +2544,65 @@ func (w *Watcher) legacyJobPaths(watchlistID string) map[string]string {
 	}
 	return out
 }
+
+// BatchAddOutcome is what happened to one playlist in a bulk add.
+type BatchAddOutcome struct {
+	SpotifyURL string `json:"spotify_url"`
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	// One of "added", "already_watched", "failed".
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// BatchAddResult is the whole of a bulk add: counts for the summary line, and
+// one outcome per playlist so the view can say WHICH failed rather than "3 of
+// 12 did not work".
+type BatchAddResult struct {
+	Added          int               `json:"added"`
+	AlreadyWatched int               `json:"already_watched"`
+	Failed         int               `json:"failed"`
+	Outcomes       []BatchAddOutcome `json:"outcomes"`
+}
+
+// AddWatchlists adds several playlists in one call, which is what the picker
+// needs: ticking twelve boxes and getting twelve round-trips, each able to fail
+// on its own, is a worse experience than one call that reports twelve outcomes.
+//
+// It loops over AddWatchlist rather than reimplementing it. That matters more
+// than it looks — AddWatchlist decides the M3U8 name against the live set of
+// watchlists, refuses a duplicate source, and enqueues the batch, and a second
+// implementation of any of those would drift.
+//
+// Never returns an error for a single playlist's failure. A bulk add is
+// partially successful by nature: eleven watchlists that worked must not be
+// rolled back because the twelfth was a dead URL, and the caller needs to know
+// which one it was.
+//
+// "Already watching this" comes back as its own status rather than an error,
+// because the picker shows already-watched playlists as such and this is the
+// race between that render and the click — the user did nothing wrong.
+func (w *Watcher) AddWatchlists(reqs []AddWatchlistRequest) BatchAddResult {
+	result := BatchAddResult{Outcomes: make([]BatchAddOutcome, 0, len(reqs))}
+	for _, req := range reqs {
+		out := BatchAddOutcome{SpotifyURL: req.SpotifyURL}
+		resp, err := w.AddWatchlist(req)
+		switch {
+		case err == nil:
+			out.Status = "added"
+			out.ID, out.Name = resp.ID, resp.Name
+			result.Added++
+		case strings.Contains(err.Error(), "already watching this"):
+			out.Status = "already_watched"
+			result.AlreadyWatched++
+		default:
+			out.Status = "failed"
+			out.Error = err.Error()
+			result.Failed++
+		}
+		result.Outcomes = append(result.Outcomes, out)
+	}
+	slog.Info("[Watcher] Bulk add finished",
+		"added", result.Added, "already", result.AlreadyWatched, "failed", result.Failed)
+	return result
+}
