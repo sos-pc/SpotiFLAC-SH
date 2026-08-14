@@ -1,4 +1,5 @@
 import { type Dispatch, type SetStateAction } from "react";
+import { InstanceScoped } from "./InstanceScoped";
 import { Button } from "@/components/ui/button";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,10 @@ interface GeneralTabProps {
   setTempSettings: Dispatch<SetStateAction<SettingsType>>;
   isDark: boolean;
   handleBrowseFolder: () => void;
+  // downloadPath is the one instance-scoped setting on this tab: it decides
+  // where files land in the shared library, and it used to double as the root
+  // confining what its owner could browse.
+  canEditInstance: boolean;
 }
 
 // GeneralTab — download path, theme/font, sound, and the download source +
@@ -41,6 +46,7 @@ export function GeneralTab({
   setTempSettings,
   isDark,
   handleBrowseFolder,
+  canEditInstance,
 }: GeneralTabProps) {
   const handleTidalQualityChange = async (
     value: "LOSSLESS" | "HI_RES_LOSSLESS",
@@ -56,6 +62,7 @@ export function GeneralTab({
   return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-4">
+              <InstanceScoped canEdit={canEditInstance} what="The download path">
               <div className="space-y-2">
                 <Label htmlFor="download-path">Download Path</Label>
                 <div className="flex gap-2">
@@ -80,6 +87,7 @@ export function GeneralTab({
                   </Button>
                 </div>
               </div>
+              </InstanceScoped>
 
               <div className="space-y-2">
                 <Label htmlFor="theme-mode">Mode</Label>
