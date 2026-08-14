@@ -241,7 +241,13 @@ export function SettingsPage({
 
         {activeTab === "tidal" && <TidalTab />}
 
-        {activeTab === "apis" && <ApisTab />}
+        {activeTab === "apis" && (
+          <ApisTab
+            isAdmin={isAdmin}
+            tempSettings={tempSettings}
+            setTempSettings={setTempSettings}
+          />
+        )}
 
         {activeTab === "maintenance" && <MaintenanceTab />}
       </div>
