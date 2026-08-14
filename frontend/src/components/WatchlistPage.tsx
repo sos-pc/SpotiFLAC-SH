@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PlaylistPicker } from "@/components/PlaylistPicker";
 import {
   AddToWatchlist,
   RemoveFromWatchlist,
@@ -109,6 +110,7 @@ function isURL(str: string): boolean {
 
 export function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<WatchedPlaylist[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
@@ -472,9 +474,17 @@ export function WatchlistPage() {
           <div className="col-span-full py-12 text-center text-muted-foreground border-2 border-dashed rounded-lg">
             <Eye className="h-10 w-10 mx-auto mb-3 opacity-30" />
             <p>No playlists are being watched.</p>
-            <p className="text-sm mt-1">
-              Add a Spotify playlist to start auto-syncing new tracks.
+            <p className="text-sm mt-1 mb-4">
+              Watched playlists are re-checked regularly and new tracks are
+              downloaded automatically.
             </p>
+            {/* This state used to say what to do and offer no way to do it —
+                no button, nothing — which is the first screen of every new
+                account. */}
+            <Button onClick={() => setPickerOpen(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              Choose playlists
+            </Button>
           </div>
         ) : (
           watchlists.map((list) => {
@@ -884,6 +894,12 @@ export function WatchlistPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <PlaylistPicker
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onAdded={loadWatchlists}
+        watchedURLs={new Set(watchlists.map((l) => l.spotify_url))}
+      />
     </div>
   );
 }

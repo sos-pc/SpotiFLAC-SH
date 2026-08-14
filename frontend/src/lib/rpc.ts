@@ -292,6 +292,57 @@ export const AddToWatchlist = (req: {
   sync_deletions: boolean;
   settings: Partial<Settings>;
 }) => rest<WatchedPlaylist & { message?: string }>("POST", "/watchlists", req);
+// One row of the playlist picker, whatever source produced it. track_count is
+// absent on the profile source — Spotify's profile endpoint does not return one
+// — so the view omits the column rather than printing "0 tracks" about a
+// playlist with 300.
+export interface PickerPlaylist {
+  uri: string;
+  id: string;
+  name: string;
+  image_url?: string;
+  owner_name?: string;
+  owner_uri?: string;
+  owned: boolean;
+  track_count?: number;
+}
+export interface SpotifyProfile {
+  id: string;
+  display_name: string;
+  image_url?: string;
+}
+export const SearchSpotifyProfiles = (q: string, limit = 10) =>
+  rest<{ profiles: SpotifyProfile[] }>(
+    "GET",
+    `/spotify/profiles?q=${encodeURIComponent(q)}&limit=${limit}`,
+  ).then((r) => r.profiles ?? []);
+export const GetProfilePlaylists = (profileID: string) =>
+  rest<{ playlists: PickerPlaylist[] }>(
+    "GET",
+    `/spotify/profiles/${encodeURIComponent(profileID)}/playlists`,
+  ).then((r) => r.playlists ?? []);
+
+export interface BatchAddOutcome {
+  spotify_url: string;
+  id?: string;
+  name?: string;
+  status: "added" | "already_watched" | "failed";
+  error?: string;
+}
+export interface BatchAddResult {
+  added: number;
+  already_watched: number;
+  failed: number;
+  outcomes: BatchAddOutcome[];
+}
+// Always answers 200 with one outcome per playlist: a bulk add is partially
+// successful by nature, and the caller has to be able to say WHICH failed.
+export const AddWatchlistsBatch = (req: {
+  spotify_urls: string[];
+  interval_hours: number;
+  sync_deletions: boolean;
+}) => rest<BatchAddResult>("POST", "/watchlists/batch", req);
+
 export const RemoveFromWatchlist = (id: string) =>
   rest<void>("DELETE", `/watchlists/${encodeURIComponent(id)}`);
 export const GetWatchlists = () => rest<WatchedPlaylist[]>("GET", "/watchlists");
