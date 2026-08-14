@@ -1,6 +1,6 @@
 # Opening the instance to every Jellyfin user — plan
 
-> **🧭 Plan, 2026-08-13.** The operator intends every Jellyfin account to use
+> **🧭 Plan, 2026-08-13, updated 2026-08-14.** The operator intends every Jellyfin account to use
 > SpotiFLAC, not just the admin. This audits what that changes. It was triggered
 > by a feature request — connect a Spotify account to pick playlists from a list
 > — which is deferred to §8 because what it would expose is not ready to be
@@ -9,6 +9,11 @@
 > against. Companions: [authentication.md](authentication.md) ·
 > [settings-reference.md](settings-reference.md) ·
 > [watchlist-consistency-plan.md](watchlist-consistency-plan.md).
+>
+> Every section carries its status. Three of the findings below were wrong
+> when first written and say so where they were wrong — that record is worth
+> more than a clean document, because each was wrong in a way that read
+> plausibly enough to be repeated.
 
 ## 0. The finding
 
@@ -30,6 +35,8 @@ library, one Tidal account, one engine, several people. The work below is about
 sharing that household fairly and safely, not about walling people off.
 
 ## 1. A user's own setting is their own confinement root
+
+**Shipped in #75** — `downloadPath` is instance-scoped, so there is no longer a user-chosen root to validate.
 
 **Fix before onboarding anyone.**
 
@@ -115,6 +122,8 @@ this ships must stop being honoured on read, not only rejected on write.
 
 ## 1b. Settings fork on first save, and instance keys fork with them
 
+**Shipped in #75.**
+
 `GET /api/v1/settings` (`api_files.go:225`) returns the user's own settings if
 they have any, else the global ones. `PUT` (`api_files.go:244`) writes the whole
 submitted map to the user's profile whenever a user is authenticated — it never
@@ -185,6 +194,8 @@ configuration.
   the snapshot taken at enqueue. One field, two meanings, by origin.
 
 ## 2. Resolution: two typed stores, one layered read
+
+**Shipped in #74 (defaults) and #75 (scopes, layering, migration).** What actually landed keeps the blob and labels its keys — see the note at the end of this section.
 
 Decided 2026-08-14 with the operator, over the cheaper option of keeping the
 free-form map and adding a list of instance-scoped key names. That list would
@@ -289,6 +300,8 @@ client id, which today has nowhere to live.
 
 ## 2a. A shared library, fragmented by personal settings
 
+**Shipped in #75.**
+
 This is why the table above changed, and it is the strongest argument in the
 plan for a boundary the operator owns.
 
@@ -324,6 +337,8 @@ plan.
 
 ## 2b. Quality is shared in outcome, whatever each user asked for
 
+**Open — operator's decision.** Tracked in issue #73.
+
 A consequence of the same mechanism, called out separately because it is a
 policy question rather than a bug.
 
@@ -343,6 +358,8 @@ system quietly cannot honour.
 
 ## 2c. Records with no owner are visible to everyone
 
+**Open.** Nothing has been done here; `jobVisibleTo` still lets an ownerless job through to everyone, deliberately, until the backfill exists.
+
 `GetWatchlistsByUser` (`internal/watcher/watcher.go:883`) returns a watchlist
 when `pl.UserID == userID` **or `pl.UserID == ""`**. The same `!= ""` escape
 appears in the SSE filter (`sse.go:192`) and on the job download route
@@ -359,6 +376,8 @@ deleting the cases without the backfill hides existing watchlists from their
 owner. Both, in that order, in one change.
 
 ## 3. One worker, strict FIFO, no fairness
+
+**Shipped in #76**, and verified on the reference deployment: a single track from a second account started nine seconds after the previous job, ahead of twenty-odd already queued.
 
 ```go
 jobWorkers = 1                      // internal/jobs/manager.go:32
@@ -394,6 +413,8 @@ Two details that decide whether this is worth doing:
 
 ## 4. A full queue strands jobs until the next restart
 
+**Shipped in #76**, as a side effect of replacing the channel.
+
 The buffer is 10000 (`manager.go:282`). `Submit` (`manager.go:335`) offers the
 job and, if the channel is full, returns `queued=false` — the job is persisted
 and picked up by `recoverPendingJobs` **on the next start**.
@@ -409,6 +430,8 @@ selected from there. If §3 is deferred, this needs its own fix — a periodic
 drain of persisted pending jobs, not a bigger buffer.
 
 ## 5. The LAN bypass grants admin, not a guest
+
+**Open.** Settled as a deletion rather than a fix; nobody has deleted it yet.
 
 `DISABLE_AUTH_ON_LAN=true` makes `localBypassMiddleware` (`server.go:99`)
 inject a synthetic **administrator** for any request from a private IP with no
@@ -445,6 +468,8 @@ permission-scoped.
 
 ## 6. Shared by design — to be surfaced, not fixed
 
+**Open.** One line of UI, unwritten.
+
 These are correct and should stay. They need to be *visible*, because users will
 otherwise experience them as bugs.
 
@@ -462,18 +487,94 @@ download does not conclude their own account is broken.
 
 ## 7. Destructive and admin actions now belong to other people
 
-Two that changed meaning the moment a second user exists:
+**Shipped in #79. This section was also wrong, twice, and the correction is the
+useful part.**
 
-- **"Reset queue"** calls `ClearAllDownloads(userID, isAdmin)`
-  (`api_jobs.go:151`). For an admin that wipes *everyone's* jobs, including
-  running ones. It gained a two-step confirmation in #67, which said what it
-  would do when it only did it to you. It should now name the scope: how many
-  jobs, belonging to how many people.
-- **The failed-downloads export** (`internal/service/history.go`) emits
-  `Track, Artist, Album, Error`. For an admin it aggregates every user's
-  failures with no column saying whose. Add an owner column on the admin path.
+It said "Reset queue" wiped everyone's jobs *including running ones*. It does
+not, and never did:
+
+```go
+// ClearAllJobs removes every terminal job (done/failed/skipped-manual)
+// belonging to userID, or every user's if isAdmin. Deliberately leaves
+// pending/downloading jobs untouched — the frontend already assumes active
+// downloads survive a "clear all" click.
+```
+
+The doc comment was there the whole time. The claim was written here, repeated
+in a pull request description, and repeated again in a code comment in
+`DownloadQueue.tsx` — three times, because it read plausibly and nobody
+including its author went back to the source.
+
+What was actually wrong was narrower and real: the three buttons on the queue
+panel — clear, clear-all, export — all passed `user.IsAdmin`, so after §7a
+scoped the *panel* to its owner, an operator could look at three of their own
+rows and delete thirty belonging to other people. They now act on the caller's
+own work, and `isAdmin` is gone from those signatures. JobManager keeps the
+instance-wide capability for the administration screen that will need it.
+
+Reading them side by side turned up the thing worth fixing that this section had
+missed entirely: **the two buttons differed by exactly one status.** "Clear
+History" removed completed and skipped, "Reset queue" removed those plus failed,
+and neither name said so. They are now "Clear finished" and "Clear all", each
+with a title spelling out what goes and what stays.
+
+The owner column this section asked for is not needed here: an export scoped to
+its caller has one owner. It belongs with the instance-wide export, on the
+administration screen, where it would be the difference between readable and
+useless.
+
+## 7a. A personal screen shows its owner their own work
+
+**Shipped in #77.** Found by the operator within an hour of the second account
+being real: their download queue showed another account's playlist.
+
+The filter exempted admins, so an operator received everyone's jobs — and since
+the panel groups by batch, they saw other people's batches with nothing saying
+whose. Watchlists already filtered unconditionally, and history too, so the same
+account saw "my watchlists" beside "everybody's queue", with no principle
+written anywhere to say which was right.
+
+The rule now lives in `jobVisibleTo` rather than inline at each site:
+
+> A personal screen shows its owner their own work, administrator included.
+> Anything global belongs on an administration screen of its own.
+
+Deletion of *completed* jobs keeps its admin bypass at the JobManager level
+deliberately — an operator clearing up is acting on the instance, not reading
+their own work — but nothing on the personal panel reaches it any more.
+
+## 7b. A new account inherited nothing from the operator
+
+**Shipped in #77.** Raised by the operator: defaults should follow what the
+admin configured.
+
+They did not. Measured on the reference deployment, what a household member
+would have got against what the operator uses:
+
+| Setting | Operator | New account |
+|---|---|---|
+| `tidalQuality` | HI_RES_LOSSLESS | LOSSLESS |
+| `autoQuality` | 24 | empty |
+| `embedLyrics` | true | **false** |
+| `embedGenre` | true | **false** |
+| `allowFallback` | true | **false** |
+
+They would have downloaded worse files than the person who invited them,
+silently.
+
+The mechanism was already there — §2's instance layer applies to every key, not
+only instance-scoped ones, precisely so a house-wide default reaches anyone who
+has not chosen otherwise. Nothing was putting anything in it. The migration now
+seeds it from the admin's own values, leaves their profile alone, and yields to
+anyone who sets their own.
+
+**The gap that leaves**, in issue #73: changing a house default afterwards needs
+an admin screen that edits the instance store distinctly from the admin's own
+preferences. Until it exists they are frozen at the values seeded at migration.
 
 ## 8. Then, and only then: connecting a Spotify account
+
+**Open.** The playlist source layer landed in #71; the API, the picker and OAuth have not.
 
 The feature that started this. Deferred to last on purpose — it brings more
 people into a queue that has no fairness (§3) and a settings store that cannot
@@ -578,6 +679,8 @@ URL, and the entire watcher is keyed on `SpotifyURL`.
 
 ## 8a. The flow starts at an empty state that is currently a dead end
 
+**Open.**
+
 This is what a new Jellyfin user sees on their first visit to the Watchlist tab
 (`frontend/src/components/WatchlistPage.tsx:474`):
 
@@ -615,6 +718,8 @@ existing app — but it is a decision. Translation is a real project and does no
 belong inside this feature.
 
 ## 8b. Accessibility: the current baseline, measured
+
+**Open**, and it gates the picker: the lint rule should land before more interactive surface is written.
 
 The picker is the largest interactive surface this app will have gained in one
 go. Building it the way the existing components are built would multiply an
@@ -655,25 +760,33 @@ buttons is a separate cleanup and should not gate this feature.
 - The selection count in an `aria-live` region. "12 selected" changing silently
   is information that exists only for people who can see it.
 
-## 9. Sequence
+## 9. Sequence — where it actually got to
 
-1. **§1, §1b, §2 and §2a together.** They are one change: two typed settings
-   stores and a layered read. §1 and §1b are the symptoms, §2a is why that
-   shape is the right one, and §2 is the mechanism — which also creates the
-   admin write path everything later needs. The migration in §2 is not optional
-   and has to land in the same change as the read it protects. §2c (the
-   ownerless backfill) rides along; it is small and it touches the same
-   question of who owns what.
-2. **§3, with §4 falling out of it.** Establish first *why* `jobWorkers` is 1 —
-   that answer decides whether fairness is enough or throughput must also be
-   addressed. §8a's bulk add is unsafe to ship before this.
-3. **§7, and the §8b lint rule.** Small, independent, and the lint rule has to
-   land before the picker is written rather than after. **§5 is now a
-   deletion**, not a fix — the bypass is off and unreachable on this deployment.
-4. **§8.** OAuth and *My playlists* first, since it is the default source; then
-   *A profile* behind the same interface; the URL path already exists. §2b
-   (quality policy) needs an answer before the picker promises anything about
-   quality.
+Done, in this order:
+
+1. **§1, §1b, §2, §2a** — the settings boundary, in two pull requests: #74
+   consolidated the default *values* (behaviour-preserving), #75 split the
+   scopes, layered the read, and ran the promotion migration. Verified in
+   production: nine keys promoted, no loss, and the M3U8 files regenerated where
+   Jellyfin reads them, which is the failure this migration existed to prevent.
+2. **§3, and §4 with it** — round-robin between users. Verified in production.
+3. **§7a, §7b, §7** — the personal-screen rule, house defaults, and the panel's
+   own buttons.
+
+Still open, in the order I would take them:
+
+4. **§8b's lint rule**, before any more interactive surface is written.
+5. **The settings screen.** Three things converge on it: disabling
+   instance-scoped fields for a non-admin *and saying why* (§2), letting the
+   operator edit house defaults distinctly from their own preferences (§7b), and
+   not adding to the accessibility debt (§8b).
+6. **§8** — the API, the picker, then OAuth. §8a's empty state is where the flow
+   starts.
+7. **§5** (a deletion), **§6** (one line of UI), **§2c** (the ownerless
+   backfill). Small and independent.
+
+**§2b stays with the operator**, not with me: it is a policy question about
+quality, not a defect.
 
 ## 10. Explicitly not in this plan
 
