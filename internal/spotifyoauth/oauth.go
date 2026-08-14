@@ -398,6 +398,10 @@ func (s *Store) EnsureIdentity(ctx context.Context, c *Connection, accessToken s
 	}
 	id, name, err := currentUser(ctx, accessToken)
 	if err != nil || id == "" {
+		// A 403 here is the same cause as on /v1/me/playlists: the account is
+		// not on the application's allowlist. Worth naming in the log, because
+		// the visible symptom is an empty "Connected as" that looks like a
+		// rendering bug rather than a permission.
 		slog.Warn("[Spotify] Could not resolve the account identity; own playlists will read as followed",
 			"user", c.UserID, "err", err)
 		return ""

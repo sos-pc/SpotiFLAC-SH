@@ -2,6 +2,8 @@ package spotify
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +114,26 @@ func TestMyPlaylistsReportsTheNextPage(t *testing.T) {
 func TestListMyPlaylistsNeedsAToken(t *testing.T) {
 	if _, err := ListMyPlaylists(t.Context(), "", "me"); err == nil {
 		t.Error("an empty access token was accepted")
+	}
+}
+
+// 403 and 401 are different problems with opposite remedies, and telling them
+// apart is the whole point of these sentinels.
+//
+// Both connections made on the reference deployment answered 403 — the accounts
+// were not on the application's allowlist — while the screen said "often an
+// expired connection, reconnecting usually resolves it". Reconnecting cannot
+// resolve it, so that advice was a loop with no end.
+func TestMyPlaylistsTellsRefusalsApart(t *testing.T) {
+	if ErrAccountNotAllowlisted == nil || ErrConnectionRejected == nil {
+		t.Fatal("the two refusals must be distinguishable sentinels")
+	}
+	if errors.Is(ErrAccountNotAllowlisted, ErrConnectionRejected) {
+		t.Error("403 and 401 collapse to the same error; the screen cannot advise correctly")
+	}
+	// The one a person can act on says who has to act.
+	if !strings.Contains(ErrAccountNotAllowlisted.Error(), "not authorised") {
+		t.Errorf("403 message = %q, want it to say the account is not authorised",
+			ErrAccountNotAllowlisted.Error())
 	}
 }

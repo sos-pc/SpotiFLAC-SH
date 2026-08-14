@@ -13,6 +13,7 @@ package main
 // Read-only, and "read" rather than "manage": nothing here downloads anything.
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -171,6 +172,14 @@ func (s *Server) registerSpotifyRoutes() {
 		selfID := s.ctr.SpotifyOAuth.EnsureIdentity(r.Context(), conn, token)
 		entries, err := spotify.ListMyPlaylists(r.Context(), token, selfID)
 		if err != nil {
+			// 403 is answered as 403 rather than folded into "upstream said
+			// no", because it is the one failure here a person can act on and
+			// the action is not the obvious one: an administrator adds the
+			// account in the Spotify dashboard. Reconnecting never fixes it.
+			if errors.Is(err, spotify.ErrAccountNotAllowlisted) {
+				writeV1Error(w, http.StatusForbidden, err.Error())
+				return
+			}
 			writeV1Error(w, http.StatusBadGateway, err.Error())
 			return
 		}

@@ -3,6 +3,7 @@ package spotify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -469,6 +470,20 @@ func parseMyPlaylistsPage(body []byte, selfID string) ([]PlaylistEntry, string, 
 	return entries, page.Next, nil
 }
 
+// The two answers Spotify gives that a person can act on, told apart because
+// their remedies are opposite.
+//
+// ErrAccountNotAllowlisted is a 403: the connection is fine and this account is
+// simply not on the application's list. Only an administrator can fix it, in the
+// Spotify dashboard, and reconnecting never will.
+//
+// ErrConnectionRejected is a 401: the stored token is no longer accepted, and
+// reconnecting is exactly the fix.
+var (
+	ErrAccountNotAllowlisted = errors.New("this Spotify account is not authorised for this application")
+	ErrConnectionRejected    = errors.New("Spotify no longer accepts this connection")
+)
+
 // ListMyPlaylists returns every playlist the connected account can see —
 // private and collaborative included.
 //
@@ -503,11 +518,25 @@ func ListMyPlaylists(ctx context.Context, accessToken, selfID string) ([]Playlis
 		if readErr != nil {
 			return nil, readErr
 		}
-		if resp.StatusCode != http.StatusOK {
-			// 401 here means the refresh produced a token Spotify will not
-			// accept — the account was disconnected on their side, or the
-			// application lost its authorization. Partial results would look
-			// like an emptying library, so this fails instead.
+		switch resp.StatusCode {
+		case http.StatusOK:
+		case http.StatusForbidden:
+			// 403 on a token Spotify itself just issued means the ACCOUNT is
+			// not allowed to use this application. In development mode — which
+			// is where an application stays unless it passes a review this
+			// project would fail — Spotify serves only the accounts an
+			// administrator has added by email in the dashboard, up to 25.
+			//
+			// Told apart from 401 because the remedies are opposite: 401 is
+			// fixed by reconnecting, 403 never is. Reporting them the same way
+			// sends someone round a loop that cannot end, which is what the
+			// first two connections here did.
+			return nil, ErrAccountNotAllowlisted
+		case http.StatusUnauthorized:
+			// The refresh produced a token Spotify will not accept — the
+			// account was disconnected on their side. Reconnecting is the fix.
+			return nil, ErrConnectionRejected
+		default:
 			return nil, fmt.Errorf("%w: my playlists: HTTP %d", SpotifyError, resp.StatusCode)
 		}
 

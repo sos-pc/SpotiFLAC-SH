@@ -203,13 +203,28 @@ export function SpotifyConnection({
       ) : conn.connected ? (
         <div className="flex items-center justify-between gap-3 rounded-md border p-3">
           <div className="min-w-0">
-            <p className="text-sm">
-              Connected as{" "}
-              <span className="font-medium">
-                {conn.display_name || conn.spotify_id}
-              </span>
-            </p>
-            {conn.connected_at && (
+            {conn.display_name || conn.spotify_id ? (
+              <p className="text-sm">
+                Connected as{" "}
+                <span className="font-medium">
+                  {conn.display_name || conn.spotify_id}
+                </span>
+              </p>
+            ) : (
+              // The name is empty when /v1/me answered 403, which is Spotify
+              // saying this account is not on the application's allowlist. It
+              // rendered as "Connected as " followed by nothing — a permission
+              // problem wearing the costume of a rendering bug.
+              <>
+                <p className="text-sm">Connected, but not yet authorised</p>
+                <p className="text-xs text-muted-foreground">
+                  Spotify serves only accounts added under User Management in
+                  the developer dashboard — up to 25 while the app is in
+                  development mode.
+                </p>
+              </>
+            )}
+            {conn.connected_at && (conn.display_name || conn.spotify_id) && (
               // Refresh tokens can carry a finite lifetime — 180 days on this
               // deployment — and the only symptom of expiry is an empty
               // playlist list. Showing the date is what lets someone recognise

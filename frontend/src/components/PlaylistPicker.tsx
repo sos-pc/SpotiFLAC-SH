@@ -83,7 +83,7 @@ export function PlaylistPicker({
   // The only source that reports a track count, and the only one that sees
   // private and collaborative playlists.
   const [mineState, setMineState] = useState<
-    "loading" | "unconfigured" | "disconnected" | "ready" | "error"
+    "loading" | "unconfigured" | "disconnected" | "notallowed" | "ready" | "error"
   >("loading");
   const [mineError, setMineError] = useState("");
 
@@ -103,11 +103,19 @@ export function PlaylistPicker({
       setSelected(new Set());
       setMineState("ready");
     } catch (e) {
-      // A 401 from Spotify surfaces here as a 502 and means the account was
-      // disconnected on their side. Offering to reconnect is the useful answer;
-      // a stack trace is not.
-      setMineError(String(e));
-      setMineState("error");
+      // 403 and everything else are different problems with opposite remedies.
+      // Spotify answers 403 when the account is not on the application's
+      // allowlist — development mode serves only accounts an administrator has
+      // added — and reconnecting never fixes that. Both connections made on
+      // this deployment hit it, and the "reconnect" advice sent them round a
+      // loop that could not end.
+      const msg = String(e);
+      if (msg.includes("not authorised for this application")) {
+        setMineState("notallowed");
+      } else {
+        setMineError(msg);
+        setMineState("error");
+      }
     }
   }, []);
 
@@ -329,6 +337,25 @@ export function PlaylistPicker({
               <Button onClick={() => void connectSpotify()}>
                 Connect Spotify
               </Button>
+            </div>
+          )}
+
+          {source === "mine" && mineState === "notallowed" && (
+            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              <p className="mb-1 font-medium text-foreground">
+                Spotify has not authorised this account for this app
+              </p>
+              <p className="mb-2">
+                The connection itself worked. Spotify applications stay in
+                development mode, where only accounts an administrator has added
+                by hand are served — up to 25.
+              </p>
+              {/* No Reconnect button on purpose: it cannot help, and offering it
+                  is what sends someone round a loop that has no end. */}
+              <p>
+                Ask an administrator to add your Spotify account under User
+                Management in the Spotify developer dashboard, then reload.
+              </p>
             </div>
           )}
 
