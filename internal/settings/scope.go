@@ -59,6 +59,17 @@ var instanceKeys = map[string]bool{
 	"jellyfinMusicPath": true, // one Jellyfin
 	"spotFetchAPIUrl":   true, // one fallback endpoint, and it is a third party
 	"createM3u8File":    true, // whether M3U8s are written into that one Jellyfin
+
+	// The Spotify application this deployment authenticates against. Public
+	// by design in OAuth — it is in every authorize URL the browser follows —
+	// so this is instance-scoped for ownership, not secrecy: one deployment,
+	// one registered application, whose redirect URI is registered against
+	// this host and nobody else's.
+	//
+	// There is deliberately no client SECRET key here or anywhere. The flow is
+	// Authorization Code + PKCE, which needs none, so the one credential this
+	// feature could have leaked simply is not stored.
+	"spotifyClientId": true,
 }
 
 // ScopeOf reports who owns key.
