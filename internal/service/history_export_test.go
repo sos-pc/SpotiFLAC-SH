@@ -28,7 +28,7 @@ func TestFailedDownloadsExportSurvivesRoundTrip(t *testing.T) {
 		{UserID: "u1", Status: jobs.StatusDone, TrackName: "fine"},
 	}
 
-	got, err := failedDownloadsExport(jobList, "u1", false)
+	got, err := failedDownloadsExport(jobList, "u1")
 	if err != nil {
 		t.Fatalf("failedDownloadsExport: %v", err)
 	}
@@ -58,29 +58,26 @@ func TestFailedDownloadsExportSurvivesRoundTrip(t *testing.T) {
 	}
 }
 
-// Only the caller's own failures, unless they are an admin. The filter predates
-// this change; it is asserted here because splitting the function out is exactly
-// the kind of edit that could drop it silently.
+// Only the caller's own failures. There is no admin variant any more: the one
+// caller is the download-queue panel's Export button, and that panel shows the
+// caller their own work — so it exports their own work too. An instance-wide
+// export belongs on an administration screen, where it would also need an owner
+// column to be readable at all.
 func TestFailedDownloadsExportScope(t *testing.T) {
 	jobList := []jobs.Job{
 		{UserID: "u1", Status: jobs.StatusFailed, TrackName: "mine"},
 		{UserID: "u2", Status: jobs.StatusFailed, TrackName: "theirs"},
 	}
 
-	own, err := failedDownloadsExport(jobList, "u1", false)
+	own, err := failedDownloadsExport(jobList, "u1")
 	if err != nil {
 		t.Fatalf("failedDownloadsExport: %v", err)
 	}
 	if strings.Contains(own.CSV, "theirs") {
-		t.Error("non-admin export leaked another user's failure")
+		t.Error("the export leaked another user's failure")
 	}
-
-	admin, err := failedDownloadsExport(jobList, "u1", true)
-	if err != nil {
-		t.Fatalf("failedDownloadsExport: %v", err)
-	}
-	if !strings.Contains(admin.CSV, "theirs") {
-		t.Error("admin export dropped another user's failure")
+	if !strings.Contains(own.CSV, "mine") {
+		t.Error("the export dropped the caller's own failure")
 	}
 }
 
@@ -89,7 +86,7 @@ func TestFailedDownloadsExportScope(t *testing.T) {
 func TestFailedDownloadsExportEmpty(t *testing.T) {
 	got, err := failedDownloadsExport([]jobs.Job{
 		{UserID: "u1", Status: jobs.StatusDone, TrackName: "fine"},
-	}, "u1", false)
+	}, "u1")
 	if err != nil {
 		t.Fatalf("failedDownloadsExport: %v", err)
 	}

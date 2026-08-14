@@ -77,7 +77,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
         setConfirmReset(false);
         try {
             await ClearAllDownloads();
-            toast.success("Download queue reset");
+            toast.success("Finished and failed downloads cleared");
         }
         catch (error) {
             console.error("Failed to reset queue:", error);
@@ -158,26 +158,37 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
       <DialogHeader className="px-6 pt-6 pb-4 border-b space-y-0">
         <div className="flex items-center justify-between mb-4">
           {/* A title, not a button. It used to carry onClick={handleReset} —
-              ClearAllDownloads, which wipes the queue including jobs still
-              running — with no label, no confirmation, and nothing but a
-              cursor change to suggest it did anything at all. The visible,
-              labelled control was the safe one; the destructive one looked
-              like a heading. */}
+              ClearAllDownloads — with no label, no confirmation, and nothing
+              but a cursor change to suggest it did anything at all. The
+              visible, labelled control was the safe one; the destructive one
+              looked like a heading.
+
+              The two buttons beside it differ by exactly one status: "Clear
+              finished" removes completed and skipped rows, "Clear all" also
+              removes failed ones. Neither touches a download that is running
+              or queued — ClearAllJobs returns false for those and says so in
+              its own doc comment. They were called "Clear History" and "Reset
+              queue", which suggested emptying the queue; an earlier version of
+              this very comment repeated that mistake and claimed the call
+              "wipes the queue including jobs still running".
+
+              Both act on the caller's own rows only, like the panel they sit
+              on. */}
           <DialogTitle className="text-lg font-semibold">Download Queue</DialogTitle>
           <div className="flex items-center gap-2">
-            {(queueInfo.completed_count > 0 || queueInfo.failed_count > 0 || queueInfo.skipped_count > 0) && (<Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={handleClearHistory}>
+            {(queueInfo.completed_count > 0 || queueInfo.failed_count > 0 || queueInfo.skipped_count > 0) && (<Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" title="Removes completed and skipped rows from your list. Running and queued downloads are not affected." onClick={handleClearHistory}>
               <Trash2 className="h-3 w-3"/>
-              Clear History
+              Clear finished
             </Button>)}
             {/* Two-step rather than a confirmation dialog: this project has no
                 AlertDialog primitive, and pulling one in for a single button is
                 more surface than the button is worth. Arms on the first click,
                 disarms itself after a few seconds. */}
-            {queueInfo.queue.length > 0 && (<Button variant={confirmReset ? "destructive" : "ghost"} size="sm" className="h-7 text-xs gap-1.5" onClick={handleResetClick}>
+            {queueInfo.queue.length > 0 && (<Button variant={confirmReset ? "destructive" : "ghost"} size="sm" className="h-7 text-xs gap-1.5" title="Removes completed, skipped and failed rows from your list. Running and queued downloads are not affected." onClick={handleResetClick}>
               <RotateCcw className="h-3 w-3"/>
-              {confirmReset ? "Confirm reset" : "Reset queue"}
+              {confirmReset ? "Confirm — clear all" : "Clear all"}
             </Button>)}
-            {queueInfo.failed_count > 0 && (<Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={handleExportFailed}>
+            {queueInfo.failed_count > 0 && (<Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" title="Exports your own failed downloads as CSV." onClick={handleExportFailed}>
               <FileDown className="h-3 w-3"/>
               Export Failures
             </Button>)}
