@@ -185,7 +185,7 @@ func (f *FileService) CheckFilesExistence(outputDir string, rootDir string, trac
 		rootDir = util.NormalizePath(rootDir)
 	}
 
-	defaultFilenameFormat := "title-artist"
+	defaultFilenameFormat := util.DefaultFilenameTemplate
 
 	type result struct {
 		index  int

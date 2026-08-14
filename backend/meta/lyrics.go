@@ -427,7 +427,10 @@ func (c *LyricsClient) DownloadLyrics(req LyricsDownloadRequest) (*LyricsDownloa
 
 	filenameFormat := req.FilenameFormat
 	if filenameFormat == "" {
-		filenameFormat = "title-artist"
+		// Must equal the audio file's default. This names the lyric sidecar,
+		// which has to land beside the track it belongs to — diverge and the
+		// sidecar sits next to a file with a different name.
+		filenameFormat = util.DefaultFilenameTemplate
 	}
 	filename := buildSidecarFilename(req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, filenameFormat, req.TrackNumber, req.Position, req.DiscNumber, lyricsTrackSeparator, ".lrc")
 	filePath := filepath.Join(outputDir, filename)
