@@ -22,10 +22,13 @@ import (
 // one stops M3U8 files landing where Jellyfin reads them — no error, nothing in
 // the log, the playlists simply stop appearing.
 //
-// Two halves, in this order, and both are needed:
+// Three parts, in this order, and each is needed:
 //
 //   - Promote: for each instance-scoped key missing from the instance store but
 //     present in an admin's profile, write it to the instance store.
+//   - Seed: the same for the PERSONAL keys, as house defaults, so a new
+//     account starts from the operator's configuration and not from package
+//     defaults. See the comment at that loop for why it matters.
 //   - Strip: remove instance-scoped keys from every profile. They are ignored on
 //     read from now on, but leaving them means the next reader who forgets the
 //     filter finds a value that looks authoritative.
@@ -66,6 +69,7 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 	}
 
 	promoted := 0
+	seeded := 0
 	if src != nil {
 		for _, key := range InstanceKeys() {
 			if _, present := instance[key]; present {
@@ -80,8 +84,43 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 			slog.Info("[Settings] Promoted to instance scope",
 				"key", key, "from_user", src.ID)
 		}
+
+		// House defaults for the PERSONAL settings too.
+		//
+		// The instance layer already applies to every key, not only the
+		// instance-scoped ones — that is deliberate, so the operator can set a
+		// default that reaches anyone who has not chosen otherwise. Nothing was
+		// putting anything there, so a new account fell back to package
+		// defaults instead: LOSSLESS where the operator had configured
+		// HI_RES_LOSSLESS, and lyrics, genre and provider fallback all off
+		// where the operator had them on. A household member would have
+		// downloaded worse files than the person who invited them, silently.
+		//
+		// Seeding from the admin's own values is the closest thing to intent
+		// available at migration time. It does not touch their profile: those
+		// keys are user-scoped, they stay, and their patch overrides this layer
+		// with the same values — so nothing changes for them.
+		//
+		// The gap this leaves, recorded in issue #73: changing a house default
+		// afterwards needs an admin screen that edits the instance store
+		// distinctly from the admin's own preferences. Until that exists, these
+		// are frozen at the values seeded here.
+		for key, v := range src.Settings {
+			if ScopeOf(key) == ScopeInstance {
+				continue // handled above
+			}
+			if _, present := instance[key]; present {
+				continue
+			}
+			instance[key] = v
+			seeded++
+		}
+		if seeded > 0 {
+			slog.Info("[Settings] Seeded house defaults from the operator's own settings",
+				"keys", seeded, "from_user", src.ID)
+		}
 	}
-	if promoted > 0 {
+	if promoted > 0 || seeded > 0 {
 		if err := config.SaveSettingsFile(instance); err != nil {
 			return err
 		}
@@ -118,9 +157,9 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 		stripped++
 	}
 
-	if promoted > 0 || stripped > 0 {
+	if promoted > 0 || seeded > 0 || stripped > 0 {
 		slog.Info("[Settings] Scope migration done",
-			"promoted", promoted, "profiles_stripped", stripped)
+			"promoted", promoted, "house_defaults_seeded", seeded, "profiles_stripped", stripped)
 	}
 	return nil
 }

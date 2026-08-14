@@ -261,3 +261,79 @@ func TestSameValueToleratesJSONNumberForms(t *testing.T) {
 		t.Error("nil and a value reported as equal")
 	}
 }
+
+// A new household member used to start from package defaults, not from the
+// operator's configuration: LOSSLESS where the admin had HI_RES_LOSSLESS, and
+// lyrics, genre and provider fallback all off where the admin had them on. They
+// would have downloaded worse files than the person who invited them, with
+// nothing saying so.
+func TestPromoteSeedsHouseDefaultsForPersonalKeys(t *testing.T) {
+	isolate(t)
+	am := newAuth(t)
+
+	if _, err := am.GetOrCreateUser("admin", "admin", true); err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	if err := am.SaveUserSettings("admin", map[string]interface{}{
+		"tidalQuality":      "HI_RES_LOSSLESS",
+		"embedLyrics":       true,
+		"jellyfinMusicPath": "/Multimedia/Musique/Spotiflac",
+	}); err != nil {
+		t.Fatalf("SaveUserSettings: %v", err)
+	}
+
+	if err := PromoteInstanceSettings(am); err != nil {
+		t.Fatalf("PromoteInstanceSettings: %v", err)
+	}
+
+	// A brand-new account, with no settings of its own.
+	if _, err := am.GetOrCreateUser("newcomer", "newcomer", false); err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	blob := EffectiveBlob(am, "newcomer")
+
+	if got := blob["tidalQuality"]; got != "HI_RES_LOSSLESS" {
+		t.Errorf("tidalQuality = %v, want the operator's HI_RES_LOSSLESS", got)
+	}
+	if got := blob["embedLyrics"]; got != true {
+		t.Errorf("embedLyrics = %v, want the operator's true", got)
+	}
+
+	// The admin keeps their own copy: these are user-scoped, only the
+	// instance-scoped ones are stripped.
+	profile, err := am.GetUser("admin")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if profile.Settings["tidalQuality"] != "HI_RES_LOSSLESS" {
+		t.Error("seeding removed a personal key from the admin's own profile")
+	}
+	if _, still := profile.Settings["jellyfinMusicPath"]; still {
+		t.Error("an instance-scoped key survived in the profile")
+	}
+}
+
+// Seeding must not silently make a personal preference unchangeable: whoever
+// sets their own value still wins over the house default.
+func TestHouseDefaultsYieldToAPersonalChoice(t *testing.T) {
+	isolate(t)
+	am := newAuth(t)
+
+	if err := config.SaveSettingsFile(map[string]interface{}{
+		"tidalQuality": "HI_RES_LOSSLESS", // seeded house default
+	}); err != nil {
+		t.Fatalf("SaveSettingsFile: %v", err)
+	}
+	if _, err := am.GetOrCreateUser("u1", "user", false); err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	if err := am.SaveUserSettings("u1", map[string]interface{}{
+		"tidalQuality": "LOSSLESS",
+	}); err != nil {
+		t.Fatalf("SaveUserSettings: %v", err)
+	}
+
+	if got := EffectiveBlob(am, "u1")["tidalQuality"]; got != "LOSSLESS" {
+		t.Errorf("tidalQuality = %v, want the user's own LOSSLESS", got)
+	}
+}

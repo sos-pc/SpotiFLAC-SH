@@ -110,10 +110,23 @@ func TestV1JobsStreamSendsHeartbeatWhileIdle(t *testing.T) {
 	}
 }
 
-// TestV1JobsStreamInitialSnapshotAdminSeesEveryone verifies the admin
-// bypass on the read side, mirroring the same bypass already covered for
-// deletion in TestClearCompletedJobsAdminClearsEveryone.
-func TestV1JobsStreamInitialSnapshotAdminSeesEveryone(t *testing.T) {
+// TestV1JobsStreamInitialSnapshotAdminSeesEveryone asserted the admin bypass on
+// the read side. That bypass is gone, and this now pins its replacement.
+//
+// The operator reported another account's playlist showing up under their own
+// downloads: their queue carried everyone's jobs, and since the panel groups by
+// batch they saw other people's batches with nothing saying whose. Watchlists
+// already filtered unconditionally, so one account saw "my watchlists" beside
+// "everybody's queue".
+//
+// The rule is now jobVisibleTo: a personal screen shows its owner their own
+// work, administrator included. A global view stays legitimate, on an
+// administration screen of its own.
+//
+// Note this does NOT mirror deletion: ClearCompletedJobs keeps its admin
+// bypass, deliberately — an operator clearing up is acting on the instance,
+// not reading their own work. That asymmetry is the point, not an oversight.
+func TestV1JobsStreamSnapshotIsScopedToTheRequester(t *testing.T) {
 	jm, hub := newTestJobManagerWithHub(t, false)
 	s := &Server{ctr: &Container{Jobs: jm, SSE: hub}}
 
@@ -148,8 +161,8 @@ func TestV1JobsStreamInitialSnapshotAdminSeesEveryone(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "job-a") || !strings.Contains(body, "job-b") {
-		t.Errorf("admin snapshot should include every user's jobs, got: %s", body)
+	if strings.Contains(body, "job-a") || strings.Contains(body, "job-b") {
+		t.Errorf("an admin's own queue carried other accounts' jobs, got: %s", body)
 	}
 }
 

@@ -425,3 +425,29 @@ func (s *Server) v1LocalLogin(w http.ResponseWriter, r *http.Request) {
 		"user":  map[string]interface{}{"id": profile.ID, "display_name": profile.DisplayName, "is_admin": profile.IsAdmin},
 	})
 }
+
+// jobVisibleTo reports whether user may see job in a PERSONAL view — the
+// download queue and the events that feed it.
+//
+// The rule, written here rather than inlined at each site because three
+// surfaces had drifted into three different answers: **a personal screen shows
+// its owner their own work, administrator included.** Anything global belongs on
+// an administration screen of its own, not mixed silently into this one.
+//
+// It used to exempt admins, so an operator's queue carried everyone's jobs with
+// nothing saying whose — visible as another account's playlist appearing under
+// their own downloads. Watchlists already filtered unconditionally, so the same
+// account saw "my watchlists" beside "everybody's queue".
+//
+// A job with no UserID predates authentication and stays visible to all, until
+// the backfill in the multi-user plan (§2c) gives those records an owner.
+// Hiding them first would hide them from their own owner too.
+func jobVisibleTo(user *auth.JWTClaims, jobUserID string) bool {
+	if user == nil {
+		return true // unauthenticated contexts have no one to filter against
+	}
+	if jobUserID == "" {
+		return true
+	}
+	return jobUserID == user.UserID
+}
