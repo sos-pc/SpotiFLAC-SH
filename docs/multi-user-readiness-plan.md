@@ -113,7 +113,7 @@ answer for a shared library rather than merely the cheaper one.
 Keep one thing from the boundary idea: values already stored in Bolt from before
 this ships must stop being honoured on read, not only rejected on write.
 
-## 2. Settings fork on first save, and instance keys fork with them
+## 1b. Settings fork on first save, and instance keys fork with them
 
 `GET /api/v1/settings` (`api_files.go:225`) returns the user's own settings if
 they have any, else the global ones. `PUT` (`api_files.go:244`) writes the whole
@@ -147,18 +147,145 @@ reading the global file and "silently ignoring" the user's saved value. That was
 correct when the only user was the operator. It is not a mistake being corrected
 here; it is a decision that does not survive the new context.
 
-**Resolution.** Split the store, not the endpoint:
+### The defect underneath both of those
 
-- Declare which keys are instance-scoped, in one list, in `internal/settings`.
-- `PUT /api/v1/settings` splits the submitted map: instance keys are applied
-  only for an admin (`v1RequireAdmin`) and rejected with a clear message
-  otherwise; personal keys go to the user profile as they do now.
-- `GET` returns instance keys from the instance store *always*, overlaid with
-  the user's personal keys — so an operator change reaches everyone
-  immediately, and the fork stops existing.
+Resolution is a **replacement, not a merge**:
 
-This also creates the admin write path that §8 needs for the Spotify client ID,
-which currently has nowhere to live.
+```go
+if profile != nil && len(profile.Settings) > 0 {
+	raw = profile.Settings          // the whole map, not the keys they set
+}
+if raw == nil {
+	raw, _ = config.LoadSettingsFile()
+}
+```
+
+One saved key means that user's map replaces the instance map entirely, and
+every key they did not save resolves to its **zero value** rather than to the
+operator's default.
+
+Nothing has noticed because the frontend GETs the resolved view and PUTs it back
+whole, so in practice every stored map is complete. The system is correct only
+because the client behaves — a convention nothing states and nothing enforces.
+The first API call written by hand with a single key blanks its author's entire
+configuration.
+
+### What else is wrong with the shape
+
+- **No schema.** `map[string]interface{}`: no types, no validation, and the only
+  way to learn which keys exist is to grep for `getString`/`getBool` calls. A
+  typo is silent, a new key is declared nowhere.
+- **Defaults live at the use sites.** `ParseDownloadSettings` yields zero
+  values and each caller patches afterwards — `if base == "" { base =
+  util.GetDefaultMusicPath() }`, `if filenameFormat == "" { filenameFormat =
+  "title-artist" }`. "What is the default for this key" has no single answer.
+- **No version stamp**, so a rename orphans the old key forever.
+- **`job.Settings` has two lifetimes.** Watchlist jobs are refreshed from the
+  watchlist at processing time (`internal/jobs/worker.go:91`); manual jobs keep
+  the snapshot taken at enqueue. One field, two meanings, by origin.
+
+## 2. Resolution: two typed stores, one layered read
+
+Decided 2026-08-14 with the operator, over the cheaper option of keeping the
+free-form map and adding a list of instance-scoped key names. That list would
+have been a *second* source of truth about the keys, sitting beside the keys
+themselves — the kind nobody updates. Scope is exactly what this deployment got
+wrong; it should be a compile error, not a list.
+
+**Three types, and the third is why this works.**
+
+```go
+// Stored in config.json. Admin-writable only. Complete: defaults applied.
+type InstanceSettings struct { DownloadPath, FolderTemplate, … string }
+
+// Stored per user in Bolt. SPARSE — every field optional.
+type UserSettingsPatch struct { EmbedLyrics *bool; TidalQuality *string; … }
+
+// Never stored. What callers read.
+type Settings struct { … }
+```
+
+The pointers in the patch are the load-bearing detail. The whole point of
+layering is to stop requiring the client to send every key; the moment it sends
+a partial patch, "the user chose false" and "the user has no opinion" stop being
+the same thing. Today they are indistinguishable, and `getBool` returns `false`
+for a missing key — which is why no bool can currently default to true, and why
+a user could never turn *off* a setting that did.
+
+**The read is layered, each layer overriding only what it sets:**
+
+```
+defaults()  ←  InstanceSettings  ←  UserSettingsPatch (user-scoped keys only)
+```
+
+Defaults are declared once, in `defaults()`, and deleted from the use sites.
+
+**The scope rule, stated once so new keys classify themselves:** anything that
+decides where a file lands on the shared disk, or names shared infrastructure,
+is instance. Everything else is user.
+
+| Instance | User |
+|---|---|
+| `downloadPath`, `folderTemplate`, `createPlaylistFolder`, `useFirstArtistOnly`, `filenameTemplate` — §2a | qualities, `autoOrder`, `autoQuality`, tagging toggles, `createM3u8File`, `downloader` |
+| `jellyfinMusicPath`, `spotFetchAPIUrl` — one shared Jellyfin, one shared fallback endpoint | |
+| later: the Spotify application's client id — §8 | later: each user's Spotify refresh token — §8 |
+
+Note that quality stays **user**-scoped and §2b is unchanged by this: the
+setting is genuinely personal, it is its *effect* that is bounded by
+deduplication. Scoping and policy are different questions and this does not
+answer the second.
+
+**On the wire, one flat object, not two.** `GET /api/v1/settings` keeps
+returning resolved values at the top level — the existing frontend relearns
+nothing — plus the list of keys this caller may write. That list is what lets
+the settings screen grey out instance keys for a non-admin *and say why*, which
+§7 and §8b both wanted anyway. `PUT` accepts a partial patch, routes instance
+keys through `v1RequireAdmin`, and rejects the rest with a message naming the
+key rather than silently dropping it.
+
+**A `schemaVersion` int goes in the instance store**, so the next rename has
+somewhere to hook a migration instead of orphaning a key.
+
+### The migration is mandatory, and here is why
+
+Read from the live deployment, 2026-08-14, read-only over SSH:
+
+```
+/srv/…/DockerFiles/Spotiflac/config/
+  catalog.db  jobs.db  jobs.db.bak-20260811-160709  tidal_token.json
+```
+
+**There is no `config.json`.** `LoadSettingsFile` returns `(nil, nil)` when the
+file is absent (`internal/config/config.go:44`), so the instance store is empty
+and *every* setting currently resolves from the admin's Bolt profile. Two values
+exist only there:
+
+```
+jellyfinMusicPath : /Multimedia/Musique/Spotiflac
+spotFetchAPIUrl   : https://spotify.afkarxyz.fun/api
+```
+
+Ship the layered read without a migration and both become empty. The first one
+silently stops M3U8 files landing where Jellyfin reads them — no error, nothing
+in the log.
+
+So: **on first start, promote.** For each instance-scoped key absent from the
+instance store but present in an admin's profile, write it to the instance store
+and log the promotion. Then strip instance keys from every user profile. Both
+halves, in that order, idempotent — promoting without stripping leaves stale
+copies that the next reader might reach for; stripping without promoting is the
+data loss above.
+
+*Also worth the operator knowing, found while reading the above:*
+`spotFetchAPIUrl` points at a **third-party public server**. It is the fallback
+used when the native Spotify client fails (`internal/service/metadata.go:96`),
+so whenever Spotify's TOTP handshake breaks — which it has — track and playlist
+URLs go to someone else's infrastructure. Inherited from upstream defaults, not
+chosen. Becoming instance-scoped at least stops any user repointing it; whether
+to keep it at all is a separate decision.
+
+This section also creates the admin write path that §8 needs for the Spotify
+client id, which today has nowhere to live.
 
 ## 2a. A shared library, fragmented by personal settings
 
@@ -530,11 +657,13 @@ buttons is a separate cleanup and should not gate this feature.
 
 ## 9. Sequence
 
-1. **§1, §2 and §2a together.** They are one change: an instance/user settings
-   boundary. §2a is the reason it is the right shape, §1 is why it is urgent,
-   and §2 is the mechanism — which also creates the admin write path everything
-   later needs. §2c (the ownerless backfill) rides along; it is small and it
-   touches the same question of who owns what.
+1. **§1, §1b, §2 and §2a together.** They are one change: two typed settings
+   stores and a layered read. §1 and §1b are the symptoms, §2a is why that
+   shape is the right one, and §2 is the mechanism — which also creates the
+   admin write path everything later needs. The migration in §2 is not optional
+   and has to land in the same change as the read it protects. §2c (the
+   ownerless backfill) rides along; it is small and it touches the same
+   question of who owns what.
 2. **§3, with §4 falling out of it.** Establish first *why* `jobWorkers` is 1 —
    that answer decides whether fairness is enough or throughput must also be
    addressed. §8a's bulk add is unsafe to ship before this.
