@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Users } from "lucide-react";
 import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
   LibraryRebuild,
+  PublishHouseDefaults,
   RetagIncompleteMetadata,
   type LibraryRebuildResult,
   type RetagIncompleteMetadataResult,
@@ -93,8 +94,61 @@ export function MaintenanceTab() {
     });
   });
 
+  // Publishing the operator's own personal settings as what a new account
+  // starts from. The migration seeded these once and then nothing could change
+  // them: a PUT of a personal key goes to the caller's own profile by design,
+  // so the instance store's copy stayed frozen at whatever it found.
+  //
+  // Not a second settings form. The gesture people actually have is "set the app
+  // up the way I like it, then make that the starting point for everyone else",
+  // and a form duplicating fifteen fields to allow a house default that differs
+  // from your own preference answers a question nobody has asked yet.
+  const [publishing, setPublishing] = useState(false);
+  const publishDefaults = useCallback(async () => {
+    setPublishing(true);
+    try {
+      const updated = await PublishHouseDefaults();
+      toast.success(
+        updated === 0
+          ? "Defaults already match your settings"
+          : `${updated} default${updated === 1 ? "" : "s"} updated for new accounts`,
+      );
+    } catch (e) {
+      toast.error(`Could not publish defaults: ${e}`);
+    } finally {
+      setPublishing(false);
+    }
+  }, []);
+
   return (
     <div className="space-y-8 max-w-2xl">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold mb-1">
+              Defaults for new accounts
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Copies your own quality, provider order and tagging preferences to
+              what a new account starts from. It does not change anyone's saved
+              settings — only the starting point for people who have not chosen
+              otherwise. Folder and filename settings are not included: those
+              apply to everyone already.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={publishDefaults}
+            disabled={publishing}
+            className="gap-1.5 shrink-0"
+          >
+            <Users className="h-3.5 w-3.5" />
+            {publishing ? "Publishing..." : "Use mine"}
+          </Button>
+        </div>
+      </div>
+
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-4">
           <div>
