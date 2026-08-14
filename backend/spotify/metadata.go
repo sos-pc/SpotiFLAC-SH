@@ -1403,7 +1403,7 @@ func (c *SpotifyMetadataClient) Search(ctx context.Context, query string, limit 
 		"extensions": map[string]interface{}{
 			"persistedQuery": map[string]interface{}{
 				"version":    1,
-				"sha256Hash": "fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c",
+				"sha256Hash": searchDesktopHash,
 			},
 		},
 	}
@@ -1510,7 +1510,7 @@ func (c *SpotifyMetadataClient) SearchByType(ctx context.Context, query string, 
 		"extensions": map[string]interface{}{
 			"persistedQuery": map[string]interface{}{
 				"version":    1,
-				"sha256Hash": "fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c",
+				"sha256Hash": searchDesktopHash,
 			},
 		},
 	}

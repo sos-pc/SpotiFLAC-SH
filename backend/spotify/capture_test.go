@@ -27,6 +27,7 @@ package spotify
 // all; see volatileNormalizers in filter_golden_test.go.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -178,5 +179,27 @@ func TestCaptureFixtures(t *testing.T) {
 		t.Logf("query search failed (non-fatal): %v", err)
 	} else {
 		dumpRaw(t, "raw_search.json", searchData)
+	}
+
+	// ── a profile's public playlists ──
+	//
+	// Deliberately the `spotify` corporate account, and not only because it is
+	// stable. It is the profile that misbehaves: it announces ~1500 playlists,
+	// answers a 50-item request with 46, and drifts its own total between
+	// calls. A personal profile answers exactly and would freeze a fixture that
+	// proves nothing about the pagination rules in listProfilePlaylists.
+	//
+	// It must also stay a corporate account for a plainer reason: fixtures are
+	// committed to a public repository, and a real person's playlist names are
+	// not ours to publish.
+	if body, err := client.fetchProfilePlaylistsPage(context.Background(), "spotify", 0, 50); err != nil {
+		t.Logf("fetch profile playlists failed (non-fatal): %v", err)
+	} else {
+		var page map[string]interface{}
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Logf("decode profile playlists failed (non-fatal): %v", err)
+		} else {
+			dumpRaw(t, "raw_profile_playlists.json", page)
+		}
 	}
 }
