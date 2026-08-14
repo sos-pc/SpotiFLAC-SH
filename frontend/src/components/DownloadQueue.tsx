@@ -200,26 +200,26 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
 
 
         <div className="flex items-center gap-4 text-sm">
-          <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'queued' ? 'bg-secondary px-2 py-0.5 rounded-md ring-1 ring-border' : ''}`} onClick={() => toggleFilter('queued')}>
+          <button type="button" aria-pressed={filterStatus === 'queued'} className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md ${filterStatus === 'queued' ? 'bg-secondary px-2 py-0.5 rounded-md ring-1 ring-border' : ''}`} onClick={() => toggleFilter('queued')}>
             <Clock className="h-3.5 w-3.5 text-muted-foreground"/>
             <span className="text-muted-foreground">{STATUS_LABEL.queued}:</span>
             <span className="font-semibold">{queueInfo.queued_count}</span>
-          </div>
-          <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'completed' ? 'bg-green-500/10 px-2 py-0.5 rounded-md ring-1 ring-green-500/20' : ''}`} onClick={() => toggleFilter('completed')}>
+          </button>
+          <button type="button" aria-pressed={filterStatus === 'completed'} className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md ${filterStatus === 'completed' ? 'bg-green-500/10 px-2 py-0.5 rounded-md ring-1 ring-green-500/20' : ''}`} onClick={() => toggleFilter('completed')}>
             <CheckCircle2 className="h-3.5 w-3.5 text-green-500"/>
             <span className="text-muted-foreground">{STATUS_LABEL.completed}:</span>
             <span className="font-semibold">{queueInfo.completed_count}</span>
-          </div>
-          <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'skipped' ? 'bg-yellow-500/10 px-2 py-0.5 rounded-md ring-1 ring-yellow-500/20' : ''}`} onClick={() => toggleFilter('skipped')}>
+          </button>
+          <button type="button" aria-pressed={filterStatus === 'skipped'} className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md ${filterStatus === 'skipped' ? 'bg-yellow-500/10 px-2 py-0.5 rounded-md ring-1 ring-yellow-500/20' : ''}`} onClick={() => toggleFilter('skipped')}>
             <FileCheck className="h-3.5 w-3.5 text-yellow-500"/>
             <span className="text-muted-foreground">{STATUS_LABEL.skipped}:</span>
             <span className="font-semibold">{queueInfo.skipped_count}</span>
-          </div>
-          <div className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none ${filterStatus === 'failed' ? 'bg-red-500/10 px-2 py-0.5 rounded-md ring-1 ring-red-500/20' : ''}`} onClick={() => toggleFilter('failed')}>
+          </button>
+          <button type="button" aria-pressed={filterStatus === 'failed'} className={`flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md ${filterStatus === 'failed' ? 'bg-red-500/10 px-2 py-0.5 rounded-md ring-1 ring-red-500/20' : ''}`} onClick={() => toggleFilter('failed')}>
             <XCircle className="h-3.5 w-3.5 text-red-500"/>
             <span className="text-muted-foreground">{STATUS_LABEL.failed}:</span>
             <span className="font-semibold">{queueInfo.failed_count}</span>
-          </div>
+          </button>
         </div>
 
 
