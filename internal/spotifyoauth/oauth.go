@@ -29,6 +29,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -294,7 +295,13 @@ func (s *Store) Exchange(ctx context.Context, clientID, redirectURI, code, state
 		return "", fmt.Errorf("spotify returned no refresh token")
 	}
 
-	id, name := currentUser(ctx, tr.AccessToken)
+	id, name, meErr := currentUser(ctx, tr.AccessToken)
+	if meErr != nil {
+		// Not fatal — the authorization worked and the refresh token is worth
+		// keeping — but no longer silent, and EnsureIdentity will retry.
+		slog.Warn("[Spotify] Connected, but could not read the account identity",
+			"user", p.userID, "err", meErr)
+	}
 	if err := s.Save(Connection{
 		UserID:       p.userID,
 		SpotifyID:    id,
@@ -342,28 +349,62 @@ func (s *Store) AccessToken(ctx context.Context, clientID, userID string) (strin
 }
 
 // currentUser asks who the token belongs to, so the screen can say "connected
-// as X" rather than "connected". Best-effort: a failure here must not fail an
-// authorization that otherwise worked.
-func currentUser(ctx context.Context, accessToken string) (id, name string) {
+// as X" rather than "connected", and — the part that actually matters — so
+// ListMyPlaylists can tell the account's own playlists from the ones it merely
+// follows.
+//
+// It used to swallow every failure and return two empty strings, described as
+// "best-effort: a failure here must not fail an authorization that otherwise
+// worked". The first real connection produced exactly that: a stored record
+// with spotify_id and display_name empty, no line anywhere saying why, and a
+// picker that would have shown every playlist as "followed".
+//
+// Still non-fatal, because an authorization that worked must not be thrown away
+// over a profile lookup. But it says so now, and the caller can retry.
+func currentUser(ctx context.Context, accessToken string) (id, name string, err error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.spotify.com/v1/me", nil)
 	if err != nil {
-		return "", ""
+		return "", "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", ""
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", ""
+		return "", "", fmt.Errorf("spotify /v1/me: HTTP %d", resp.StatusCode)
 	}
 	var me struct {
 		ID          string `json:"id"`
 		DisplayName string `json:"display_name"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&me) != nil {
-		return "", ""
+	if err := json.NewDecoder(resp.Body).Decode(&me); err != nil {
+		return "", "", fmt.Errorf("spotify /v1/me: %w", err)
 	}
-	return me.ID, me.DisplayName
+	return me.ID, me.DisplayName, nil
+}
+
+// EnsureIdentity fills in a connection's Spotify identity when the exchange
+// could not. Returns the account id.
+//
+// Self-healing rather than a migration: connections stored before this existed
+// carry an empty id, and the fix has to reach them without anyone knowing to
+// reconnect. Called where the id is needed, which is the only place its absence
+// has a consequence.
+func (s *Store) EnsureIdentity(ctx context.Context, c *Connection, accessToken string) string {
+	if c.SpotifyID != "" {
+		return c.SpotifyID
+	}
+	id, name, err := currentUser(ctx, accessToken)
+	if err != nil || id == "" {
+		slog.Warn("[Spotify] Could not resolve the account identity; own playlists will read as followed",
+			"user", c.UserID, "err", err)
+		return ""
+	}
+	c.SpotifyID, c.DisplayName = id, name
+	if err := s.Save(*c); err != nil {
+		slog.Warn("[Spotify] Could not store the resolved identity", "user", c.UserID, "err", err)
+	}
+	return id
 }

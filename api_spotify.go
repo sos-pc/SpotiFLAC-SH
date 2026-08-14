@@ -165,7 +165,11 @@ func (s *Server) registerSpotifyRoutes() {
 			writeV1Error(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		entries, err := spotify.ListMyPlaylists(r.Context(), token, conn.SpotifyID)
+		// Backfills the account id when the exchange could not read it. Without
+		// it every playlist reads as "followed" and the ownership filter is
+		// useless — which is what the first real connection produced.
+		selfID := s.ctr.SpotifyOAuth.EnsureIdentity(r.Context(), conn, token)
+		entries, err := spotify.ListMyPlaylists(r.Context(), token, selfID)
 		if err != nil {
 			writeV1Error(w, http.StatusBadGateway, err.Error())
 			return

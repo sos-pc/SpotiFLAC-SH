@@ -163,7 +163,12 @@ export function SettingsPage({
         </div>
       </div>
 
-      <div className="flex gap-2 border-b shrink-0">
+      {/* Wrapping, not scrolling. Seven tabs fit on one line at 1280px and
+          overflow below roughly 900 — where the row pushed the WHOLE PAGE into
+          a horizontal scroll and left the last tabs past the right edge with
+          nothing saying they were there. "Spotify Account" was one of them,
+          which is how someone looking for it found nothing at all. */}
+      <div className="flex flex-wrap gap-2 border-b shrink-0">
         <Button
           variant={activeTab === "general" ? "default" : "ghost"}
           size="sm"
