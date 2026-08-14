@@ -83,8 +83,12 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		return DownloadResponse{Success: false, Error: "Spotify ID is required for Qobuz"},
 			fmt.Errorf("spotify ID is required for Qobuz")
 	}
+	// This function is an internal API boundary: callers build a
+	// DownloadRequest by hand and are not obliged to fill every field.
+	// These substitutions guard THAT input, which is why they coexist
+	// with the identical ones in internal/jobs (those guard a stored job).
 	if req.Service == "" {
-		req.Service = "tidal"
+		req.Service = util.DefaultService
 	}
 	if req.OutputDir == "" {
 		req.OutputDir = "."
@@ -92,10 +96,10 @@ func ExecuteDownload(req DownloadRequest) (DownloadResponse, error) {
 		req.OutputDir = util.SanitizeFolderPath(req.OutputDir)
 	}
 	if req.AudioFormat == "" {
-		req.AudioFormat = "LOSSLESS"
+		req.AudioFormat = util.DefaultAudioFormat
 	}
 	if req.FilenameFormat == "" {
-		req.FilenameFormat = "title-artist"
+		req.FilenameFormat = util.DefaultFilenameTemplate
 	}
 
 	var err error

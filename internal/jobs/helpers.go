@@ -118,6 +118,9 @@ func (jm *JobManager) buildOutputDir(job *Job) string {
 	s := job.Settings
 	base := s.DownloadPath
 	if base == "" {
+		// A stored job again — recovered pending jobs can predate any
+		// download path being set. Removing this would build the output
+		// path from "" and write relative to the process working dir.
 		base = util.GetDefaultMusicPath()
 	}
 	sub := OutputSubfolder(s.FolderTemplate, s.CreatePlaylistFolder, s.UseFirstArtistOnly,
@@ -186,7 +189,11 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc stri
 
 	service := s.Service
 	if service == "" {
-		service = "tidal"
+		// Guards a job persisted before its settings carried a service —
+		// freshly resolved settings always do. Not redundant with the
+		// identical substitution in backend.Download, which guards a
+		// request built by an internal caller.
+		service = util.DefaultService
 	}
 
 	audioFormat := resolveAudioFormat(service, s)
@@ -222,7 +229,8 @@ func (jm *JobManager) buildDownloadRequest(job *Job, outputDir string, isrc stri
 
 	filenameFormat := s.FilenameTemplate
 	if filenameFormat == "" {
-		filenameFormat = "title-artist"
+		// Same input as the service default above: a stored job.
+		filenameFormat = util.DefaultFilenameTemplate
 	}
 
 	durationSeconds := 0
@@ -308,7 +316,10 @@ func (jm *JobManager) checkFileExists(job *Job, outputDir string) string {
 	s := job.Settings
 	filenameFormat := s.FilenameTemplate
 	if filenameFormat == "" {
-		filenameFormat = "title-artist"
+		// Must match buildDownloadRequest's default exactly: this decides
+		// where to LOOK for an existing file, that one decides where to
+		// WRITE it. Disagree and every download re-downloads.
+		filenameFormat = util.DefaultFilenameTemplate
 	}
 
 	artist := job.ArtistName
