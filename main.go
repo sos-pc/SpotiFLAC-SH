@@ -20,6 +20,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/spotifyoauth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	bolt "go.etcd.io/bbolt"
 )
@@ -116,6 +117,13 @@ func main() {
 		slog.Error("[Settings] Scope migration failed; instance settings may be missing", "err", err)
 	}
 
+	// Spotify account connections. Non-fatal: a deployment that cannot open
+	// this bucket still downloads, it just cannot offer "my playlists".
+	spotifyOAuth, err := spotifyoauth.NewStore(db)
+	if err != nil {
+		slog.Error("[Spotify] cannot init the connection store", "err", err)
+	}
+
 	// ── Watcher (playlist sync) ───────────────────────────────────────────
 	wtch := watcher.NewWatcher(db, catalog, jobMgr, auth)
 	defer wtch.Close()
@@ -125,18 +133,19 @@ func main() {
 
 	// ── Container (DI) ───────────────────────────────────────────────────
 	ctr := &Container{
-		DB:       db,
-		Catalog:  catalog,
-		Jobs:     jobMgr,
-		Auth:     auth,
-		Watcher:  wtch,
-		SSE:      sseHub,
-		System:   &service.SystemService{},
-		Media:    &service.MediaService{},
-		History:  service.NewHistoryService(jobMgr),
-		Audio:    &service.AudioService{},
-		Metadata: service.NewMetadataService(auth),
-		Download: service.NewDownloadService(jobMgr, auth),
+		DB:           db,
+		Catalog:      catalog,
+		Jobs:         jobMgr,
+		Auth:         auth,
+		Watcher:      wtch,
+		SpotifyOAuth: spotifyOAuth,
+		SSE:          sseHub,
+		System:       &service.SystemService{},
+		Media:        &service.MediaService{},
+		History:      service.NewHistoryService(jobMgr),
+		Audio:        &service.AudioService{},
+		Metadata:     service.NewMetadataService(auth),
+		Download:     service.NewDownloadService(jobMgr, auth),
 	}
 	ctr.Files = service.NewFileService(catalog, jobMgr)
 
