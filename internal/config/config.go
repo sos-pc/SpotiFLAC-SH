@@ -36,6 +36,39 @@ func SettingsFilePath() (string, error) {
 // download_settings.go had to write `(&SystemService{}).LoadSettings()` — a
 // throwaway object built purely to reach a method, and a dependency from the
 // settings domain onto the service layer for no behaviour at all.
+// SaveSettingsFile writes the instance settings blob, atomically.
+//
+// It exists so the promotion migration in internal/settings can write without
+// reaching into internal/service (which imports internal/settings, so the
+// dependency would run backwards). SystemService.SaveSettings delegates here
+// rather than keeping its own copy of the same temp-file-and-rename.
+func SaveSettingsFile(settings map[string]interface{}) error {
+	configPath, err := SettingsFilePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	// Temp file then rename: a crash or a concurrent save mid-write must not
+	// leave config.json truncated, because a truncated instance store now
+	// means every setting in it falls back to a default.
+	tmpPath := configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
 func LoadSettingsFile() (map[string]interface{}, error) {
 	configPath, err := SettingsFilePath()
 	if err != nil {

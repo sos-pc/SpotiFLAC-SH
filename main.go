@@ -19,6 +19,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	bolt "go.etcd.io/bbolt"
 )
@@ -103,6 +104,16 @@ func main() {
 	if err != nil {
 		applog.FprintReal("FATAL: cannot init auth: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Instance-scoped settings used to live in whatever user profile happened
+	// to save them; this moves them where they belong, once. Not fatal on
+	// error — a deployment that cannot migrate should still start, and the
+	// layered read falls back to defaults — but loud, because the failure mode
+	// it prevents is silent: M3U8 files quietly stop being written where
+	// Jellyfin reads them.
+	if err := settings.PromoteInstanceSettings(auth); err != nil {
+		slog.Error("[Settings] Scope migration failed; instance settings may be missing", "err", err)
 	}
 
 	// ── Watcher (playlist sync) ───────────────────────────────────────────
