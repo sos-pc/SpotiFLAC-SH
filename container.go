@@ -5,6 +5,7 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
+	"github.com/sos-pc/SpotiFLAC-SH/internal/spotifyoauth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 
 	bolt "go.etcd.io/bbolt"
@@ -18,6 +19,8 @@ type Container struct {
 	Jobs    *jobs.JobManager
 	Auth    *auth.AuthManager
 	Watcher *watcher.Watcher
+	// Per-user Spotify account connections (PKCE refresh tokens).
+	SpotifyOAuth *spotifyoauth.Store
 
 	// SSE is the event transport. It sits here, beside the components that use
 	// it, rather than inside JobManager: the manager only publishes and takes it
