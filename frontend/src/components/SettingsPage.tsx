@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
+import { SpotifyConnection } from "@/components/settings/SpotifyConnection";
+import { SpotifyIcon } from "@/components/settings/providerIcons";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -134,7 +136,7 @@ export function SettingsPage({
   };
   const handleBrowseFolder = () => setShowFileBrowser(true);
   const [activeTab, setActiveTab] = useState<
-    "general" | "files" | "keys" | "tidal" | "apis" | "maintenance"
+    "general" | "files" | "keys" | "tidal" | "spotify" | "apis" | "maintenance"
   >("general");
 
   // isAdmin gates the Maintenance tab (below) and the API-keys "Admin"
@@ -201,6 +203,17 @@ export function SettingsPage({
           Tidal Account
         </Button>
         <Button
+          variant={activeTab === "spotify" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setActiveTab("spotify")}
+          className="rounded-b-none gap-2"
+        >
+          <SpotifyIcon
+            className={activeTab === "spotify" ? "fill-foreground" : undefined}
+          />
+          Spotify Account
+        </Button>
+        <Button
           variant={activeTab === "apis" ? "default" : "ghost"}
           size="sm"
           onClick={() => setActiveTab("apis")}
@@ -241,13 +254,14 @@ export function SettingsPage({
 
         {activeTab === "tidal" && <TidalTab />}
 
-        {activeTab === "apis" && (
-          <ApisTab
+        {activeTab === "spotify" && (
+          <SpotifyConnection
             isAdmin={isAdmin}
             tempSettings={tempSettings}
             setTempSettings={setTempSettings}
           />
         )}
+        {activeTab === "apis" && <ApisTab />}
 
         {activeTab === "maintenance" && <MaintenanceTab />}
       </div>

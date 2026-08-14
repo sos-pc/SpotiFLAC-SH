@@ -1,7 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { SpotifyConnection } from "./SpotifyConnection";
-import type { Dispatch, SetStateAction } from "react";
-import type { Settings as SettingsType } from "@/lib/settings";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
@@ -14,15 +11,7 @@ import { GetAPIStatuses, type ServiceStatus } from "@/lib/rpc";
 // until 2026-07-28. That list could not produce a download (previews only
 // without a personal token) and was removed server-side, so the panel would
 // have been a form writing into nothing.
-export function ApisTab({
-  isAdmin,
-  tempSettings,
-  setTempSettings,
-}: {
-  isAdmin: boolean;
-  tempSettings: SettingsType;
-  setTempSettings: Dispatch<SetStateAction<SettingsType>>;
-}) {
+export function ApisTab() {
   const [apiStatuses, setApiStatuses] = useState<ServiceStatus[] | null>(null);
   const [apisLoading, setApisLoading] = useState(false);
 
@@ -48,14 +37,6 @@ export function ApisTab({
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <SpotifyConnection
-        isAdmin={isAdmin}
-        tempSettings={tempSettings}
-        setTempSettings={setTempSettings}
-      />
-
-      <div className="border-t" />
-
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold mb-1">External APIs</h2>
