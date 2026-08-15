@@ -742,6 +742,37 @@ If `interval_hours <= 0`, the watcher uses `24`.
 }
 ```
 
+### `POST /api/v1/watchlists/batch`
+Add several playlists in one call — what the playlist picker sends when boxes are ticked. Loops over the same code path as `POST /watchlists`, so each playlist gets the same duplicate check, M3U8 naming and enqueue.
+
+Never fails as a whole: eleven playlists that worked are not rolled back because the twelfth was a dead URL. Always `200`, with one outcome per playlist so the caller can say *which*. Already-watched is its own status, not an error — it is the race between the picker rendering a playlist as available and the click.
+
+Maximum **200** URLs per request; the handler walks each playlist's metadata before returning.
+
+**Body**
+```json
+{
+  "spotify_urls": ["https://open.spotify.com/playlist/...", "..."],
+  "interval_hours": 24,
+  "sync_deletions": false
+}
+```
+
+**Response `200`**
+```json
+{
+  "added": 11,
+  "already_watched": 0,
+  "failed": 1,
+  "outcomes": [
+    { "spotify_url": "https://open.spotify.com/playlist/A", "id": "watch-1", "name": "Road trip", "status": "added" },
+    { "spotify_url": "https://open.spotify.com/playlist/B", "status": "failed", "error": "playlist not found" }
+  ]
+}
+```
+
+`status` is one of `added`, `already_watched`, `failed`.
+
 ### `PUT /api/v1/watchlists/{id}`
 Update a watchlist. Returns `403 access denied` if the caller is neither the owner nor an admin. Only the listed fields are mutable; settings (download path, quality, etc.) require recreating the watchlist.
 
@@ -837,6 +868,56 @@ Per-track history (newest first), not per-sync.
 The aggregated **per-sync** log is embedded inside the watchlist itself (the `sync_logs` array on `WatchedPlaylist`, returned by `GET /watchlists`), capped at the most recent 20 entries.
 
 ---
+
+## Spotify profiles
+
+Two read-only routes behind the playlist picker's *profile* source. Both use the anonymous web-player token the app already holds, so neither needs a Spotify application, a client ID, or the user to sign in to anything.
+
+They read; they never download. Turning a playlist into downloads is `POST /watchlists` or `/watchlists/batch` above.
+
+**There is no OAuth path.** One existed and was removed in #92: Spotify serves an application in development mode only the five accounts its owner hand-adds in the dashboard, which is not a household. The cost of the anonymous token is that **only public playlists are visible**.
+
+### `GET /api/v1/spotify/profiles?q={name}&limit={n}`
+Search Spotify accounts by display name. `limit` defaults to `10`. Requires the `read` permission.
+
+Display names are **not unique** — `q=marc` returns ten different people, most of them named Marc — so this is a poor way to reach one specific profile. To reach a known profile, take the id out of its URL and call the route below directly.
+
+**Response `200`**
+```json
+{
+  "profiles": [
+    { "id": "methammer", "display_name": "methammer", "image_url": "https://i.scdn.co/image/..." }
+  ]
+}
+```
+
+Returns `502` when Spotify refuses — upstream's failure, not the caller's.
+
+### `GET /api/v1/spotify/profiles/{id}/playlists`
+Every **public** playlist on one profile. `id` is the trailing segment of a profile URL (`open.spotify.com/user/{id}`), not a display name. Requires the `read` permission.
+
+One blocking request rather than a paginated endpoint the client drives, because the pagination rules are subtle enough that a second implementation would drift: the upstream endpoint pages over its own window and filters within it, returns short pages that are *not* the last page, and reports a total that moves between calls. `listProfilePlaylists` advances by the size requested, stops on an empty page, and deduplicates. On a large profile this walks several pages before returning.
+
+**Response `200`**
+```json
+{
+  "playlists": [
+    {
+      "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+      "id": "37i9dQZF1DXcBWIGoYBM5M",
+      "name": "Road trip",
+      "image_url": "https://i.scdn.co/image/...",
+      "owner_name": "methammer",
+      "owner_uri": "spotify:user:methammer",
+      "owned": true
+    }
+  ]
+}
+```
+
+`owned` separates the profile's own playlists from ones it merely follows. No track count: this endpoint does not return one, and counting would mean opening every playlist.
+
+Returns `502` for a profile that does not exist, or when Spotify refuses. A profile that simply shares nothing publicly returns `200` with an empty list — that is information, not a failure.
 
 ## History
 
