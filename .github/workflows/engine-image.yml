@@ -407,9 +407,15 @@ jobs:
 
           The build is deliberately strict, and each guard names a different cause:
 
-          - **\`patch\` failed** — upstream changed code one of
-            [\`engine/patches/\`](../blob/main/engine/patches) rewrites. Rebase the
-            patch, or drop it if upstream fixed the bug themselves.
+          - **\`patch\` failed** — upstream moved the code one of
+            [\`engine/patches/\`](../blob/main/engine/patches) rewrites. Rebase
+            the patch against the new layout. If upstream **fixed the bug**
+            rather than moving it, the patch is obsolete: delete it, and give
+            the next patch a probe so this stops failing the build — see
+            [\`engine/patches/README.md\`](../blob/main/engine/patches/README.md).
+          - **\`PROBE BROKEN\`** — a patch’s probe crashed instead of
+            answering. The build refuses to guess whether the bug is still
+            there. Fix the probe.
           - **\`contract check\` failed** — upstream renamed something
             [\`shim.py\`](../blob/main/engine/shim.py) calls. Fix the call and
             [\`contract-check.py\`](../blob/main/engine/contract-check.py) together.
