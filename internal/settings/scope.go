@@ -59,7 +59,6 @@ var instanceKeys = map[string]bool{
 	"jellyfinMusicPath": true, // one Jellyfin
 	"spotFetchAPIUrl":   true, // one fallback endpoint, and it is a third party
 	"createM3u8File":    true, // whether M3U8s are written into that one Jellyfin
-
 }
 
 // retiredKeys are keys a past version wrote and this one no longer knows. The
