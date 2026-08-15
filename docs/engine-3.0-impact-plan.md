@@ -164,6 +164,12 @@ the lossless four.
 | **D3** | Pin extension versions explicitly, or follow the registry's current | Follow current **at build time** — pinned by the image, refreshed on every rebuild, which is how the wheel is already handled |
 | **D4** | Expose `pandora` / `soundcloud` / `ytmusic` | **Not now.** Out of scope of a repair; revisit deliberately |
 
+**Decided by the operator, 2026-08-15: D1, D2 and D3 as recommended; D4 stays
+open.** Implemented in #102 as an `ARG` that deliberately does not become an
+`ENV`, so the variable does not survive into the running image — measured: with
+it unset at runtime the manager skips its registry check, uses what the build
+installed, and a real download succeeds.
+
 D2 is the load-bearing one. Everything else follows from it.
 
 ## 5. The responses, in order
@@ -191,12 +197,13 @@ D2 is the load-bearing one. Everything else follows from it.
 
 Stated so nobody mistakes this document for more than it is:
 
-- **Quality tiers.** Everything was tested at `LOSSLESS`. The deployment runs
-  `tidalQuality=HI_RES_LOSSLESS`, `qobuzQuality=27`, `autoQuality=24`,
-  `allowFallback=true`. Whether the JS extensions honour those identically to
-  the Python providers is unverified.
-- **Two tracks.** Both were the same well-known track. Nothing about playlists,
-  albums, ISRC fallback, or a track that is genuinely hard to source.
+- **Quality tiers.** *Partly closed by #102*: a second track downloaded through
+  `tidal` at `HI_RES_LOSSLESS` came back a valid 39 MB FLAC at 24-bit, against
+  16-bit for the `LOSSLESS` run — so bit depth is honoured. `qobuzQuality=27`,
+  `autoQuality=24` and `allowFallback=false` remain unverified.
+- **Tracks.** *Partly closed by #102*: two different tracks now, across two
+  quality tiers. Still nothing about playlists, albums, ISRC fallback, or a
+  track that is genuinely hard to source.
 - **`allow_fallback`** semantics through the extension path.
 - **Rate limits and long-run behaviour** of a third-party registry consulted on
   every container start.
