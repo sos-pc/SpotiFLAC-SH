@@ -267,6 +267,23 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &submitted) {
 			return
 		}
+		// Refused, not stored. These are this endpoint's own RESPONSE field
+		// names: a submission containing one is a client PUTting back the
+		// envelope it got from GET instead of the values inside it. Accepting
+		// it stores a complete second copy of every setting one level down,
+		// where nothing that reasons about settings will ever look — and on
+		// this deployment that copy then became a house default.
+		//
+		// Loud rather than quiet. A client confused enough to send this needs
+		// to find out, and the most likely one is a browser running a bundle
+		// old enough to predate the envelope.
+		if bad := settings.NotSettingKeys(submitted); len(bad) > 0 {
+			writeV1Error(w, http.StatusBadRequest,
+				"these are not settings, they are the fields of this endpoint's own response: "+
+					strings.Join(bad, ", ")+" — send the values, not the envelope")
+			return
+		}
+
 		user := auth.GetUserFromContext(r)
 		isAdmin := user != nil && user.IsAdmin
 
