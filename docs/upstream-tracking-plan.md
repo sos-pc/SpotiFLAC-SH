@@ -63,6 +63,22 @@ insertions into the core. That second pair is the entire risk surface, and it
 is small enough to stop being a fork and start being two `.patch` files applied
 at Docker build time via `patch(1)`.
 
+**Where those two ended up, and what it cost (2026-08-15).** Neither is a patch
+today: `signed_session_mobile.py` was adopted upstream (§2.3) and
+`signed_session_desktop.py` became a runtime hook, which survives line shifts.
+A third patch was added later for an Amazon bug found in production on
+2026-08-04, and it is now retired too — upstream 3.0.0 fixed that bug while
+restructuring the file out of existence.
+
+That retirement is the lesson this section did not anticipate. "The build fails
+if a patch stops applying" was written as a safety property, and it is one in
+the case where our fix is still needed. In the case where **upstream fixes the
+bug themselves**, the same rule froze the engine image on its previous version
+for four consecutive builds — a good upstream event, read as a failure, cutting
+the deployment off from every other upstream change. Patches now carry a probe
+that separates the two: see
+[`engine/patches/README.md`](../engine/patches/README.md).
+
 ### 2.2 The wheel is complete enough to build on
 
 Downloaded and inspected `spotiflac-1.5.6-py3-none-any.whl` from PyPI (published

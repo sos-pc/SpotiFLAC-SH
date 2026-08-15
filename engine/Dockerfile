@@ -95,13 +95,54 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # hooks/ (below), not here — a patch that stops applying blocks the entire
 # update chain, while a hook that cannot wrap degrades gracefully.  Patches
 # remain the right shape for bug fixes the upstream source needs corrected.
-# --dry-run first so a bad patch cannot leave a half-modified tree behind.
+#
+# Three outcomes, not two, because "the patch does not apply" hides two
+# opposite events and only one of them is bad:
+#
+#   the bug is gone   — upstream fixed it. Our patch is obsolete. Skip it and
+#                       say so; the build MUST NOT fail, or upstream fixing our
+#                       bug would freeze this image on its previous version and
+#                       cut us off from every other upstream change. That is not
+#                       hypothetical: it is what happened on 2026-08-15 with
+#                       SpotiFLAC 3.0.0, for four consecutive builds.
+#   still needed, applies    — apply it.
+#   still needed, will not apply — upstream moved the code around our fix. Fail
+#                       hard: an image that silently drops a bug fix is worse
+#                       than no image.
+#
+# Only a probe can tell the first case from the third, because "did upstream
+# fix this?" is a question about behaviour and `patch` only reads text. So a
+# patch MAY carry a sibling <name>.probe.py — see patches/README.md — that
+# exits 0 when the bug is still present and 3 when it is gone. No probe means
+# "assume still needed", which is the old behaviour.
+#
+# --dry-run before applying, so a rejected hunk cannot leave a half-modified
+# tree. `|| exit 1` on both, because a for loop reports only its LAST
+# iteration's status: with two patches, the first failing and the second
+# succeeding, the previous version of this loop exited 0 and published an image
+# missing a fix. It was correct only while exactly one patch existed.
 COPY patches/ /tmp/patches/
 RUN SITE="$(python -c 'import SpotiFLAC, pathlib; print(pathlib.Path(SpotiFLAC.__file__).parent.parent)')" \
     && for p in /tmp/patches/*.patch; do \
          [ -e "$p" ] || continue; \
-         echo "applying $(basename "$p")"; \
-         patch -p1 -d "$SITE" --dry-run < "$p" && patch -p1 -d "$SITE" < "$p"; \
+         name="$(basename "$p" .patch)"; \
+         probe="/tmp/patches/$name.probe.py"; \
+         if [ -f "$probe" ]; then \
+           python "$probe"; rc=$?; \
+           if [ "$rc" = 3 ]; then \
+             echo "OBSOLETE PATCH: $name - upstream fixed this bug themselves."; \
+             echo "  Delete engine/patches/$name.patch and its probe. Not applying it."; \
+             continue; \
+           fi; \
+           if [ "$rc" != 0 ]; then \
+             echo "PROBE BROKEN: $name.probe.py exited $rc (expected 0=present, 3=gone)" >&2; \
+             exit 1; \
+           fi; \
+           echo "probe: bug still present, $name.patch is still needed"; \
+         fi; \
+         echo "applying $name.patch"; \
+         patch -p1 -d "$SITE" --dry-run < "$p" || exit 1; \
+         patch -p1 -d "$SITE" < "$p" || exit 1; \
        done \
     && rm -rf /tmp/patches
 
