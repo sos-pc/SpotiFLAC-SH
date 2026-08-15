@@ -162,10 +162,52 @@ RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; import nodriver, pydoll; pr
 # image is most exposed to, because a scheduled build publishes `:latest`
 # without a human reading the changelog. A renamed keyword would build green and
 # fail on the first download. See contract-check.py for the full reasoning.
-COPY contract-check.py /tmp/contract-check.py
-RUN python /tmp/contract-check.py && rm /tmp/contract-check.py
+# ── The download providers ────────────────────────────────────────────────
+#
+# They are not in the wheel any more. SpotiFLAC 3.0.0 deleted
+# `SpotiFLAC/providers/` — eight Python modules — and replaced them with
+# JavaScript extensions that an extension manager downloads from a registry.
+# 1.7.3 carried that registry's URL as a hardcoded constant; 3.0.0 removed it
+# and expects `SPOTIFLAC_REGISTRIES` from the environment, a `.env` file, or the
+# GUI settings screen. A headless image has none of those, so it installs
+# nothing, resolves no provider, and fails EVERY download with
+# `ValueError: No valid providers found in: [...]` — which names the service
+# list, the one thing that is not wrong. See docs/engine-3.0-impact-plan.md.
+#
+# Installing them HERE rather than letting them arrive on first use, because
+# runtime install gives up three things this image is built to have:
+#
+#   - reproducibility. SPOTIFLAC_VERSION pins the wheel; it does not pin
+#     qobuz-web@1.1.0. Two builds of this file a week apart would ship
+#     different download code under the same tag.
+#   - a startup that does not depend on GitHub. The extensions land in
+#     ~/.spotiflac/extensions, which no volume persists, so every container
+#     recreation would re-fetch all seven.
+#   - failing at build instead of on the first download.
+#
+# ARG, deliberately not ENV: the variable must NOT survive into the running
+# image. With it unset at runtime the manager skips its registry check entirely
+# and uses what is installed here — measured, and the point of doing this at
+# build time. An operator who wants runtime updates can set it in compose,
+# which is then a choice rather than a default.
+#
+# The URL is the one 1.7.3 carried internally. It serves executable JavaScript
+# from a third-party repository, and its sha256 comes from the same registry
+# that serves the file — good against corruption, not against a compromised
+# registry. That is a real exposure and it is the reason this is pinned into an
+# image someone can inspect rather than fetched fresh on every start.
+ARG SPOTIFLAC_REGISTRIES=https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/registry.json
+RUN HOME=/home/nonroot SPOTIFLAC_REGISTRIES="$SPOTIFLAC_REGISTRIES" python -c "\
+from SpotiFLAC.extensions.manager import ExtensionManager; \
+m = ExtensionManager(auto_install_downloads=True); \
+import os; \
+names = sorted(os.listdir(m.ext_dir)); \
+print('extensions installed:', ', '.join(names) or '(none)'); \
+raise SystemExit(0 if names else 'no extension installed - the registry served nothing usable')"
 
+COPY contract-check.py /tmp/contract-check.py
 COPY shim.py /app/shim.py
+RUN HOME=/home/nonroot python /tmp/contract-check.py && rm /tmp/contract-check.py
 
 # Non-root, same uid as the Go service so FLACs written to the shared /staging
 # volume are readable/movable by it. HOME set explicitly (numeric uid, no passwd).

@@ -20,7 +20,6 @@ M3U8 consistency (see docs/module-engine.md §4).
 from __future__ import annotations
 
 import asyncio
-import inspect
 import io
 import logging
 import os
@@ -208,6 +207,39 @@ _provider_lock = asyncio.Lock()
 _provider_refreshing = False
 
 
+# The service names this image can be asked for; kept in step with
+# contract-check.py's REQUIRED_SERVICES, which fails the BUILD on the same
+# condition this reports at runtime. Both exist, and they are not redundant:
+# the build check stops a broken image being published, this one explains an
+# image that is already deployed.
+_EXPECTED_SERVICES = ("qobuz", "deezer", "amazon", "tidal")
+
+
+def _missing_providers() -> list[str]:
+    """Service names with no installed extension behind them.
+
+    Empty is the healthy answer. Anything here means a download naming that
+    service fails with `No valid providers found`, which reads like a caller
+    mistake and is not one.
+
+    Never raises: a status endpoint that 500s tells an operator less than one
+    which admits it could not check.
+    """
+    try:
+        from SpotiFLAC.extensions.catalog import extension_id
+        from SpotiFLAC.extensions.manager import ExtensionManager
+
+        manager = ExtensionManager(auto_install_downloads=False)
+        missing = []
+        for service in _EXPECTED_SERVICES:
+            ext_id = extension_id(service, manager)
+            if not ext_id or not manager.get_installed(ext_id):
+                missing.append(service)
+        return missing
+    except Exception:  # noqa: BLE001 - never fatal for a status route
+        return []
+
+
 def _summarise(results: list, ext) -> dict:
     """Fold ~51 endpoint probes into one row per provider.
 
@@ -248,12 +280,21 @@ def _summarise(results: list, ext) -> dict:
         if row["ok"]:
             row["detail"] = ""
 
+    missing = _missing_providers()
     return {
         "checked_at": int(time.time()),
         "providers": per,
+        # Upstream's own extension probe, AND whether this image actually
+        # carries the providers it would be asked for.
+        #
+        # Those are not the same question, and on 2026-08-15 they disagreed in
+        # the worst direction: upstream reported ok while zero extensions were
+        # installed and every download was failing. A status board that answers
+        # "fine" in that state is worse than one that says nothing.
         "extensions": {
-            "ok": bool(getattr(ext, "ok", False)),
+            "ok": bool(getattr(ext, "ok", False)) and not missing,
             "detail": str(getattr(ext, "detail", ""))[:80],
+            "missing_providers": missing,
         },
         "skipped_malformed": skipped,
     }
@@ -367,53 +408,6 @@ def _discard(out: pathlib.Path) -> None:
     shutil.rmtree(out, ignore_errors=True)
 
 
-async def _prime_tidal_apis() -> None:
-    """Populate the Tidal API list, which nothing upstream does for us.
-
-    Without this, every Tidal download fails with
-    `[tidal] UNAVAILABLE: no Tidal APIs configured`, four times over — once per
-    quality tier, on a condition that cannot vary by tier. Traced 2026-07-30:
-
-      * `PROVIDER_REGISTRY` maps "tidal" to the TidalProvider *class*, so the
-        orchestrator constructs it directly. `TidalProvider.create()` — the async
-        factory that refreshes the API list — is never called anywhere in the
-        package, and neither is `prime_tidal_api_list()`.
-      * A direct construction leaves `self._apis = _TIDAL_APIS_GET`, which is
-        hardcoded `[]`. The gist that used to fill it (afkarxyz/2ce772b9…) is 404.
-      * `get_rotated_tidal_api_list()` then raises "No cached Tidal API URLs",
-        and its caller swallows that with a bare `except Exception`, falling back
-        to the same empty `self._apis`.
-      * The one path that *does* refresh the list is a background thread inside
-        `core/metadata_enrichment.py` — which we disable with
-        `enrich_metadata=False`, because tagging belongs to the Go ingestion.
-
-    So the last branch that filled the list is one we switch off ourselves.
-    Priming explicitly is the fix, and it belongs here rather than in a patch to
-    upstream's source: it is a call we fail to make, not a line they got wrong.
-
-    The list comes from their live endpoint registry, which does carry Tidal
-    entries (`tidal.post` and `community.tidal`, both non-empty, checked
-    2026-07-30). Best-effort on purpose: a failure here must not stop a Qobuz or
-    Deezer download that never needed the list.
-    """
-    try:
-        from SpotiFLAC.providers.tidal import prime_tidal_api_list
-
-        # Sync in the version this fork pins, async from 1.5.6 on (they merged the
-        # sync/async pair). Dispatch on the signature so the same shim works either
-        # side of that bump — awaiting the sync one raises TypeError, and calling
-        # the async one without awaiting does nothing at all. Both fail quietly,
-        # which is the worst way for this to fail.
-        if inspect.iscoroutinefunction(prime_tidal_api_list):
-            await prime_tidal_api_list()
-        else:
-            await asyncio.to_thread(prime_tidal_api_list)
-    except Exception as exc:  # noqa: BLE001 - never block a download on this
-        logging.getLogger("spotiflac-engine-shim").warning(
-            "could not prime the Tidal API list: %s", exc
-        )
-
-
 async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
     """The only engine-specific code. Rewrite this body to swap engines.
 
@@ -440,7 +434,6 @@ async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
         # After construction, not before: the client installs its own logging
         # handlers, and a filter attached earlier would not cover them.
         _quiet_engine_logs()
-        await _prime_tidal_apis()
         await client.download_track(req.spotify_url)
 
 

@@ -20,6 +20,21 @@ So this asserts the exact surface shim.py depends on, and it runs at build time
 breaks the contract now fails the build loudly instead of reaching the server
 quietly.
 
+It was too narrow once, and the way it was too narrow is worth keeping in mind
+when adding to it. On 2026-08-15 every assertion below passed against SpotiFLAC
+3.0.0 — the kwargs, the attrs, the health surface, all intact — while the
+engine could not download a single track. Two things it did not look at:
+
+  * the modules shim.py IMPORTS. `_prime_tidal_apis()` reached for
+    `SpotiFLAC.providers`, which 3.0.0 deleted outright.
+  * whether a service name still resolves to something that can download.
+    3.0.0 moved every provider out of the package and into JavaScript
+    extensions fetched from a registry; with no registry configured, nothing
+    installed, and every name resolved to nothing.
+
+Both are checked now. The rule they suggest: assert what the shim USES, not
+only what upstream OFFERS.
+
 Run it locally the same way CI does:
 
     python contract-check.py
@@ -27,7 +42,9 @@ Run it locally the same way CI does:
 
 from __future__ import annotations
 
+import ast
 import inspect
+import pathlib
 import sys
 
 # Every keyword shim.py passes to AsyncSpotiFLAC(...). Keep this list and the
@@ -59,6 +76,45 @@ REQUIRED_ATTRS = ("__aenter__", "__aexit__", "download_track")
 # must not give.
 HEALTH_FUNC = "run_health_check_with_extensions"
 REQUIRED_HEALTH_FIELDS = ("provider", "url", "ok", "latency", "detail")
+
+# Where shim.py is in the image. Read, not imported: importing it would start
+# FastAPI and the hooks, and this check has no business doing that.
+SHIM_PATH = "/app/shim.py"
+
+# Every service name this image can be asked for. The first three are
+# DownloadRequest's default in shim.py; "tidal" is added by the Go side when a
+# token exists (ENGINE_SERVICES on the reference deployment lists all four).
+#
+# In 3.0.0 a name resolves through the extension catalogue to an installed
+# extension. A name that resolves to nothing produces an error naming the
+# service list, which reads like a caller mistake and is not one.
+REQUIRED_SERVICES = ("qobuz", "deezer", "amazon", "tidal")
+
+
+def _shim_upstream_imports(path: str, problems: list[str]) -> list[str]:
+    """Every SpotiFLAC module shim.py imports, including inside functions."""
+    try:
+        source = pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        problems.append(f"cannot read {path} to check its imports: {exc}")
+        return []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        problems.append(f"cannot parse {path}: {exc}")
+        return []
+
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] == "SpotiFLAC":
+                    modules.add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            # level > 0 is a relative import, which cannot be upstream's.
+            if node.level == 0 and node.module and node.module.split(".")[0] == "SpotiFLAC":
+                modules.add(node.module)
+    return sorted(modules)
 
 
 def main() -> int:
@@ -147,6 +203,44 @@ def main() -> int:
                         + ", ".join(missing_f)
                     )
 
+    # ── Everything shim.py imports from upstream ─────────────────────────────
+    #
+    # Parsed rather than listed, so it cannot drift from the file it protects.
+    # ast.walk reaches imports inside function bodies too, which is where the
+    # one that broke lived.
+    for module in _shim_upstream_imports(SHIM_PATH, problems):
+        try:
+            __import__(module)
+        except Exception as exc:  # noqa: BLE001 — any failure is the finding
+            problems.append(f"shim.py imports {module}, which does not import: {exc}")
+
+    # ── A service name must resolve to something installed ───────────────────
+    try:
+        from SpotiFLAC.extensions.catalog import extension_id
+        from SpotiFLAC.extensions.manager import ExtensionManager
+    except Exception as exc:  # noqa: BLE001
+        notes.append(
+            "the extension catalogue could not be imported, so service names "
+            f"could not be verified: {exc}"
+        )
+    else:
+        # auto_install_downloads=False on purpose: this asserts what the image
+        # ALREADY carries. Letting it install here would make the check pass by
+        # doing the thing it is supposed to verify has been done.
+        manager = ExtensionManager(auto_install_downloads=False)
+        for service in REQUIRED_SERVICES:
+            try:
+                ext = extension_id(service, manager)
+                installed = manager.get_installed(ext) if ext else None
+            except Exception as exc:  # noqa: BLE001
+                problems.append(f"resolving service {service!r} raised: {exc}")
+                continue
+            if not installed:
+                problems.append(
+                    f"service {service!r} resolves to extension {ext!r}, which is "
+                    "not installed in this image - every download using it would fail"
+                )
+
     for note in notes:
         print(f"CONTRACT WARNING: {note}", file=sys.stderr)
 
@@ -176,7 +270,8 @@ def main() -> int:
     else:
         print(
             f"contract check OK "
-            f"({len(REQUIRED_INIT_KWARGS)} kwargs, {len(REQUIRED_ATTRS)} attrs)"
+            f"({len(REQUIRED_INIT_KWARGS)} kwargs, {len(REQUIRED_ATTRS)} attrs, "
+            f"{len(REQUIRED_SERVICES)} services)"
         )
     return 0
 
