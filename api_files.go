@@ -346,9 +346,9 @@ func (s *Server) registerFileRoutes() {
 			}
 		} else if len(userPart) > 0 {
 			// No authenticated user: there is no profile to write to, so the
-			// operator's instance store is the only sensible home. This is the
-			// DISABLE_AUTH_ON_LAN path, which is off on the reference
-			// deployment.
+			// operator's instance store is the only sensible home. Reachable
+			// by an API key issued without a user, not by a browser — every
+			// browser route authenticates.
 			if err := s.ctr.System.SaveSettings(userPart); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return

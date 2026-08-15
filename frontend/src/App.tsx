@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode, applyFont } from "@/lib/settings";
 import { applyTheme } from "@/lib/themes";
 import { LoginPage } from "@/components/LoginPage";
-import { isAuthenticated, clearAuth, getUser, tryLocalAuth, fetchMe } from "@/lib/auth";
+import { isAuthenticated, clearAuth, getUser, fetchMe } from "@/lib/auth";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
 import { Sidebar, type PageType } from "@/components/Sidebar";
@@ -63,7 +63,7 @@ function App() {
     const cover = useCover();
     const downloadQueue = useDownloadQueueDialog();
     const [authed, setAuthed] = useState<boolean>(false);
-    const [checkingLocalAuth, setCheckingLocalAuth] = useState<boolean>(true);
+    const [checkingAuth, setCheckingAuth] = useState<boolean>(true);
     const [authUser, setAuthUser] = useState(getUser());
     useEffect(() => {
         const initAuth = async () => {
@@ -72,14 +72,12 @@ function App() {
                 if (me) {
                     setAuthed(true);
                     setAuthUser(me);
-                    setCheckingLocalAuth(false);
+                    setCheckingAuth(false);
                     return;
                 }
                 clearAuth();
             }
-            const user = await tryLocalAuth();
-            if (user) { setAuthed(true); setAuthUser(user); }
-            setCheckingLocalAuth(false);
+            setCheckingAuth(false);
         };
         initAuth();
     }, []);
@@ -452,7 +450,7 @@ function App() {
                 </>);
         }
     };
-    if (checkingLocalAuth) {
+    if (checkingAuth) {
         return <div className="min-h-screen flex items-center justify-center bg-background"><div className="text-muted-foreground text-sm">Connecting...</div></div>;
     }
     if (!authed) {

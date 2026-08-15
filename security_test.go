@@ -108,31 +108,19 @@ func TestCleanLibraryPaths(t *testing.T) {
 	})
 }
 
-func TestIsSameOriginRequest(t *testing.T) {
-	tests := []struct {
-		name   string
-		host   string
-		origin string
-		want   bool
-	}{
-		{"no origin header", "app.example.com", "", true},
-		{"matching origin", "app.example.com", "https://app.example.com", true},
-		{"matching origin with port", "app.example.com:6890", "http://app.example.com:6890", true},
-		{"cross-origin attacker site", "app.example.com", "https://evil.example.net", false},
-		{"malformed origin", "app.example.com", "not a url", false},
+// makeRequest builds a bare request with the two proxy headers remoteIP has to
+// reason about. It lived in server_test.go next to the LAN-bypass tests until
+// those were deleted with the bypass itself (#98); it moved here rather than
+// leaving a test file holding nothing but a helper.
+func makeRequest(remoteAddr, xForwardedFor, xRealIP string) *http.Request {
+	r := &http.Request{Header: make(http.Header), RemoteAddr: remoteAddr}
+	if xForwardedFor != "" {
+		r.Header.Set("X-Forwarded-For", xForwardedFor)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &http.Request{Header: make(http.Header), Host: tt.host}
-			if tt.origin != "" {
-				r.Header.Set("Origin", tt.origin)
-			}
-			got := isSameOriginRequest(r)
-			if got != tt.want {
-				t.Errorf("isSameOriginRequest(host=%q, origin=%q) = %v, want %v", tt.host, tt.origin, got, tt.want)
-			}
-		})
+	if xRealIP != "" {
+		r.Header.Set("X-Real-IP", xRealIP)
 	}
+	return r
 }
 
 func TestRemoteIPIgnoresForwardedHeadersByDefault(t *testing.T) {

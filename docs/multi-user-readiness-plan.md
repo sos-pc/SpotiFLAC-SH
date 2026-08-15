@@ -433,7 +433,7 @@ drain of persisted pending jobs, not a bigger buffer.
 
 ## 5. The LAN bypass grants admin, not a guest
 
-**Open.** Settled as a deletion rather than a fix; nobody has deleted it yet.
+**Done — deleted in #98.**
 
 `DISABLE_AUTH_ON_LAN=true` makes `localBypassMiddleware` (`server.go:99`)
 inject a synthetic **administrator** for any request from a private IP with no
@@ -461,11 +461,17 @@ service publishes no `ports:` at all — it is reachable only through nginx on t
 today, and `TRUST_PROXY_HEADERS=true` is correct for a single proxy hop
 (`ratelimit.go:84`).
 
-So this section is not a fix, it is a decision to record: the middleware is dead
-code on this deployment. Deleting it removes a class of problem permanently and
-costs nothing; keeping it means keeping a code path whose only failure mode is
-silent and severe. Recommendation: delete it, and if a headless client is ever
-needed, give it a scoped API key — which already exists and is already
+So this section was not a fix, it was a decision to record: the middleware was
+dead code on this deployment. Deleting it removes a class of problem
+permanently and costs nothing; keeping it meant keeping a code path whose only
+failure mode is silent and severe.
+
+**Deleted in #98**, along with `POST /api/v1/auth/local`, the frontend's
+auto-login attempt at boot, and `isSameOriginRequest` — a same-origin check
+that existed solely to stop any LAN website from `fetch()`ing an admin JWT out
+of that route, and that had no other caller once the route was gone.
+
+A headless client gets a scoped API key, which already exists and is already
 permission-scoped.
 
 ## 6. Shared by design — to be surfaced, not fixed
