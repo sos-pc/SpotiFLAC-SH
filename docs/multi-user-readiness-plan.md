@@ -1,11 +1,13 @@
 # Opening the instance to every Jellyfin user — plan
 
-> **🧭 Plan, 2026-08-13, updated 2026-08-14.** The operator intends every Jellyfin account to use
+> **🧭 Plan, 2026-08-13, updated 2026-08-15.** The operator intends every Jellyfin account to use
 > SpotiFLAC, not just the admin. This audits what that changes. It was triggered
 > by a feature request — connect a Spotify account to pick playlists from a list
 > — which is deferred to §8 because what it would expose is not ready to be
-> shared. OAuth is required, not optional, by the operator's decision; §8a and
-> §8b cover the user flow and the accessibility baseline it must be built
+> shared. That feature shipped without OAuth in the end: it was built, deployed,
+> and removed in #92 when Spotify's development-mode limit turned out to be five
+> hand-added accounts. §8 records why, since the reasoning is the useful part.
+> §8a and §8b cover the user flow and the accessibility baseline it was built
 > against. Companions: [authentication.md](authentication.md) ·
 > [settings-reference.md](settings-reference.md) ·
 > [watchlist-consistency-plan.md](watchlist-consistency-plan.md).
@@ -574,37 +576,62 @@ preferences. Until it exists they are frozen at the values seeded at migration.
 
 ## 8. Then, and only then: connecting a Spotify account
 
-**Open.** The playlist source layer landed in #71; the API, the picker and OAuth have not.
+**Done, and smaller than planned.** The source layer landed in #71, the API in
+#84, the picker in #86, the OAuth chain in #87–#90 — and #92 removed the OAuth
+chain again. Two sources ship: a public profile, and a link.
 
 The feature that started this. Deferred to last on purpose — it brings more
 people into a queue that has no fairness (§3) and a settings store that cannot
 hold its instance-level client ID (§2).
 
-**OAuth is required, by the operator's decision (2026-08-13), not optional.**
-An earlier draft framed it as a later phase behind a "declared profile" path.
-It is now the engine of the default source, and the declared path survives with
-a *different job* — see the three sources below. That is cleaner than the draft,
-where the two competed for the same use.
+### What killed OAuth, and why it is written down rather than deleted
 
-### Three sources, one picker, entered from where the need arises
+**The decision recorded here — "OAuth is required, by the operator's decision
+(2026-08-13), not optional" — did not survive contact with Spotify.** It was
+built and it worked end to end: authorize, PKCE exchange, refresh, identity. It
+was deployed. Then both connected accounts got `403` from `/v1/me/playlists`.
+
+The cause is not in the code. **Spotify serves an application in development
+mode only the five accounts its owner hand-adds in the developer dashboard.**
+Extended quota, which lifts the limit, requires 250k monthly active users and a
+registered business. So the feature would have required the operator to register
+each household member by hand, and would have stopped at five people:
+
+> *"si la condition c'est de devoir ajouter des comptes sur le dashboard de
+> spotify.dev (limité a 5 donc trop petit en plus) alors c'est pas viable car
+> l'user ne peu pas le faire et je veux pas d'une feature que je doit config
+> pour chaque utilisateur et qui est limité a 5 comptes"* — the operator,
+> 2026-08-14
+
+**This paragraph earlier said 25, not 5.** The wrong number was in the code, the
+UI, this plan and five pull request bodies before anyone checked Spotify's own
+documentation. It mattered: 25 sounds like a household, 5 does not. That is why
+the correction stays visible instead of being quietly overwritten.
+
+What is actually lost with it: **private and collaborative playlists**, and the
+track counts `/v1/me/playlists` returned. A playlist has to be public to be
+watchable.
+
+### Two sources, one picker, entered from where the need arises
 
 Account association is not a settings chore. It is the first step of the first
 source, and it belongs where a user goes to add something to watch — the
 Watchlist tab — not buried in Settings.
 
-| Source | What it is for | Backed by |
-|---|---|---|
-| **My playlists** | the default | OAuth. `/v1/me/playlists`, which also returns `tracks.total` |
-| **A profile** | watching *someone else's* public playlists — a friend, a curator | the anonymous token; profile search + the profile endpoint |
-| **A URL** | a playlist shared by link that no search will find | today's path, kept |
+| Source | What it is for | Backed by | Needs |
+|---|---|---|---|
+| **A profile** | your own public playlists, or someone else's — a friend, a curator | the anonymous token; profile search + the profile endpoint | nothing |
+| **A link** | a playlist shared by link that no search will find | today's path, kept | nothing |
 
-When the account is not connected, the **My playlists** panel does not show an
-error. It shows the connect button and one line saying what it unlocks. The
-association happens without leaving the panel, and the user lands back on the
-list — not on the home screen.
+*Struck: **My playlists**, over OAuth — see above.*
 
-Settings keeps a mirror — *Connected as X*, Disconnect — to **manage** the
-association, never to acquire it.
+Neither survivor asks anyone to sign in to anything, which is the one property
+that makes this work for a household. The cost is that both see only what an
+anonymous visitor sees.
+
+The **Spotify Account** settings tab that mirrored the association went with the
+OAuth chain. Nothing about Spotify is configured per account any more, which is
+the intended end state: a user adds a playlist and never visits Settings.
 
 ### Profile search, and why it is not for finding yourself
 
@@ -623,21 +650,31 @@ But display names are not unique and ids are opaque:
 ```
 
 So search is *worse* than a URL for finding **yourself**, unless your handle is
-rare — and it is moot anyway now that OAuth is required, since the connected
-account already knows who you are. Its real value is the second source: finding
-**other people's** profiles, where the URL is exactly what you do not have.
+rare. The draft dismissed that as moot because the connected account already
+knew who you were — and then the connected account went away, which turned it
+back into the central question: *how does a user reach their own playlists?*
+
+**The answer shipped in #92: the profile box also takes a pasted profile link.**
+`open.spotify.com/user/<id>`, `spotify:user:<id>`, with or without the `?si=`
+tracking suffix. A link is unambiguous where a name is not, and it is already in
+the address bar when you are looking at your own profile. Search keeps its real
+value — finding **other people's** profiles, where the link is exactly what you
+do not have.
 
 The avatar is the only discriminator between ten identical names. That has an
 accessibility consequence — see §8b.
 
 **Two levels, one identity.** Presenting "public profile" versus "OAuth" as a
-choice asks the user a question they cannot answer. It is one thing — your
+choice asks the user a question they cannot answer. It was one thing — your
 Spotify identity — at two levels:
 
 - **Declared**: a profile, yours or someone else's. Public playlists only.
-- **Verified**: your connected account. Everything, including private and
-  collaborative playlists — and `tracks.total`, which the declared path cannot
-  provide.
+- ~~**Verified**: your connected account. Everything, including private and
+  collaborative playlists — and `tracks.total`.~~ Removed in #92.
+
+Only the declared level survives, so the question never gets asked. That is an
+accidental improvement to the flow, and the honest reason the UI is simpler than
+this plan describes.
 
 **Measured, not assumed** (probe run 2026-08-13 against
 `spclient.wg.spotify.com/user-profile-view/v3`, with the existing anonymous
@@ -653,26 +690,29 @@ web-player token — no OAuth):
   owner_uri` — and no track count. `owner_uri` is what separates owned from
   followed.
 
-**Structural decision to make on day one.** Model the playlist source as an
-interface returning a normalised entry with an *optional* track count. The
-declared path fills it without; OAuth fills it with. Skipping this means
-rewriting the picker when OAuth lands.
+**Structural decision to make on day one** — *made, then unmade.* The playlist
+source returned a normalised entry with an *optional* track count: the declared
+path filled it without, OAuth with. When OAuth left, no producer remained, so
+`TrackCount` could only ever be `nil` and the "at least N tracks" preview could
+never render. #92 removed the field rather than leave a permanently-empty
+column.
 
-**OAuth prerequisites, in order.** An HTTPS redirect URI is mandatory —
-loopback does not help, since the redirect runs in the user's browser, not on
-the server. **Cleared on the reference deployment**, which is served over TLS by
-SWAG at `spotiflac.redstack.fr`; the redirect URI would be
-`https://spotiflac.redstack.fr/api/v1/spotify/callback`.
+The lesson is not "do not design for the second source". It is that a field
+kept alive by exactly one caller dies with that caller, and the removal has to
+be part of the same change or nobody finds it later.
 
-Each deployment must register its own Spotify application; a shared client ID
-would cap the entire project at Spotify's 25-user development-mode limit and
-hang it on one person's developer account. Use Authorization Code + PKCE so no
-client secret is stored; only refresh tokens are, per user.
+**OAuth prerequisites — kept as a record, since none of them was the blocker.**
+The HTTPS redirect URI was cleared on the reference deployment (SWAG serves
+`spotiflac.redstack.fr` over TLS). PKCE meant no client secret was stored, only
+one refresh token per user. The redirect URI was displayed pre-filled from the
+admin's own origin. All of it worked. **The five-account allowlist is what
+ended it**, and no amount of getting the prerequisites right would have moved
+that.
 
-The one UI detail that decides whether this works for anyone but its author: the
-redirect URI must be displayed **pre-filled from the origin the admin is
-actually on**, with a copy button, and must refuse to proceed with a clear
-message when that origin is not HTTPS.
+Two things outlived the code and are removed at startup by #92: the
+`spotify_tokens` Bolt bucket, which held live refresh tokens for a feature that
+no longer exists, and the `spotifyClientId` key in `config.json` — settings are
+an untyped map, so nothing removes a key on its own.
 
 Out of scope for a first version: Liked Songs. They are not a playlist, have no
 URL, and the entire watcher is keyed on `SpotifyURL`.
@@ -690,26 +730,35 @@ This is what a new Jellyfin user sees on their first visit to the Watchlist tab
 It says what to do and offers **no way to do it** — no button, nothing. The user
 has to go and find the control somewhere else. At one user, who wrote the app,
 that is invisible. It is now the first screen of every person being onboarded,
-and it is where the whole feature should begin: this empty state should carry
-*Connect your Spotify account*, with the other two sources behind it.
+and it is where the whole feature begins: the empty state carries the button
+that opens the picker, on both sources.
 
 **Bulk add must show its cost before it commits.** `AddWatchlist`
 (`internal/watcher/watcher.go:678`) enqueues the entire playlist immediately, in
 a goroutine, on add. Ticking twelve boxes therefore enqueues everything at once
-— which, until §3 lands, is the easiest gesture in the application and also the
-one that blocks the household's queue for hours. The picker's confirm step
-should read *"12 playlists, ~3400 tracks"*, not *"Add"*.
+— which is the easiest gesture in the application and, before §3 landed, the one
+that blocked the household's queue for hours.
+
+**Partly delivered.** The picker announces *"12 playlists selected"* in an
+`aria-live` region before the button. It cannot say *"~3400 tracks"*: the track
+count came from the OAuth source, and the profile endpoint does not return one.
+Counting properly would mean opening all twelve playlists to add up their
+lengths. §3's fairness is what actually protects the household now.
 
 **Failure paths to design, because these are what make a feature look broken:**
 
 | Situation | What the user must see |
 |---|---|
-| Admin has not registered the Spotify app | why the button cannot work — not a greyed-out control |
-| User declines authorisation on Spotify | a page that receives them, not a raw error |
-| Refresh token later revoked | an offer to reconnect, not a silently empty list |
-| Profile shares no public playlists | "this profile shares none publicly" — information, not failure |
-| Search returns nothing | a reminder that display names are not unique |
+| ~~Admin has not registered the Spotify app~~ | ~~why the button cannot work~~ — moot; nothing to register |
+| ~~User declines authorisation on Spotify~~ | ~~a page that receives them~~ — moot |
+| ~~Refresh token later revoked~~ | ~~an offer to reconnect~~ — moot |
+| Profile shares no public playlists | "this profile shares none publicly" — information, not failure, and a hint to check the id |
+| Search returns nothing | a reminder that display names are not unique, and that a profile link always works |
 | Playlist already watched | shown as such and not tickable — **per user**; another user watching it is not this user's business |
+
+Three of the six failure paths this section demanded existed only because of
+OAuth. Removing it removed them — which is worth noticing: half the failure
+surface of this feature was the authentication, not the feature.
 
 **A question the operator has to settle before onboarding, not after:** the UI is
 entirely in English (`<html lang="en">`, all strings), and the household being
@@ -719,7 +768,9 @@ belong inside this feature.
 
 ## 8b. Accessibility: the current baseline, measured
 
-**Open**, and it gates the picker: the lint rule should land before more interactive surface is written.
+**Done for the gate, open for the debt.** The lint rule landed in #80, before
+the picker was written, as a ratchet: enforced everywhere except an explicit
+baseline of 17 pre-existing files. The picker was built under it.
 
 The picker is the largest interactive surface this app will have gained in one
 go. Building it the way the existing components are built would multiply an
@@ -730,8 +781,13 @@ existing problem, so here is the measured baseline.
 | `eslint-plugin-jsx-a11y` in the config | **absent** — nothing catches any of this |
 | clickable `<div onClick>` in `src/components` | **12**, across 6 files |
 | …of those, with `role`, `tabIndex` or a key handler | **0** |
-| icon-only buttons (`size="icon"`) | **40** |
+| icon-only buttons (`size="icon"`) | **40** — *see the correction below* |
 | …of those, with `aria-label` or `title` | **0** |
+
+**The 40 was a bad count.** It came from grepping `size="icon"`, which counts
+buttons that carry a label from elsewhere. The rule itself, once installed,
+finds **17** files with real violations. A number produced by a grep is a guess
+until the tool that will act on it agrees.
 
 Concretely, for the four status filters in the download queue — refactored twice
 in #65 and #69 without this being noticed: they cannot be reached by keyboard at
@@ -744,10 +800,11 @@ One thing is right, and became right by accident: status is no longer
 colour-only. #69's `STATUS_LABEL` gave every badge a text label beside icons of
 differing shape.
 
-**Resolution — the lint rule first, before the picker is written.** Adding
-`eslint-plugin-jsx-a11y` would have caught all 52 items above, and more to the
-point it prevents the picker from adding to them. Remediating the 40 existing
-buttons is a separate cleanup and should not gate this feature.
+**Resolution — the lint rule first, before the picker is written.** Done in
+#80. `eslint-plugin-jsx-a11y` runs on every file; the 17 files that already
+violated it are listed explicitly in `frontend/eslint.config.js` and warn rather
+than fail. New code cannot join that list — the array is the ratchet. Clearing
+the existing 17 is a separate cleanup and did not gate this feature.
 
 **What the picker itself must do**, none of which is optional:
 
@@ -773,17 +830,20 @@ Done, in this order:
 3. **§7a, §7b, §7** — the personal-screen rule, house defaults, and the panel's
    own buttons.
 
+4. **§8b's lint rule** — #80, as a ratchet over an explicit baseline.
+5. **The settings screen** — #81 and #82. Three things converged on it:
+   disabling instance-scoped fields for a non-admin *and saying why* (§2),
+   letting the operator publish house defaults distinctly from their own
+   preferences (§7b), and not adding to the accessibility debt (§8b).
+6. **§8** — the API (#84), the picker (#86), then OAuth (#87–#90), then OAuth
+   removed (#92). §8a's empty state is where the flow starts.
+
 Still open, in the order I would take them:
 
-4. **§8b's lint rule**, before any more interactive surface is written.
-5. **The settings screen.** Three things converge on it: disabling
-   instance-scoped fields for a non-admin *and saying why* (§2), letting the
-   operator edit house defaults distinctly from their own preferences (§7b), and
-   not adding to the accessibility debt (§8b).
-6. **§8** — the API, the picker, then OAuth. §8a's empty state is where the flow
-   starts.
 7. **§5** (a deletion), **§6** (one line of UI), **§2c** (the ownerless
    backfill). Small and independent.
+8. **§8b's remaining debt** — the 17 baselined files, one at a time, each
+   shrinking the array in `frontend/eslint.config.js`.
 
 **§2b stays with the operator**, not with me: it is a policy question about
 quality, not a defect.
