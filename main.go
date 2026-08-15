@@ -20,7 +20,6 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/jobs"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/service"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
-	"github.com/sos-pc/SpotiFLAC-SH/internal/spotifyoauth"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/watcher"
 	bolt "go.etcd.io/bbolt"
 )
@@ -72,6 +71,11 @@ func main() {
 		defer catalog.Close()
 	}
 
+	// ── Retired buckets ───────────────────────────────────────────────────
+	if err := dropRetiredBuckets(db); err != nil {
+		slog.Warn("[Main] failed to drop retired buckets", "err", err)
+	}
+
 	// ── History buckets (partagés dans jobs.db) ───────────────────────────
 	if err := backend.InitHistoryDBShared(db); err != nil {
 		slog.Warn("[Main] failed to init history buckets", "err", err)
@@ -117,13 +121,6 @@ func main() {
 		slog.Error("[Settings] Scope migration failed; instance settings may be missing", "err", err)
 	}
 
-	// Spotify account connections. Non-fatal: a deployment that cannot open
-	// this bucket still downloads, it just cannot offer "my playlists".
-	spotifyOAuth, err := spotifyoauth.NewStore(db)
-	if err != nil {
-		slog.Error("[Spotify] cannot init the connection store", "err", err)
-	}
-
 	// ── Watcher (playlist sync) ───────────────────────────────────────────
 	wtch := watcher.NewWatcher(db, catalog, jobMgr, auth)
 	defer wtch.Close()
@@ -133,19 +130,18 @@ func main() {
 
 	// ── Container (DI) ───────────────────────────────────────────────────
 	ctr := &Container{
-		DB:           db,
-		Catalog:      catalog,
-		Jobs:         jobMgr,
-		Auth:         auth,
-		Watcher:      wtch,
-		SpotifyOAuth: spotifyOAuth,
-		SSE:          sseHub,
-		System:       &service.SystemService{},
-		Media:        &service.MediaService{},
-		History:      service.NewHistoryService(jobMgr),
-		Audio:        &service.AudioService{},
-		Metadata:     service.NewMetadataService(auth),
-		Download:     service.NewDownloadService(jobMgr, auth),
+		DB:       db,
+		Catalog:  catalog,
+		Jobs:     jobMgr,
+		Auth:     auth,
+		Watcher:  wtch,
+		SSE:      sseHub,
+		System:   &service.SystemService{},
+		Media:    &service.MediaService{},
+		History:  service.NewHistoryService(jobMgr),
+		Audio:    &service.AudioService{},
+		Metadata: service.NewMetadataService(auth),
+		Download: service.NewDownloadService(jobMgr, auth),
 	}
 	ctr.Files = service.NewFileService(catalog, jobMgr)
 
@@ -225,4 +221,33 @@ func printPermissionHintIfNeeded(err error, configDir string) {
 	applog.FprintReal("HINT: this container runs as a non-root user (uid 1000, see 'user: \"1000:1000\"' in docker-compose.yaml).\n")
 	applog.FprintReal("      The host directory mounted at %s must be owned by that same uid. On the host, run:\n", configDir)
 	applog.FprintReal("      sudo chown -R 1000:1000 /path/to/your/host/config/directory\n")
+}
+
+// retiredBuckets are BoltDB buckets no code opens any more.
+//
+// spotify_tokens held one OAuth refresh token per account, for the per-account
+// Spotify connection removed in #92. Nothing reads them now, and a credential
+// nobody reads is still a credential: it stays valid at Spotify until it is
+// revoked there, and it sits in a file that gets copied into backups. Dropping
+// the bucket is the difference between "the feature is gone" and "the feature
+// is gone and so are its secrets".
+var retiredBuckets = [][]byte{
+	[]byte("spotify_tokens"),
+}
+
+// dropRetiredBuckets deletes them, once. Idempotent: bolt.ErrBucketNotFound on
+// a second run is the expected outcome, not a failure.
+func dropRetiredBuckets(db *bolt.DB) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		for _, name := range retiredBuckets {
+			if tx.Bucket(name) == nil {
+				continue
+			}
+			if err := tx.DeleteBucket(name); err != nil {
+				return err
+			}
+			slog.Info("[Main] Dropped a retired bucket", "bucket", string(name))
+		}
+		return nil
+	})
 }

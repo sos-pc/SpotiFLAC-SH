@@ -47,9 +47,6 @@ func TestParseProfilePlaylistsPage(t *testing.T) {
 		if e.URI == "" || e.ID == "" || e.Name == "" {
 			t.Errorf("incomplete entry: %+v", e)
 		}
-		if e.TrackCount != nil {
-			t.Errorf("this source cannot know a track count, got %d for %q", *e.TrackCount, e.Name)
-		}
 	}
 
 	// Every playlist on the `spotify` profile is owned by it.

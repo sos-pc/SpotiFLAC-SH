@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { SpotifyConnection } from "@/components/settings/SpotifyConnection";
-import { SpotifyIcon } from "@/components/settings/providerIcons";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -136,7 +134,7 @@ export function SettingsPage({
   };
   const handleBrowseFolder = () => setShowFileBrowser(true);
   const [activeTab, setActiveTab] = useState<
-    "general" | "files" | "keys" | "tidal" | "spotify" | "apis" | "maintenance"
+    "general" | "files" | "keys" | "tidal" | "apis" | "maintenance"
   >("general");
 
   // isAdmin gates the Maintenance tab (below) and the API-keys "Admin"
@@ -163,11 +161,11 @@ export function SettingsPage({
         </div>
       </div>
 
-      {/* Wrapping, not scrolling. Seven tabs fit on one line at 1280px and
+      {/* Wrapping, not scrolling. The tabs fit on one line at 1280px and
           overflow below roughly 900 — where the row pushed the WHOLE PAGE into
           a horizontal scroll and left the last tabs past the right edge with
-          nothing saying they were there. "Spotify Account" was one of them,
-          which is how someone looking for it found nothing at all. */}
+          nothing saying they were there. A tab nobody can see is a tab nobody
+          finds, so the row wraps onto a second line instead. */}
       <div className="flex flex-wrap gap-2 border-b shrink-0">
         <Button
           variant={activeTab === "general" ? "default" : "ghost"}
@@ -206,17 +204,6 @@ export function SettingsPage({
             className={activeTab === "tidal" ? "fill-foreground" : undefined}
           />
           Tidal Account
-        </Button>
-        <Button
-          variant={activeTab === "spotify" ? "default" : "ghost"}
-          size="sm"
-          onClick={() => setActiveTab("spotify")}
-          className="rounded-b-none gap-2"
-        >
-          <SpotifyIcon
-            className={activeTab === "spotify" ? "fill-foreground" : undefined}
-          />
-          Spotify Account
         </Button>
         <Button
           variant={activeTab === "apis" ? "default" : "ghost"}
@@ -259,13 +246,6 @@ export function SettingsPage({
 
         {activeTab === "tidal" && <TidalTab />}
 
-        {activeTab === "spotify" && (
-          <SpotifyConnection
-            isAdmin={isAdmin}
-            tempSettings={tempSettings}
-            setTempSettings={setTempSettings}
-          />
-        )}
         {activeTab === "apis" && <ApisTab />}
 
         {activeTab === "maintenance" && <MaintenanceTab />}

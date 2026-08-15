@@ -337,3 +337,74 @@ func TestHouseDefaultsYieldToAPersonalChoice(t *testing.T) {
 		t.Errorf("tidalQuality = %v, want the user's own LOSSLESS", got)
 	}
 }
+
+// A key no version writes any more must leave, from both stores. The settings
+// blob is an untyped map, so nothing removes it on its own: it would keep
+// riding along in every effective blob sent to every client, and in the case
+// that motivated this — spotifyClientId, left behind by the Spotify connection
+// removed in #92 — it would keep publishing the id of an application the
+// operator has decommissioned.
+func TestPromoteRemovesRetiredKeys(t *testing.T) {
+	isolate(t)
+	am := newAuth(t)
+
+	retired := ""
+	for k := range retiredKeys {
+		retired = k
+		break
+	}
+	if retired == "" {
+		t.Skip("no key is currently retired")
+	}
+
+	if _, err := am.GetOrCreateUser("admin", "admin", true); err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	if err := am.SaveUserSettings("admin", map[string]interface{}{
+		retired: "left over in a profile",
+		"theme": "yellow",
+	}); err != nil {
+		t.Fatalf("SaveUserSettings: %v", err)
+	}
+	if err := config.SaveSettingsFile(map[string]interface{}{
+		retired:        "left over in the instance store",
+		"downloadPath": "/home/nonroot/Music",
+	}); err != nil {
+		t.Fatalf("SaveSettingsFile: %v", err)
+	}
+
+	if err := PromoteInstanceSettings(am); err != nil {
+		t.Fatalf("PromoteInstanceSettings: %v", err)
+	}
+
+	instance, err := config.LoadSettingsFile()
+	if err != nil {
+		t.Fatalf("LoadSettingsFile: %v", err)
+	}
+	if _, still := instance[retired]; still {
+		t.Errorf("%s survived in the instance store", retired)
+	}
+	if instance["downloadPath"] != "/home/nonroot/Music" {
+		t.Errorf("a live key was lost with the retired one: %v", instance["downloadPath"])
+	}
+
+	profile, err := am.GetUser("admin")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if _, still := profile.Settings[retired]; still {
+		t.Errorf("%s survived in the profile", retired)
+	}
+	if profile.Settings["theme"] != "yellow" {
+		t.Error("a user-scoped key was stripped along with the retired one")
+	}
+
+	// Idempotent: nothing left to remove, and nothing else removed either.
+	if err := PromoteInstanceSettings(am); err != nil {
+		t.Fatalf("second PromoteInstanceSettings: %v", err)
+	}
+	again, _ := config.LoadSettingsFile()
+	if again["downloadPath"] != "/home/nonroot/Music" {
+		t.Errorf("second run changed downloadPath: %v", again["downloadPath"])
+	}
+}
