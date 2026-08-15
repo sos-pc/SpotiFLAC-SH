@@ -60,16 +60,25 @@ var instanceKeys = map[string]bool{
 	"spotFetchAPIUrl":   true, // one fallback endpoint, and it is a third party
 	"createM3u8File":    true, // whether M3U8s are written into that one Jellyfin
 
-	// The Spotify application this deployment authenticates against. Public
-	// by design in OAuth — it is in every authorize URL the browser follows —
-	// so this is instance-scoped for ownership, not secrecy: one deployment,
-	// one registered application, whose redirect URI is registered against
-	// this host and nobody else's.
-	//
-	// There is deliberately no client SECRET key here or anywhere. The flow is
-	// Authorization Code + PKCE, which needs none, so the one credential this
-	// feature could have leaked simply is not stored.
-	"spotifyClientId": true,
+}
+
+// retiredKeys are keys a past version wrote and this one no longer knows. The
+// value is why, so the next reader does not have to dig through git to find out
+// whether the key is dead or merely undocumented.
+//
+// They matter because the settings blob is an untyped map: a key nobody writes
+// any more is not dropped by a struct field disappearing. It sits in config.json
+// and in user profiles, gets merged into every effective blob, and ships to
+// every client — forever, unless something removes it. PromoteInstanceSettings
+// does, at startup.
+var retiredKeys = map[string]string{
+	"spotifyClientId": "the per-account Spotify connection was removed in #92",
+}
+
+// RetiredReason reports whether a key has been retired, and why.
+func RetiredReason(key string) (string, bool) {
+	why, ok := retiredKeys[key]
+	return why, ok
 }
 
 // ScopeOf reports who owns key.

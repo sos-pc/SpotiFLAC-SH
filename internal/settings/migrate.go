@@ -32,6 +32,8 @@ import (
 //   - Strip: remove instance-scoped keys from every profile. They are ignored on
 //     read from now on, but leaving them means the next reader who forgets the
 //     filter finds a value that looks authoritative.
+//   - Retire: remove keys no version writes any more, from the instance store
+//     and from every profile. See retiredKeys.
 //
 // Idempotent: a second run promotes nothing (the keys are present) and strips
 // nothing (the profiles are clean), so it is safe on every start.
@@ -120,7 +122,18 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 				"keys", seeded, "from_user", src.ID)
 		}
 	}
-	if promoted > 0 || seeded > 0 {
+	retired := 0
+	for key := range instance {
+		why, dead := RetiredReason(key)
+		if !dead {
+			continue
+		}
+		delete(instance, key)
+		retired++
+		slog.Info("[Settings] Removed a retired instance key", "key", key, "why", why)
+	}
+
+	if promoted > 0 || seeded > 0 || retired > 0 {
 		if err := config.SaveSettingsFile(instance); err != nil {
 			return err
 		}
@@ -135,6 +148,12 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 		clean := make(map[string]interface{}, len(u.Settings))
 		changed := false
 		for k, v := range u.Settings {
+			if why, dead := RetiredReason(k); dead {
+				changed = true
+				slog.Info("[Settings] Removed a retired key from a profile",
+					"key", k, "user", u.ID, "why", why)
+				continue
+			}
 			if ScopeOf(k) != ScopeInstance {
 				clean[k] = v
 				continue
@@ -157,9 +176,10 @@ func PromoteInstanceSettings(am *auth.AuthManager) error {
 		stripped++
 	}
 
-	if promoted > 0 || seeded > 0 || stripped > 0 {
+	if promoted > 0 || seeded > 0 || stripped > 0 || retired > 0 {
 		slog.Info("[Settings] Scope migration done",
-			"promoted", promoted, "house_defaults_seeded", seeded, "profiles_stripped", stripped)
+			"promoted", promoted, "house_defaults_seeded", seeded,
+			"profiles_stripped", stripped, "retired_instance_keys", retired)
 	}
 	return nil
 }

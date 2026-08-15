@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Link2, User, Loader2, Check } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Search, Link2, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -14,11 +14,8 @@ import {
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
   AddWatchlistsBatch,
-  GetMyPlaylists,
   GetProfilePlaylists,
-  GetSpotifyConnection,
   SearchSpotifyProfiles,
-  StartSpotifyConnection,
   type PickerPlaylist,
   type SpotifyProfile,
 } from "@/lib/rpc";
@@ -27,13 +24,11 @@ import {
 // and repeating. Twelve times for twelve playlists. This is the same operation
 // with the list in front of you.
 //
-// Three sources (see docs/multi-user-readiness-plan.md §8): your own playlists
-// over OAuth, someone's public profile, and a URL. All three work now; the
-// first one explains itself when the operator has registered no Spotify
-// application, or when this account has not connected yet, rather than showing
-// a dead tab.
+// Two sources (see docs/multi-user-readiness-plan.md §8): someone's public
+// profile, and a URL. Both read Spotify anonymously, so neither asks an account
+// holder to sign in and neither reaches a playlist its owner keeps private.
 
-type Source = "mine" | "profile" | "url";
+type Source = "profile" | "url";
 type OwnerFilter = "all" | "owned" | "followed";
 
 export function PlaylistPicker({
@@ -52,15 +47,65 @@ export function PlaylistPicker({
 }) {
   const [source, setSource] = useState<Source>("profile");
 
-  // ── Profile search ────────────────────────────────────────────────────────
+  // ── The chosen profile's playlists ────────────────────────────────────────
+  const [profile, setProfile] = useState<SpotifyProfile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [playlists, setPlaylists] = useState<PickerPlaylist[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<OwnerFilter>("all");
+  const [needle, setNeedle] = useState("");
+
+  const openProfile = useCallback(async (p: SpotifyProfile) => {
+    setProfile(p);
+    setLoading(true);
+    setPlaylists([]);
+    setSelected(new Set());
+    try {
+      const entries = await GetProfilePlaylists(p.id);
+      setPlaylists(entries);
+      // A pasted link tells us an id and nothing else. The profile's own
+      // playlists carry its display name, so borrow it rather than heading the
+      // list with an opaque string the user never chose.
+      if (p.display_name === p.id) {
+        const owner = entries.find((e) => e.owned && e.owner_name)?.owner_name;
+        if (owner) setProfile({ ...p, display_name: owner });
+      }
+    } catch (e) {
+      toast.error(`Could not read that profile: ${e}`);
+      setProfile(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ── Finding a profile ─────────────────────────────────────────────────────
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [profiles, setProfiles] = useState<SpotifyProfile[] | null>(null);
-  const [profile, setProfile] = useState<SpotifyProfile | null>(null);
+
+  // Display names are not unique on Spotify — several accounts answer to
+  // "Marc" — so searching is a poor way to reach one specific profile, your own
+  // included. A profile link is unambiguous, and it is what the address bar
+  // already holds when you are looking at the profile. Accepting it here is
+  // what gives "find my own playlists" an answer that always works.
+  const profileIDFromInput = (raw: string) => {
+    const uri = /^spotify:user:([^\s:]+)$/.exec(raw);
+    if (uri) return uri[1];
+    const url = /^(?:https?:\/\/)?open\.spotify\.com\/user\/([^/?#\s]+)/.exec(
+      raw,
+    );
+    return url ? url[1] : "";
+  };
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
+    const pasted = profileIDFromInput(q);
+    if (pasted) {
+      const id = decodeURIComponent(pasted);
+      void openProfile({ id, display_name: id });
+      return;
+    }
     setSearching(true);
     setProfiles(null);
     try {
@@ -70,62 +115,7 @@ export function PlaylistPicker({
     } finally {
       setSearching(false);
     }
-  }, [query]);
-
-  // ── The chosen profile's playlists ────────────────────────────────────────
-  const [loading, setLoading] = useState(false);
-  const [playlists, setPlaylists] = useState<PickerPlaylist[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<OwnerFilter>("all");
-  const [needle, setNeedle] = useState("");
-
-  // ── My own playlists ──────────────────────────────────────────────────────
-  // The only source that reports a track count, and the only one that sees
-  // private and collaborative playlists.
-  const [mineState, setMineState] = useState<
-    "loading" | "unconfigured" | "disconnected" | "ready" | "error"
-  >("loading");
-  const [mineError, setMineError] = useState("");
-
-  const loadMine = useCallback(async () => {
-    setMineState("loading");
-    try {
-      const conn = await GetSpotifyConnection();
-      if (!conn.configured) {
-        setMineState("unconfigured");
-        return;
-      }
-      if (!conn.connected) {
-        setMineState("disconnected");
-        return;
-      }
-      setPlaylists(await GetMyPlaylists());
-      setSelected(new Set());
-      setMineState("ready");
-    } catch (e) {
-      // A 401 from Spotify surfaces here as a 502 and means the account was
-      // disconnected on their side. Offering to reconnect is the useful answer;
-      // a stack trace is not.
-      setMineError(String(e));
-      setMineState("error");
-    }
-  }, []);
-
-
-  const openProfile = useCallback(async (p: SpotifyProfile) => {
-    setProfile(p);
-    setLoading(true);
-    setPlaylists([]);
-    setSelected(new Set());
-    try {
-      setPlaylists(await GetProfilePlaylists(p.id));
-    } catch (e) {
-      toast.error(`Could not read that profile: ${e}`);
-      setProfile(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  }, [query, openProfile]);
 
   const playlistURL = (p: PickerPlaylist) =>
     `https://open.spotify.com/playlist/${p.id}`;
@@ -139,24 +129,6 @@ export function PlaylistPicker({
       return true;
     });
   }, [playlists, filter, needle]);
-
-  // What "Watch 12 playlists" is actually about to do. The plan asked for this
-  // before the button, because bulk add is the easiest gesture in the app and
-  // also the one that fills the household's queue for hours. Only the connected
-  // account's source reports counts, so the total is stated as a minimum rather
-  // than invented for the sources that cannot say.
-  const selectedCost = useMemo(() => {
-    let known = 0;
-    let tracks = 0;
-    for (const p of playlists) {
-      if (!selected.has(playlistURL(p))) continue;
-      if (p.track_count !== undefined) {
-        known++;
-        tracks += p.track_count;
-      }
-    }
-    return { known, tracks, partial: known < selected.size };
-  }, [playlists, selected]);
 
   const toggle = (p: PickerPlaylist) =>
     setSelected((prev) => {
@@ -187,14 +159,6 @@ export function PlaylistPicker({
 
   // ── URL source ────────────────────────────────────────────────────────────
   const [url, setUrl] = useState("");
-
-  const connectSpotify = useCallback(async () => {
-    try {
-      window.location.href = await StartSpotifyConnection();
-    } catch (e) {
-      toast.error(`Could not start the connection: ${e}`);
-    }
-  }, []);
 
   // Carried by the whole batch. The dialog this replaced offered both, and
   // dropping them would have been a quiet loss of capability rather than a
@@ -241,14 +205,6 @@ export function PlaylistPicker({
     [onAdded, onClose, intervalHours, syncDeletions],
   );
 
-  useEffect(() => {
-    if (!isOpen || source !== "mine") return;
-    // External-system sync when the tab becomes active, same shape as the
-    // settings tabs' own loads.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadMine();
-  }, [isOpen, source, loadMine]);
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[720px] w-[95vw] max-h-[85vh] flex flex-col">
@@ -261,17 +217,6 @@ export function PlaylistPicker({
         </DialogHeader>
 
         <div className="flex gap-2" role="tablist" aria-label="Playlist source">
-          <Button
-            role="tab"
-            aria-selected={source === "mine"}
-            variant={source === "mine" ? "secondary" : "ghost"}
-            size="sm"
-            className="gap-1.5"
-            onClick={() => setSource("mine")}
-          >
-            <User className="h-3.5 w-3.5" />
-            My playlists
-          </Button>
           <Button
             role="tab"
             aria-selected={source === "profile"}
@@ -297,59 +242,6 @@ export function PlaylistPicker({
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-[280px]">
-          {source === "mine" && mineState === "loading" && (
-            <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Reading your Spotify account…
-            </p>
-          )}
-
-          {source === "mine" && mineState === "unconfigured" && (
-            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              <p className="mb-1 font-medium text-foreground">
-                No Spotify application is configured for this instance
-              </p>
-              <p>
-                An administrator registers one, once, in Settings → APIs. Until
-                then a public profile or a link works — they just cannot reach
-                private playlists.
-              </p>
-            </div>
-          )}
-
-          {source === "mine" && mineState === "disconnected" && (
-            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              <p className="mb-1 font-medium text-foreground">
-                Your Spotify account is not connected
-              </p>
-              <p className="mb-4">
-                Connecting it shows your own playlists here, private and
-                collaborative ones included, with their track counts.
-              </p>
-              <Button onClick={() => void connectSpotify()}>
-                Connect Spotify
-              </Button>
-            </div>
-          )}
-
-          {source === "mine" && mineState === "error" && (
-            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              <p className="mb-1 font-medium text-foreground">
-                Spotify would not answer for this account
-              </p>
-              {/* The likely cause, stated: a refresh token that expired or was
-                  revoked looks exactly like this, and reconnecting is the fix. */}
-              <p className="mb-4">
-                Often an expired connection — they last 180 days here.
-                Reconnecting usually resolves it.
-              </p>
-              <p className="mb-4 font-mono text-xs">{mineError}</p>
-              <Button variant="outline" onClick={() => void connectSpotify()}>
-                Reconnect
-              </Button>
-            </div>
-          )}
-
           {source === "profile" && !profile && (
             <div className="space-y-3">
               <form
@@ -360,27 +252,37 @@ export function PlaylistPicker({
                 }}
               >
                 <Label htmlFor="profile-q" className="sr-only">
-                  Spotify profile name
+                  Spotify profile name or link
                 </Label>
                 <Input
                   id="profile-q"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search a Spotify profile by name"
+                  placeholder="Profile name, or paste a profile link"
+                  aria-describedby="profile-q-help"
                 />
                 <Button type="submit" disabled={searching || !query.trim()}>
                   {searching ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    "Search"
+                    "Open"
                   )}
                 </Button>
               </form>
 
+              <p
+                id="profile-q-help"
+                className="px-1 text-xs text-muted-foreground"
+              >
+                For your own playlists, open your Spotify profile and paste its
+                link here. Only playlists you have made public are listed.
+              </p>
+
               {profiles?.length === 0 && (
                 <p className="px-1 text-sm text-muted-foreground">
                   No profile found. Display names are not unique on Spotify, so
-                  a common one may need the exact spelling.
+                  a common one may need the exact spelling — or paste the
+                  profile link instead.
                 </p>
               )}
 
@@ -424,9 +326,8 @@ export function PlaylistPicker({
             </div>
           )}
 
-          {(source === "mine" ? mineState === "ready" : source === "profile" && !!profile) && (
+          {source === "profile" && !!profile && (
             <div className="space-y-3">
-              {profile && (
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm">
                   <span className="font-medium">{profile.display_name}</span>
@@ -448,7 +349,6 @@ export function PlaylistPicker({
                   Another profile
                 </Button>
               </div>
-              )}
 
               <div className="flex flex-wrap items-center gap-2">
                 <Label htmlFor="playlist-filter" className="sr-only">
@@ -517,11 +417,6 @@ export function PlaylistPicker({
                             <span className="min-w-0 flex-1 truncate text-sm">
                               {p.name}
                             </span>
-                            {p.track_count !== undefined && (
-                              <span className="shrink-0 text-xs text-muted-foreground">
-                                {p.track_count} track{p.track_count === 1 ? "" : "s"}
-                              </span>
-                            )}
                             {!p.owned && (
                               <span className="shrink-0 text-xs text-muted-foreground">
                                 followed
@@ -545,8 +440,8 @@ export function PlaylistPicker({
                   )}
                   {playlists.length === 0 && (
                     <p className="p-4 text-sm text-muted-foreground">
-                      This profile shares no playlists publicly. Private ones are
-                      only reachable by connecting the account.
+                      This profile shares no playlists publicly — check the
+                      profile id, or ask its owner to make a playlist public.
                     </p>
                   )}
                 </>
@@ -611,14 +506,14 @@ export function PlaylistPicker({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t pt-3">
-          {/* Announced, because a count that only changes visually does not
-              exist for anyone using a screen reader. */}
+          {/* What "Watch" is about to do, announced: a count that only
+              changes visually does not exist for anyone using a screen reader.
+              Playlists, not tracks — no source left can report a track count
+              without opening every playlist. */}
           <p aria-live="polite" className="text-sm text-muted-foreground">
             {selected.size === 0
               ? "Nothing selected"
-              : selectedCost.tracks > 0
-                ? `${selected.size} playlist${selected.size === 1 ? "" : "s"} — ${selectedCost.partial ? "at least " : ""}${selectedCost.tracks} tracks`
-                : `${selected.size} playlist${selected.size === 1 ? "" : "s"} selected`}
+              : `${selected.size} playlist${selected.size === 1 ? "" : "s"} selected`}
           </p>
           <Button
             disabled={adding || selected.size === 0}

@@ -292,10 +292,7 @@ export const AddToWatchlist = (req: {
   sync_deletions: boolean;
   settings: Partial<Settings>;
 }) => rest<WatchedPlaylist & { message?: string }>("POST", "/watchlists", req);
-// One row of the playlist picker, whatever source produced it. track_count is
-// absent on the profile source — Spotify's profile endpoint does not return one
-// — so the view omits the column rather than printing "0 tracks" about a
-// playlist with 300.
+// One row of the playlist picker, whatever source produced it.
 export interface PickerPlaylist {
   uri: string;
   id: string;
@@ -304,40 +301,12 @@ export interface PickerPlaylist {
   owner_name?: string;
   owner_uri?: string;
   owned: boolean;
-  track_count?: number;
 }
 export interface SpotifyProfile {
   id: string;
   display_name: string;
   image_url?: string;
 }
-// The connection between one account and Spotify. `configured` is about the
-// INSTANCE — whether an administrator has registered a Spotify application at
-// all — and is reported separately from `connected` so a screen can tell
-// "nobody has set this up" apart from "you have not connected yet".
-export interface SpotifyConnection {
-  configured: boolean;
-  redirect_uri: string;
-  connected: boolean;
-  display_name?: string;
-  spotify_id?: string;
-  connected_at?: string;
-}
-export const GetSpotifyConnection = () =>
-  rest<SpotifyConnection>("GET", "/spotify/connection");
-export const StartSpotifyConnection = () =>
-  rest<{ authorize_url: string }>("POST", "/spotify/connection").then(
-    (r) => r.authorize_url,
-  );
-export const DisconnectSpotify = () =>
-  rest<void>("DELETE", "/spotify/connection");
-// 428 when the account is not connected — not an error state, just what a user
-// who has not connected looks like.
-export const GetMyPlaylists = () =>
-  rest<{ playlists: PickerPlaylist[] }>("GET", "/spotify/me/playlists").then(
-    (r) => r.playlists ?? [],
-  );
-
 export const SearchSpotifyProfiles = (q: string, limit = 10) =>
   rest<{ profiles: SpotifyProfile[] }>(
     "GET",
