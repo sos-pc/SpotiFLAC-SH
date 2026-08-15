@@ -113,6 +113,37 @@ That retirement is also why the build now runs a probe before each patch — see
 [`patches/README.md`](patches/README.md). Upstream adopting our fix used to
 fail the build and freeze this image on its previous version.
 
+## Where the download providers come from
+
+**Not from the wheel.** SpotiFLAC 3.0.0 deleted `SpotiFLAC/providers/` — eight
+Python modules — and replaced them with JavaScript extensions fetched from a
+registry. 1.7.3 carried that registry's URL as a hardcoded constant; 3.0.0
+removed it and expects `SPOTIFLAC_REGISTRIES` from the environment, a `.env`
+file, or the GUI settings screen, none of which a headless image has.
+
+The Dockerfile therefore installs them **at build time**, with the registry URL
+as an `ARG` that deliberately does not become an `ENV`:
+
+| | at build | at runtime |
+|---|---|---|
+| `SPOTIFLAC_REGISTRIES` | set, from the `ARG` | **unset** |
+| effect | seven extensions installed into the image | manager skips its registry check and uses what is installed |
+
+That is what makes the image reproducible again — `SPOTIFLAC_VERSION` pins the
+wheel, and this pins the code that actually downloads — and what stops every
+container recreation from re-fetching seven bundles from GitHub.
+
+An operator who wants runtime updates can set `SPOTIFLAC_REGISTRIES` in compose.
+Then it is a choice.
+
+**The exposure, stated:** the bundles are executable JavaScript from a
+third-party repository, and their `sha256` comes from the same registry that
+serves them — good against corruption, not against a compromised registry.
+Pinning them into an image someone can inspect is better than fetching them
+fresh on every start; it is not the same as trusting them.
+
+Full measurements: [docs/engine-3.0-impact-plan.md](../docs/engine-3.0-impact-plan.md).
+
 ## Runtime hooks
 
 Behaviour that must happen *inside* an upstream function, but where a textual
