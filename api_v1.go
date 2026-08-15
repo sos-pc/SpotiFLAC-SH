@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -177,25 +176,6 @@ func (s *Server) cleanUploadOrLibraryPaths(root string, paths []string) ([]strin
 	return out, nil
 }
 
-// isSameOriginRequest reports whether a browser-sent Origin header (when
-// present) matches the Host this request was addressed to. Requests with no
-// Origin header (same-origin navigations, curl, server-to-server calls)
-// are treated as same-origin. Used to keep token-issuing endpoints from
-// being reachable via a cross-origin fetch() from an untrusted page, since
-// the wildcard CORS policy on this API would otherwise let any website read
-// the response.
-func isSameOriginRequest(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	return u.Host == r.Host
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CORS middleware
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,7 +224,7 @@ func isJobDownloadPath(path string) bool {
 
 // v1Auth wraps a handler with CORS + local bypass + JWT/API Key authentication.
 func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
-	return v1CORSMiddleware(localBypassMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return v1CORSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. JWT Bearer
 		token := ""
 		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
@@ -263,10 +243,9 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 				// they expire (up to 24h). Comparing against the live
 				// TokenVersion closes that gap for the one case that bumps
 				// it today (a Jellyfin admin-flag change) without a DB read
-				// on API-key auth (already checked live) or on lookup
-				// failure (e.g. the local-admin bypass profile, which is
-				// never persisted — treated as unrevocable, same as before
-				// this check existed).
+				// on API-key auth (already checked live) or on a lookup
+				// failure, which is treated as unrevocable — same as before
+				// this check existed.
 				if !claims.IsAPIKey && s.ctr.Auth != nil {
 					if profile, err := s.ctr.Auth.GetUser(claims.UserID); err == nil && profile.TokenVersion != claims.TokenVersion {
 						writeV1Error(w, http.StatusUnauthorized, "session revoked")
@@ -289,7 +268,7 @@ func (s *Server) v1Auth(next http.HandlerFunc) http.Handler {
 		}
 
 		writeV1Error(w, http.StatusUnauthorized, "unauthorized")
-	})))
+	}))
 }
 
 // userIDFromContext returns the authenticated user's ID, or "" if anonymous.
@@ -368,7 +347,6 @@ func callerHasPermission(user *auth.JWTClaims, perm string) bool {
 func (s *Server) registerV1Routes() {
 	// ── Auth & API Keys & Tidal & Proxies ─────────────────────────────────
 	s.mux.Handle("POST /api/v1/auth/login", v1CORSMiddleware(http.HandlerFunc(s.v1Login)))
-	s.mux.Handle("POST /api/v1/auth/local", v1CORSMiddleware(http.HandlerFunc(s.v1LocalLogin)))
 	s.mux.Handle("GET /api/v1/auth/me", s.v1Auth(s.v1Me))
 	s.mux.Handle("GET /api/v1/auth/stream-token", s.v1Auth(s.v1StreamToken))
 	s.mux.Handle("GET /api/v1/auth/keys", s.v1Auth(s.v1ListAPIKeys))
@@ -398,33 +376,6 @@ func (s *Server) registerV1Routes() {
 
 	// ── Admin closed write actions on the catalog ─────────────────────────
 	s.registerCatalogActionRoutes()
-}
-
-// v1LocalLogin handles POST /api/v1/auth/local — auto-login on direct LAN access.
-func (s *Server) v1LocalLogin(w http.ResponseWriter, r *http.Request) {
-	if !localBypassEnabled() || !isLocalIP(r) {
-		writeV1Error(w, http.StatusForbidden, "local bypass not enabled")
-		return
-	}
-	// This endpoint mints an admin token from nothing but a "local" source
-	// IP, and the API's CORS policy is wildcarded — without this check any
-	// website open in a LAN browser could fetch() it cross-origin and read
-	// back an admin JWT (a "simple request" needs no preflight since this
-	// handler doesn't read the body). Reject anything that isn't same-origin.
-	if !isSameOriginRequest(r) {
-		writeV1Error(w, http.StatusForbidden, "cross-origin request not allowed")
-		return
-	}
-	profile := &auth.UserProfile{ID: "local-admin", DisplayName: "Local Admin", IsAdmin: true}
-	token, err := auth.GenerateJWT(profile)
-	if err != nil {
-		writeV1Error(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-	writeV1JSON(w, http.StatusOK, map[string]interface{}{
-		"token": token,
-		"user":  map[string]interface{}{"id": profile.ID, "display_name": profile.DisplayName, "is_admin": profile.IsAdmin},
-	})
 }
 
 // jobVisibleTo reports whether user may see job in a PERSONAL view — the

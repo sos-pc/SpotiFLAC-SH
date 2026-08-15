@@ -47,7 +47,6 @@ services:
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
-      # - DISABLE_AUTH_ON_LAN=true   # see authentication.md
       - ENGINE_URL=http://spotiflac-engine:8080
       - ENGINE_SERVICES=qobuz,deezer,amazon,tidal
     user: "1000:1000"
@@ -145,7 +144,6 @@ sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
 |----------|---------|-------------|
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, **reachable from inside the container** (so not `localhost` if Jellyfin runs on the host). |
 | `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates 32 random bytes on first start and writes them to `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas, or to inject one from a secret manager. |
-| `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md). |
 | `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for the client IP. Set it **only** behind a proxy you control — see [archive/deployment-hardening.md](archive/deployment-hardening.md). |
 | `LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error`. |
 | `ENGINE_URL` | *(unset)* | Where the download engine's shim listens, e.g. `http://spotiflac-engine:8080`. **Required in practice** — see below. |
@@ -218,7 +216,7 @@ location / {
 }
 ```
 
-> The `X-Forwarded-For` header set by the proxy is what prevents `DISABLE_AUTH_ON_LAN` from triggering on internet requests — never strip it.
+> The `X-Forwarded-For` header set by the proxy is what `TRUST_PROXY_HEADERS` reads to rate-limit per real client rather than per proxy — never strip it.
 
 > **Login rate limiting behind a reverse proxy:** set `TRUST_PROXY_HEADERS=true` so the login rate limiter (`POST /api/v1/auth/login`) keys off the real client IP from `X-Forwarded-For`/`X-Real-IP` instead of the proxy's own IP. This is **off by default** — trusting those headers unconditionally would let any client on the LAN (or anything sharing a Docker network with the container) forge a fresh IP on every request and bypass the lockout entirely. Only set it when every request genuinely passes through a proxy you control that overwrites these headers (as in the examples on this page); never set it if the app is reachable directly.
 

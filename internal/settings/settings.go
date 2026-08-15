@@ -131,7 +131,7 @@ func ServerJobSettings(s DownloadSettings, serviceOverride string) jobs.JobSetti
 // EffectiveDownloadSettings resolves the settings that should govern
 // behavior for userID: that user's own saved settings (UserProfile.Settings
 // in BoltDB) if they have any, else the operator's global config.json.
-// userID == "" (no authenticated user — DISABLE_AUTH_ON_LAN, or a
+// userID == "" (no authenticated user — a background caller, or a
 // system-wide operation with no single user to attribute) always resolves
 // to the global settings.
 //

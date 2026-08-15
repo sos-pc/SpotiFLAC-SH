@@ -103,8 +103,8 @@ func TestGetOrCreateUserHealsMissingID(t *testing.T) {
 // TestGetOrCreateUserHealsMissingID, found by auditing every other writer
 // of bucketUsers after fixing GetOrCreateUser: SaveUserSettings is the
 // sole writer for a userID that has never logged in through
-// GetOrCreateUser (e.g. the local-admin bypass profile, never persisted
-// by design) — without setting ID explicitly here too, that first write
+// GetOrCreateUser (e.g. an API key issued for no particular user, which
+// no login ever creates) — without setting ID explicitly here too, that write
 // would freeze ID="" forever, same as the original bug.
 func TestSaveUserSettingsSetsIDOnFirstWrite(t *testing.T) {
 	am := newTestAuthManager(t)
