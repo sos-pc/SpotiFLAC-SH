@@ -120,6 +120,20 @@ func CreateLibraryFile(ctx context.Context, q Querier, lf *LibraryFile) error {
 // GetActiveLibraryFile returns the current non-deleted file for a track,
 // or (nil, nil) if there is none. The partial unique index guarantees at
 // most one row matches.
+//
+// "Active" means exactly `status != 'deleted'` — the predicate of
+// idx_library_files_active_per_track in migration 0002, not a synonym for
+// "on disk". A row marked "missing" IS active and is returned, deliberately:
+//
+//   - upsertActiveLibraryFile has to find it, or a re-download of a missing
+//     track would insert a second non-deleted row and violate that index;
+//   - the library rebuild has to find it to flip it back to "present" when
+//     the file reappears.
+//
+// Callers that need "is the file there right now" stat the path themselves —
+// checkCatalogDedup does, which is why a deleted file is re-downloaded rather
+// than deduplicated away. Narrowing this filter to "present" would break both
+// callers above; it was considered on 2026-08-16 and rejected for that reason.
 func GetActiveLibraryFile(ctx context.Context, q Querier, spotifyID string) (*LibraryFile, error) {
 	if spotifyID == "" {
 		return nil, errors.New("library_file: spotify_id required")
@@ -240,9 +254,13 @@ func MarkLibraryFileDeleted(ctx context.Context, q Querier, id string) error {
 	return nil
 }
 
-// UpdateLibraryFileStatus changes the status field (e.g. to "missing" or
-// "corrupt") and bumps last_verified_at. Use MarkLibraryFileDeleted for
-// the deleted state to keep that path explicit.
+// UpdateLibraryFileStatus changes the status field — in practice between
+// "present" and "missing", which is what the daily verify loop moves rows
+// between — and bumps last_verified_at. Use MarkLibraryFileDeleted for the
+// deleted state to keep that path explicit.
+//
+// "corrupt" is a legal value the callers never pass; see the Status constants
+// in quality.go for why nothing produces it.
 func UpdateLibraryFileStatus(ctx context.Context, q Querier, id, status string) error {
 	if id == "" {
 		return errors.New("library_file: id required")
