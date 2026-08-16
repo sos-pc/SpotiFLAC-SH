@@ -31,6 +31,56 @@ const catalogMirrorTimeout = 10 * time.Second
 // failing fast lets the existing filesystem fallback kick in.
 const catalogLookupTimeout = 5 * time.Second
 
+// catalogDeleteTimeout caps the row update that follows a deliberate file
+// deletion: one indexed lookup and one UPDATE. Short, because the file is
+// already gone by the time this runs — the catalog is recording a fact, not
+// deciding one, and the daily verify loop is the backstop if it fails.
+const catalogDeleteTimeout = 5 * time.Second
+
+// recordFileDeleted marks spotifyID's catalog row as deliberately deleted,
+// after SpotiFLAC itself removed the file.
+//
+// Why this is not left to the daily verify loop, which would notice the file
+// is gone anyway: it would mark the row "missing", and "missing" means
+// something else. The schema carries two different facts —
+//
+//	deleted : we removed it on purpose. Audit trail, nothing to recover.
+//	missing : it vanished behind our back. Something to offer to fix.
+//
+// — and POST /api/v1/library/redownload-missing acts on the second. Letting a
+// deliberate deletion decay into "missing" makes the app offer to re-download
+// the files a user has just chosen to delete, which is the opposite of what
+// they asked for. MarkLibraryFileDeleted's own doc comment already names this
+// case ("when sync_deletions has removed the underlying file"); it was simply
+// never called from here.
+//
+// Best-effort, like everything else in this file: a sick catalog must not
+// wedge the watcher, and the verify loop still reconciles what this misses —
+// as "missing" rather than "deleted", which is wrong but not harmful on its
+// own.
+func (w *Watcher) recordFileDeleted(spotifyID string) {
+	if w.catalog == nil || spotifyID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), catalogDeleteTimeout)
+	defer cancel()
+
+	lf, err := db.GetActiveLibraryFile(ctx, w.catalog, spotifyID)
+	if err != nil {
+		slog.Warn("[Catalog] Could not look up library file to mark deleted",
+			"spotify_id", spotifyID, "err", err)
+		return
+	}
+	if lf == nil {
+		// Never catalogued, or already deleted. Nothing to record either way.
+		return
+	}
+	if err := db.MarkLibraryFileDeleted(ctx, w.catalog, lf.ID); err != nil {
+		slog.Warn("[Catalog] Could not mark library file deleted",
+			"spotify_id", spotifyID, "library_file_id", lf.ID, "err", err)
+	}
+}
+
 // mirrorWatchlistToCatalog updates the SQLite catalog to reflect the
 // current playlist contents:
 //   - UpsertTrackStub for each track_id so the FK on watchlist_tracks

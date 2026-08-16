@@ -512,6 +512,31 @@ func (w *Watcher) syncPlaylist(pl WatchedPlaylist) {
 // watchlist still references the same Spotify ID. Returns the number of files
 // deleted. No-op returning 0 when deletion-sync is disabled or the freshly
 // fetched playlist came back empty. Extracted from syncPlaylist (R4).
+// deleteTrackFile removes a track's audio file because SpotiFLAC decided to —
+// sync_deletions dropped it from a playlist, or its watchlist was removed — and
+// records that decision in the catalog.
+//
+// One function rather than an os.Remove at each site, because the two halves
+// belong together: for eight months the file was deleted and the catalog was
+// not told, so the daily verify loop later relabelled every deliberate deletion
+// as "missing" and the app offered to re-download files the user had just
+// removed. Pairing them here is what stops the next deletion site repeating it.
+//
+// Returns whether the file was actually removed, so callers can keep their own
+// counters and skip their own follow-up work.
+func (w *Watcher) deleteTrackFile(spotifyID, path, outputRoot, reason string) bool {
+	if err := os.Remove(path); err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("[Watcher] Failed to delete file", "reason", reason, "path", path, "err", err)
+		}
+		return false
+	}
+	slog.Info("[Watcher] Deleted file", "reason", reason, "spotify_id", spotifyID, "path", path)
+	removeEmptyParents(filepath.Dir(path), outputRoot)
+	w.recordFileDeleted(spotifyID)
+	return true
+}
+
 func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) int {
 	if !pl.SyncDeletions || len(currentTrackIDs) == 0 {
 		return 0
@@ -578,14 +603,9 @@ func (w *Watcher) syncDeletions(pl *WatchedPlaylist, currentTrackIDs []string) i
 		if inOtherPlaylist {
 			slog.Debug("[Watcher] Track removed from playlist but present in another watchlist, skipping file deletion", "spotify_id", knownID, "playlist", pl.Name)
 		} else if path := files[knownID]; path != "" {
-			if err := os.Remove(path); err != nil {
-				if !os.IsNotExist(err) {
-					slog.Warn("[Watcher] Failed to delete file", "path", path, "err", err)
-				}
+			if !w.deleteTrackFile(knownID, path, outputRoot, "dropped from playlist") {
 				continue
 			}
-			slog.Info("[Watcher] Deleted file", "spotify_id", knownID, "path", path)
-			removeEmptyParents(filepath.Dir(path), outputRoot)
 			deletedCount++
 			// The job record keeps pointing at where it put the file, and that
 			// stays true: it did put it there. Clearing it was necessary while
@@ -769,14 +789,7 @@ func (w *Watcher) RemoveWatchlist(id string) error {
 				slog.Debug("[Watcher] Track in another watchlist, skipping file deletion", "spotify_id", spotifyID)
 				continue
 			}
-			if err := os.Remove(path); err != nil {
-				if !os.IsNotExist(err) {
-					slog.Warn("[Watcher] Failed to delete file (watchlist removed)", "path", path, "err", err)
-				}
-				continue
-			}
-			slog.Info("[Watcher] Deleted file (watchlist removed)", "spotify_id", spotifyID, "path", path)
-			removeEmptyParents(filepath.Dir(path), outputRoot)
+			w.deleteTrackFile(spotifyID, path, outputRoot, "watchlist removed")
 		}
 	}
 
