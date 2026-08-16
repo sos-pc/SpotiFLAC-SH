@@ -37,11 +37,11 @@ func TestEngineHandlesRequiresBothURLAndService(t *testing.T) {
 
 func TestEngineStagingDirDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("ENGINE_STAGING_DIR", "")
-	if got := engineStagingDir(); got != "/staging" {
+	if got := EngineStagingDir(); got != "/staging" {
 		t.Errorf("default staging dir = %q, want /staging", got)
 	}
 	t.Setenv("ENGINE_STAGING_DIR", "/mnt/scratch")
-	if got := engineStagingDir(); got != "/mnt/scratch" {
+	if got := EngineStagingDir(); got != "/mnt/scratch" {
 		t.Errorf("override staging dir = %q, want /mnt/scratch", got)
 	}
 }
