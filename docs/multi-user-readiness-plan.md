@@ -725,7 +725,12 @@ URL, and the entire watcher is keyed on `SpotifyURL`.
 
 ## 8a. The flow starts at an empty state that is currently a dead end
 
-**Open.**
+**Mostly done.** The empty state carries the button that opens the picker
+(#89), which is the part this section existed for — it was a screen telling
+people what to do and offering no way to do it. The cost preview is partly
+delivered and cannot be completed as written (see below: no surviving source
+reports a track count). The language question at the end is still the
+operator's, untouched.
 
 This is what a new Jellyfin user sees on their first visit to the Watchlist tab
 (`frontend/src/components/WatchlistPage.tsx:474`):
