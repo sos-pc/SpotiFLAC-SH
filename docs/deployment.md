@@ -169,10 +169,25 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 | File | Purpose |
 |------|---------|
-| `jobs.db` | BoltDB single-file database. Buckets: `jobs`, `watchlist`, `users`, `apikeys`, `history`, `fetch_history`. Two orphans survive in databases created before 2026-07-28 — `proxy_discovery` and `api_proxies`, left from the removed proxy-discovery and proxy-configuration features. Nothing reads either; together they are a few hundred bytes, so they are left in place rather than migrated away. |
+| `jobs.db` | BoltDB single-file database — the **live** half of the state: what the app needs right now. Buckets as measured on the reference deployment 2026-08-17: `jobs`, `watchlist`, `users`, `apikeys`, `DownloadHistory`, `FetchHistory`, `SpotifyTrackISRC`, `community_session`, and the orphan `proxy_discovery` (left from the removed proxy-discovery feature; nothing reads it, a few hundred bytes, kept rather than migrated away). Old jobs are pruned every 24 h, which is why anything that must outlive them lives in `catalog.db` instead. |
 | `jwt_secret` | Auto-generated JWT signing key (mode `0600`). Skipped when `JWT_SECRET` env var is set. |
 | `tidal_token.json` | Cached Tidal Device Code token (mode `0644`). Created on successful auth, deleted on disconnect or refresh failure. Auto-refreshed before expiry. |
-| `config.json` | Legacy global settings (read-only fallback for users with no per-user settings yet). New deployments should not need this — settings are stored per-user inside `jobs.db`. |
+| `catalog.db` | SQLite catalog: `tracks`, `library_files`, `watchlist_tracks`, `playlist_snapshots`, `download_attempts`. The long-term half of the state — what exists on disk, where it came from, what a playlist held on a given day. Survives `jobs.db`'s daily pruning, which is the point of it being separate. Plus `catalog.db-wal` / `-shm` while the app runs. |
+| `config.json` | The **instance settings store**, written by the app. Holds the deployment-wide keys (download path, templates, `jellyfinMusicPath`) plus the house defaults a new account starts from. It was a read-only legacy fallback before the settings split; it is now actively read and written on every start — see [settings-reference.md](settings-reference.md). |
+
+> **Paths inside these databases are CONTAINER paths.** `catalog.db` and
+> `jobs.db` store library files as `/home/nonroot/Music/...`, because that is
+> where the app sees them. From the host that directory is whatever the compose
+> file bind-mounts onto it — `/data/Multimedia/Musique/Spotiflac` on the
+> reference deployment. Inspecting the catalog from the host without
+> translating gives a `stat()` that fails for *every* row, present and missing
+> alike, and nothing raises an error: the answer is uniformly wrong rather than
+> obviously wrong. Read the mapping first:
+> ```bash
+> docker inspect spotiflac --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+> ```
+> A check that returns the same verdict for all rows is measuring the mount, not
+> the files.
 
 > **Backup:** with the example compose file's named volume (`spotiflac_config`), there's no host folder to `cp` directly — go through a throwaway container instead:
 > ```bash
