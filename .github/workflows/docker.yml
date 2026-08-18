@@ -181,12 +181,18 @@ jobs:
       # real though: BtbN tracks ffmpeg master, where Debian ships a years-old
       # branch.)
       #
-      # The runtime is now distroless/cc (see the Dockerfile — `scratch` could
-      # not execute those binaries at all), so glibc/libgcc CVEs are reportable
-      # again and this gate may start failing on them. That is the trade being
-      # made deliberately: the exploitable surface here is ffmpeg parsing
-      # third-party bytes, which is identical on either base — only the report
-      # changes. See docs/ffmpeg-runtime-regression.md §4.
+      # The runtime is distroless/base-nossl plus libgcc_s (see the Dockerfile —
+      # `scratch` could not execute those binaries at all), so glibc/libgcc CVEs
+      # are reportable again and this gate may start failing on them. That is the
+      # trade being made deliberately: the exploitable surface here is ffmpeg
+      # parsing third-party bytes, which is identical on either base — only the
+      # report changes. See docs/ffmpeg-runtime-regression.md §4.
+      #
+      # It stays blocking, and with no ignore-unfixed. The first time that hurt
+      # was CVE-2026-14456 in libssl3, HIGH and unfixed, which halted every
+      # deployment over OpenSSL's QUIC server — code this image does not run.
+      # The answer was to stop shipping OpenSSL, not to stop reporting it: a gate
+      # that is taught to look away has to be taught again for the next one.
       - name: Scan pushed image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
