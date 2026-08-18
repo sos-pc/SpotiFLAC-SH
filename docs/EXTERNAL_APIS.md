@@ -32,7 +32,7 @@ Used strictly for metadata (track names, artists, album art, release dates, IDs)
 - **`https://i.scdn.co/image/`** — Spotify's CDN for downloading high-resolution cover art.
 - **`https://p.scdn.co/mp3-preview/`** — 30-second audio previews.
 
-When the native scraper fails, SpotiFLAC can transparently fall back to a SpotFetch-compatible API if `spotFetchAPIUrl` is set in user settings (default points to `https://spotify.afkarxyz.fun/api`).
+When the native scraper fails, SpotiFLAC can transparently fall back to a SpotFetch-compatible API if `spotFetchAPIUrl` is set in user settings. **It is empty by default** — see [settings-reference.md](settings-reference.md#spotfetch-custom-spotify-metadata-api) for why the previous default was removed.
 
 The Spotify track ID is **persisted into every downloaded audio file** as a `SPOTIFY_ID` tag (Vorbis comment / `TXXX` / iTunes atom). This tag is what `meta.BuildSpotifyIDIndex` later uses to regenerate M3U8 playlists straight from the filesystem, independent of BoltDB.
 

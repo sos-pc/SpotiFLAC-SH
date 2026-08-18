@@ -135,9 +135,27 @@ Used in both `folderTemplate` and `filenameTemplate`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `spotFetchAPIUrl` | string | `"https://spotify.afkarxyz.fun/api"` | Optional fallback metadata API. Used **only** when the native TOTP-based Spotify scraper fails. The `/apis/status` health-check uses this URL when set. |
+| `spotFetchAPIUrl` | string | `""` | Optional fallback metadata API, **off by default**. Used only when the native TOTP-based Spotify scraper fails, and only when set. The `/apis/status` health-check adds an entry for it when set, and none when empty. |
 
-The native scraper tries first. SpotFetch is invoked transparently if the native call returns an error — useful when Spotify's web token endpoint is temporarily blocked. Self-hosting the SpotFetch API is documented in its own project.
+The native scraper tries first. SpotFetch is invoked transparently if the native
+call returns an error — useful when Spotify's web token endpoint is temporarily
+blocked.
+
+**It ships empty, and that is deliberate.** The default used to be
+`https://spotify.afkarxyz.fun/api`, a third party that has been unreachable for
+as long as anyone has measured it: DNS resolves, the TCP connection never
+completes, and the fallback has never fired on the reference deployment. Two
+archived plans had already recorded it as dead
+([dead-code-removal-plan](archive/dead-code-removal-plan.md),
+[third-party-layer-status](archive/third-party-layer-status.md)) without anyone
+changing the default. Upstream `spotbye/SpotiFLAC` has since removed the setting
+entirely.
+
+The mechanism is kept because it is a genuine escape hatch: the day Spotify
+rotates the secret behind the native TOTP path, a configurable second source is
+worth having. What is not worth having is a default pointing at a dead host
+that would, if it ever came back, learn every Spotify URL this deployment
+fetches. Point it wherever you host one.
 
 ---
 
@@ -212,7 +230,7 @@ The `sync_deletions` flag is a separate per-watchlist boolean (see [watchlist.md
   "autoOrder":            "tidal-qobuz-amazon-deezer",
   "autoQuality":          "16",
   "allowFallback":        true,
-  "spotFetchAPIUrl":      "https://spotify.afkarxyz.fun/api",
+  "spotFetchAPIUrl":      "",
   "createPlaylistFolder": true,
   "createM3u8File":       false,
   "jellyfinMusicPath":    "",

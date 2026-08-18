@@ -103,7 +103,7 @@ export const DEFAULT_SETTINGS: Settings = {
     autoOrder: DEFAULT_AUTO_ORDER,
     autoQuality: "16",
     allowFallback: true,
-    spotFetchAPIUrl: "https://spotify.afkarxyz.fun/api",
+    spotFetchAPIUrl: "",
     createPlaylistFolder: true,
     createM3u8File: false,
     jellyfinMusicPath: "",
