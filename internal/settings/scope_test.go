@@ -141,9 +141,9 @@ func TestCreateM3u8FileDefaultsOn(t *testing.T) {
 	}
 }
 
-// The migration. Without it, jellyfinMusicPath and spotFetchAPIUrl — which
-// exist only in the admin's profile on the reference deployment — become empty,
-// and M3U8 files silently stop landing where Jellyfin reads them.
+// The migration. Without it, jellyfinMusicPath — which exists only in the
+// admin's profile on the reference deployment — becomes empty, and M3U8 files
+// silently stop landing where Jellyfin reads them.
 func TestPromoteMovesInstanceKeysOutOfProfiles(t *testing.T) {
 	isolate(t)
 	am := newAuth(t)
@@ -406,6 +406,25 @@ func TestPromoteRemovesRetiredKeys(t *testing.T) {
 	again, _ := config.LoadSettingsFile()
 	if again["downloadPath"] != "/home/nonroot/Music" {
 		t.Errorf("second run changed downloadPath: %v", again["downloadPath"])
+	}
+}
+
+// spotFetchAPIUrl by name, not "whatever happens to be in the map". It was an
+// instance-scoped setting until the SpotFetch fallback was removed, so every
+// deployment that ran an earlier version still carries it — in config.json, in
+// profiles, or both. Drop either half of its retirement and it comes back as an
+// ordinary key nothing reads: still shipped to every client, still promoted into
+// the instance store. That is exactly how it survived unnoticed the first time.
+func TestSpotFetchAPIUrlIsRetired(t *testing.T) {
+	why, bad := DiscardReason("spotFetchAPIUrl")
+	if !bad {
+		t.Error("spotFetchAPIUrl is stored again, and nothing reads it any more")
+	}
+	if bad && why == "" {
+		t.Error("retired with no reason recorded; the next reader has to dig through git")
+	}
+	if ScopeOf("spotFetchAPIUrl") == ScopeInstance {
+		t.Error("still instance-scoped: the promote pass would write it back into config.json on every start")
 	}
 }
 

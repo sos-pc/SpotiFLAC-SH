@@ -294,47 +294,10 @@ func pingURL(name, url string) ServiceStatus {
 	return ServiceStatus{Name: name, URL: url, Status: status, LatencyMs: int(elapsed.Milliseconds()), Error: errMsg, CheckedAt: time.Now().Unix()}
 }
 
-// pingSpotFetch performs a real track lookup to validate SpotFetch is fully
-// functional, not just reachable.
-func pingSpotFetch(name, baseURL string) ServiceStatus {
-	const testTrackID = "7qiZfU4dY1lWllzX7mPBI3" // Shape of You — Ed Sheeran
-	testURL := strings.TrimSuffix(baseURL, "/") + "/track/" + testTrackID
-
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
-	defer cancel()
-
-	resp, elapsed, err := doRequest(ctx, http.MethodGet, testURL)
-	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: describeRequestError(err), CheckedAt: time.Now().Unix()}
-	}
-	defer resp.Body.Close()
-
-	latency := int(elapsed.Milliseconds())
-
-	if resp.StatusCode == 429 {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "ratelimited", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: describeHTTPStatus(resp.StatusCode), CheckedAt: time.Now().Unix()}
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "Reply was cut off mid-transfer", CheckedAt: time.Now().Unix()}
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", Error: "Reply was not valid JSON — service may have changed", CheckedAt: time.Now().Unix()}
-	}
-
-	trackName, _ := result["name"].(string)
-	if trackName == "" {
-		return ServiceStatus{Name: name, URL: baseURL, Status: "down", LatencyMs: latency, Error: "Answered, but sent no track data — service is broken", CheckedAt: time.Now().Unix()}
-	}
-
-	return ServiceStatus{Name: name, URL: baseURL, Status: "ok", LatencyMs: latency, CheckedAt: time.Now().Unix()}
-}
+// pingSpotFetch lived here. It probed the SpotFetch metadata fallback with a
+// real track lookup — the right shape of probe for a service whose uptime is
+// not its usefulness. The fallback itself is gone (see
+// internal/service/metadata.go), so there is nothing left to probe.
 
 // pingDeezer performs a real track lookup to validate the Deezer API is
 // returning valid data (not just an HTTP 200 with an error payload).
@@ -458,7 +421,7 @@ var coreServices = []serviceEntry{
 // User customisations made via Settings → APIs are reflected automatically.
 // ─────────────────────────────────────────────────────────────────────────────
 
-func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
+func CheckAllServices(jellyfinURL string) []ServiceStatus {
 	all := make([]serviceEntry, 0, 32)
 	all = append(all, coreServices...)
 
@@ -477,9 +440,6 @@ func CheckAllServices(jellyfinURL string, spotFetchURL string) []ServiceStatus {
 
 	if jellyfinURL != "" {
 		all = append(all, serviceEntry{"Jellyfin", jellyfinURL, nil})
-	}
-	if spotFetchURL != "" {
-		all = append(all, serviceEntry{"SpotFetch", spotFetchURL, pingSpotFetch})
 	}
 
 	results := make([]ServiceStatus, len(all))

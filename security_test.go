@@ -12,10 +12,10 @@ import (
 // of the server's own outbound requests. That list and its PUT endpoint are
 // gone (see api_auth.go), so the guard had no caller and went with them.
 //
-// Nothing replaced it because nothing needs it: the two remaining
-// user-configurable URLs are Jellyfin and SpotFetch, and Jellyfin is routinely
-// on a private address — applying this check there would reject legitimate
-// installs, not protect them.
+// Nothing replaced it because nothing needs it: the only user-configurable URL
+// left is Jellyfin — the SpotFetch fallback took the other one with it when it
+// was removed — and Jellyfin is routinely on a private address, so applying this
+// check there would reject legitimate installs, not protect them.
 func TestIsSubPath(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -32,7 +32,7 @@ Used strictly for metadata (track names, artists, album art, release dates, IDs)
 - **`https://i.scdn.co/image/`** — Spotify's CDN for downloading high-resolution cover art.
 - **`https://p.scdn.co/mp3-preview/`** — 30-second audio previews.
 
-When the native scraper fails, SpotiFLAC can transparently fall back to a SpotFetch-compatible API if `spotFetchAPIUrl` is set in user settings. **It is empty by default** — see [settings-reference.md](settings-reference.md#spotfetch-custom-spotify-metadata-api) for why the previous default was removed.
+A second metadata source used to sit behind this one — a SpotFetch-compatible API at a configurable URL, tried whenever the native scraper failed. **It was removed**: the shipped default was an unreachable third party, the fallback never fired, and upstream carries no such setting. See [settings-reference.md](settings-reference.md#retired-keys).
 
 The Spotify track ID is **persisted into every downloaded audio file** as a `SPOTIFY_ID` tag (Vorbis comment / `TXXX` / iTunes atom). This tag is what `meta.BuildSpotifyIDIndex` later uses to regenerate M3U8 playlists straight from the filesystem, independent of BoltDB.
 
@@ -140,7 +140,6 @@ No other identity providers are supported.
 
 | Service | Probe |
 |---------|-------|
-| Spotify (SpotFetch) | `GET /track/7qiZfU4dY1lWllzX7mPBI3` — parses JSON, requires `name` field |
 | Deezer public API | `GET /track/3135556` — parses JSON, flags `error` payloads |
 | Apple Music · genre | first tier of the genre chain |
 | Download engine | `GET /health` on `ENGINE_URL`. Listed only when configured, so an install without the engine shows no phantom service. This is the probe that says whether delegated providers can run at all. |

@@ -487,8 +487,6 @@ directly:
 ### `GET /api/v1/search?url={spotifyURL}&batch={true|false}`
 Resolve a Spotify URL (track, album, playlist, artist) and return full metadata. The URL is normalized (any `intl-xx/` prefix and `?si=` query param are stripped). When `batch=true`, large playlists/artists are fetched in parallel batches; `batch=false` does sequential per-page fetches with a small delay.
 
-If the native Spotify TOTP scraper fails and `spotFetchAPIUrl` is set in user settings, SpotiFLAC retries via the SpotFetch-compatible API.
-
 The response shape depends on the URL type (`track_info`, `album_info`, `playlist_info` or `artist_info` plus a corresponding tracks list).
 
 ### `GET /api/v1/search/stream?url={spotifyURL}` *(SSE)*
