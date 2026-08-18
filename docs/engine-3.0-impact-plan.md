@@ -3,8 +3,9 @@
 > **🧭 Plan, 2026-08-15.** Every number here was measured against the real
 > images and the real deployment; the commands are inline so they can be re-run.
 > Written after 3.0.0 was built, deployed, found unable to download anything,
-> and rolled back. The sidecar is **pinned to `1.7.3`** in the live compose and
-> is working. Companions: [upstream-tracking-plan.md](upstream-tracking-plan.md)
+> and rolled back. §2 is now closed: #102 shipped the fix, the sidecar is
+> unpinned, and 3.0.0 has been serving the deployment since 2026-08-16 —
+> verified by a real download through the whole chain, app included. Companions: [upstream-tracking-plan.md](upstream-tracking-plan.md)
 > · [../engine/README.md](../engine/README.md) ·
 > [../engine/patches/README.md](../engine/patches/README.md).
 >
@@ -67,7 +68,7 @@ further download providers exist that this deployment does not use.
 
 ### 2a. No registry configured — every download fails
 
-**Open. This is why the sidecar is pinned.**
+**Done — #102.** The sidecar is unpinned and running 3.0.0.
 
 `ensure_download_providers()` returns at its first guard when no registry is
 configured, logging **at DEBUG**:
@@ -91,7 +92,7 @@ internally, seven extensions install and downloads succeed — checked on
 
 ### 2b. `_prime_tidal_apis()` imports a module that is gone
 
-**Open.** `shim.py` imports `SpotiFLAC.providers`, absent in 3.0.0. It degrades
+**Done — deleted in #102.** `shim.py` imported `SpotiFLAC.providers`, absent in 3.0.0. It degrades
 to a logged warning, so it is not fatal — but the priming it performs does not
 happen. A Tidal download succeeded without it (the `tidal-web` extension carries
 its own API handling), which suggests the function is now obsolete. **One track
@@ -99,7 +100,7 @@ is not proof.** Decide, do not assume.
 
 ### 2c. `/providers/health` said `extensions: ok` with zero extensions installed
 
-**Open.** During the incident the health endpoint reported
+**Done — #102.** During the incident the health endpoint reported
 `extensions: {"ok": true, "detail": "ok"}` while nothing was installed and every
 download was failing. A status board that answers "fine" in that state is worse
 than one that says nothing.
