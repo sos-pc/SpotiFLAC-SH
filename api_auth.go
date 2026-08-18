@@ -10,7 +10,6 @@ import (
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/tidal"
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
-	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,8 +275,7 @@ func (s *Server) v1APIStatus(w http.ResponseWriter, r *http.Request) {
 		writeV1JSON(w, http.StatusOK, cached)
 		return
 	}
-	spotFetchURL := settings.EffectiveDownloadSettings(s.ctr.Auth, userIDFromContext(r)).SpotFetchAPIURL
-	results := CheckAllServices(auth.JellyfinURL, spotFetchURL)
+	results := CheckAllServices(auth.JellyfinURL)
 	setCachedStatuses(results)
 	writeV1JSON(w, http.StatusOK, results)
 }

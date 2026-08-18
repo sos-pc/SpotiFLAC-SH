@@ -126,8 +126,9 @@ engine author's namespace. Integrity is checked with a `sha256` **supplied by
 the same registry that serves the file** — that detects corruption and
 mid-flight tampering, not a compromised or malicious registry.
 
-This is the same class as `spotFetchAPIUrl` (issue #73), one step closer to the
-core: that one returns data, this one returns code that runs in our container.
+This is the same class as `spotFetchAPIUrl` (issue #73) — since retired, for
+exactly this reason — and one step closer to the core: that one returned data,
+this one returns code that runs in our container.
 
 Upstream removing the hardcoded default is plausibly deliberate. Re-adding it is
 a choice, and it should be made rather than inherited.

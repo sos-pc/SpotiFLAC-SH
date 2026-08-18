@@ -20,7 +20,10 @@ import (
 //
 // Ship the layered read without promoting them and both become empty. The first
 // one stops M3U8 files landing where Jellyfin reads them — no error, nothing in
-// the log, the playlists simply stop appearing.
+// the log, the playlists simply stop appearing. The second is now retired rather
+// than promoted — the fallback it configured is gone, and the discard pass below
+// takes it out of both stores — but it stays named here because it is half of
+// why this migration had to exist.
 //
 // Three parts, in this order, and each is needed:
 //

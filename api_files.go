@@ -103,7 +103,7 @@ func (s *Server) registerFileRoutes() {
 		}
 		batchStr := r.URL.Query().Get("batch")
 		batch := batchStr == "true" || batchStr == "1"
-		result, err := s.ctr.Metadata.GetSpotifyMetadata(service.SpotifyMetadataRequest{URL: url, Batch: batch}, userIDFromContext(r))
+		result, err := s.ctr.Metadata.GetSpotifyMetadata(service.SpotifyMetadataRequest{URL: url, Batch: batch})
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return

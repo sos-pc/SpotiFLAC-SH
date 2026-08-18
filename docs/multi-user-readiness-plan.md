@@ -143,7 +143,7 @@ globally and it reaches nobody who has ever opened the settings page.
 
 | Key | Why it is instance-level |
 |---|---|
-| `spotFetchAPIUrl` | the engine sidecar; a user repointing it aims the server's requests at a host of their choosing |
+| ~~`spotFetchAPIUrl`~~ *(retired — the fallback was removed, see [settings-reference](settings-reference.md#retired-keys))* | the engine sidecar; a user repointing it aims the server's requests at a host of their choosing |
 | `jellyfinMusicPath` | where M3U8 files are written for one shared Jellyfin |
 | `downloadPath` | see §2a — it decides where a file lands in a shared library |
 | `folderTemplate`, `createPlaylistFolder`, `useFirstArtistOnly`, `filenameTemplate` | same, see §2a |
@@ -240,7 +240,7 @@ is instance. Everything else is user.
 | Instance | User |
 |---|---|
 | `downloadPath`, `folderTemplate`, `createPlaylistFolder`, `useFirstArtistOnly`, `filenameTemplate` — §2a | qualities, `autoOrder`, `autoQuality`, tagging toggles, `createM3u8File`, `downloader` |
-| `jellyfinMusicPath`, `spotFetchAPIUrl` — one shared Jellyfin, one shared fallback endpoint | |
+| `jellyfinMusicPath` — one shared Jellyfin. (`spotFetchAPIUrl` was the second entry here until the fallback was removed; it is retired.) | |
 | later: the Spotify application's client id — §8 | later: each user's Spotify refresh token — §8 |
 
 Note that quality stays **user**-scoped and §2b is unchanged by this: the
@@ -290,6 +290,9 @@ copies that the next reader might reach for; stripping without promoting is the
 data loss above.
 
 *Also worth the operator knowing, found while reading the above:*
+**Settled since — the key is retired and the fallback is gone.** What follows is
+what was true when this was written.
+
 `spotFetchAPIUrl` points at a **third-party public server**. It is the fallback
 used when the native Spotify client fails (`internal/service/metadata.go:96`),
 so whenever Spotify's TOTP handshake breaks — which it has — track and playlist

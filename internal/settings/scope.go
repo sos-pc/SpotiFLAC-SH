@@ -41,7 +41,7 @@ const (
 	ScopeInstance
 )
 
-// instanceKeys is the whole of the instance scope. Nine keys.
+// instanceKeys is the whole of the instance scope. Eight keys.
 //
 // Note what is NOT here. Qualities and the embed toggles stay user-owned: the
 // preference is genuinely personal even though its effect is bounded by
@@ -60,7 +60,6 @@ var instanceKeys = map[string]bool{
 
 	// Name shared infrastructure.
 	"jellyfinMusicPath": true, // one Jellyfin
-	"spotFetchAPIUrl":   true, // one fallback endpoint, and it is a third party
 	"createM3u8File":    true, // whether M3U8s are written into that one Jellyfin
 }
 
@@ -75,6 +74,10 @@ var instanceKeys = map[string]bool{
 // does, at startup.
 var retiredKeys = map[string]string{
 	"spotifyClientId": "the per-account Spotify connection was removed in #92",
+	// Instance-scoped until the fallback it configured was removed. Every
+	// deployment that ran an earlier version still holds it — in config.json, in
+	// profiles, or both — and nothing reads it any more.
+	"spotFetchAPIUrl": "the SpotFetch metadata fallback was removed; its shipped default was a third party that never answered",
 }
 
 // notSettings are the field names of the settings API's own response envelope.
