@@ -26,6 +26,14 @@ const SEARCH_PLACEHOLDERS = [
     "Joji",
     "Die For You",
 ];
+// Both kinds of example, in turn: the four link shapes, then the six word
+// examples. The field accepts either, and this list is now the only thing that
+// says so.
+//
+// Module scope on purpose. Built inside the component, this is a new array on
+// every render — which is precisely what sent useTypingEffect into an infinite
+// render loop when the two modes were merged.
+const PLACEHOLDERS = [...FETCH_PLACEHOLDERS, ...SEARCH_PLACEHOLDERS];
 const REGIONS = [
     "AD",
     "AE",
@@ -272,10 +280,7 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
     const [showInvalidUrlDialog, setShowInvalidUrlDialog] = useState(false);
     const [invalidUrl, setInvalidUrl] = useState("");
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // Both kinds of example, alternating: the field accepts either, and the
-    // placeholder is now the only thing that says so.
-    const placeholders = [...FETCH_PLACEHOLDERS, ...SEARCH_PLACEHOLDERS];
-    const placeholderText = useTypingEffect(placeholders);
+    const placeholderText = useTypingEffect(PLACEHOLDERS);
     const saveRecentSearch = (query: string) => {
         const trimmed = query.trim();
         if (!trimmed)
@@ -635,7 +640,7 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
           <DialogHeader>
             <DialogTitle>Invalid URL</DialogTitle>
             <DialogDescription>
-              This is a link, but not a Spotify one — hasSearchTerms for it would find nothing. Type words instead, or paste a Spotify link.
+              This is a link, but not a Spotify one — searching for it would find nothing. Type words instead, or paste a Spotify link.
             </DialogDescription>
           </DialogHeader>
 
