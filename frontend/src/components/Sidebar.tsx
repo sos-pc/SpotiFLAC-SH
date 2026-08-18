@@ -122,7 +122,7 @@ export function Sidebar({ currentPage, onPageChange, isAdmin = false }: SidebarP
         </Tooltip>
         <Tooltip delayDuration={0}>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-primary/10 hover:text-primary" onClick={() => openExternal("https://ko-fi.com/afkarxyz")}>
+            <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-primary/10 hover:text-primary" onClick={() => openExternal("https://ko-fi.com/methammer")}>
               <CoffeeIcon size={20} loop={true}/>
             </Button>
           </TooltipTrigger>

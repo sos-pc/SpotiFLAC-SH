@@ -33,6 +33,7 @@ import { useMetadata } from "@/hooks/useMetadata";
 import { useLyrics } from "@/hooks/useLyrics";
 import { useCover } from "@/hooks/useCover";
 import { useDownloadQueueDialog } from "@/hooks/useDownloadQueueDialog";
+import { isSearchTerms } from "@/lib/spotifyInput";
 const HISTORY_KEY = "spotiflac_fetch_history";
 const MAX_HISTORY = 5;
 function App() {
@@ -45,7 +46,6 @@ function App() {
     const [hasUpdate, setHasUpdate] = useState(false);
     const [releaseDate, setReleaseDate] = useState<string | null>(null);
     const [fetchHistory, setFetchHistory] = useState<HistoryItem[]>([]);
-    const [isSearchMode, setIsSearchMode] = useState(false);
     const [region, setRegion] = useState(() => localStorage.getItem("spotiflac_region") || "US");
     useEffect(() => {
         localStorage.setItem("spotiflac_region", region);
@@ -444,9 +444,9 @@ function App() {
                         if (updatedUrl) {
                             setSpotifyUrl(updatedUrl);
                         }
-                    }} history={fetchHistory} onHistorySelect={handleHistorySelect} onHistoryRemove={removeFromHistory} hasResult={!!metadata.metadata} searchMode={isSearchMode} onSearchModeChange={setIsSearchMode} region={region} onRegionChange={setRegion}/>
+                    }} history={fetchHistory} onHistorySelect={handleHistorySelect} onHistoryRemove={removeFromHistory} hasResult={!!metadata.metadata} onSearchCleared={() => setSpotifyUrl("")} region={region} onRegionChange={setRegion}/>
 
-                    {!isSearchMode && metadata.metadata && renderMetadata()}
+                    {!isSearchTerms(spotifyUrl) && metadata.metadata && renderMetadata()}
                 </>);
         }
     };
