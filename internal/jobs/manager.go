@@ -309,6 +309,7 @@ func NewJobManager(configDir string, db *bolt.DB, catalog *sql.DB, sink EventSin
 
 	util.SafeGo("jobs.cleanupLoop", jm.cleanupLoop)
 	util.SafeGo("jobs.verifyLibraryLoop", jm.verifyLibraryLoop)
+	util.SafeGo("jobs.reclaimStagingLoop", jm.reclaimStagingLoop)
 
 	slog.Info("[Jobs] Manager started", "workers", jobWorkers, "db", filepath.Join(configDir, DBFile))
 	return jm, nil

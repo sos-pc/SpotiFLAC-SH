@@ -1,6 +1,9 @@
 package settings
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Who owns which setting
@@ -38,7 +41,7 @@ const (
 	ScopeInstance
 )
 
-// instanceKeys is the whole of the instance scope. Nine keys.
+// instanceKeys is the whole of the instance scope. Eight keys.
 //
 // Note what is NOT here. Qualities and the embed toggles stay user-owned: the
 // preference is genuinely personal even though its effect is bounded by
@@ -57,7 +60,6 @@ var instanceKeys = map[string]bool{
 
 	// Name shared infrastructure.
 	"jellyfinMusicPath": true, // one Jellyfin
-	"spotFetchAPIUrl":   true, // one fallback endpoint, and it is a third party
 	"createM3u8File":    true, // whether M3U8s are written into that one Jellyfin
 }
 
@@ -72,12 +74,63 @@ var instanceKeys = map[string]bool{
 // does, at startup.
 var retiredKeys = map[string]string{
 	"spotifyClientId": "the per-account Spotify connection was removed in #92",
+	// Instance-scoped until the fallback it configured was removed. Every
+	// deployment that ran an earlier version still holds it — in config.json, in
+	// profiles, or both — and nothing reads it any more.
+	"spotFetchAPIUrl": "the SpotFetch metadata fallback was removed; its shipped default was a third party that never answered",
 }
 
-// RetiredReason reports whether a key has been retired, and why.
-func RetiredReason(key string) (string, bool) {
-	why, ok := retiredKeys[key]
-	return why, ok
+// notSettings are the field names of the settings API's own response envelope.
+// They are never settings. A blob containing one is a client that has PUT back
+// what it received from GET instead of the values inside it.
+//
+// Not hypothetical. On the reference deployment, 2026-08-15: the operator's
+// profile acquired "values", "instanceKeys" and "writableScope";
+// PromoteInstanceSettings dutifully seeded all three into config.json as house
+// defaults; and "values" carried a complete second copy of every setting —
+// including a key the same startup pass had just retired from the top level.
+// The retirement worked and was useless, because the key had a twin one level
+// down.
+//
+// Refused on write and stripped at startup. A store that accepts anything
+// eventually contains everything, and none of it can be reasoned about.
+var notSettings = map[string]bool{
+	"values":        true,
+	"instanceKeys":  true,
+	"writableScope": true,
+}
+
+// IsNotASetting reports whether a key is one the settings store must never
+// hold, whatever a client says. Callers that WRITE use this to refuse; callers
+// that clean up use DiscardReason, which also covers retired keys.
+func IsNotASetting(key string) bool { return notSettings[key] }
+
+// NotSettingKeys returns, sorted, the submitted keys that are envelope fields
+// rather than settings. Empty means the submission is well-formed.
+func NotSettingKeys(blob map[string]interface{}) []string {
+	var bad []string
+	for k := range blob {
+		if notSettings[k] {
+			bad = append(bad, k)
+		}
+	}
+	sort.Strings(bad)
+	return bad
+}
+
+// DiscardReason reports whether a key must not be stored, and why.
+//
+// Two origins, one outcome: a key this version retired, and a key that was
+// never a setting at all. Both are removed from the instance store and from
+// every profile at startup.
+func DiscardReason(key string) (string, bool) {
+	if why, ok := retiredKeys[key]; ok {
+		return why, true
+	}
+	if notSettings[key] {
+		return "a field of the settings API's response envelope, never a setting", true
+	}
+	return "", false
 }
 
 // ScopeOf reports who owns key.

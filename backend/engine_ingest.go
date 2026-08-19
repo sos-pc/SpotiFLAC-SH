@@ -35,10 +35,10 @@ import (
 // two can't drift apart.
 func EngineBaseURL() string { return strings.TrimSpace(os.Getenv("ENGINE_URL")) }
 
-// engineStagingDir is the shared volume the engine writes into. It must be
+// EngineStagingDir is the shared volume the engine writes into. It must be
 // mounted at the SAME path in both containers, since the path the engine
 // returns is resolved as-is on our side.
-func engineStagingDir() string {
+func EngineStagingDir() string {
 	if d := strings.TrimSpace(os.Getenv("ENGINE_STAGING_DIR")); d != "" {
 		return d
 	}
@@ -114,7 +114,7 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 
 	client := engine.NewClient(EngineBaseURL())
 	quality := engineQualityFor(req.AudioFormat)
-	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, quality, engineStagingDir(), req.AllowFallback)
+	res, err := client.Download(context.Background(), spotifyURL, []string{svc}, quality, EngineStagingDir(), req.AllowFallback)
 
 	// Hi-res is a request the catalogue often cannot honour: most older material
 	// exists only in 16/44.1, and asking a stream endpoint for strict 24-bit on
@@ -126,7 +126,7 @@ func downloadViaEngine(req DownloadRequest, svc, spotifyURL string) (string, err
 	// AllowFallback so "hi-res or nothing" stays expressible.
 	if err != nil && req.AllowFallback && isHiResRequest(quality) && providerHasQualityTiers(svc) {
 		slog.Info("[Engine] hi-res failed, retrying at CD quality", "service", svc, "err", err, "track", req.TrackName)
-		res, err = client.Download(context.Background(), spotifyURL, []string{svc}, "LOSSLESS", engineStagingDir(), req.AllowFallback)
+		res, err = client.Download(context.Background(), spotifyURL, []string{svc}, "LOSSLESS", EngineStagingDir(), req.AllowFallback)
 	}
 	if err != nil {
 		drainGenre() // never leave the genre goroutine's send blocked

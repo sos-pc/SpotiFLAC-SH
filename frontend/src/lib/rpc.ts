@@ -431,6 +431,27 @@ export interface LibraryRebuildResult {
 export const LibraryRebuild = () =>
   rest<void>("POST", "/admin/library-rebuild");
 
+export interface RetagLegacyResult {
+  scanned: number;
+  tagged: number;
+  skipped: number;
+  failed: number;
+  failed_ids?: string[];
+}
+// Stamps SPOTIFY_ID onto library files that do not carry it, reading the
+// identity from the job record that downloaded them.
+//
+// Synchronous, unlike its neighbours: it walks BoltDB jobs and writes a tag
+// block per file, with no external lookup, so it finishes in seconds rather
+// than outliving a proxy timeout.
+//
+// This is what makes an unidentified file visible to LibraryRebuild, which
+// keys on that tag — and therefore what has to run BEFORE it. Nothing else
+// can establish the identity: the tag is absent and the catalog has no row,
+// so the job record is the only place the path→track mapping survives.
+export const RetagLegacy = () =>
+  rest<RetagLegacyResult>("POST", "/admin/retag-legacy");
+
 export interface RetagIncompleteMetadataResult {
   scanned: number;
   filled: number;

@@ -12,10 +12,10 @@ import (
 // of the server's own outbound requests. That list and its PUT endpoint are
 // gone (see api_auth.go), so the guard had no caller and went with them.
 //
-// Nothing replaced it because nothing needs it: the two remaining
-// user-configurable URLs are Jellyfin and SpotFetch, and Jellyfin is routinely
-// on a private address — applying this check there would reject legitimate
-// installs, not protect them.
+// Nothing replaced it because nothing needs it: the only user-configurable URL
+// left is Jellyfin — the SpotFetch fallback took the other one with it when it
+// was removed — and Jellyfin is routinely on a private address, so applying this
+// check there would reject legitimate installs, not protect them.
 func TestIsSubPath(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -108,31 +108,19 @@ func TestCleanLibraryPaths(t *testing.T) {
 	})
 }
 
-func TestIsSameOriginRequest(t *testing.T) {
-	tests := []struct {
-		name   string
-		host   string
-		origin string
-		want   bool
-	}{
-		{"no origin header", "app.example.com", "", true},
-		{"matching origin", "app.example.com", "https://app.example.com", true},
-		{"matching origin with port", "app.example.com:6890", "http://app.example.com:6890", true},
-		{"cross-origin attacker site", "app.example.com", "https://evil.example.net", false},
-		{"malformed origin", "app.example.com", "not a url", false},
+// makeRequest builds a bare request with the two proxy headers remoteIP has to
+// reason about. It lived in server_test.go next to the LAN-bypass tests until
+// those were deleted with the bypass itself (#98); it moved here rather than
+// leaving a test file holding nothing but a helper.
+func makeRequest(remoteAddr, xForwardedFor, xRealIP string) *http.Request {
+	r := &http.Request{Header: make(http.Header), RemoteAddr: remoteAddr}
+	if xForwardedFor != "" {
+		r.Header.Set("X-Forwarded-For", xForwardedFor)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &http.Request{Header: make(http.Header), Host: tt.host}
-			if tt.origin != "" {
-				r.Header.Set("Origin", tt.origin)
-			}
-			got := isSameOriginRequest(r)
-			if got != tt.want {
-				t.Errorf("isSameOriginRequest(host=%q, origin=%q) = %v, want %v", tt.host, tt.origin, got, tt.want)
-			}
-		})
+	if xRealIP != "" {
+		r.Header.Set("X-Real-IP", xRealIP)
 	}
+	return r
 }
 
 func TestRemoteIPIgnoresForwardedHeadersByDefault(t *testing.T) {

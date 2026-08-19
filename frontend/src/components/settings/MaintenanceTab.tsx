@@ -1,14 +1,16 @@
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Users } from "lucide-react";
+import { RefreshCw, Users, Wrench } from "lucide-react";
 import { useJobsStreamEvent } from "@/hooks/useJobsStreamEvent";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
   LibraryRebuild,
   PublishHouseDefaults,
   RetagIncompleteMetadata,
+  RetagLegacy,
   type LibraryRebuildResult,
   type RetagIncompleteMetadataResult,
+  type RetagLegacyResult,
 } from "@/lib/rpc";
 
 const StatRow = ({
@@ -41,6 +43,10 @@ export function MaintenanceTab() {
   const [rebuildLoading, setRebuildLoading] = useState(false);
   const [rebuildResult, setRebuildResult] =
     useState<LibraryRebuildResult | null>(null);
+  const [repairLoading, setRepairLoading] = useState(false);
+  const [repairResult, setRepairResult] = useState<RetagLegacyResult | null>(
+    null,
+  );
   const [retagLoading, setRetagLoading] = useState(false);
   const [retagResult, setRetagResult] =
     useState<RetagIncompleteMetadataResult | null>(null);
@@ -72,6 +78,41 @@ export function MaintenanceTab() {
       });
     }
   });
+
+  // Stamp the identity tag, then rescan. In that order, and not as two
+  // buttons, because the second is useless before the first: LibraryRebuild
+  // identifies files by their embedded SPOTIFY_ID, so a file that never got one
+  // is invisible to it no matter how often it runs — it lands in `no_tag` and
+  // stays out of the catalog forever.
+  //
+  // That sequence is what the watcher already tells people to run when it
+  // cannot resolve a track ("run POST /admin/retag-legacy then POST
+  // /admin/library-rebuild"), and until now nothing in the interface could do
+  // it. The prescription existed; the remedy was unreachable.
+  const runRepair = useCallback(async () => {
+    setRepairLoading(true);
+    setRepairResult(null);
+    try {
+      const tagged = await RetagLegacy();
+      setRepairResult(tagged);
+      if (tagged.failed > 0) {
+        toast.warning(`${tagged.failed} file(s) could not be tagged`, {
+          description: "Rescanning anyway — the rest are recoverable.",
+        });
+      }
+      // Hand over to the rebuild's own loading state and SSE handler rather
+      // than duplicating them: from here the two paths are identical.
+      setRepairLoading(false);
+      setRebuildLoading(true);
+      await LibraryRebuild();
+    } catch (err) {
+      toast.error("Repair failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+      setRepairLoading(false);
+      setRebuildLoading(false);
+    }
+  }, []);
 
   const runRetagIncompleteMetadata = useCallback(async () => {
     setRetagLoading(true);
@@ -216,6 +257,44 @@ export function MaintenanceTab() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-base font-semibold mb-1">
+              Recover Untagged Files
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              For files a rebuild reports under <em>without a Spotify tag</em>.
+              Writes the missing tag from the download record that produced each
+              file, then rescans — a rebuild alone cannot help them, because it
+              identifies files by exactly the tag they are missing. Fast: no
+              external lookups.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={runRepair}
+            disabled={repairLoading || rebuildLoading}
+            className="gap-1.5 shrink-0"
+          >
+            <Wrench
+              className={`h-3.5 w-3.5 ${repairLoading ? "animate-spin" : ""}`}
+            />
+            {repairLoading ? "Tagging..." : "Recover"}
+          </Button>
+        </div>
+
+        {repairResult && (
+          <div className="border rounded-lg p-3 bg-muted/10 space-y-1.5 text-sm">
+            <StatRow label="Files examined" value={repairResult.scanned} />
+            <StatRow label="Tagged" value={repairResult.tagged} />
+            <StatRow label="Already tagged" value={repairResult.skipped} />
+            <StatRow label="Failed" value={repairResult.failed} warn={repairResult.failed > 0} />
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3 border-t pt-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold mb-1">
               Retag Incomplete Metadata
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -224,6 +303,10 @@ export function MaintenanceTab() {
               missing — existing tags and catalog values are never overwritten.
               One external lookup per track, throttled — can take a while on a
               library with many incomplete tracks.
+              <br />
+              <strong>Only reaches files the catalog already knows.</strong> A
+              file with no catalog entry is not scanned here at all — use
+              <em> Recover Untagged Files</em> above for those.
             </p>
           </div>
           <Button

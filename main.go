@@ -140,7 +140,7 @@ func main() {
 		Media:    &service.MediaService{},
 		History:  service.NewHistoryService(jobMgr),
 		Audio:    &service.AudioService{},
-		Metadata: service.NewMetadataService(auth),
+		Metadata: service.NewMetadataService(),
 		Download: service.NewDownloadService(jobMgr, auth),
 	}
 	ctr.Files = service.NewFileService(catalog, jobMgr)

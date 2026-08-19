@@ -141,9 +141,9 @@ func TestCreateM3u8FileDefaultsOn(t *testing.T) {
 	}
 }
 
-// The migration. Without it, jellyfinMusicPath and spotFetchAPIUrl — which
-// exist only in the admin's profile on the reference deployment — become empty,
-// and M3U8 files silently stop landing where Jellyfin reads them.
+// The migration. Without it, jellyfinMusicPath — which exists only in the
+// admin's profile on the reference deployment — becomes empty, and M3U8 files
+// silently stop landing where Jellyfin reads them.
 func TestPromoteMovesInstanceKeysOutOfProfiles(t *testing.T) {
 	isolate(t)
 	am := newAuth(t)
@@ -406,5 +406,102 @@ func TestPromoteRemovesRetiredKeys(t *testing.T) {
 	again, _ := config.LoadSettingsFile()
 	if again["downloadPath"] != "/home/nonroot/Music" {
 		t.Errorf("second run changed downloadPath: %v", again["downloadPath"])
+	}
+}
+
+// spotFetchAPIUrl by name, not "whatever happens to be in the map". It was an
+// instance-scoped setting until the SpotFetch fallback was removed, so every
+// deployment that ran an earlier version still carries it — in config.json, in
+// profiles, or both. Drop either half of its retirement and it comes back as an
+// ordinary key nothing reads: still shipped to every client, still promoted into
+// the instance store. That is exactly how it survived unnoticed the first time.
+func TestSpotFetchAPIUrlIsRetired(t *testing.T) {
+	why, bad := DiscardReason("spotFetchAPIUrl")
+	if !bad {
+		t.Error("spotFetchAPIUrl is stored again, and nothing reads it any more")
+	}
+	if bad && why == "" {
+		t.Error("retired with no reason recorded; the next reader has to dig through git")
+	}
+	if ScopeOf("spotFetchAPIUrl") == ScopeInstance {
+		t.Error("still instance-scoped: the promote pass would write it back into config.json on every start")
+	}
+}
+
+// The failure this exists to prevent, reproduced from the reference deployment
+// on 2026-08-15. A client PUT this endpoint's own response envelope back at it;
+// the three envelope fields landed in the operator's profile as ordinary
+// user-scoped keys; and the seeding loop then copied all three into config.json
+// as house defaults — where "values" sat holding a complete second copy of every
+// setting, one level below where anything looks.
+//
+// The seeding loop is the amplifier: one profile's junk becomes the whole
+// house's, permanently, because a house default is never re-derived. Stripping
+// it afterwards is one start too late, so it must never be seeded at all.
+func TestSeedingRefusesKeysThatAreNotSettings(t *testing.T) {
+	isolate(t)
+	am := newAuth(t)
+
+	if _, err := am.GetOrCreateUser("admin", "admin", true); err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	if err := am.SaveUserSettings("admin", map[string]interface{}{
+		"theme":         "yellow",
+		"values":        map[string]interface{}{"theme": "blue", "downloadPath": "/elsewhere"},
+		"instanceKeys":  []interface{}{"downloadPath"},
+		"writableScope": "all",
+	}); err != nil {
+		t.Fatalf("SaveUserSettings: %v", err)
+	}
+
+	if err := PromoteInstanceSettings(am); err != nil {
+		t.Fatalf("PromoteInstanceSettings: %v", err)
+	}
+
+	instance, err := config.LoadSettingsFile()
+	if err != nil {
+		t.Fatalf("LoadSettingsFile: %v", err)
+	}
+	for _, k := range []string{"values", "instanceKeys", "writableScope"} {
+		if _, seeded := instance[k]; seeded {
+			t.Errorf("%q became a house default; one profile's junk is now the whole instance's", k)
+		}
+	}
+	if instance["theme"] != "yellow" {
+		t.Errorf("a real house default was refused along with the junk: %v", instance["theme"])
+	}
+
+	profile, err := am.GetUser("admin")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	for _, k := range []string{"values", "instanceKeys", "writableScope"} {
+		if _, still := profile.Settings[k]; still {
+			t.Errorf("%q survived in the profile it came from", k)
+		}
+	}
+	if profile.Settings["theme"] != "yellow" {
+		t.Error("a real setting was stripped along with the junk")
+	}
+}
+
+func TestNotSettingKeysNamesThemSorted(t *testing.T) {
+	got := NotSettingKeys(map[string]interface{}{
+		"writableScope": "all",
+		"theme":         "yellow",
+		"instanceKeys":  []string{},
+		"downloadPath":  "/music",
+	})
+	want := []string{"instanceKeys", "writableScope"}
+	if len(got) != len(want) {
+		t.Fatalf("NotSettingKeys = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("NotSettingKeys = %v, want %v (sorted, so the error message is stable)", got, want)
+		}
+	}
+	if len(NotSettingKeys(map[string]interface{}{"theme": "yellow"})) != 0 {
+		t.Error("a well-formed submission was reported as malformed")
 	}
 }

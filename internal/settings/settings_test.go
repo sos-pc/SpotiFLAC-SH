@@ -64,7 +64,6 @@ func TestParseDownloadSettingsPassesThroughValidValues(t *testing.T) {
 		"useSingleGenre":       true,
 		"embedGenre":           true,
 		"trackNumber":          true,
-		"spotFetchAPIUrl":      "https://example.com/api",
 		"createM3u8File":       true,
 		"jellyfinMusicPath":    "/jellyfin/music",
 	}
@@ -81,7 +80,6 @@ func TestParseDownloadSettingsPassesThroughValidValues(t *testing.T) {
 		UseSingleGenre:       true,
 		EmbedGenre:           true,
 		TrackNumber:          true,
-		SpotFetchAPIURL:      "https://example.com/api",
 		CreateM3u8File:       true,
 		JellyfinMusicPath:    "/jellyfin/music",
 	}

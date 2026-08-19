@@ -5,7 +5,7 @@ Settings are **per-user** and stored in BoltDB inside the user's profile. They c
 - `GET /api/v1/settings` — returns the current user's settings (or the legacy `config.json` fallback if the user has none yet).
 - `PUT /api/v1/settings` — saves the full settings object. Unknown keys are accepted and stored as-is (forward-compatible).
 
-> **Key naming convention.** All keys are **`camelCase`**. The frontend `Settings` interface in `frontend/src/lib/settings.ts` is the source of truth. The Go side stores them as `map[string]interface{}` and only reads a handful of keys directly (`createM3u8File`, `jellyfinMusicPath`, `spotFetchAPIUrl`); the rest pass through to the frontend or are projected into a `JobSettings` struct when a download is enqueued.
+> **Key naming convention.** All keys are **`camelCase`**. The frontend `Settings` interface in `frontend/src/lib/settings.ts` is the source of truth. The Go side stores them as `map[string]interface{}` and only reads a handful of keys directly (`createM3u8File`, `jellyfinMusicPath`); the rest pass through to the frontend or are projected into a `JobSettings` struct when a download is enqueued.
 
 The example values in this document match `DEFAULT_SETTINGS` (`frontend/src/lib/settings.ts`).
 
@@ -131,16 +131,6 @@ Used in both `folderTemplate` and `filenameTemplate`.
 
 ---
 
-## SpotFetch (custom Spotify metadata API)
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `spotFetchAPIUrl` | string | `"https://spotify.afkarxyz.fun/api"` | Optional fallback metadata API. Used **only** when the native TOTP-based Spotify scraper fails. The `/apis/status` health-check uses this URL when set. |
-
-The native scraper tries first. SpotFetch is invoked transparently if the native call returns an error — useful when Spotify's web token endpoint is temporarily blocked. Self-hosting the SpotFetch API is documented in its own project.
-
----
-
 ## UI / Theme
 
 These keys are stored alongside everything else in BoltDB but only consumed by the React frontend.
@@ -151,6 +141,21 @@ These keys are stored alongside everything else in BoltDB but only consumed by t
 | `themeMode` | `"auto" \| "light" \| "dark"` | `"auto"` | Color scheme. `auto` follows the OS preference via `prefers-color-scheme`. |
 | `fontFamily` | string | `"google-sans"` | One of 17 web-fonts: `bricolage-grotesque`, `dm-sans`, `figtree`, `geist-sans`, `google-sans`, `inter`, `jetbrains-mono`, `manrope`, `noto-sans`, `nunito-sans`, `outfit`, `plus-jakarta-sans`, `poppins`, `public-sans`, `raleway`, `roboto`, `space-grotesk`. |
 | `sfxEnabled` | bool | `true` | Play UI sound effects on download completion / errors. |
+
+---
+
+## Retired keys
+
+Keys an earlier version wrote and this one no longer knows. They are **removed
+from `config.json` and from every user profile at startup** — the settings blob
+is an untyped map, so nothing drops them on its own: they would keep riding
+along in every effective blob sent to every client. The list lives in
+`retiredKeys` (`internal/settings/scope.go`), each with the reason.
+
+| Key | Retired because |
+|-----|-----------------|
+| `spotifyClientId` | the per-account Spotify connection was removed in #92 |
+| `spotFetchAPIUrl` | the SpotFetch metadata fallback was removed. Its shipped default was `https://spotify.afkarxyz.fun/api`, a third party unreachable for as long as anyone has measured it — DNS resolves, the TCP connection never completes — and the fallback had never once fired on the reference deployment. Two archived plans ([dead-code-removal-plan](archive/dead-code-removal-plan.md), [third-party-layer-status](archive/third-party-layer-status.md)) had recorded it dead without anyone acting on it. Upstream `spotbye/SpotiFLAC` has no such setting either. The native TOTP scraper is now the only metadata source; the day it breaks, a configurable second source is worth rebuilding — pointing at something that answers. |
 
 ---
 
@@ -212,7 +217,6 @@ The `sync_deletions` flag is a separate per-watchlist boolean (see [watchlist.md
   "autoOrder":            "tidal-qobuz-amazon-deezer",
   "autoQuality":          "16",
   "allowFallback":        true,
-  "spotFetchAPIUrl":      "https://spotify.afkarxyz.fun/api",
   "createPlaylistFolder": true,
   "createM3u8File":       false,
   "jellyfinMusicPath":    "",

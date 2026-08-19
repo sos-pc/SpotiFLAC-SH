@@ -26,7 +26,6 @@ export interface Settings {
     autoOrder: "tidal-qobuz-amazon-deezer" | "tidal-qobuz-deezer-amazon" | "tidal-amazon-qobuz-deezer" | "tidal-amazon-deezer-qobuz" | "tidal-deezer-qobuz-amazon" | "tidal-deezer-amazon-qobuz" | "qobuz-tidal-amazon-deezer" | "qobuz-tidal-deezer-amazon" | "qobuz-amazon-tidal-deezer" | "qobuz-amazon-deezer-tidal" | "qobuz-deezer-tidal-amazon" | "qobuz-deezer-amazon-tidal" | "amazon-tidal-qobuz-deezer" | "amazon-tidal-deezer-qobuz" | "amazon-qobuz-tidal-deezer" | "amazon-qobuz-deezer-tidal" | "amazon-deezer-tidal-qobuz" | "amazon-deezer-qobuz-tidal" | "deezer-tidal-qobuz-amazon" | "deezer-tidal-amazon-qobuz" | "deezer-qobuz-tidal-amazon" | "deezer-qobuz-amazon-tidal" | "deezer-amazon-tidal-qobuz" | "deezer-amazon-qobuz-tidal" | string;
     autoQuality: "16" | "24";
     allowFallback: boolean;
-    spotFetchAPIUrl: string;
     createPlaylistFolder: boolean;
     createM3u8File: boolean;
     jellyfinMusicPath: string;
@@ -103,7 +102,6 @@ export const DEFAULT_SETTINGS: Settings = {
     autoOrder: DEFAULT_AUTO_ORDER,
     autoQuality: "16",
     allowFallback: true,
-    spotFetchAPIUrl: "https://spotify.afkarxyz.fun/api",
     createPlaylistFolder: true,
     createM3u8File: false,
     jellyfinMusicPath: "",
@@ -173,7 +171,28 @@ let warnedSinceLoadAttempt = false;
 // another device, or a server-side migration left this browser's localStorage
 // stale *forever*, and getSettings() served it on every page load until the
 // user happened to press Save.
-function rememberSettings(s: Settings): Settings {
+// Fields of the settings API's RESPONSE envelope, which are not settings.
+//
+// A bundle old enough to predate the envelope reads `GET /settings` as if the
+// whole body were the settings, so `values`, `instanceKeys` and `writableScope`
+// end up merged into the cached object and PUT back on the next save. That
+// happened on the reference deployment: the three keys reached the operator's
+// profile and were then seeded into the instance store as house defaults.
+//
+// The server refuses them now. Stripping here is what stops that refusal from
+// turning into "settings no longer save" for a browser whose localStorage still
+// holds them from before — the cache heals on the next read or write instead of
+// needing to be cleared by hand.
+const ENVELOPE_FIELDS = ["values", "instanceKeys", "writableScope"] as const;
+
+function withoutEnvelopeFields<T extends object>(s: T): T {
+    const out = { ...s } as Record<string, unknown>;
+    for (const k of ENVELOPE_FIELDS) delete out[k];
+    return out as T;
+}
+
+function rememberSettings(raw: Settings): Settings {
+    const s = withoutEnvelopeFields(raw);
     cachedSettings = s;
     settingsLoadState = "loaded";
     try {
@@ -245,7 +264,10 @@ function getSettingsFromLocalStorage(): Settings {
             if (!('allowFallback' in parsed)) {
                 parsed.allowFallback = true;
             }
-            return { ...DEFAULT_SETTINGS, ...parsed };
+            // Cleaned on the way out, not only on the way in: this cache was
+            // written by an older bundle, and its value reaches the server
+            // directly on the migration path below.
+            return withoutEnvelopeFields({ ...DEFAULT_SETTINGS, ...parsed });
         }
     }
     catch (error) {
@@ -426,9 +448,9 @@ export async function getSettingsWithDefaults(): Promise<Settings> {
 }
 export async function saveSettings(settings: Settings): Promise<void> {
     try {
-        rememberSettings(settings);
-        await SaveToBackend(settings);
-        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
+        const clean = rememberSettings(settings);
+        await SaveToBackend(clean);
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: clean }));
     }
     catch (error) {
         console.error("Failed to save settings:", error);

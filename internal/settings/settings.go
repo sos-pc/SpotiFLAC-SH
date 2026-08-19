@@ -17,7 +17,7 @@ import (
 // preset selectors) the backend never interprets and must never lose on a
 // round-trip. DownloadSettings types only the ~15 keys the backend actually
 // reads to drive behavior — download path, quality, filename/M3U8
-// generation, SpotFetch fallback — so every backend reader shares one
+// generation — so every backend reader shares one
 // validated, defaulted view instead of five ad hoc getBool/getString call
 // sites.
 //
@@ -44,7 +44,6 @@ type DownloadSettings struct {
 	UseSingleGenre       bool
 	EmbedGenre           bool
 	TrackNumber          bool
-	SpotFetchAPIURL      string
 	CreateM3u8File       bool
 	JellyfinMusicPath    string
 }
@@ -95,7 +94,6 @@ func ParseDownloadSettings(raw map[string]interface{}) DownloadSettings {
 		UseSingleGenre:       getBool("useSingleGenre"),
 		EmbedGenre:           getBool("embedGenre"),
 		TrackNumber:          getBool("trackNumber"),
-		SpotFetchAPIURL:      getString("spotFetchAPIUrl"),
 		CreateM3u8File:       getBool("createM3u8File"),
 		JellyfinMusicPath:    getString("jellyfinMusicPath"),
 	}
@@ -131,18 +129,18 @@ func ServerJobSettings(s DownloadSettings, serviceOverride string) jobs.JobSetti
 // EffectiveDownloadSettings resolves the settings that should govern
 // behavior for userID: that user's own saved settings (UserProfile.Settings
 // in BoltDB) if they have any, else the operator's global config.json.
-// userID == "" (no authenticated user — DISABLE_AUTH_ON_LAN, or a
+// userID == "" (no authenticated user — a background caller, or a
 // system-wide operation with no single user to attribute) always resolves
 // to the global settings.
 //
 // This is the single resolution point for a per-user-then-global pattern
 // that used to be duplicated inline 4x in watcher.go, and — worse — was
-// silently skipped by libraryRoot, ApplySettingsFallbacks and both
-// spotFetchAPIUrl readers, which read the global file unconditionally
-// regardless of which user made the request. An authenticated user's own
-// downloadPath/spotFetchAPIUrl was therefore correctly saved and correctly
-// returned by GET /api/v1/settings, yet silently ignored by those four call
-// sites in favor of the operator's global value.
+// silently skipped by libraryRoot, ApplySettingsFallbacks and both readers of
+// the SpotFetch fallback URL (since removed), which read the global file
+// unconditionally regardless of which user made the request. An authenticated
+// user's own downloadPath was therefore correctly saved and correctly returned
+// by GET /api/v1/settings, yet silently ignored by those four call sites in
+// favor of the operator's global value.
 func EffectiveDownloadSettings(auth *auth.AuthManager, userID string) DownloadSettings {
 	return ParseDownloadSettings(EffectiveBlob(auth, userID))
 }

@@ -126,9 +126,23 @@ export function groupQueue(items: QueueItem[]): QueueGroup[] {
   });
 }
 
+// One QueueItem per Job object, cached on the Job itself.
+//
+// This is what makes memoising a row possible. A job_update replaces exactly
+// one entry in the Map, so every OTHER Job object keeps its identity across the
+// event — but mapping them through a plain function produced a brand-new
+// QueueItem for all of them anyway, and a new object prop defeats React.memo.
+// With the cache, an unchanged job yields the very same item, and the 2560 rows
+// that did not change are skipped instead of re-rendered.
+//
+// A WeakMap so a job removed from the Map takes its item with it.
+const itemCache = new WeakMap<Job, QueueItem>();
+
 // Map Job status/fields to the shape the existing UI expects
 function toQueueItem(job: Job): QueueItem {
-  return {
+  const cached = itemCache.get(job);
+  if (cached) return cached;
+  const item: QueueItem = {
     ...job,
     status:
       job.status === "pending"
@@ -139,6 +153,8 @@ function toQueueItem(job: Job): QueueItem {
     error_message: job.error ?? "",
     speed: job.speed ?? 0,
   };
+  itemCache.set(job, item);
+  return item;
 }
 
 export function useDownloadQueueData() {

@@ -462,7 +462,7 @@ Les 5 sans contrôle, examinées une par une :
 
 | Route | Verdict |
 |---|---|
-| `POST /auth/login`, `POST /auth/local` | **légitime** — pré-authentification par nature |
+| `POST /auth/login`, ~~`POST /auth/local`~~ | **légitime** — pré-authentification par nature. `/auth/local` a été supprimée depuis (#98) |
 | `GET /auth/me` | **légitime** — renvoie la propre identité de l'appelant |
 | `GET /auth/stream-token` | **légitime** — jeton 60 s restreint aux chemins SSE + téléchargement de job |
 | `POST /auth/keys` | 🔴 **FAILLE** — voir ci-dessous |

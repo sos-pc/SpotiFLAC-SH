@@ -103,7 +103,7 @@ func (s *Server) registerFileRoutes() {
 		}
 		batchStr := r.URL.Query().Get("batch")
 		batch := batchStr == "true" || batchStr == "1"
-		result, err := s.ctr.Metadata.GetSpotifyMetadata(service.SpotifyMetadataRequest{URL: url, Batch: batch}, userIDFromContext(r))
+		result, err := s.ctr.Metadata.GetSpotifyMetadata(service.SpotifyMetadataRequest{URL: url, Batch: batch})
 		if err != nil {
 			writeV1Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -267,6 +267,23 @@ func (s *Server) registerFileRoutes() {
 		if !decodeV1JSON(w, r, &submitted) {
 			return
 		}
+		// Refused, not stored. These are this endpoint's own RESPONSE field
+		// names: a submission containing one is a client PUTting back the
+		// envelope it got from GET instead of the values inside it. Accepting
+		// it stores a complete second copy of every setting one level down,
+		// where nothing that reasons about settings will ever look — and on
+		// this deployment that copy then became a house default.
+		//
+		// Loud rather than quiet. A client confused enough to send this needs
+		// to find out, and the most likely one is a browser running a bundle
+		// old enough to predate the envelope.
+		if bad := settings.NotSettingKeys(submitted); len(bad) > 0 {
+			writeV1Error(w, http.StatusBadRequest,
+				"these are not settings, they are the fields of this endpoint's own response: "+
+					strings.Join(bad, ", ")+" — send the values, not the envelope")
+			return
+		}
+
 		user := auth.GetUserFromContext(r)
 		isAdmin := user != nil && user.IsAdmin
 
@@ -329,9 +346,9 @@ func (s *Server) registerFileRoutes() {
 			}
 		} else if len(userPart) > 0 {
 			// No authenticated user: there is no profile to write to, so the
-			// operator's instance store is the only sensible home. This is the
-			// DISABLE_AUTH_ON_LAN path, which is off on the reference
-			// deployment.
+			// operator's instance store is the only sensible home. Reachable
+			// by an API key issued without a user, not by a browser — every
+			// browser route authenticates.
 			if err := s.ctr.System.SaveSettings(userPart); err != nil {
 				writeV1Error(w, http.StatusInternalServerError, err.Error())
 				return

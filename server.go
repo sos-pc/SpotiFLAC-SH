@@ -7,7 +7,6 @@ import (
 	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
 	"io"
 	"io/fs"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,69 +53,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Local bypass — DISABLE_AUTH_ON_LAN=true
-// ─────────────────────────────────────────────────────────────────────────────
-
-func isLocalIP(r *http.Request) bool {
-	// Si la requête vient via un reverse proxy (SWAG), X-Forwarded-For est présent.
-	// Dans ce cas on refuse le bypass même si RemoteAddr est une IP privée.
-	// Accès direct (LAN, SSH tunnel localhost) → pas de X-Forwarded-For → on vérifie RemoteAddr.
-	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" {
-		return false
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	parsed := net.ParseIP(host)
-	if parsed == nil {
-		return false
-	}
-	// Loopback + RFC-1918 + Docker bridge (172.16/12 couvre 172.17.0.1)
-	privateRanges := []string{
-		"127.0.0.0/8",
-		"::1/128",
-		"10.0.0.0/8",
-		"192.168.0.0/16",
-		"172.16.0.0/12",
-	}
-	for _, cidr := range privateRanges {
-		_, network, err := net.ParseCIDR(cidr)
-		if err == nil && network.Contains(parsed) {
-			return true
-		}
-	}
-	return false
-}
-
-func localBypassEnabled() bool {
-	return os.Getenv("DISABLE_AUTH_ON_LAN") == "true"
-}
-
-// localBypassMiddleware injecte un JWT admin synthétique si la requête vient
-// d'une IP locale et que DISABLE_AUTH_ON_LAN=true.
-// Remplace RequireAuth sur les routes protégées dans ce cas.
-func localBypassMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if localBypassEnabled() && isLocalIP(r) {
-			// Pas de token dans la requête → injecter un user admin local
-			if r.Header.Get("Authorization") == "" {
-				profile := &auth.UserProfile{
-					ID:          "local-admin",
-					DisplayName: "Local Admin",
-					IsAdmin:     true,
-				}
-				token, err := auth.GenerateJWT(profile)
-				if err == nil {
-					r.Header.Set("Authorization", "Bearer "+token)
-				}
-			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -198,7 +134,7 @@ func writeV1Error(w http.ResponseWriter, status int, msg string) {
 }
 
 func (s *Server) registerRoutes() {
-	s.mux.Handle("/api/upload", corsMiddleware(localBypassMiddleware(s.RequireAuth(http.HandlerFunc(s.handleUpload)))))
+	s.mux.Handle("/api/upload", corsMiddleware(s.RequireAuth(http.HandlerFunc(s.handleUpload))))
 
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {

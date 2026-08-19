@@ -17,7 +17,6 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 - **Jellyfin integration** — generates M3U8 playlist files automatically per user settings
 - **Spotify ID embedded in tags** — every downloaded file carries a `SPOTIFY_ID` tag (Vorbis / TXXX / iTunes), so M3U8 regeneration is filesystem-driven and survives BoltDB cleanup. An admin retag endpoint exists to back-fill legacy files.
 - Real-time download queue (Server-Sent Events) with progress, speed and size
-- **LAN bypass** — optional auto-login on local network (no password required)
 - File browser, audio converter, audio analysis
 - **Optional Tidal Premium** — OAuth 2.0 Device Code Flow unlocks the native full-FLAC path; without an account, Tidal is routed to the download engine like the other providers
 - Automatic BoltDB cleanup (deduplication every 24h)
@@ -28,7 +27,7 @@ A self-hosted web app to download Spotify tracks in true FLAC from Tidal, Qobuz,
 | Guide | Description |
 |-------|-------------|
 | [API Reference](docs/api-reference.md) | All REST endpoints with examples |
-| [Authentication](docs/authentication.md) | JWT, API keys, LAN bypass |
+| [Authentication](docs/authentication.md) | JWT, API keys, permission scopes |
 | [Deployment](docs/deployment.md) | Docker, reverse proxy, env vars |
 | [Settings Reference](docs/settings-reference.md) | All configurable options (camelCase keys) |
 | [Watchlists](docs/watchlist.md) | Auto-sync playlists |
@@ -70,7 +69,6 @@ services:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
       # Optional: auto-login for direct LAN access (see below)
-      # - DISABLE_AUTH_ON_LAN=true
     volumes:
       - /path/to/music:/home/nonroot/Music
       - /path/to/config:/home/nonroot/.SpotiFLAC
@@ -88,29 +86,6 @@ Open `http://your-server:6890` and log in with your Jellyfin credentials.
 |----------|---------|-------------|
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin instance, reachable from inside the container |
 | `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates one and persists it in `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas. |
-| `DISABLE_AUTH_ON_LAN` | `false` | Auto-login as admin on direct LAN/localhost access (see below) |
-
-## LAN Bypass (`DISABLE_AUTH_ON_LAN`)
-
-When set to `true`, requests arriving **directly** on the local network (no reverse proxy) are automatically authenticated as a local admin — no Jellyfin login required.
-
-**Security model:**
-- Only `RemoteAddr` is trusted. If `X-Forwarded-For` or `X-Real-IP` is present, the bypass is refused — even if `RemoteAddr` is private.
-- This means: direct LAN → bypass; via reverse proxy → normal Jellyfin login.
-- Trusted ranges: loopback (`127.0.0.0/8`, `::1`), `10.0.0.0/8`, `172.16.0.0/12` (covers Docker bridge), `192.168.0.0/16`.
-- **Requires port 6890 to be closed on the public internet.** If the port is exposed and `DISABLE_AUTH_ON_LAN=true`, anyone hitting the LAN-routed path becomes admin.
-
-| Access path | Result |
-|-------------|--------|
-| `localhost:6890` / LAN direct | Auto-login as Local Admin |
-| Via reverse proxy (internet) | Jellyfin login required |
-| Internet direct (port open) | Would bypass auth — keep port closed |
-
-```bash
-# Verify the port is not exposed publicly before enabling
-curl -m 5 http://$(curl -s ifconfig.me):6890/api/v1/auth/local -X POST
-# Should timeout — if it responds, do NOT enable DISABLE_AUTH_ON_LAN
-```
 
 ## Reverse Proxy (Nginx / SWAG example)
 
@@ -131,7 +106,7 @@ location / {
 }
 ```
 
-> The `X-Forwarded-For` header set by the proxy is what prevents the LAN bypass from triggering on internet requests — never strip it.
+> The `X-Forwarded-For` header set by the proxy is what `TRUST_PROXY_HEADERS` reads to rate-limit per real client rather than per proxy — never strip it.
 
 ## Watchlists
 
@@ -184,7 +159,7 @@ curl -s -X POST http://your-server:6890/api/v1/auth/tidal/device/poll \
 
 ```
 Browser → /api/v1/auth/login  → Jellyfin auth → JWT (24h, HMAC-SHA256)
-Browser → /api/v1/auth/local  → LAN bypass    → JWT (admin, if DISABLE_AUTH_ON_LAN=true and request is LAN-direct)
+Headless client → X-API-Key header → scoped API key (read / manage / admin)
 Browser → /api/v1/* + JWT     → handlers (per-user filtered)
                               → BoltDB (jobs, watchlists, history, users, settings, api_keys, api_proxies)
                               → SQLite catalog (tracks, albums, library_files, download_attempts,
@@ -210,7 +185,7 @@ Background goroutines (started in main.go):
 ```
 .
 ├── main.go              # Entry point, graceful shutdown, background goroutines
-├── server.go            # HTTP server, mux, middleware (CORS, LAN bypass)
+├── server.go            # HTTP server, mux, middleware (CORS, auth)
 ├── container.go         # DI container — DB, Catalog, Jobs, Auth, Watcher, plus the
 │                        #   domain services below
 ├── system_service.go    # SystemService: settings (load/save), OS/defaults, M3U8 write
@@ -314,7 +289,6 @@ All data is stored in the config volume (`/home/nonroot/.SpotiFLAC`):
 | Multi-user | No | Yes |
 | Watchlists + auto-sync | No | Yes |
 | M3U8 Jellyfin | No | Yes |
-| LAN bypass | No | Yes |
 | Docker | No | Yes |
 | Self-hosted | No | Yes |
 | Real-time progress | Polling | Server-Sent Events |
@@ -423,7 +397,7 @@ A large batch covering a full security-hardening pass, the SQLite catalog refact
 - **feat:** Deezer ISRC fallback + direct Tidal search by name when Song.link unavailable.
 - **feat:** Community API pool expanded; Song.link `__NEXT_DATA__` HTML scraping fallback.
 - **fix:** Deezer disabled (domain expiry) — re-enabled in v3.3.0.
-- **feat:** `DISABLE_AUTH_ON_LAN` — auto-login on direct LAN/localhost access.
+- **feat:** `DISABLE_AUTH_ON_LAN` — auto-login on direct LAN/localhost access. *(removed in #98 — a scoped API key replaces it.)*
 - **fix:** Spotify URLs with `intl-fr/` prefix and `?si=` parameter now work for albums and artists.
 - **fix:** Playlist names resolved from Spotify `playlist_info.owner.name` (the underlying API returns the playlist name in this field, not in `playlist_info.name`).
 - **fix:** Watchlist stats — `missing = total - downloaded` (was incorrectly showing 100 % failed).

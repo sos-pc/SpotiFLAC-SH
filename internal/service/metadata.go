@@ -5,8 +5,9 @@ package service
 // god-object (R3). Streaming-link resolution and track-availability lookups also
 // lived here until item 7b removed them with the rest of Song.link.
 //
-// Holds only its real dependency: AuthManager, for EffectiveDownloadSettings'
-// per-user lookup (see GetSpotifyMetadata / DownloadSettings, R8).
+// Holds nothing. The AuthManager it used to carry was there for one purpose —
+// resolving the SpotFetch fallback URL for the calling user — and went when that
+// fallback did.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import (
@@ -18,18 +19,14 @@ import (
 	"time"
 
 	"github.com/sos-pc/SpotiFLAC-SH/backend/spotify"
-	"github.com/sos-pc/SpotiFLAC-SH/internal/auth"
-	"github.com/sos-pc/SpotiFLAC-SH/internal/settings"
 )
 
 // The JobManager dependency went with them: it was held only to borrow the
 // JobManager's shared ISRC client.
-type MetadataService struct {
-	auth *auth.AuthManager
-}
+type MetadataService struct{}
 
-func NewMetadataService(auth *auth.AuthManager) *MetadataService {
-	return &MetadataService{auth: auth}
+func NewMetadataService() *MetadataService {
+	return &MetadataService{}
 }
 
 type SpotifyMetadataRequest struct {
@@ -53,6 +50,13 @@ type SpotifySearchByTypeRequest struct {
 
 // normalizeSpotifyURL supprime le préfixe intl-xx/ et le paramètre ?si=
 // ex: https://open.spotify.com/intl-fr/album/ID?si=xxx → https://open.spotify.com/album/ID
+//
+// Existait pour l'API externe SpotFetch, qui recevait l'URL telle quelle. Cette
+// API n'est plus appelée, et le parseur natif (backend/spotify.parseSpotifyURI)
+// couvre déjà les deux cas : il saute le segment intl-, et il lit Path, donc la
+// query ne l'atteint jamais. Ce qui reste ici est donc une ceinture par-dessus
+// des bretelles — sans effet mesurable, testé, gardé faute d'une raison de le
+// retirer, pas faute d'en avoir besoin.
 func normalizeSpotifyURL(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -72,16 +76,20 @@ func normalizeSpotifyURL(rawURL string) string {
 	return parsed.String()
 }
 
-// GetSpotifyMetadata fetches track/album/playlist/artist metadata natively,
-// falling back to userID's effective SpotFetch API URL (their own saved
-// settings if any, else the operator's global config.json — see
-// EffectiveDownloadSettings) if the native client fails. userID == ""
-// resolves to the global settings.
-func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest, userID string) (string, error) {
+// GetSpotifyMetadata fetches track/album/playlist/artist metadata through the
+// native TOTP client.
+//
+// A second source used to sit behind it: a SpotFetch-compatible API, tried
+// whenever the native call failed, at a URL resolved per user. It is gone. The
+// shipped default was a third party that has never once answered — the fallback
+// never fired on any deployment — and upstream dropped the setting as well. The
+// escape hatch it was meant to be is worth rebuilding the day the native path
+// breaks; keeping a dead one wired in was not.
+func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 	if req.URL == "" {
 		return "", fmt.Errorf("URL parameter is required")
 	}
-	// Normaliser l'URL : supprimer intl-xx/ et ?si=... pour compatibilité API externe
+	// Normaliser l'URL : supprimer intl-xx/ et ?si=... (redondant, voir plus haut)
 	req.URL = normalizeSpotifyURL(req.URL)
 	if req.Delay == 0 {
 		req.Delay = 1.0
@@ -93,32 +101,16 @@ func (m *MetadataService) GetSpotifyMetadata(req SpotifyMetadataRequest, userID 
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), time.Duration(req.Timeout*float64(time.Second)))
 	defer metaCancel()
 
-	spotFetchAPIURL := settings.EffectiveDownloadSettings(m.auth, userID).SpotFetchAPIURL
-
-	// Client natif Spotify (TOTP) — avec fallback automatique vers SpotFetch si échec
-	data, nativeErr := spotify.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
-	if nativeErr == nil {
-		jsonData, err := json.MarshalIndent(data, "", "  ")
-		if err != nil {
-			return "", fmt.Errorf("failed to encode response: %v", err)
-		}
-		return string(jsonData), nil
+	// Client natif Spotify (TOTP)
+	data, err := spotify.GetFilteredSpotifyData(metaCtx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch metadata: %v", err)
 	}
-
-	// Fallback automatique vers SpotFetch si disponible
-	if spotFetchAPIURL != "" {
-		data, err := spotify.GetSpotifyDataWithAPI(metaCtx, req.URL, true, spotFetchAPIURL, req.Batch, time.Duration(req.Delay*float64(time.Second)))
-		if err != nil {
-			return "", fmt.Errorf("failed to fetch metadata (native: %v, spotfetch: %v)", nativeErr, err)
-		}
-		jsonData, err := json.MarshalIndent(data, "", "  ")
-		if err != nil {
-			return "", fmt.Errorf("failed to encode response: %v", err)
-		}
-		return string(jsonData), nil
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to encode response: %v", err)
 	}
-
-	return "", fmt.Errorf("failed to fetch metadata: %v", nativeErr)
+	return string(jsonData), nil
 }
 
 func (m *MetadataService) SearchSpotify(req SpotifySearchRequest) (*spotify.SearchResponse, error) {

@@ -47,7 +47,6 @@ services:
     environment:
       - JELLYFIN_URL=http://your-jellyfin-host:8096
       - JWT_SECRET=change-me-to-a-random-32-char-string
-      # - DISABLE_AUTH_ON_LAN=true   # see authentication.md
       - ENGINE_URL=http://spotiflac-engine:8080
       - ENGINE_SERVICES=qobuz,deezer,amazon,tidal
     user: "1000:1000"
@@ -145,7 +144,6 @@ sudo chown -R 1000:1000 /path/to/your/backed-up/folder/spotiflac-config
 |----------|---------|-------------|
 | `JELLYFIN_URL` | `http://localhost:8096` | URL of your Jellyfin server, **reachable from inside the container** (so not `localhost` if Jellyfin runs on the host). |
 | `JWT_SECRET` | *(auto-generated)* | Secret for JWT signing. If unset, SpotiFLAC generates 32 random bytes on first start and writes them to `<config>/jwt_secret` (mode `0600`). Set this env var to share a secret across replicas, or to inject one from a secret manager. |
-| `DISABLE_AUTH_ON_LAN` | `false` | Auto-login on direct LAN access — see [authentication.md](authentication.md). |
 | `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for the client IP. Set it **only** behind a proxy you control — see [archive/deployment-hardening.md](archive/deployment-hardening.md). |
 | `LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error`. |
 | `ENGINE_URL` | *(unset)* | Where the download engine's shim listens, e.g. `http://spotiflac-engine:8080`. **Required in practice** — see below. |
@@ -171,10 +169,25 @@ All persistent state lives in the config volume (`/home/nonroot/.SpotiFLAC`):
 
 | File | Purpose |
 |------|---------|
-| `jobs.db` | BoltDB single-file database. Buckets: `jobs`, `watchlist`, `users`, `apikeys`, `history`, `fetch_history`. Two orphans survive in databases created before 2026-07-28 — `proxy_discovery` and `api_proxies`, left from the removed proxy-discovery and proxy-configuration features. Nothing reads either; together they are a few hundred bytes, so they are left in place rather than migrated away. |
+| `jobs.db` | BoltDB single-file database — the **live** half of the state: what the app needs right now. Buckets as measured on the reference deployment 2026-08-17: `jobs`, `watchlist`, `users`, `apikeys`, `DownloadHistory`, `FetchHistory`, `SpotifyTrackISRC`, `community_session`, and the orphan `proxy_discovery` (left from the removed proxy-discovery feature; nothing reads it, a few hundred bytes, kept rather than migrated away). Old jobs are pruned every 24 h, which is why anything that must outlive them lives in `catalog.db` instead. |
 | `jwt_secret` | Auto-generated JWT signing key (mode `0600`). Skipped when `JWT_SECRET` env var is set. |
 | `tidal_token.json` | Cached Tidal Device Code token (mode `0644`). Created on successful auth, deleted on disconnect or refresh failure. Auto-refreshed before expiry. |
-| `config.json` | Legacy global settings (read-only fallback for users with no per-user settings yet). New deployments should not need this — settings are stored per-user inside `jobs.db`. |
+| `catalog.db` | SQLite catalog: `tracks`, `library_files`, `watchlist_tracks`, `playlist_snapshots`, `download_attempts`. The long-term half of the state — what exists on disk, where it came from, what a playlist held on a given day. Survives `jobs.db`'s daily pruning, which is the point of it being separate. Plus `catalog.db-wal` / `-shm` while the app runs. |
+| `config.json` | The **instance settings store**, written by the app. Holds the deployment-wide keys (download path, templates, `jellyfinMusicPath`) plus the house defaults a new account starts from. It was a read-only legacy fallback before the settings split; it is now actively read and written on every start — see [settings-reference.md](settings-reference.md). |
+
+> **Paths inside these databases are CONTAINER paths.** `catalog.db` and
+> `jobs.db` store library files as `/home/nonroot/Music/...`, because that is
+> where the app sees them. From the host that directory is whatever the compose
+> file bind-mounts onto it — `/data/Multimedia/Musique/Spotiflac` on the
+> reference deployment. Inspecting the catalog from the host without
+> translating gives a `stat()` that fails for *every* row, present and missing
+> alike, and nothing raises an error: the answer is uniformly wrong rather than
+> obviously wrong. Read the mapping first:
+> ```bash
+> docker inspect spotiflac --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+> ```
+> A check that returns the same verdict for all rows is measuring the mount, not
+> the files.
 
 > **Backup:** with the example compose file's named volume (`spotiflac_config`), there's no host folder to `cp` directly — go through a throwaway container instead:
 > ```bash
@@ -218,7 +231,7 @@ location / {
 }
 ```
 
-> The `X-Forwarded-For` header set by the proxy is what prevents `DISABLE_AUTH_ON_LAN` from triggering on internet requests — never strip it.
+> The `X-Forwarded-For` header set by the proxy is what `TRUST_PROXY_HEADERS` reads to rate-limit per real client rather than per proxy — never strip it.
 
 > **Login rate limiting behind a reverse proxy:** set `TRUST_PROXY_HEADERS=true` so the login rate limiter (`POST /api/v1/auth/login`) keys off the real client IP from `X-Forwarded-For`/`X-Real-IP` instead of the proxy's own IP. This is **off by default** — trusting those headers unconditionally would let any client on the LAN (or anything sharing a Docker network with the container) forge a fresh IP on every request and bypass the lockout entirely. Only set it when every request genuinely passes through a proxy you control that overwrites these headers (as in the examples on this page); never set it if the app is reachable directly.
 

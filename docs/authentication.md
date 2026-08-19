@@ -4,7 +4,7 @@ SpotiFLAC uses **Jellyfin** as its identity provider. All sessions are represent
 
 The whole flow is implemented in three files:
 
-- `auth.go` — Jellyfin authentication, JWT issuance and validation, the `RequireAuth` and `localBypassMiddleware` helpers.
+- `auth.go` — Jellyfin authentication, JWT issuance and validation, and the `RequireAuth` helper.
 - `api_keys.go` — API key creation, hashing (`SHA-256`), validation.
 - `ratelimit.go` — login rate limiter.
 
@@ -52,7 +52,7 @@ Tokens are signed with `HMAC-SHA256` using the secret from the `jwt_secret` file
 
 | Claim | Type | Description |
 |-------|------|-------------|
-| `uid` | string | Jellyfin user ID (or `local-admin` for LAN bypass) |
+| `uid` | string | Jellyfin user ID |
 | `name` | string | Display name |
 | `admin` | bool | Admin flag |
 | `exp` | int | Expiry timestamp, Unix seconds |
@@ -163,46 +163,6 @@ Returns `204`. Returns `400 access denied` if the key does not belong to the cal
 
 ---
 
-## LAN Bypass (`DISABLE_AUTH_ON_LAN`)
-
-When `DISABLE_AUTH_ON_LAN=true`, requests arriving **directly** from a local IP are automatically authenticated as a local admin — no Jellyfin login required.
-
-### Trusted IP ranges
-
-Implemented in `server.go` (`isLocalIP`):
-
-| Range | Notes |
-|-------|-------|
-| `127.0.0.0/8` | Loopback (incl. SSH tunnels back to localhost) |
-| `::1/128` | IPv6 loopback |
-| `10.0.0.0/8` | RFC-1918 private |
-| `172.16.0.0/12` | Includes the default Docker bridge (`172.17.0.0/16`) |
-| `192.168.0.0/16` | RFC-1918 private |
-
-### How the check works
-
-SpotiFLAC trusts **only `r.RemoteAddr`** — not `X-Forwarded-For` or `X-Real-IP`. The presence of either of those headers automatically disqualifies the bypass:
-
-| Scenario | Result |
-|----------|--------|
-| Direct LAN request | `RemoteAddr` is private, no XFF → auto-login as `local-admin` |
-| Request via Nginx/SWAG/Caddy | `XFF` is set → bypass refused, normal Jellyfin login enforced |
-| Public exposure on port 6890 | If `RemoteAddr` is private (rare on public IPs) and no proxy headers → bypass would trigger. **Keep port 6890 closed publicly.** |
-
-The bypass is implemented in two places:
-
-- `localBypassMiddleware` injects a synthetic admin JWT in the `Authorization` header so the per-route auth still works.
-- `POST /api/v1/auth/local` lets clients explicitly request a token; returns `403 local bypass not enabled` when the conditions aren't met.
-
-### Verification before enabling
-
-```bash
-# Run from an external machine — should time out
-curl -m 5 -X POST http://$(curl -s ifconfig.me):6890/api/v1/auth/local
-# If it responds with a token, do NOT enable DISABLE_AUTH_ON_LAN
-```
-
----
 
 ## Tidal Account (Optional)
 

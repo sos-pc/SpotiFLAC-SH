@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, memo, type ReactNode } from "react";
 import { X, Download, CheckCircle2, XCircle, Clock, FileCheck, Trash2, HardDrive, Zap, Timer, FileDown, ChevronRight, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
@@ -43,6 +43,18 @@ const STATUS_BADGE_VARIANT: Record<QueueStatus, "default" | "secondary" | "destr
 // rather than to QueueStatus — nothing else in the app should be able to hold
 // a QueueItem whose status is "all".
 type StatusFilter = QueueStatus | "all";
+// Mounted whether the panel is open or not, and it has to be: this component's
+// subscription IS its history. The server replays recent job_update events only
+// to subscribers present when the connection opens (see lib/jobsStream.ts), so
+// a panel that subscribed on open would start from an empty queue and show only
+// what changed since — measured, while trying exactly that: 8 jobs where the
+// session had 2561.
+//
+// It costs about 9 ms per status transition to keep a closed panel current at
+// that size. The fix is not to unmount it but to stop holding the same jobs
+// twice: one shared store feeding both this and DownloadProgressToast, instead
+// of two subscriptions each keeping their own Map and deriving everything from
+// it independently.
 export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     const queueInfo = useDownloadQueueData();
     // Both of these used to report failure to the console only. A button that
@@ -96,14 +108,6 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
             toast.error(`Failed to export: ${error}`);
         }
     };
-    // Both took a bare `string` and defended themselves against values the
-    // union never contained — a `default: return null` and a `|| "outline"`
-    // that no call could reach, since the only argument either ever gets is
-    // item.status. Typed to QueueStatus, the lookups are total and the
-    // defences are gone.
-    const getStatusBadge = (status: QueueStatus) => (<Badge variant={STATUS_BADGE_VARIANT[status]} className="text-xs">
-      {STATUS_LABEL[status]}
-    </Badge>);
     // Takes whole seconds, already computed by useDownloadQueueData. It used to
     // take a start timestamp and subtract Date.now() itself — which is how a
     // fractional epoch turned into "1.0179998874664307s" on screen, since only
@@ -152,7 +156,10 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
     // The status filters hunt individual tracks across every batch, so a filter
     // shows the flat list it always showed. Grouping is the unfiltered view's
     // job: an overview of what was asked for, not a way to find one track.
-    const renderItem = (item: QueueItem) => (<QueueRow key={item.id} item={item} icon={STATUS_ICON[item.status]} badge={getStatusBadge(item.status)}/>);
+    // The icon and the badge are looked up inside the row now. Passing them in
+    // meant two freshly created elements per row per render, which is a new
+    // prop identity every time and makes memoising the row pointless.
+    const renderItem = (item: QueueItem) => (<QueueRow key={item.id} item={item}/>);
     return (<Dialog open={isOpen} onOpenChange={onClose}>
     <DialogContent className="max-w-[1200px] w-[95vw] max-h-[80vh] flex flex-col p-0 gap-0 [&>button]:hidden">
       <DialogHeader className="px-6 pt-6 pb-4 border-b space-y-0">
@@ -304,7 +311,18 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
 
 // One row. Extracted so the grouped view and the filtered flat view render an
 // item identically — two copies of this would drift the moment either changed.
-function QueueRow({ item, icon, badge }: { item: QueueItem; icon: ReactNode; badge: ReactNode }) {
+//
+// memo, and it earns it: one job finishing used to re-render every row on
+// screen. Expanded on a 2561-track batch that measured 630 ms of render work
+// per status transition — a download completes every few seconds, so the panel
+// spent most of its life rebuilding rows that had not changed. The two halves
+// this depends on are the stable item identity from useDownloadQueueData's
+// cache, and looking the icon and badge up here rather than receiving them.
+const QueueRow = memo(function QueueRow({ item }: { item: QueueItem }) {
+    const icon: ReactNode = STATUS_ICON[item.status];
+    const badge = (<Badge variant={STATUS_BADGE_VARIANT[item.status]} className="text-xs">
+      {STATUS_LABEL[item.status]}
+    </Badge>);
     return (<div className="border rounded-lg p-3 hover:bg-muted/30 transition-colors">
       <div className="flex items-start gap-3">
         <div className="mt-1">{icon}</div>
@@ -351,4 +369,4 @@ function QueueRow({ item, icon, badge }: { item: QueueItem; icon: ReactNode; bad
         </div>
       </div>
     </div>);
-}
+});

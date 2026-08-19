@@ -69,9 +69,15 @@ directory, and two edits to the engine's core. Neither needed a fork:
 - the core installs from PyPI, and the edits are `.patch` files applied on top.
 
 That removes a whole class of work. There is no merge to perform, no conflict to
-resolve, no drift to monitor on a schedule. **If a patch stops applying, the
-build fails** — immediately, at the point of change, instead of being discovered
-weeks later by a cron job nobody reads.
+resolve, no drift to monitor on a schedule. **If a fix we carry stops reaching
+its target, the build says so immediately**, at the point of change, instead of
+being discovered weeks later by a cron job nobody reads.
+
+"Says so" rather than "fails": a patch whose bug upstream has fixed is skipped
+with a notice, because failing there would freeze this image on its previous
+version and cut the deployment off from every other upstream change. Failing is
+reserved for the case that deserves it — a fix that is still needed and no
+longer applies. See [`patches/README.md`](patches/README.md).
 
 Full reasoning and the measurements behind it:
 [docs/upstream-tracking-plan.md](../docs/upstream-tracking-plan.md).
@@ -97,17 +103,46 @@ cleanly while silently going stale — a worse failure than a conflict.
 
 ## Patches currently carried
 
-- **`amazon-songlink-unformatted-url.patch`** — `amazon.py`: `source_url` is a
-  module-level template, `"https://open.spotify.com/track/{track_id}"`, and
-  nothing calls `.format()` on it. Amazon resolution step 4 therefore put the
-  literal `{track_id}` on the wire and took an HTTP 400 every time; the route had
-  never resolved a single track. Found in production logs 2026-08-04.
+**None.** The one there was — `amazon-songlink-unformatted-url.patch` — was
+retired on 2026-08-15: upstream 3.0.0 rewrote the whole resolution path into
+`core/link_resolver.py`, where the SongLink call passes
+`params={"url": url, "userCountry": "US"}` against a bare base URL. The
+unformatted template it fixed no longer exists to fix.
 
-  Not a missing `f` prefix — the constant is defined where `track_id` is not in
-  scope, so an f-string there would raise `NameError` at import. Only the
-  substitution is missing. The ISRC variant just below it is correctly formatted
-  and still 400s, so this removes a route that could not work rather than
-  guaranteeing one that does.
+That retirement is also why the build now runs a probe before each patch — see
+[`patches/README.md`](patches/README.md). Upstream adopting our fix used to
+fail the build and freeze this image on its previous version.
+
+## Where the download providers come from
+
+**Not from the wheel.** SpotiFLAC 3.0.0 deleted `SpotiFLAC/providers/` — eight
+Python modules — and replaced them with JavaScript extensions fetched from a
+registry. 1.7.3 carried that registry's URL as a hardcoded constant; 3.0.0
+removed it and expects `SPOTIFLAC_REGISTRIES` from the environment, a `.env`
+file, or the GUI settings screen, none of which a headless image has.
+
+The Dockerfile therefore installs them **at build time**, with the registry URL
+as an `ARG` that deliberately does not become an `ENV`:
+
+| | at build | at runtime |
+|---|---|---|
+| `SPOTIFLAC_REGISTRIES` | set, from the `ARG` | **unset** |
+| effect | seven extensions installed into the image | manager skips its registry check and uses what is installed |
+
+That is what makes the image reproducible again — `SPOTIFLAC_VERSION` pins the
+wheel, and this pins the code that actually downloads — and what stops every
+container recreation from re-fetching seven bundles from GitHub.
+
+An operator who wants runtime updates can set `SPOTIFLAC_REGISTRIES` in compose.
+Then it is a choice.
+
+**The exposure, stated:** the bundles are executable JavaScript from a
+third-party repository, and their `sha256` comes from the same registry that
+serves them — good against corruption, not against a compromised registry.
+Pinning them into an image someone can inspect is better than fetching them
+fresh on every start; it is not the same as trusting them.
+
+Full measurements: [docs/engine-3.0-impact-plan.md](../docs/engine-3.0-impact-plan.md).
 
 ## Runtime hooks
 
@@ -121,8 +156,15 @@ in `hooks/` as Python modules loaded by `shim.py` at startup.
   solver.py) have both failed. Survives line shifts — only breaks if the
   function is renamed, removed, or its signature changes incompatibly.
 
-**When upstream adopts a patch**, `patch --dry-run` reports "Reversed (or
-previously applied)" and the build fails. That is the signal to delete the file.
+**When upstream adopts a patch textually**, `patch --dry-run` reports
+"Reversed (or previously applied)". **When upstream fixes the bug their own
+way**, as in 3.0.0, the patch simply stops finding its target. Both used to
+fail the build, which is the wrong answer for a bug that no longer exists: it
+freezes this image on its previous version and cuts the deployment off from
+every other upstream change until a human intervenes.
+
+A patch's probe is what separates those from a real breakage. See
+[`patches/README.md`](patches/README.md).
 
 **When a hook stops applying**, it logs a warning at import time and degrades
 gracefully — the build succeeds, the image is published, only the fallback is
@@ -130,7 +172,9 @@ unavailable. The build log records whether each hook applied or skipped.
 
 ## Adding or updating a patch
 
-Generate it against the version you are targeting, never against a working tree:
+Write the probe first — [`patches/README.md`](patches/README.md) says why and
+shows one. Then generate the diff against the version you are targeting, never
+against a working tree:
 
 ```bash
 # extract the wheel you are targeting, edit a copy, then:
@@ -140,10 +184,14 @@ diff -u a/SpotiFLAC/core/<file>.py b/SpotiFLAC/core/<file>.py > patches/<name>.p
 Paths inside the patch must start at `SpotiFLAC/` — the Dockerfile applies with
 `-p1` from the site-packages root.
 
-Verify before committing:
+Verify before committing — both halves:
 
 ```bash
 patch -p1 --dry-run -d <extracted-wheel> < patches/<name>.patch
+```
+
+```bash
+PYTHONPATH=<extracted-wheel> python patches/<name>.probe.py; echo "probe exit=$? (0=bug present, 3=gone)"
 ```
 
 ## Building locally

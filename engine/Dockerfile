@@ -95,13 +95,54 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # hooks/ (below), not here — a patch that stops applying blocks the entire
 # update chain, while a hook that cannot wrap degrades gracefully.  Patches
 # remain the right shape for bug fixes the upstream source needs corrected.
-# --dry-run first so a bad patch cannot leave a half-modified tree behind.
+#
+# Three outcomes, not two, because "the patch does not apply" hides two
+# opposite events and only one of them is bad:
+#
+#   the bug is gone   — upstream fixed it. Our patch is obsolete. Skip it and
+#                       say so; the build MUST NOT fail, or upstream fixing our
+#                       bug would freeze this image on its previous version and
+#                       cut us off from every other upstream change. That is not
+#                       hypothetical: it is what happened on 2026-08-15 with
+#                       SpotiFLAC 3.0.0, for four consecutive builds.
+#   still needed, applies    — apply it.
+#   still needed, will not apply — upstream moved the code around our fix. Fail
+#                       hard: an image that silently drops a bug fix is worse
+#                       than no image.
+#
+# Only a probe can tell the first case from the third, because "did upstream
+# fix this?" is a question about behaviour and `patch` only reads text. So a
+# patch MAY carry a sibling <name>.probe.py — see patches/README.md — that
+# exits 0 when the bug is still present and 3 when it is gone. No probe means
+# "assume still needed", which is the old behaviour.
+#
+# --dry-run before applying, so a rejected hunk cannot leave a half-modified
+# tree. `|| exit 1` on both, because a for loop reports only its LAST
+# iteration's status: with two patches, the first failing and the second
+# succeeding, the previous version of this loop exited 0 and published an image
+# missing a fix. It was correct only while exactly one patch existed.
 COPY patches/ /tmp/patches/
 RUN SITE="$(python -c 'import SpotiFLAC, pathlib; print(pathlib.Path(SpotiFLAC.__file__).parent.parent)')" \
     && for p in /tmp/patches/*.patch; do \
          [ -e "$p" ] || continue; \
-         echo "applying $(basename "$p")"; \
-         patch -p1 -d "$SITE" --dry-run < "$p" && patch -p1 -d "$SITE" < "$p"; \
+         name="$(basename "$p" .patch)"; \
+         probe="/tmp/patches/$name.probe.py"; \
+         if [ -f "$probe" ]; then \
+           python "$probe"; rc=$?; \
+           if [ "$rc" = 3 ]; then \
+             echo "OBSOLETE PATCH: $name - upstream fixed this bug themselves."; \
+             echo "  Delete engine/patches/$name.patch and its probe. Not applying it."; \
+             continue; \
+           fi; \
+           if [ "$rc" != 0 ]; then \
+             echo "PROBE BROKEN: $name.probe.py exited $rc (expected 0=present, 3=gone)" >&2; \
+             exit 1; \
+           fi; \
+           echo "probe: bug still present, $name.patch is still needed"; \
+         fi; \
+         echo "applying $name.patch"; \
+         patch -p1 -d "$SITE" --dry-run < "$p" || exit 1; \
+         patch -p1 -d "$SITE" < "$p" || exit 1; \
        done \
     && rm -rf /tmp/patches
 
@@ -121,10 +162,52 @@ RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; import nodriver, pydoll; pr
 # image is most exposed to, because a scheduled build publishes `:latest`
 # without a human reading the changelog. A renamed keyword would build green and
 # fail on the first download. See contract-check.py for the full reasoning.
-COPY contract-check.py /tmp/contract-check.py
-RUN python /tmp/contract-check.py && rm /tmp/contract-check.py
+# ── The download providers ────────────────────────────────────────────────
+#
+# They are not in the wheel any more. SpotiFLAC 3.0.0 deleted
+# `SpotiFLAC/providers/` — eight Python modules — and replaced them with
+# JavaScript extensions that an extension manager downloads from a registry.
+# 1.7.3 carried that registry's URL as a hardcoded constant; 3.0.0 removed it
+# and expects `SPOTIFLAC_REGISTRIES` from the environment, a `.env` file, or the
+# GUI settings screen. A headless image has none of those, so it installs
+# nothing, resolves no provider, and fails EVERY download with
+# `ValueError: No valid providers found in: [...]` — which names the service
+# list, the one thing that is not wrong. See docs/engine-3.0-impact-plan.md.
+#
+# Installing them HERE rather than letting them arrive on first use, because
+# runtime install gives up three things this image is built to have:
+#
+#   - reproducibility. SPOTIFLAC_VERSION pins the wheel; it does not pin
+#     qobuz-web@1.1.0. Two builds of this file a week apart would ship
+#     different download code under the same tag.
+#   - a startup that does not depend on GitHub. The extensions land in
+#     ~/.spotiflac/extensions, which no volume persists, so every container
+#     recreation would re-fetch all seven.
+#   - failing at build instead of on the first download.
+#
+# ARG, deliberately not ENV: the variable must NOT survive into the running
+# image. With it unset at runtime the manager skips its registry check entirely
+# and uses what is installed here — measured, and the point of doing this at
+# build time. An operator who wants runtime updates can set it in compose,
+# which is then a choice rather than a default.
+#
+# The URL is the one 1.7.3 carried internally. It serves executable JavaScript
+# from a third-party repository, and its sha256 comes from the same registry
+# that serves the file — good against corruption, not against a compromised
+# registry. That is a real exposure and it is the reason this is pinned into an
+# image someone can inspect rather than fetched fresh on every start.
+ARG SPOTIFLAC_REGISTRIES=https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/registry.json
+RUN HOME=/home/nonroot SPOTIFLAC_REGISTRIES="$SPOTIFLAC_REGISTRIES" python -c "\
+from SpotiFLAC.extensions.manager import ExtensionManager; \
+m = ExtensionManager(auto_install_downloads=True); \
+import os; \
+names = sorted(os.listdir(m.ext_dir)); \
+print('extensions installed:', ', '.join(names) or '(none)'); \
+raise SystemExit(0 if names else 'no extension installed - the registry served nothing usable')"
 
+COPY contract-check.py /tmp/contract-check.py
 COPY shim.py /app/shim.py
+RUN HOME=/home/nonroot python /tmp/contract-check.py && rm /tmp/contract-check.py
 
 # Non-root, same uid as the Go service so FLACs written to the shared /staging
 # volume are readable/movable by it. HOME set explicitly (numeric uid, no passwd).

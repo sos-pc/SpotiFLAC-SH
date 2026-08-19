@@ -148,23 +148,50 @@ RUN mkdir -p /rootfs/home/nonroot/Music /rootfs/home/nonroot/.SpotiFLAC /rootfs/
 # that exists, because the missing thing is the *interpreter*, not the binary.
 # See docs/ffmpeg-runtime-regression.md.
 #
-# distroless/cc is glibc + libgcc — exactly that list and nothing more (verified
-# by listing the image's own layers; distroless/base is NOT enough, it has no
-# libgcc_s). It keeps what actually mattered about scratch: no shell, no package
-# manager, no apt database. What it gives up is the absolute claim "zero OS
+# What the runtime needs is that DT_NEEDED list and nothing else: glibc, plus
+# libgcc_s. distroless/base supplies the first; `cc` was chosen because it adds
+# the second (base alone has NO libgcc_s, verified by listing the image layers).
+# It keeps what actually mattered about scratch: no shell, no package manager,
+# no apt database.
+#
+# But `cc` is built on `base`, and `base` also carries OpenSSL — which nothing
+# here links. The Go binary is CGO_ENABLED=0 and speaks TLS through crypto/tls,
+# pure Go; ffmpeg does not name libssl in the list above.
+#
+# That stopped being merely untidy on 2026-08-18: CVE-2026-14456 (HIGH, a denial
+# of service in OpenSSL's QUIC *server*) landed in libssl3 3.0.20-1~deb12u2 with
+# NO fixed version published, and the blocking scan in
+# .github/workflows/docker.yml refused every image from then on. A QUIC server
+# this deployment does not run, in a library nothing in it loads, blocking the
+# delivery of unrelated fixes. Telling the scanner to look away would have been
+# the wrong repair — the library had no business being in the image.
+#
+# So: base-nossl for glibc without OpenSSL, and libgcc_s.so.1 copied from the
+# Debian stage above, which is the single thing `cc` was contributing. Both
+# halves fail loudly if wrong: a COPY on a missing path stops the build, and the
+# smoke test in the workflow runs the real binaries with production argv against
+# the pushed image — the check whose absence let the scratch regression ship. What it gives up is the absolute claim "zero OS
 # packages, therefore zero CVEs for a scanner to report" — which was always
 # partly an artifact anyway: Trivy enumerates OS packages and language binaries,
 # so the ~115MB of codec libraries baked into ffmpeg were never visible to it.
 # The 51+9 -> 0 drop measured scanner blindness as much as it measured safety.
 # The real attack surface (a media decoder parsing bytes chosen by third-party
 # proxies) is identical either way — the base image only decides whether it runs.
+# Dropping OpenSSL does not touch that surface either; it removes a package that
+# was never on any path, and with it a class of report that can block delivery
+# without a corresponding risk.
 #
 # Docker/Kubernetes always inject /etc/resolv.conf, /etc/hosts and
 # /etc/hostname into a running container regardless of what the image itself
 # contains, so DNS resolution works here even though the image ships none of
 # those files.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/cc-debian12@sha256:e8e7ee4b8b106d4c5fde9e422a321b2b8a2d5cca546c97adcce927f3e1d36e36
+FROM gcr.io/distroless/base-nossl-debian12@sha256:afec526a569d6adbe4980b15b9b7582c128f386a868db57f06f1fa2f5e3e48a4
+
+# The one library `cc` was here for. Single-arch by construction — the workflow
+# names no platforms and the ffmpeg asset above is linux64 — so the path is the
+# amd64 one rather than a TARGETARCH expansion that nothing would exercise.
+COPY --from=ffmpeg-static /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
 
 COPY --from=ffmpeg-static /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=ffmpeg-static --chown=1000:1000 /rootfs/home /home

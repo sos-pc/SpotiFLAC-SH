@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode, applyFont } from "@/lib/settings";
 import { applyTheme } from "@/lib/themes";
 import { LoginPage } from "@/components/LoginPage";
-import { isAuthenticated, clearAuth, getUser, tryLocalAuth, fetchMe } from "@/lib/auth";
+import { isAuthenticated, clearAuth, getUser, fetchMe } from "@/lib/auth";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
 import { Sidebar, type PageType } from "@/components/Sidebar";
@@ -33,6 +33,7 @@ import { useMetadata } from "@/hooks/useMetadata";
 import { useLyrics } from "@/hooks/useLyrics";
 import { useCover } from "@/hooks/useCover";
 import { useDownloadQueueDialog } from "@/hooks/useDownloadQueueDialog";
+import { isSearchTerms } from "@/lib/spotifyInput";
 const HISTORY_KEY = "spotiflac_fetch_history";
 const MAX_HISTORY = 5;
 function App() {
@@ -45,7 +46,6 @@ function App() {
     const [hasUpdate, setHasUpdate] = useState(false);
     const [releaseDate, setReleaseDate] = useState<string | null>(null);
     const [fetchHistory, setFetchHistory] = useState<HistoryItem[]>([]);
-    const [isSearchMode, setIsSearchMode] = useState(false);
     const [region, setRegion] = useState(() => localStorage.getItem("spotiflac_region") || "US");
     useEffect(() => {
         localStorage.setItem("spotiflac_region", region);
@@ -63,7 +63,7 @@ function App() {
     const cover = useCover();
     const downloadQueue = useDownloadQueueDialog();
     const [authed, setAuthed] = useState<boolean>(false);
-    const [checkingLocalAuth, setCheckingLocalAuth] = useState<boolean>(true);
+    const [checkingAuth, setCheckingAuth] = useState<boolean>(true);
     const [authUser, setAuthUser] = useState(getUser());
     useEffect(() => {
         const initAuth = async () => {
@@ -72,14 +72,12 @@ function App() {
                 if (me) {
                     setAuthed(true);
                     setAuthUser(me);
-                    setCheckingLocalAuth(false);
+                    setCheckingAuth(false);
                     return;
                 }
                 clearAuth();
             }
-            const user = await tryLocalAuth();
-            if (user) { setAuthed(true); setAuthUser(user); }
-            setCheckingLocalAuth(false);
+            setCheckingAuth(false);
         };
         initAuth();
     }, []);
@@ -446,13 +444,13 @@ function App() {
                         if (updatedUrl) {
                             setSpotifyUrl(updatedUrl);
                         }
-                    }} history={fetchHistory} onHistorySelect={handleHistorySelect} onHistoryRemove={removeFromHistory} hasResult={!!metadata.metadata} searchMode={isSearchMode} onSearchModeChange={setIsSearchMode} region={region} onRegionChange={setRegion}/>
+                    }} history={fetchHistory} onHistorySelect={handleHistorySelect} onHistoryRemove={removeFromHistory} hasResult={!!metadata.metadata} onSearchCleared={() => setSpotifyUrl("")} region={region} onRegionChange={setRegion}/>
 
-                    {!isSearchMode && metadata.metadata && renderMetadata()}
+                    {!isSearchTerms(spotifyUrl) && metadata.metadata && renderMetadata()}
                 </>);
         }
     };
-    if (checkingLocalAuth) {
+    if (checkingAuth) {
         return <div className="min-h-screen flex items-center justify-center bg-background"><div className="text-muted-foreground text-sm">Connecting...</div></div>;
     }
     if (!authed) {

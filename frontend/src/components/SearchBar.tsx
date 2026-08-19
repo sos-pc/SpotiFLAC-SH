@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { InputWithContext } from "@/components/ui/input-with-context";
-import { CloudDownload, XCircle, Link, Search, X, ChevronDown } from "lucide-react";
+import { isSearchTerms } from "@/lib/spotifyInput";
+import { CloudDownload, XCircle, X, ChevronDown } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { FetchHistory } from "@/components/FetchHistory";
 import type { HistoryItem } from "@/components/FetchHistory";
 import type { SpotifySearchResults, SpotifySearchTrack, SpotifySearchAlbum, SpotifySearchArtist, SpotifySearchPlaylist } from "@/types/api";
@@ -26,6 +26,14 @@ const SEARCH_PLACEHOLDERS = [
     "Joji",
     "Die For You",
 ];
+// Both kinds of example, in turn: the four link shapes, then the six word
+// examples. The field accepts either, and this list is now the only thing that
+// says so.
+//
+// Module scope on purpose. Built inside the component, this is a new array on
+// every render — which is precisely what sent useTypingEffect into an infinite
+// render loop when the two modes were merged.
+const PLACEHOLDERS = [...FETCH_PLACEHOLDERS, ...SEARCH_PLACEHOLDERS];
 const REGIONS = [
     "AD",
     "AE",
@@ -236,13 +244,18 @@ interface SearchBarProps {
     onHistorySelect: (item: HistoryItem) => void;
     onHistoryRemove: (id: string) => void;
     hasResult: boolean;
-    searchMode: boolean;
-    onSearchModeChange: (isSearch: boolean) => void;
+    /** Cleared when a result is opened, so the bar does not keep searching
+     * for the thing you just chose. */
+    onSearchCleared?: () => void;
     region: string;
     onRegionChange: (region: string) => void;
 }
-export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, history, onHistorySelect, onHistoryRemove, hasResult, searchMode, onSearchModeChange, region, onRegionChange, }: SearchBarProps) {
-    const [searchQuery, setSearchQuery] = useState("");
+export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, history, onHistorySelect, onHistoryRemove, hasResult, onSearchCleared, region, onRegionChange, }: SearchBarProps) {
+    // One field, one value. What happens to it is decided by what it contains
+    // (see lib/spotifyInput), not by a mode the user has to select first.
+    const searchQuery = url;
+    const setSearchQuery = onUrlChange;
+    const hasSearchTerms = isSearchTerms(url);
     const [searchResults, setSearchResults] = useState<SpotifySearchResults | null>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -267,8 +280,7 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
     const [showInvalidUrlDialog, setShowInvalidUrlDialog] = useState(false);
     const [invalidUrl, setInvalidUrl] = useState("");
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const placeholders = searchMode ? SEARCH_PLACEHOLDERS : FETCH_PLACEHOLDERS;
-    const placeholderText = useTypingEffect(placeholders);
+    const placeholderText = useTypingEffect(PLACEHOLDERS);
     const saveRecentSearch = (query: string) => {
         const trimmed = query.trim();
         if (!trimmed)
@@ -298,7 +310,7 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
         });
     };
     useEffect(() => {
-        if (!searchMode || !searchQuery.trim()) {
+        if (!hasSearchTerms) {
             return;
         }
         if (searchQuery.trim() === lastSearchedQuery) {
@@ -345,7 +357,7 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
                 clearTimeout(searchTimeoutRef.current);
             }
         };
-    }, [searchQuery, searchMode, lastSearchedQuery]);
+    }, [searchQuery, hasSearchTerms, lastSearchedQuery]);
     const handleLoadMore = async () => {
         if (!searchResults || !lastSearchedQuery || isLoadingMore)
             return;
@@ -409,8 +421,6 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
             trimmed.startsWith("spotify:"));
     };
     const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-        if (searchMode)
-            return;
         const pastedText = e.clipboardData.getData("text");
         if (pastedText && !isSpotifyUrl(pastedText)) {
             e.preventDefault();
@@ -426,8 +436,21 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
         }
         onFetch();
     };
+    // Enter does the one thing the text can mean. Searching needs no Enter at
+    // all — the debounce above has already run — so this only has to handle the
+    // link case and the bad paste.
+    const handleSubmit = () => {
+        if (hasSearchTerms)
+            return;
+        handleFetchWithValidation();
+    };
     const handleResultClick = (externalUrl: string) => {
-        onSearchModeChange(false);
+        // Clear the terms before fetching: leaving them would re-run the search
+        // for the thing the user has just picked, and re-render the list under
+        // the result they asked for.
+        setSearchResults(null);
+        setLastSearchedQuery("");
+        onSearchCleared?.();
         onFetchUrl(externalUrl);
     };
     const formatDuration = (ms: number) => {
@@ -465,36 +488,18 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
     ];
     return (<div className="space-y-4">
       <div className="flex gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" className="shrink-0" onClick={() => onSearchModeChange(!searchMode)}>
-              {searchMode ? (<Link className="h-4 w-4"/>) : (<Search className="h-4 w-4"/>)}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>{searchMode ? "Fetch Mode" : "Search Mode"}</p>
-          </TooltipContent>
-        </Tooltip>
-
         <div className="relative flex-1">
-          {!searchMode ? (<>
-              <InputWithContext id="spotify-url" placeholder={placeholderText} value={url} onChange={(e) => onUrlChange(e.target.value)} onPaste={handlePaste} onKeyDown={(e) => e.key === "Enter" && handleFetchWithValidation()} className="pr-8"/>
-              {url && (<button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={() => onUrlChange("")}>
-                  <XCircle className="h-4 w-4"/>
-                </button>)}
-            </>) : (<>
-              <InputWithContext id="spotify-search" placeholder={placeholderText} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pr-8"/>
-              {searchQuery && (<button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={() => {
-                    setSearchQuery("");
-                    setSearchResults(null);
-                    setLastSearchedQuery("");
-                }}>
-                  <XCircle className="h-4 w-4"/>
-                </button>)}
-            </>)}
+          <InputWithContext id="spotify-input" placeholder={placeholderText} value={url} onChange={(e) => onUrlChange(e.target.value)} onPaste={handlePaste} onKeyDown={(e) => e.key === "Enter" && handleSubmit()} className="pr-8"/>
+          {url && (<button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={() => {
+                onUrlChange("");
+                setSearchResults(null);
+                setLastSearchedQuery("");
+            }}>
+              <XCircle className="h-4 w-4"/>
+            </button>)}
         </div>
 
-        {!searchMode && (<>
+        {!hasSearchTerms && (<>
             <Select value={region} onValueChange={onRegionChange}>
               <SelectTrigger className="w-[70px] shrink-0">
                 <SelectValue placeholder="Region"/>
@@ -520,9 +525,9 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
           </>)}
       </div>
 
-      {!searchMode && !hasResult && (<FetchHistory history={history} onSelect={onHistorySelect} onRemove={onHistoryRemove}/>)}
+      {!hasSearchTerms && !hasResult && (<FetchHistory history={history} onSelect={onHistorySelect} onRemove={onHistoryRemove}/>)}
 
-      {searchMode && (<div className="space-y-4">
+      {(hasSearchTerms || searchResults) && (<div className="space-y-4">
           {!searchQuery && !searchResults && recentSearches.length > 0 && (<div className="space-y-2">
               <p className="text-sm text-muted-foreground">Recent Searches</p>
               <div className="flex flex-wrap gap-2">
@@ -635,7 +640,7 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
           <DialogHeader>
             <DialogTitle>Invalid URL</DialogTitle>
             <DialogDescription>
-              Only Spotify links are allowed in Fetch mode.
+              This is a link, but not a Spotify one — searching for it would find nothing. Type words instead, or paste a Spotify link.
             </DialogDescription>
           </DialogHeader>
 
@@ -651,11 +656,11 @@ export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, hist
               Cancel
             </Button>
             <Button onClick={() => {
-            onSearchModeChange(true);
+            onUrlChange("");
             setShowInvalidUrlDialog(false);
             setInvalidUrl("");
         }}>
-              Switch to Search
+              Clear the field
             </Button>
           </DialogFooter>
         </DialogContent>
