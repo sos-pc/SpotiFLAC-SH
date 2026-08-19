@@ -5,7 +5,18 @@ updates:
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "npm"
+  # bun, not npm. The frontend is built by `bun install --frozen-lockfile`
+  # (Dockerfile stage 1, and .github/workflows/go-checks.yml), and bun.lock is
+  # the only lockfile in the repo — package-lock.json was removed and ignored in
+  # 0153a47. Declared as npm, Dependabot found no lockfile it knew how to touch
+  # and opened pull requests that changed package.json ALONE, which is precisely
+  # what a frozen lockfile refuses:
+  #
+  #     error: lockfile had changes, but lockfile is frozen
+  #
+  # So every frontend dependency update failed CI and none could ever merge
+  # (#96). The ecosystem name is the whole bug.
+  - package-ecosystem: "bun"
     directory: "/frontend"
     schedule:
       interval: "weekly"
