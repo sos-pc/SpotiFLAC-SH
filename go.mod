@@ -10,7 +10,7 @@ require (
 	github.com/mewkiz/flac v1.0.13
 	github.com/pquerna/otp v1.5.0
 	go.etcd.io/bbolt v1.5.0
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.41.0
 	modernc.org/sqlite v1.56.0
 )
 
