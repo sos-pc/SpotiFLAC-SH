@@ -39,6 +39,21 @@ const STATUS_BADGE_VARIANT: Record<QueueStatus, "default" | "secondary" | "destr
     skipped: "secondary",
     queued: "outline",
 };
+// How many rows exist in the document at once, per list.
+//
+// Memoising the rows stopped one finished download from re-rendering the other
+// 2560, but it could do nothing about the first render: opening a batch of that
+// size measured 1515 ms and put 38 516 nodes in the document, and no amount of
+// skipping later work pays that back.
+//
+// A cap rather than true virtualisation, deliberately. Windowing by pixel
+// offset needs a known row height, and these rows do not have one — a failed
+// row carries its error, a finished one its path, a running one its speed. The
+// options that handle variable heights are libraries, and adding one is a
+// dependency this repo would then carry forever for a list nobody reads to the
+// end. 100 is the first page of a thing you scan, not a thing you read.
+const ROWS_PER_PAGE = 100;
+
 // "all" is the absence of a filter, not a sixth status, so it is added here
 // rather than to QueueStatus — nothing else in the app should be able to hold
 // a QueueItem whose status is "all".
@@ -267,7 +282,7 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
           </div>) : filteredQueue.length === 0 ? (<div className="text-center py-12 text-muted-foreground">
              <p>No {filterStatus === "all" ? "" : STATUS_LABEL[filterStatus].toLowerCase() + " "}downloads</p>
              <Button variant="link" onClick={() => setFilterStatus("all")}>Clear filter</Button>
-            </div>) : filterStatus !== "all" ? (filteredQueue.map(renderItem)) : (queueInfo.groups.map((group) => group.total === 1 ? (
+            </div>) : filterStatus !== "all" ? (<RowList items={filteredQueue}/>) : (queueInfo.groups.map((group) => group.total === 1 ? (
             // A single track downloaded from the search bar is not a batch.
             // Wrapping it in collapsible chrome would invent a grouping the
             // user never made.
@@ -300,13 +315,36 @@ export function DownloadQueue({ isOpen, onClose }: DownloadQueueProps) {
               </div>
             </button>
             {expandedGroups.has(group.key) && (<div className="border-t p-2 space-y-2 bg-muted/10">
-              {group.items.map(renderItem)}
+              <RowList items={group.items}/>
             </div>)}
           </div>)))}
         </div>
       </div>
     </DialogContent>
   </Dialog>);
+}
+
+// A capped list of rows, with its own "show more" state.
+//
+// Per instance on purpose: the flat filtered list and each expanded batch get
+// their own cap, and collapsing a batch unmounts its list, so reopening it
+// starts at the first page again rather than re-rendering the 2500 rows someone
+// once clicked through.
+//
+// Order is left exactly as the queue produced it. Sorting the interesting
+// statuses to the front would make the first page more useful and make rows
+// jump between pages as jobs finish, which is worse while you are watching one
+// run. The status filters above already answer "show me the failures".
+function RowList({ items }: { items: QueueItem[] }) {
+    const [shown, setShown] = useState(ROWS_PER_PAGE);
+    const visible = items.length <= shown ? items : items.slice(0, shown);
+    const hidden = items.length - visible.length;
+    return (<>
+      {visible.map((item) => (<QueueRow key={item.id} item={item}/>))}
+      {hidden > 0 && (<Button variant="outline" className="w-full" onClick={() => setShown((n) => n + ROWS_PER_PAGE)}>
+        Show {Math.min(ROWS_PER_PAGE, hidden)} more — {hidden} not shown
+      </Button>)}
+    </>);
 }
 
 // One row. Extracted so the grouped view and the filtered flat view render an
