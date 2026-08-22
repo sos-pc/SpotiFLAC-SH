@@ -186,7 +186,7 @@ RUN mkdir -p /rootfs/home/nonroot/Music /rootfs/home/nonroot/.SpotiFLAC /rootfs/
 # contains, so DNS resolution works here even though the image ships none of
 # those files.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/base-nossl-debian12@sha256:afec526a569d6adbe4980b15b9b7582c128f386a868db57f06f1fa2f5e3e48a4
+FROM gcr.io/distroless/base-nossl-debian12@sha256:e35893f8ca1cabfbd60394af94899c20930c4615355adf97c5da660a51b61bca
 
 # The one library `cc` was here for. Single-arch by construction — the workflow
 # names no platforms and the ffmpeg asset above is linux64 — so the path is the
