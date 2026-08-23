@@ -196,7 +196,7 @@ class DownloadResponse(BaseModel):
 # HEAD as well as GET: the Go status probe tries HEAD first (cheaper) and only
 # falls back to GET, so a GET-only route answers its liveness check with a 405.
 @app.api_route("/health", methods=["GET", "HEAD"])
-def health() -> dict[str, str]:
+def health() -> dict:
     # Identity alongside liveness: additive, so the Go side's existing decode
     # into {status} is unaffected, and `curl` from the app container answers
     # "what is actually running over there?" without restarting anything to
