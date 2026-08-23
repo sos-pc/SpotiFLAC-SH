@@ -83,7 +83,8 @@ POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
              →  {status: "ok"|"error", file, error, log}
 GET|HEAD /health → {status: "ok", engine_version, revision}
 GET /providers/health?services=a,b
-             →  {pending, checked_at, missing_providers[], extensions{ok, detail}}
+             →  {pending, checked_at, providers{name:{ok, reachable, total,
+                 latency_ms, detail}}, missing_providers[], extensions{ok, detail}}
 ```
 
 **`status: "ok"` means the file was parsed as audio, not merely produced.** The
@@ -101,37 +102,42 @@ behind it can deliver, and on 2026-08-07 it read `ok` for hours while Qobuz had
 3 reachable mirrors out of 48, Deezer's only resolver answered `403` and Amazon's
 only host refused connections.
 
-### What it can and cannot say, since SpotiFLAC 3.0.7
+### Two questions, and where each answer comes from
 
-**Reachability is gone, and not by our choice.** Upstream published an endpoint
-table and probed all ~51 entries; 3.0.7 deleted both. The
-`run_health_check_with_extensions` this endpoint was built on no longer exists,
-and the `run_health_check` that remains probes **lyrics** servers — ask it about
-`qobuz` or `tidal` and it matches nothing, ask it about `deezer` and it answers
-about a lyrics endpoint. Calling it anyway would fill the status board with rows
-that look authoritative and describe something else, which is worse than fewer
-rows and is the exact failure this endpoint exists to prevent.
+`missing_providers` — **is there an installed extension behind this service at
+all?** A name listed there cannot download, whatever the network is doing. This
+is the condition that made the engine report `extensions: ok` on 2026-08-15
+while every download failed. `/apis/status` renders one `down` row per entry.
 
-**What it still answers is `missing_providers`**: which of the requested
-services have no installed extension behind them. A weaker claim than
-reachability and a decisive one — a name listed there cannot download at all,
-whatever the network is doing, and it is the condition that made the engine
-report `extensions: ok` on 2026-08-15 while every download failed. `/apis/status`
-renders one `down` row per entry.
+`providers` — **are the hosts that extension needs actually up?** This used to
+come from upstream: an endpoint table and a `health_check` module that probed
+all ~51 entries. **SpotiFLAC 3.0.7 deleted both.** `run_health_check_with_extensions`
+is gone, and the `run_health_check` that remains probes *lyrics* servers — ask
+it about `qobuz` or `tidal` and it matches nothing at all.
 
-The reachability fields (`providers{…}`, `skipped_malformed`) are absent rather
-than empty. The Go side still decodes `providers` and renders it when present,
-so an engine that can answer this again needs no change here to be believed.
+The data did not disappear with the module, it **moved into the extensions**.
+Every installed manifest carries a `serviceHealth` list — id, label, url,
+method, `timeoutMs`, `required` — naming what has to be up for that provider to
+work. The shim reads it back and probes those URLs itself, so the rows now come
+from the extensions rather than from a table upstream can delete again.
 
-Two properties are deliberate:
+**What the rows mean today is worth knowing.** On the reference image `qobuz`,
+`deezer` and `tidal` all declare the same host — `api.zarz.moe` — so they rise
+and fall together. That is not a flaw in the probe: the JS bundles route through
+one broker, and a board that shows them moving as one is telling the truth about
+a real single point of failure. A `required` endpoint that is down marks the
+provider down whatever else answered.
 
-- **A warm call never blocks.** Stale-while-revalidate on a 5-minute cache. It
-  was built for a check that took 2.2 s over 13 real probes; what it now guards
-  is a local extension lookup, so the machinery is oversized for the job — kept
-  as-is rather than unwound in the change that repaired the build.
-- **It asks the engine what *it* would try.** We do not keep a list of provider
-  hosts or extension ids; upstream resolves them from a registry fetched at
-  runtime, so any list of ours would be wrong within days.
+Three properties are deliberate:
+
+- **A warm call never blocks; a cold one waits.** Stale-while-revalidate on a
+  5-minute cache. Measured on the reference deployment 2026-08-23: four probes,
+  300–1000 ms each.
+- **It asks the engine what *it* would try.** We keep no list of provider hosts
+  or extension ids; both come from the installed manifests, so a registry change
+  reaches the status board without a code change here.
+- **No extensions, no httpx, or no `serviceHealth` entries all return `{}`** —
+  and the Go side renders no rows for that, rather than a wall of red.
 
 **`quality` is canonical, not per-provider.** One of:
 

@@ -46,6 +46,7 @@ import ast
 import inspect
 import pathlib
 import sys
+import time
 
 # Every keyword shim.py passes to AsyncSpotiFLAC(...). Keep this list and the
 # call in _run_download in step: this file is the executable copy of that call's
@@ -186,6 +187,50 @@ def main() -> int:
                 problems.append(
                     f"service {service!r} resolves to extension {ext!r}, which is "
                     "not installed in this image - every download using it would fail"
+                )
+                continue
+
+            # ── and it has to START ──────────────────────────────────────────
+            #
+            # Installed is not the same as runnable, and everything above this
+            # line only proves installed - which a successful COPY also proves.
+            # Since 3.0.0 every download provider is a JavaScript bundle, so
+            # `node` sits on the critical path of every download and nothing
+            # asserted it could execute one. That is the exact shape of the July
+            # regression, where ffmpeg was present, executable, and unable to
+            # start because the runtime image had no ELF loader: green build,
+            # dead feature, found by reading production logs days later.
+            #
+            # JSRuntime.start() spawns node and waits for the bundle to announce
+            # itself - the same path a real download takes, since
+            # JSExtensionProvider builds the runtime exactly this way. Offline,
+            # and measured at ~200 ms per extension on the reference image.
+            #
+            # ext_path is the ENTRY FILE, not the directory. Handing it the
+            # directory does not raise: it waits out the full startup timeout
+            # and reports "Extension did not respond", which reads as a broken
+            # bundle and is not one. Measured, on seven bundles that all work.
+            if getattr(installed, "runtime", "javascript") != "javascript":
+                continue
+            try:
+                from SpotiFLAC.extensions.runtime import JSRuntime
+            except Exception as exc:  # noqa: BLE001
+                problems.append(f"cannot import the JS runtime bridge: {exc}")
+                break
+            try:
+                started = time.perf_counter()
+                runtime = JSRuntime(ext_path=installed.index_js, settings={},
+                                    startup_timeout=30.0)
+                runtime.start()
+                runtime.stop()
+                print(
+                    f"js runtime: {service} -> {ext} ready in "
+                    f"{(time.perf_counter() - started) * 1000:.0f} ms"
+                )
+            except Exception as exc:  # noqa: BLE001
+                problems.append(
+                    f"service {service!r} resolves to extension {ext!r}, which is "
+                    f"installed but does not start: {exc}"
                 )
 
     for note in notes:
