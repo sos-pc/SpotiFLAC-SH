@@ -215,7 +215,7 @@ _provider_refreshing = False
 _EXPECTED_SERVICES = ("qobuz", "deezer", "amazon", "tidal")
 
 
-def _missing_providers() -> list[str]:
+def _missing_providers(services: list[str] | None = None) -> list[str]:
     """Service names with no installed extension behind them.
 
     Empty is the healthy answer. Anything here means a download naming that
@@ -231,7 +231,7 @@ def _missing_providers() -> list[str]:
 
         manager = ExtensionManager(auto_install_downloads=False)
         missing = []
-        for service in _EXPECTED_SERVICES:
+        for service in (services or _EXPECTED_SERVICES):
             ext_id = extension_id(service, manager)
             if not ext_id or not manager.get_installed(ext_id):
                 missing.append(service)
@@ -240,73 +240,48 @@ def _missing_providers() -> list[str]:
         return []
 
 
-def _summarise(results: list, ext) -> dict:
-    """Fold ~51 endpoint probes into one row per provider.
+def _provider_status(services: list[str]) -> dict:
+    """What this image can still say about the providers it delegates to.
 
-    Two normalisations, both forced by upstream data rather than chosen:
+    Reachability used to be the answer. Upstream published an endpoint table and
+    health_check.py probed all ~51 of them, which is how the status board could
+    say "Qobuz: 3 of 48 reachable" instead of "the engine is up" — on 2026-08-07
+    that distinction was an hour of manual forensics, answered on page load.
 
-    - Entries whose URL is not http(s) are dropped. `get_qobuz_endpoints`
-      returns the raw registry value, and the registry holds a *string* for some
-      categories; health_check.py iterates it directly, so every character
-      becomes an "endpoint" (`a/prepare`, `b/prepare`, ...). providers/qobuz.py
-      wraps the same value in a list before using it, which is the handling
-      health_check.py forgot. Filtering here keeps that upstream inconsistency
-      out of our contract without patching their file.
-    - `latency` is -1 on failure, so the reported latency is taken from the
-      reachable probes only; a provider with nothing reachable reports none.
+    SpotiFLAC 3.0.7 deleted it. `run_health_check_with_extensions` is gone;
+    `run_health_check` survives and now probes *lyrics* servers, so asking it
+    about "qobuz" or "tidal" matches nothing at all and asking it about "deezer"
+    answers about a lyrics endpoint. Wiring that up would have produced a board
+    that looks authoritative and describes something else — worse than a board
+    with fewer rows, and precisely the failure this endpoint was built to end.
+
+    What remains is answerable without upstream's help, and it is the question
+    behind the 2026-08-15 incident: is there an installed extension behind each
+    service this image would be asked for? A name with none is why a download
+    fails with `No valid providers found`.
     """
-    per: dict[str, dict] = {}
-    skipped = 0
-    for r in results:
-        if not str(getattr(r, "url", "")).startswith("http"):
-            skipped += 1
-            continue
-        row = per.setdefault(
-            r.provider, {"reachable": 0, "total": 0, "latency_ms": None, "detail": ""},
-        )
-        row["total"] += 1
-        if r.ok:
-            row["reachable"] += 1
-            lat = int(r.latency) if r.latency >= 0 else None
-            if lat is not None and (row["latency_ms"] is None or lat < row["latency_ms"]):
-                row["latency_ms"] = lat
-        # First failure detail is what an operator needs when nothing is
-        # reachable; a successful probe's detail ("HTTP 410") explains little.
-        if not r.ok and not row["detail"]:
-            row["detail"] = str(r.detail)[:80]
-
-    for row in per.values():
-        row["ok"] = row["reachable"] > 0
-        if row["ok"]:
-            row["detail"] = ""
-
-    missing = _missing_providers()
+    missing = _missing_providers(services)
     return {
         "checked_at": int(time.time()),
-        "providers": per,
-        # Upstream's own extension probe, AND whether this image actually
-        # carries the providers it would be asked for.
-        #
-        # Those are not the same question, and on 2026-08-15 they disagreed in
-        # the worst direction: upstream reported ok while zero extensions were
-        # installed and every download was failing. A status board that answers
-        # "fine" in that state is worse than one that says nothing.
+        # The reachability map is deliberately absent rather than empty: the Go
+        # side renders one row per entry, and an empty map means "no rows",
+        # which is what it already does for an engine too old to answer.
+        "missing_providers": missing,
         "extensions": {
-            "ok": bool(getattr(ext, "ok", False)) and not missing,
-            "detail": str(getattr(ext, "detail", ""))[:80],
-            "missing_providers": missing,
+            "ok": not missing,
+            "detail": "" if not missing else "no extension installed for: " + ", ".join(missing),
         },
-        "skipped_malformed": skipped,
     }
 
 
 async def _refresh_providers(services: list[str]) -> None:
     global _provider_refreshing
     try:
-        from SpotiFLAC.core.health_check import run_health_check_with_extensions
-
-        results, ext = await run_health_check_with_extensions(services)
-        _provider_cache["data"] = _summarise(results, ext)
+        # No await left in here: what this reports is a local lookup now, not a
+        # fleet of probes. The stale-while-revalidate machinery below is kept
+        # rather than unwound in the same change that repairs the build — it
+        # costs nothing but a comment saying it is now oversized for the job.
+        _provider_cache["data"] = _provider_status(services)
         _provider_cache["at"] = time.monotonic()
     except Exception as exc:  # noqa: BLE001 — a diagnostic must not take the engine down
         _provider_cache["data"] = {"error": f"{type(exc).__name__}: {exc}"[:200]}
