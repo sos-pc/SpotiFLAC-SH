@@ -308,6 +308,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Which provider bundles this image carries, in the place someone looks
+      # after a build. The image records them itself (engine/record-extensions.py);
+      # this only reads the file back out of the image that was just pushed, the
+      # same way the app workflow smoke-tests ffmpeg.
+      #
+      # Not a gate. `SPOTIFLAC_REGISTRIES` points at a branch, so a rebuild can
+      # bring different download code under the same upstream version - rarely,
+      # measured, but silently until now. Printing it makes a change visible
+      # without freezing a provider set that has to track hostile APIs.
+      - name: What the image installed
+        id: extensions
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          IMAGE="$(echo '${{ steps.tags.outputs.tags }}' | cut -d, -f1)"
+          docker run --rm --entrypoint python "$IMAGE" -c \
+            "import json;print(json.dumps(json.load(open('/app/extensions.json')),indent=1))" \
+            > /tmp/extensions.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          rows = json.load(open("/tmp/extensions.json"))
+          print("### Provider bundles in this image\n")
+          print("| extension | version | runtime | entry sha256 |")
+          print("|---|---|---|---|")
+          for r in sorted(rows, key=lambda x: x["id"]):
+              print(f"| `{r['id']}` | {r['version']} | {r['runtime']} | `{r['entry_sha256'][:12]}` |")
+          print("")
+          PY
+
       - name: Summary
         run: |
           {
