@@ -240,32 +240,129 @@ def _missing_providers(services: list[str] | None = None) -> list[str]:
         return []
 
 
-def _provider_status(services: list[str]) -> dict:
-    """What this image can still say about the providers it delegates to.
+async def _probe_one(client, entry: dict) -> tuple[bool, int | None, str]:
+    """One declared health endpoint. Never raises; a failure is an answer."""
+    method = str(entry.get("method") or "GET").upper()
+    timeout = float(entry.get("timeoutMs") or 4000) / 1000.0
+    started = time.perf_counter()
+    try:
+        resp = await client.request(method, entry["url"], timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 - the probe result IS the finding
+        return False, None, type(exc).__name__[:60]
+    elapsed = int((time.perf_counter() - started) * 1000)
+    ok = 200 <= resp.status_code < 400
+    return ok, elapsed, "" if ok else f"HTTP {resp.status_code}"
 
-    Reachability used to be the answer. Upstream published an endpoint table and
-    health_check.py probed all ~51 of them, which is how the status board could
-    say "Qobuz: 3 of 48 reachable" instead of "the engine is up" — on 2026-08-07
-    that distinction was an hour of manual forensics, answered on page load.
 
-    SpotiFLAC 3.0.7 deleted it. `run_health_check_with_extensions` is gone;
-    `run_health_check` survives and now probes *lyrics* servers, so asking it
-    about "qobuz" or "tidal" matches nothing at all and asking it about "deezer"
-    answers about a lyrics endpoint. Wiring that up would have produced a board
-    that looks authoritative and describes something else — worse than a board
-    with fewer rows, and precisely the failure this endpoint was built to end.
+async def _declared_health(services: list[str]) -> dict[str, dict]:
+    """Per-service reachability, from what the extensions declare about themselves.
 
-    What remains is answerable without upstream's help, and it is the question
-    behind the 2026-08-15 incident: is there an installed extension behind each
-    service this image would be asked for? A name with none is why a download
-    fails with `No valid providers found`.
+    Upstream used to own this: a table of provider endpoints and a health_check
+    module that probed all ~51 of them. SpotiFLAC 3.0.7 deleted both, and for a
+    while this endpoint could only report which extensions were installed.
+
+    The data did not disappear with the module, it MOVED. Every installed
+    extension's manifest carries a `serviceHealth` list — id, label, url,
+    method, timeoutMs, required — describing what has to be up for that provider
+    to work. Reading it back means the reachability rows come from the
+    extensions themselves rather than from a table upstream can delete again.
+
+    Worth knowing what the rows now mean: on the reference image, qobuz, deezer
+    and tidal all declare the same host (api.zarz.moe), so they rise and fall
+    together. That is not a flaw in the probe, it is the shape of the current
+    provider fleet — the JS bundles route through one broker — and a board that
+    shows it is telling the truth about a real single point of failure.
+
+    Returns {} rather than raising: no extensions, no httpx, no manifest entries
+    all mean "nothing to say", and the Go side renders no rows for that.
+    """
+    try:
+        import httpx
+
+        from SpotiFLAC.extensions.catalog import extension_id
+        from SpotiFLAC.extensions.manager import ExtensionManager
+    except Exception:  # noqa: BLE001
+        return {}
+
+    try:
+        manager = ExtensionManager(auto_install_downloads=False)
+    except Exception:  # noqa: BLE001
+        return {}
+
+    targets: list[tuple[str, dict]] = []
+    for service in (services or _EXPECTED_SERVICES):
+        try:
+            ext = extension_id(service, manager)
+            installed = manager.get_installed(ext) if ext else None
+        except Exception:  # noqa: BLE001
+            continue
+        if not installed:
+            continue  # already reported by _missing_providers
+        for entry in (installed.manifest.get("serviceHealth") or []):
+            if str(entry.get("url") or "").startswith("http"):
+                targets.append((service, entry))
+
+    if not targets:
+        return {}
+
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        outcomes = await asyncio.gather(
+            *(_probe_one(client, entry) for _, entry in targets),
+            return_exceptions=True,
+        )
+
+    per: dict[str, dict] = {}
+    for (service, entry), outcome in zip(targets, outcomes):
+        row = per.setdefault(
+            service,
+            {"reachable": 0, "total": 0, "latency_ms": None, "detail": "", "_required_down": False},
+        )
+        row["total"] += 1
+        if isinstance(outcome, tuple):
+            ok, elapsed, detail = outcome
+        else:
+            ok, elapsed, detail = False, None, type(outcome).__name__[:60]
+        if ok:
+            row["reachable"] += 1
+            if elapsed is not None and (row["latency_ms"] is None or elapsed < row["latency_ms"]):
+                row["latency_ms"] = elapsed
+            continue
+        # A `required` endpoint that is down means the provider cannot work,
+        # whatever else answered. With one entry per extension today this is the
+        # same as "the entry is up"; it stops being so the moment a manifest
+        # lists an optional second host.
+        if entry.get("required"):
+            row["_required_down"] = True
+        if not row["detail"]:
+            label = str(entry.get("label") or entry.get("id") or "")
+            row["detail"] = (f"{label}: " if label else "") + detail
+
+    for row in per.values():
+        row["ok"] = row["reachable"] > 0 and not row["_required_down"]
+        del row["_required_down"]
+        if row["ok"]:
+            row["detail"] = ""
+    return per
+
+
+async def _provider_status(services: list[str]) -> dict:
+    """What this image can say about the providers it delegates to.
+
+    Two questions, and they are not the same one — which is the lesson of
+    2026-08-15, when upstream's own probe answered "extensions: ok" while zero
+    were installed and every download failed.
+
+    - `missing_providers`: is there an installed extension behind this service
+      at all? A name here cannot download, whatever the network is doing.
+    - `providers`: are the hosts that extension declares actually up? Read from
+      each manifest's `serviceHealth` (see _declared_health), because upstream's
+      endpoint table went away in 3.0.7.
     """
     missing = _missing_providers(services)
+    providers = await _declared_health(services)
     return {
         "checked_at": int(time.time()),
-        # The reachability map is deliberately absent rather than empty: the Go
-        # side renders one row per entry, and an empty map means "no rows",
-        # which is what it already does for an engine too old to answer.
+        "providers": providers,
         "missing_providers": missing,
         "extensions": {
             "ok": not missing,
@@ -277,11 +374,7 @@ def _provider_status(services: list[str]) -> dict:
 async def _refresh_providers(services: list[str]) -> None:
     global _provider_refreshing
     try:
-        # No await left in here: what this reports is a local lookup now, not a
-        # fleet of probes. The stale-while-revalidate machinery below is kept
-        # rather than unwound in the same change that repairs the build — it
-        # costs nothing but a comment saying it is now oversized for the job.
-        _provider_cache["data"] = _provider_status(services)
+        _provider_cache["data"] = await _provider_status(services)
         _provider_cache["at"] = time.monotonic()
     except Exception as exc:  # noqa: BLE001 — a diagnostic must not take the engine down
         _provider_cache["data"] = {"error": f"{type(exc).__name__}: {exc}"[:200]}

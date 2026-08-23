@@ -1179,7 +1179,8 @@ Parallel health check of every external service (cached for 30 seconds).
   { "name": "Tidal API",      "url": "https://api.tidal.com",  "status": "ok",   "latency_ms": 45, "checked_at": 1753920000 },
   { "name": "Deezer",         "url": "https://api.deezer.com", "status": "ok",   "latency_ms": 62, "checked_at": 1753920000 },
   { "name": "Engine",         "url": "http://spotiflac-engine:8080/health", "status": "ok", "latency_ms": 3, "checked_at": 1753920000 },
-  { "name": "Qobuz · engine", "url": "http://spotiflac-engine:8080/providers/health", "status": "down", "checked_at": 1753920000, "error": "no extension installed — every download naming it fails" }
+  { "name": "Qobuz · engine", "url": "http://spotiflac-engine:8080/providers/health", "status": "ok",   "latency_ms": 341, "checked_at": 1753920000 },
+  { "name": "Deezer · engine","url": "http://spotiflac-engine:8080/providers/health", "status": "down", "checked_at": 1753920000, "error": "0/1 reachable — Zarz API: HTTP 503" }
 ]
 ```
 
@@ -1187,7 +1188,7 @@ Parallel health check of every external service (cached for 30 seconds).
 
 > **Added 2026-08-08, narrowed 2026-08-23.** One `<Provider> · engine` row per delegated provider, from the engine's own `/providers/health`. `Engine` is **liveness only** — this documentation used to claim it said "whether delegated providers can run", and on 2026-08-07 it read `ok` for hours while Qobuz had 3 reachable mirrors out of 48, Deezer's only resolver answered `403` and Amazon's only host refused connections.
 >
-> **These rows now report installability, not reachability.** SpotiFLAC 3.0.7 deleted the endpoint table upstream used to probe, so a row appears only for a service with **no installed extension** — which cannot download at all, whatever the network is doing. Rows carrying `"N/M reachable"` come from an older engine and are still rendered. No rows at all is the healthy answer, and also what an engine too old for the endpoint produces — see [module-engine.md](module-engine.md).
+> **Two kinds of row, since the providers became JavaScript bundles.** A `"N/M reachable"` row is host reachability, now probed from the `serviceHealth` list each extension manifest declares — SpotiFLAC 3.0.7 deleted the endpoint table upstream used to probe, so the data comes from the extensions themselves. A row reading `no extension installed` is the stronger failure: that service cannot download at all, whatever the network is doing. No rows is the healthy answer for an engine too old for the endpoint — see [module-engine.md](module-engine.md).
 
 **Status values:** `ok` · `down` · `ratelimited` · `unconfigured`
 
