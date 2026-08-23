@@ -37,7 +37,12 @@ import sys
 import urllib.request
 
 # Beside shim.py, which serves it on /health.
-OUT = pathlib.Path(__file__).resolve().parent / "extensions.json"
+#
+# An absolute default, not a path relative to this script: the Dockerfile copies
+# it to /tmp and runs it there, so `__file__`'s directory wrote /tmp/extensions.json
+# and shipped an image whose list was empty. Overridable so an ad-hoc run can
+# put it somewhere harmless - which is exactly what hid the bug the first time.
+OUT = pathlib.Path(os.environ.get("EXTENSIONS_MANIFEST") or "/app/extensions.json")
 
 
 def registry_entries() -> dict[str, dict]:
