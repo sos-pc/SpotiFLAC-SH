@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import pathlib
@@ -48,6 +49,23 @@ def _identity() -> dict[str, str]:
         engine = "unknown"
     rev = os.environ.get("ENGINE_REVISION") or "unknown"
     return {"engine_version": engine, "revision": rev[:7] if rev != "unknown" else rev}
+
+
+# Written by record-extensions.py during the build, beside this file.
+#
+# Read once, at import: it cannot change while the container runs, and a status
+# route that re-reads a file on every request is answering a question nobody
+# asked. An older image without the file reports an empty list rather than
+# failing - the field is additive, like the rest of /health.
+def _installed_extensions() -> list[dict]:
+    try:
+        path = pathlib.Path(__file__).resolve().parent / "extensions.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - identity must never break startup
+        return []
+
+
+_EXTENSIONS = _installed_extensions()
 
 
 def _log_identity() -> None:
@@ -183,7 +201,11 @@ def health() -> dict[str, str]:
     # into {status} is unaffected, and `curl` from the app container answers
     # "what is actually running over there?" without restarting anything to
     # read a startup line.
-    return {"status": "ok", **_identity()}
+    # The extension list travels with identity on purpose. "Which engine is
+    # running" and "which download code is it carrying" became separate
+    # questions when the providers left the Python package, and only the first
+    # of them had an answer that did not require a shell in the container.
+    return {"status": "ok", **_identity(), "extensions": _EXTENSIONS}
 
 
 # ── Provider reachability ────────────────────────────────────────────────────

@@ -205,6 +205,15 @@ names = sorted(os.listdir(m.ext_dir)); \
 print('extensions installed:', ', '.join(names) or '(none)'); \
 raise SystemExit(0 if names else 'no extension installed - the registry served nothing usable')"
 
+# What the build just installed, written into the image beside shim.py.
+#
+# Same ARG, so the provenance recorded is the registry actually used. It runs
+# here rather than later because this is the only point where both halves are
+# available: the registry document, and the freshly unpacked extensions.
+COPY record-extensions.py /tmp/record-extensions.py
+RUN HOME=/home/nonroot SPOTIFLAC_REGISTRIES="$SPOTIFLAC_REGISTRIES" \
+    python /tmp/record-extensions.py && rm /tmp/record-extensions.py
+
 COPY contract-check.py /tmp/contract-check.py
 COPY shim.py /app/shim.py
 RUN HOME=/home/nonroot python /tmp/contract-check.py && rm /tmp/contract-check.py

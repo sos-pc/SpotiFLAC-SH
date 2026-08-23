@@ -81,7 +81,9 @@ swapping the engine is a change to `engine/shim.py` alone, with no Go change.
 ```
 POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
              →  {status: "ok"|"error", file, error, log}
-GET|HEAD /health → {status: "ok", engine_version, revision}
+GET|HEAD /health → {status: "ok", engine_version, revision,
+                 extensions[{id, version, runtime, download_provider,
+                             entry_sha256, archive_sha256, source}]}
 GET /providers/health?services=a,b
              →  {pending, checked_at, providers{name:{ok, reachable, total,
                  latency_ms, detail}}, missing_providers[], extensions{ok, detail}}
@@ -95,6 +97,28 @@ clear that bar.
 
 The extra `/health` fields are additive; a consumer decoding only `{status}` is
 unaffected.
+
+**`extensions` is what this image actually carries.** Download providers are
+JavaScript bundles resolved from a registry *branch* URL at build time, so two
+builds of the same Dockerfile can ship different download code under the same
+upstream version — rarely, measured, but until now silently: nothing in the
+image recorded what it installed, and answering "which provider code is
+running?" meant opening a shell in the container.
+
+`engine/record-extensions.py` writes the list during the build. Two digests,
+answering different questions:
+
+| field | what it is |
+|---|---|
+| `archive_sha256` | what the registry **said** it served, verified by the installer against the file it downloaded. Good against corruption in transit; worthless against a compromised registry, since both come from there. |
+| `entry_sha256` | what this image **has**, computed over the `index.js` node will execute. Ours, not theirs — two images built a week apart can be compared on this alone. |
+
+**Deliberately not a lockfile.** Nothing refuses to build when the registry
+moves: providers chase hostile, changing APIs — the last registry change was a
+Tidal quality fix — and a frozen provider set is a deployment that stops working
+without saying why. The engine workflow prints the table in its job summary, so
+a rebuild that swapped provider code says so. Turning this into a gate is a
+decision to make with those numbers in hand, not in advance.
 
 **`/providers/health` answers a different question from `/health`.** `/health` is
 liveness — the sidecar replies. It says nothing about whether the providers
