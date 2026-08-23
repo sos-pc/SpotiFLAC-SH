@@ -83,9 +83,7 @@ POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
              →  {status: "ok"|"error", file, error, log}
 GET|HEAD /health → {status: "ok", engine_version, revision}
 GET /providers/health?services=a,b
-             →  {pending, checked_at, providers{name:{ok, reachable, total,
-                 latency_ms, detail}}, extensions{ok, detail},
-                 skipped_malformed}
+             →  {pending, checked_at, missing_providers[], extensions{ok, detail}}
 ```
 
 **`status: "ok"` means the file was parsed as audio, not merely produced.** The
@@ -101,32 +99,39 @@ unaffected.
 liveness — the sidecar replies. It says nothing about whether the providers
 behind it can deliver, and on 2026-08-07 it read `ok` for hours while Qobuz had
 3 reachable mirrors out of 48, Deezer's only resolver answered `403` and Amazon's
-only host refused connections. `/apis/status` now carries one row per provider
-from this endpoint, so the status board distinguishes "our deployment is broken"
-from "upstream's fleet is down" without anyone running a command.
+only host refused connections.
 
-Three properties are deliberate:
+### What it can and cannot say, since SpotiFLAC 3.0.7
 
-- **A warm call never blocks; a cold one waits about two seconds.**
-  Stale-while-revalidate on a 5-minute cache, so a stale answer is served
-  immediately and refreshed behind the request. But a *cold* call waits up to 6 s
-  for the first sample, because the first version did not and the result was a
-  status board that showed no provider rows on the first load after a deploy and
-  cached that emptiness for 30 s — indistinguishable from a broken feature, and
-  reported as one. The wait is affordable: measured 2.2 s for 13 real probes on
-  2026-08-08. The "ten seconds" this was first built around was the cost of
-  importing SpotiFLAC in a throwaway `docker exec`, not the probes.
+**Reachability is gone, and not by our choice.** Upstream published an endpoint
+table and probed all ~51 entries; 3.0.7 deleted both. The
+`run_health_check_with_extensions` this endpoint was built on no longer exists,
+and the `run_health_check` that remains probes **lyrics** servers — ask it about
+`qobuz` or `tidal` and it matches nothing, ask it about `deezer` and it answers
+about a lyrics endpoint. Calling it anyway would fill the status board with rows
+that look authoritative and describe something else, which is worse than fewer
+rows and is the exact failure this endpoint exists to prevent.
+
+**What it still answers is `missing_providers`**: which of the requested
+services have no installed extension behind them. A weaker claim than
+reachability and a decisive one — a name listed there cannot download at all,
+whatever the network is doing, and it is the condition that made the engine
+report `extensions: ok` on 2026-08-15 while every download failed. `/apis/status`
+renders one `down` row per entry.
+
+The reachability fields (`providers{…}`, `skipped_malformed`) are absent rather
+than empty. The Go side still decodes `providers` and renders it when present,
+so an engine that can answer this again needs no change here to be believed.
+
+Two properties are deliberate:
+
+- **A warm call never blocks.** Stale-while-revalidate on a 5-minute cache. It
+  was built for a check that took 2.2 s over 13 real probes; what it now guards
+  is a local extension lookup, so the machinery is oversized for the job — kept
+  as-is rather than unwound in the change that repaired the build.
 - **It asks the engine what *it* would try.** We do not keep a list of provider
-  hosts; upstream resolves them from a registry fetched at runtime, so any list
-  of ours would be wrong within days.
-- **`skipped_malformed` is not noise, it is a count of an upstream bug.**
-  `get_qobuz_endpoints` returns the raw registry value, which is a *string* for
-  some categories, and `health_check.py` iterates it directly — so every
-  character becomes an "endpoint" (`a/prepare`, `b/prepare`, …). 35 of them on
-  2026-08-07. `providers/qobuz.py` wraps the same value in a list before use,
-  which is the handling `health_check.py` forgot; the shim filters non-`http`
-  entries rather than patching their file, because a patch is a liability at
-  every upstream release and this costs nothing.
+  hosts or extension ids; upstream resolves them from a registry fetched at
+  runtime, so any list of ours would be wrong within days.
 
 **`quality` is canonical, not per-provider.** One of:
 

@@ -64,19 +64,13 @@ REQUIRED_INIT_KWARGS = (
 # one method it calls on the client.
 REQUIRED_ATTRS = ("__aenter__", "__aexit__", "download_track")
 
-# The second thing we call into: upstream's own provider reachability checker,
-# behind GET /providers/health. Only the data function — never
-# print_health_report, whose body computes every line and discards it (there is
-# not one print statement in it), nor _print_extensions_section, whose entire
-# body is the expression `14 + 3 + 6 + 3 + 12 + 3 + 9 + 6`.
-#
-# HealthResult's fields are listed because _summarise reads them by name. A
-# rename there would not raise on import; it would make every provider look
-# unreachable, which is exactly the kind of silent wrong answer a status board
-# must not give.
-HEALTH_FUNC = "run_health_check_with_extensions"
-REQUIRED_HEALTH_FIELDS = ("provider", "url", "ok", "latency", "detail")
-
+# Upstream's provider reachability checker was verified here until SpotiFLAC
+# 3.0.7 removed it. run_health_check_with_extensions is gone, and the
+# run_health_check that remains probes lyrics servers instead, so there is no
+# longer an upstream API behind GET /providers/health to hold to a contract.
+# What that endpoint reports now — which services have an installed extension —
+# is checked below, under "A service name must resolve to something installed",
+# which was always the stronger of the two.
 # Where shim.py is in the image. Read, not imported: importing it would start
 # FastAPI and the hooks, and this check has no business doing that.
 SHIM_PATH = "/app/shim.py"
@@ -155,53 +149,6 @@ def main() -> int:
     for attr in REQUIRED_ATTRS:
         if not callable(getattr(AsyncSpotiFLAC, attr, None)):
             problems.append(f"AsyncSpotiFLAC.{attr} is missing or not callable")
-
-    # ── Provider reachability surface ────────────────────────────────────────
-    try:
-        from SpotiFLAC.core import health_check as hc
-    except Exception as exc:  # noqa: BLE001
-        problems.append(f"cannot import SpotiFLAC.core.health_check: {exc}")
-    else:
-        fn = getattr(hc, HEALTH_FUNC, None)
-        if not callable(fn):
-            problems.append(f"health_check.{HEALTH_FUNC} is missing or not callable")
-        else:
-            try:
-                params = inspect.signature(fn).parameters
-            except (TypeError, ValueError):
-                params = {}
-            # It is called positionally with the service list; a keyword-only
-            # first parameter would break the call without breaking the import.
-            positional = [
-                p for p in params.values()
-                if p.kind in (
-                    inspect.Parameter.POSITIONAL_ONLY,
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                )
-            ]
-            if not positional:
-                problems.append(
-                    f"health_check.{HEALTH_FUNC} no longer takes the service list "
-                    "positionally"
-                )
-
-        result_type = getattr(hc, "HealthResult", None)
-        if result_type is None:
-            problems.append("health_check.HealthResult is gone")
-        else:
-            fields = set(getattr(result_type, "_fields", ()) or ())
-            if not fields:
-                notes.append(
-                    "health_check.HealthResult is no longer a NamedTuple, so its "
-                    "fields could not be verified"
-                )
-            else:
-                missing_f = [f for f in REQUIRED_HEALTH_FIELDS if f not in fields]
-                if missing_f:
-                    problems.append(
-                        "health_check.HealthResult no longer has: "
-                        + ", ".join(missing_f)
-                    )
 
     # ── Everything shim.py imports from upstream ─────────────────────────────
     #

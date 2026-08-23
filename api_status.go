@@ -170,8 +170,12 @@ func doRequest(ctx context.Context, method, url string) (*http.Response, time.Du
 
 // providersHealth mirrors GET /providers/health on the engine shim.
 type providersHealth struct {
-	Pending   bool   `json:"pending"`
-	Error     string `json:"error,omitempty"`
+	Pending bool   `json:"pending"`
+	Error   string `json:"error,omitempty"`
+	// Per-provider reachability. Empty since SpotiFLAC 3.0.7, which deleted
+	// the endpoint table upstream probed — see engine/shim.py. Kept decoded
+	// rather than deleted: nothing here breaks on an empty map, and an engine
+	// that can answer this again should not need a Go change to be believed.
 	Providers map[string]struct {
 		OK        bool   `json:"ok"`
 		Reachable int    `json:"reachable"`
@@ -179,6 +183,10 @@ type providersHealth struct {
 		LatencyMs *int   `json:"latency_ms"`
 		Detail    string `json:"detail"`
 	} `json:"providers"`
+	// Services with no installed extension behind them. Not reachability — a
+	// weaker claim, and the only provider-level one left: a name listed here
+	// cannot download at all, whatever the network is doing.
+	MissingProviders []string `json:"missing_providers"`
 }
 
 // engineProviderRows turns the engine's provider reachability into one row per
@@ -258,6 +266,34 @@ func engineProviderRows(baseURL string) []ServiceStatus {
 			row.LatencyMs = *p.LatencyMs
 		}
 		rows = append(rows, row)
+	}
+
+	// A service the engine cannot serve at all.
+	//
+	// This used to be reported only in the endpoint's JSON, which nothing read,
+	// and it is the condition that caused the 2026-08-15 incident: the board
+	// said the engine was fine while zero extensions were installed and every
+	// download failed. Since 3.0.7 removed reachability it is also the only
+	// per-provider signal left, so it gets a row of its own rather than a field
+	// nobody looks at.
+	//
+	// Skipped when the same name already has a reachability row, so an engine
+	// that reports both does not render the provider twice.
+	for _, n := range ph.MissingProviders {
+		if _, already := ph.Providers[n]; already {
+			continue
+		}
+		label := n
+		if label != "" {
+			label = strings.ToUpper(label[:1]) + label[1:]
+		}
+		rows = append(rows, ServiceStatus{
+			Name:      label + " · engine",
+			URL:       url,
+			Status:    "down",
+			Error:     "no extension installed — every download naming it fails",
+			CheckedAt: now,
+		})
 	}
 	return rows
 }
