@@ -3,6 +3,8 @@ package providerutil
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // GetToFile performs a plain GET (with the shared Chrome User-Agent), checks
@@ -23,7 +25,7 @@ func GetToFile(
 	if err != nil {
 		return 0, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("User-Agent", ChromeUserAgent)
+	req.Header.Set("User-Agent", util.ChromeUserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
