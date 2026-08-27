@@ -8,6 +8,8 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 const (
@@ -139,7 +141,7 @@ func (c *SpotifyClient) requestMetadata(entityType, gid string) ([]byte, int, er
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", util.ChromeUserAgent)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

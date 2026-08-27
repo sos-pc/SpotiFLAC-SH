@@ -78,7 +78,7 @@ func uploadToService(filename string, fileReader io.Reader) (string, error) {
 		return "", err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", util.ChromeUserAgent)
 	req.Header.Set("Origin", "https://send.now")
 	req.Header.Set("Referer", "https://send.now/")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -125,7 +125,7 @@ func getUploadURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", util.ChromeUserAgent)
 
 	client := util.NewHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
@@ -164,7 +164,7 @@ func fetchDirectImageLink(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", util.ChromeUserAgent)
 
 	client := util.NewHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)

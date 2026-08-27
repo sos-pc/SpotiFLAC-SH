@@ -39,7 +39,7 @@ import (
 const (
 	appleBrowseURL    = "https://music.apple.com/us/browse"
 	appleISRCEndpoint = "https://api.music.apple.com/v1/catalog/us/songs?filter[isrc]="
-	appleUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+	appleUserAgent    = util.ChromeUserAgent
 )
 
 var (

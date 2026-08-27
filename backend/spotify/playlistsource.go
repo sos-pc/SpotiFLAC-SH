@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/sos-pc/SpotiFLAC-SH/backend/util"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -258,7 +260,7 @@ func (c *SpotifyClient) requestProfilePlaylists(ctx context.Context, profileID s
 		req.Header.Set("Client-Token", clientToken)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", util.ChromeUserAgent)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

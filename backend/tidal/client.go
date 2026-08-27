@@ -157,7 +157,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 		req, err := http.NewRequest("GET", url, nil)
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-			req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
+			req.Header.Set("User-Agent", util.ChromeUserAgent)
 
 			resp, err := t.client.Do(req)
 			if err == nil {
@@ -178,7 +178,7 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 						losslessURL := fmt.Sprintf("https://api.tidal.com/v1/tracks/%d/playbackinfopostpaywall?countryCode=%s&audioquality=LOSSLESS&playbackmode=STREAM&assetpresentation=FULL", trackID, countryCode)
 						if lreq, lerr := http.NewRequest("GET", losslessURL, nil); lerr == nil {
 							lreq.Header.Set("Authorization", "Bearer "+token.AccessToken)
-							lreq.Header.Set("User-Agent", providerutil.ChromeUserAgent)
+							lreq.Header.Set("User-Agent", util.ChromeUserAgent)
 							if lresp, lerr := t.client.Do(lreq); lerr == nil {
 								if lresp.StatusCode == 200 {
 									body, _ = io.ReadAll(lresp.Body)
@@ -276,7 +276,7 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string) e
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", providerutil.ChromeUserAgent)
+		req.Header.Set("User-Agent", util.ChromeUserAgent)
 		return client.Do(req)
 	}
 

@@ -47,3 +47,11 @@ mp4ff_decrypt.go|Widevine/CENC decryption left with the native Amazon downloader
 file_dialog.go|native file picker, desktop build only
 fileicon_darwin.go|macOS icon extraction, desktop build only
 fileicon_stub.go|build stub for the above
+
+# ── Shipping ffmpeg, which a container does not do ──────────────────────────
+# Upstream's ffmpeg.go downloads binaries from their own Dependencies releases
+# and keeps them updated on the user's machine. Ours is a pinned BtbN build
+# baked into the image at build time, verified against its published checksum
+# (see engine/Dockerfile and docs/ffmpeg-runtime-regression.md). There is no
+# version of this we would want.
+ffmpeg.go|ffmpeg is baked into the image, not downloaded and updated at runtime
