@@ -71,6 +71,47 @@ BASELINE=$(tr -d '[:space:]' < "$BASELINE_FILE")
 emit upstream_head "$UPSTREAM_HEAD"
 emit upstream_short "${UPSTREAM_HEAD:0:8}"
 
+# ─── Do the values that ROTATE still match theirs? ───────────────────────────
+#
+# Deliberately above every early exit. This is not a file diff and it is not
+# gated on the baseline: our copy can fall behind a rotation while nothing has
+# "changed since the last review" — a triage that looked at spotify_metadata.go
+# and decided not to port leaves exactly that state, and so does an
+# auto-advanced marker. The question "are we still holding the same values" has
+# to be asked every run or it is not being asked.
+#
+# What it can and cannot promise is in check-spotify-constants.py. Short
+# version: it detects that we have fallen behind a source that usually knows,
+# not that our path still works.
+# python3 on a runner, python on a Git Bash box - and on Windows `python3`
+# EXISTS on PATH as a Microsoft Store stub that prints an ad and exits 49.
+# So presence is not the test; running is. `command -v python3` succeeded
+# happily and every local invocation reported "the check could not run".
+PY_BIN=""
+for _py in python3 python; do
+    if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "pass" >/dev/null 2>&1; then
+        PY_BIN="$_py"
+        break
+    fi
+done
+
+if [ "$MODE" = github ]; then
+    SPOTIFY_MD=$("${PY_BIN:-python3}" ./check-spotify-constants.py --md 2>/dev/null \
+        || echo "- ⚠️ the constants check could not run")
+    [ -n "$SPOTIFY_MD" ] || SPOTIFY_MD="- ✅ aligned — TOTP secret, version and every persisted-query hash we issue"
+    SPOTIFY_BAD=$(printf '%s\n' "$SPOTIFY_MD" | grep -c '⚠️' || true)
+    emit spotify_drift_count "$SPOTIFY_BAD"
+    {
+        echo "spotify_drift<<__EOF__"
+        printf '%s\n' "$SPOTIFY_MD"
+        echo "__EOF__"
+    } >> "${GITHUB_OUTPUT:-/dev/stdout}"
+else
+    say "$("${PY_BIN:-python3}" ./check-spotify-constants.py 2>/dev/null \
+        || echo 'Spotify constants: the check could not run')"
+    say ""
+fi
+
 if [ "$UPSTREAM_HEAD" = "$BASELINE" ]; then
     say "${GREEN}Up to date${RESET} — upstream is at the reviewed baseline (${UPSTREAM_HEAD:0:8})."
     emit has_changes false

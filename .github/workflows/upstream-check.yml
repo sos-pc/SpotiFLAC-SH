@@ -49,6 +49,16 @@ jobs:
 
       # One issue, updated in place. A new one per run would be noise, and the
       # question it asks is always the same one.
+      # A rotated hash is an outage, not a backlog item — and the tracking
+      # issue is only upserted when watched files changed. A red run is the
+      # signal that does not depend on that having happened.
+      - name: Fail if the Spotify constants drifted
+        if: steps.check.outputs.spotify_drift_count != '0' && steps.check.outputs.spotify_drift_count != ''
+        run: |
+          python3 ./check-spotify-constants.py
+          echo "::error::Spotify constants no longer match upstream - the native metadata path may be about to stop working"
+          exit 1
+
       - name: Upsert tracking issue
         if: steps.check.outputs.has_changes == 'true'
         env:
@@ -59,6 +69,7 @@ jobs:
           WATCHED_COUNT: ${{ steps.check.outputs.watched_count }}
           IGNORED_COUNT: ${{ steps.check.outputs.ignored_count }}
           WATCHED_FILES: ${{ steps.check.outputs.watched_files }}
+          SPOTIFY_DRIFT: ${{ steps.check.outputs.spotify_drift }}
         run: |
           set -euo pipefail
           BASELINE_SHORT=$(cut -c1-8 .github/upstream-last-reviewed.txt)
@@ -78,6 +89,18 @@ jobs:
           ### Worth a look
 
           ${WATCHED_FILES}
+
+          ---
+
+          ### Spotify values that rotate
+
+          Compared on every run, against upstream's current file rather than
+          against the baseline — a rotation can land while nothing has "changed
+          since the last review". Since #112 removed the SpotFetch fallback the
+          native TOTP path is the only metadata source there is, so one of these
+          turning is a total outage rather than a degradation.
+
+          ${SPOTIFY_DRIFT}
 
           ---
 
