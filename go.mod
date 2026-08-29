@@ -7,7 +7,7 @@ require (
 	github.com/go-flac/flacpicture v0.3.0
 	github.com/go-flac/flacvorbis v0.2.0
 	github.com/go-flac/go-flac v1.0.0
-	github.com/mewkiz/flac v1.0.13
+	github.com/mewkiz/flac v1.0.14
 	github.com/pquerna/otp v1.5.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/text v0.41.0
