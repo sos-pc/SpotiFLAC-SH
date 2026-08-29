@@ -11,7 +11,7 @@ require (
 	github.com/pquerna/otp v1.5.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/text v0.41.0
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
