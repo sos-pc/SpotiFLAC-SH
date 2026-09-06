@@ -155,7 +155,24 @@ RUN python -c "import hooks.solver_fallback; print(f'hook solver_fallback: {\"ap
 # Fail the build rather than ship an image that cannot import its own core.
 # Cheap, and it catches the exact class of breakage that reached production
 # before: a dependency the wheel does not declare.
-RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; import nodriver, pydoll; print('import check OK')"
+#
+# It used to also `import nodriver, pydoll` by name. That hardcoded UPSTREAM's
+# dependency list into ours, and upstream changed it: v3.6.0 dropped nodriver
+# from requirements.txt. The build then failed 52 times over nine days, on a
+# module the package no longer uses. The traceback said so itself — the error
+# named only nodriver, which means `from SpotiFLAC import AsyncSpotiFLAC` had
+# already succeeded on the line before.
+#
+# So the core import stays and the names go. What replaces them is a claim that
+# does not encode anyone else's choices: `pip check` asserts the installed set
+# is internally consistent, which is the real question behind "did the two-step
+# install work". Verified against a real image built by this file: "No broken
+# requirements found."
+#
+# This cannot see a module imported lazily inside a function. Nothing here
+# could. contract-check.py imports everything shim.py imports and starts every
+# JS bundle; a real download is what proves the rest.
+RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; print('import check OK')"     && python -m pip check
 
 # The import check above proves the package loads. It does not prove upstream
 # still takes the arguments shim.py passes it — and that is the failure this
