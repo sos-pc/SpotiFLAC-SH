@@ -222,6 +222,16 @@ names = sorted(os.listdir(m.ext_dir)); \
 print('extensions installed:', ', '.join(names) or '(none)'); \
 raise SystemExit(0 if names else 'no extension installed - the registry served nothing usable')"
 
+# Hold the bundles the host cannot run at their last runnable version.
+#
+# The registry serves extensions built for SpotiFLAC Mobile, whose host runtime
+# has moved ahead of the Python module's. Two of them started requiring features
+# this module does not implement and failed every download with a JavaScript
+# TypeError, while the build stayed green. See pin-extensions.py for the
+# measurements and for why the other two are left alone.
+COPY pin-extensions.py /tmp/pin-extensions.py
+RUN HOME=/home/nonroot python /tmp/pin-extensions.py && rm /tmp/pin-extensions.py
+
 # What the build just installed, written into the image beside shim.py.
 #
 # Same ARG, so the provenance recorded is the registry actually used. It runs
