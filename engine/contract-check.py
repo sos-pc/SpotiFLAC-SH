@@ -35,6 +35,15 @@ engine could not download a single track. Two things it did not look at:
 Both are checked now. The rule they suggest: assert what the shim USES, not
 only what upstream OFFERS.
 
+It was too narrow a second time, in September. Every service resolved, every
+bundle started in well under a second, and tidal-web 1.2.2 still failed every
+download with `file.downloadSegments is not a function`: the bundle called a
+host method this module had never implemented. Starting a bundle proves it
+loads. It says nothing about whether the host provides what it calls, and the
+bundles are written for SpotiFLAC Mobile's host, which is ahead of this one.
+So every call a bundle makes into the host is now compared with what this
+module's JavaScript bridge actually defines.
+
 Run it locally the same way CI does:
 
     python contract-check.py
@@ -45,8 +54,10 @@ from __future__ import annotations
 import ast
 import inspect
 import pathlib
+import re
 import sys
 import time
+from collections import Counter
 
 # Every keyword shim.py passes to AsyncSpotiFLAC(...). Keep this list and the
 # call in _run_download in step: this file is the executable copy of that call's
@@ -85,6 +96,29 @@ SHIM_PATH = "/app/shim.py"
 # service list, which reads like a caller mistake and is not one.
 REQUIRED_SERVICES = ("qobuz", "deezer", "amazon", "tidal")
 
+# The objects SpotiFLAC Mobile's runtime puts in every extension's global scope
+# (go_backend, `vm.Set("file", ...)` and its siblings). The bundles are written
+# against that runtime, so these are the names worth looking for in them. Which
+# methods each object has on THIS host is not listed here: it is read out of
+# the bridge the bundles actually run under, at build time.
+HOST_OBJECTS = (
+    "file", "http", "log", "session", "utils", "gobackend", "matching",
+    "storage", "credentials", "ffmpeg", "auth", "convert",
+)
+
+# Calls that reach for a method this host lacks, but that someone has read and
+# shown to be harmless. Keyed by extension id and call; the number is how many
+# call sites were read. A bundle that grows another one fails again, so a new
+# call has to earn the same verdict instead of inheriting it.
+KNOWN_HARMLESS_CALLS: dict[tuple[str, str], tuple[int, str]] = {
+    ("tidal-web", "file.exists"): (
+        1,
+        "only inside deleteQuietly(), which wraps it in try/catch: the call throws "
+        "into that catch and a temporary file is left behind, the transfer itself "
+        "is unaffected (read in tidal-web 1.2.0 and 1.2.6, 2026-09-23)",
+    ),
+}
+
 
 def _shim_upstream_imports(path: str, problems: list[str]) -> list[str]:
     """Every SpotiFLAC module shim.py imports, including inside functions."""
@@ -112,9 +146,194 @@ def _shim_upstream_imports(path: str, problems: list[str]) -> list[str]:
     return sorted(modules)
 
 
+# ── Reading JavaScript without a JavaScript parser ────────────────────────────
+#
+# Crude on purpose, and checked against the real files rather than trusted: on
+# 2026-09-23 these read the SpotiFLAC 3.8.0 and 4.3.0 bridges and six bundles,
+# flagged the file.downloadSegments call that broke tidal-web on 3.8.0, and
+# cleared the same bundle on 4.3.0. Where they could be fooled they fail CLOSED
+# - a bridge they cannot read, or a provider bundle in which they find no file
+# call at all, is reported as a problem, never as a pass.
+
+def _strip_js_comments(js: str) -> str:
+    """Comments out, so a method named in prose is not mistaken for a call.
+
+    A `//` preceded by `:` is kept: that is every URL in these files.
+    """
+    js = re.sub(r"/\*.*?\*/", " ", js, flags=re.S)
+    return re.sub(r"(?<!:)//[^\n]*", " ", js)
+
+
+def _blank_nested(body: str) -> str:
+    """The body with strings and everything below depth 0 blanked out."""
+    out: list[str] = []
+    depth, quote, i = 0, None, 0
+    while i < len(body):
+        c = body[i]
+        if quote:
+            if c == "\\":
+                out.append("  ")
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            out.append(" ")
+        elif c in "'\"`":
+            quote = c
+            out.append(" ")
+        else:
+            if c in "{([":
+                depth += 1
+            elif c in "})]":
+                depth -= 1
+            out.append(c if depth == 0 else " ")
+        i += 1
+    return "".join(out)
+
+
+def _object_literal(js: str, start: int) -> str:
+    """The inside of the `{ ... }` whose opening brace ends just before `start`."""
+    depth, quote, i = 1, None, start
+    while i < len(js) and depth:
+        c = js[i]
+        if quote:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        i += 1
+    return js[start:i - 1]
+
+
+def _bridge_api(bridge_js: str) -> dict[str, set[str]]:
+    """What each host object provides on this host, read from its _bridge.js.
+
+    The bridge installs them as `global.<name> = { ... }` and aliases one as
+    another (`global.gobackend = global.utils`); a property is `name:` or a
+    method shorthand `name(`.
+    """
+    js = _strip_js_comments(bridge_js)
+    api: dict[str, set[str]] = {}
+    for m in re.finditer(r"\bglobal\.([A-Za-z_]\w*)\s*=\s*\{", js):
+        keys = re.findall(
+            r"(?:^|[,{\n])\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*(?::|\()",
+            _blank_nested(_object_literal(js, m.end())),
+        )
+        api.setdefault(m.group(1), set()).update(keys)
+    for m in re.finditer(r"\bglobal\.([A-Za-z_]\w*)\s*=\s*global\.([A-Za-z_]\w*)\s*;", js):
+        api[m.group(1)] = set(api.get(m.group(2), set()))
+    return api
+
+
+def _host_calls(bundle_js: str) -> Counter:
+    """(object, method) -> number of call sites, for every name in HOST_OBJECTS."""
+    js = _strip_js_comments(bundle_js)
+    pattern = r"(?<![\w$.])(%s)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(" % "|".join(HOST_OBJECTS)
+    return Counter(re.findall(pattern, js))
+
+
+def _is_guarded(bundle_js: str, obj: str, method: str, api: dict[str, set[str]]) -> bool:
+    """Whether the bundle tests for this call before making it.
+
+    `typeof obj.method` protects a missing method. A bare `typeof obj` only
+    protects a missing OBJECT: where the host has `obj` without the method,
+    the guarded branch runs and the call throws all the same.
+    """
+    if re.search(r"typeof\s*\(?\s*%s\s*\.\s*%s\b" % (obj, method), bundle_js):
+        return True
+    return obj not in api and bool(re.search(r"typeof\s*\(?\s*%s\b(?!\s*\.)" % obj, bundle_js))
+
+
+def _check_host_calls(service: str, ext: str, installed, api: dict[str, set[str]],
+                      problems: list[str]) -> None:
+    """Every call the bundle makes into the host must land on something.
+
+    An unguarded call to a method the bridge does not define is a download that
+    fails with `... is not a function` the moment it reaches that line - which
+    is the September failure, and which nothing before this could see.
+    """
+    root = pathlib.Path(installed.index_js).parent
+    try:
+        source = "".join(p.read_text(encoding="utf-8", errors="replace")
+                         for p in sorted(root.rglob("*.js")))
+    except OSError as exc:
+        problems.append(f"cannot read the {ext!r} bundle to check its host calls: {exc}")
+        return
+
+    calls = _host_calls(source)
+    if not any(obj == "file" for obj, _ in calls):
+        # A download provider writes its file through the host; finding no such
+        # call means the reader is out of step with the bundle, not that the
+        # bundle is fine.
+        problems.append(
+            f"found no file.* call in the {ext!r} bundle, so its host calls could "
+            "not be checked - the reader in contract-check.py needs updating"
+        )
+        return
+
+    guarded: list[str] = []
+    harmless: list[str] = []
+    for (obj, method), sites in sorted(calls.items()):
+        if method in api.get(obj, set()):
+            continue
+        call = f"{obj}.{method}"
+        if _is_guarded(source, obj, method, api):
+            guarded.append(call)
+            continue
+        known = KNOWN_HARMLESS_CALLS.get((ext, call))
+        if known and sites <= known[0]:
+            harmless.append(f"{call} (x{sites})")
+            continue
+        problems.append(
+            f"service {service!r} resolves to extension {ext!r}, which calls "
+            f"{call} ({sites} call site{'s' if sites > 1 else ''}, no typeof guard) - "
+            "this module's bridge does not define it, so every download reaching "
+            "that call fails with 'is not a function'"
+        )
+
+    line = f"host calls: {service} -> {ext}: {len(calls)} methods"
+    if guarded:
+        line += f"; absent but guarded: {', '.join(guarded)}"
+    if harmless:
+        line += f"; absent, known harmless: {', '.join(harmless)}"
+    print(line)
+
+
+def _load_bridge_api() -> tuple[dict[str, set[str]] | None, str | None]:
+    """The bridge node runs the bundles under, parsed. (api, None) or (None, why)."""
+    try:
+        from SpotiFLAC.extensions import runtime as js_runtime
+    except Exception as exc:  # noqa: BLE001
+        return None, f"cannot import the JS runtime to read its bridge: {exc}"
+    # The same constant the runtime hands to node, so this reads the file that
+    # actually runs rather than a guess at where it lives.
+    path = getattr(js_runtime, "_BRIDGE_JS", None) or (
+        pathlib.Path(js_runtime.__file__).parent / "_bridge.js")
+    try:
+        api = _bridge_api(pathlib.Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        return None, f"cannot read the JS bridge at {path}: {exc}"
+    if "download" not in api.get("file", set()):
+        return None, (
+            f"could not find file.download in {path} - the bridge changed shape and "
+            "the reader in contract-check.py needs updating; host calls are unverified"
+        )
+    return api, None
+
+
 def main() -> int:
     problems: list[str] = []
     notes: list[str] = []
+    # Kept apart from `problems` only because the fix is somewhere else: a
+    # missing host method is solved in pin-extensions.py, not in shim.py.
+    host_problems: list[str] = []
 
     try:
         from SpotiFLAC import AsyncSpotiFLAC
@@ -176,6 +395,9 @@ def main() -> int:
         # ALREADY carries. Letting it install here would make the check pass by
         # doing the thing it is supposed to verify has been done.
         manager = ExtensionManager(auto_install_downloads=False)
+        bridge_api, bridge_error = _load_bridge_api()
+        if bridge_error:
+            host_problems.append(bridge_error)
         for service in REQUIRED_SERVICES:
             try:
                 ext = extension_id(service, manager)
@@ -233,21 +455,43 @@ def main() -> int:
                     f"installed but does not start: {exc}"
                 )
 
+            # ── and everything it calls has to EXIST ─────────────────────────
+            #
+            # Runs even when the start above failed: the two findings do not
+            # depend on each other, and one report with both is worth more than
+            # two builds that each reveal half.
+            if bridge_api is not None:
+                _check_host_calls(service, ext, installed, bridge_api, host_problems)
+
     for note in notes:
         print(f"CONTRACT WARNING: {note}", file=sys.stderr)
 
-    if problems:
+    if problems or host_problems:
         # ASCII only, here and above: this runs inside `docker build`, whose
         # stdout encoding is not ours to choose. A decorative dash that raises
         # UnicodeEncodeError would fail the build for a reason that has nothing
         # to do with the contract, and bury the reason that does.
-        print("CONTRACT BROKEN - upstream changed the API shim.py calls:", file=sys.stderr)
-        for p in problems:
+        print("CONTRACT BROKEN - this image would fail downloads:", file=sys.stderr)
+        for p in problems + host_problems:
             print(f"  - {p}", file=sys.stderr)
+        if problems:
+            print(
+                "\nFor the API shim.py calls: fix engine/shim.py:_run_download and "
+                "this file together, then rebuild.",
+                file=sys.stderr,
+            )
+        if host_problems:
+            print(
+                "\nFor a bundle calling what the bridge lacks: hold that extension "
+                "at its last compatible version in engine/pin-extensions.py, or "
+                "wait for upstream to implement the method. If the call has been "
+                "read and shown harmless, record it in KNOWN_HARMLESS_CALLS with "
+                "the number of call sites read.",
+                file=sys.stderr,
+            )
         print(
-            "\nFix engine/shim.py:_run_download and this file together, then "
-            "rebuild. Do not publish this image: it would fail on the first "
-            "download instead of here.",
+            "\nDo not publish this image: it would fail on the first download "
+            "instead of here.",
             file=sys.stderr,
         )
         return 1
@@ -263,7 +507,7 @@ def main() -> int:
         print(
             f"contract check OK "
             f"({len(REQUIRED_INIT_KWARGS)} kwargs, {len(REQUIRED_ATTRS)} attrs, "
-            f"{len(REQUIRED_SERVICES)} services)"
+            f"{len(REQUIRED_SERVICES)} services started, their host calls all defined)"
         )
     return 0
 

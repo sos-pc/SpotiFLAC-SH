@@ -21,33 +21,45 @@ the bundle loads and announces itself, which is all JSRuntime.start() proves.
 
 ─── What it does ────────────────────────────────────────────────────────────
 
-Reinstalls the named extensions from a pinned commit, verified by digest, and
-then REPORTS the feature compatibility of everything installed.
+Reinstalls the named extensions from a pinned commit, verified by digest.
 
-The pins are the newest version of each whose declared features this host
-satisfies, found by walking the registry repo's history. Verified by real
+The pins were the newest version of each whose declared features this host
+satisfied, found by walking the registry repo's history. Verified by real
 downloads on two tracks: both providers failed on both tracks before, both
 succeed on both after.
 
-Reporting rather than gating for the rest, and that is a measured choice:
-qobuz-web 1.2.10 declares `signedSession@3` and `preparedContext@1` — features
-this host does not have — and downloads perfectly well. The declaration is a
-manifest-level statement; whether a missing feature is ever reached depends on
-the path taken. A gate would have refused a working provider.
+─── How to know whether a pin is still needed ───────────────────────────────
+
+Not from the manifests. This file used to print, for every installed
+extension, the declared `requiredRuntimeFeatures` this host lacks - and that
+report cried wolf: four download providers out of five declared
+`preparedContext@1`, and all four read it as
+`options && options.preparedContext || {}` and do without it (read
+2026-09-23: amazon, deezer, qobuz-web, soundcloud). A declaration says what the author's host offers, not what the code
+cannot live without.
+
+What decides is whether the bundle CALLS a host method the bridge does not
+define, without testing for it first. contract-check.py now checks exactly
+that for every service the shim serves, after this file has run, and fails
+the build on it - so a bundle update that would break downloads never reaches
+`:latest`, and the build log names the call.
 
 ─── When a pin should go ────────────────────────────────────────────────────
 
-The moment the module implements the feature. Delete the entry, rebuild, and
-let the registry serve current again — the report below is what tells you the
-gap closed. A pin here is a splint, not a decision about what we want.
+The moment the module implements what the newer bundle calls. Delete the entry,
+rebuild, and let contract-check.py say whether the current version passes.
+A pin here is a splint, not a decision about what we want.
+
+tidal-web went that way on 2026-09-23: SpotiFLAC 4.x added
+`file.downloadSegments` (absent from 3.8.0, present in 4.3.0), and
+contract-check.py passes tidal-web 1.2.6 on 4.3.0 with a single missing call,
+`file.exists`, which sits inside a try/catch (see KNOWN_HARMLESS_CALLS there).
 """
 from __future__ import annotations
 
 import hashlib
-import json
 import pathlib
 import shutil
-import sys
 import urllib.request
 
 REGISTRY_RAW = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension"
@@ -57,13 +69,6 @@ REGISTRY_RAW = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension"
 # The commit is a real ref, not a branch: the branch path serves whatever is
 # current, which is the thing that broke us.
 PINS: dict[str, tuple[str, str, str, str]] = {
-    "tidal-web": (
-        "1838383e62",
-        "d346f3e5fdb6f349d8f6ede1310d1961862936f64b3dabbbb4fba868cea31a9a",
-        "1.2.0",
-        "1.2.1 added signedSession@3 + downloadSegments@1 (registry commit 29422878, "
-        '"fix(lossless): require signed session v3 host")',
-    ),
     "deezer": (
         "923d942f3e",
         "6320680f44f8292b16e3d83bc789305434442198820a0f11b4416538b143b04b",
@@ -72,12 +77,10 @@ PINS: dict[str, tuple[str, str, str, str]] = {
     ),
 }
 
-# What the module implements, read out of its own source rather than assumed.
-# Any feature name that appears nowhere in the package cannot be provided by it.
-HOST_FEATURES = {"signedSession@1", "sessionGrant@1"}
-
 # Not pinned, deliberately:
 #
+#   tidal-web  pinned at 1.2.0 until 2026-09-23 - see "When a pin should go"
+#              above. contract-check.py is what would say if it needs one again.
 #   qobuz-web  declares features this host lacks and downloads anyway. Leave it
 #              on current; pinning a working provider buys nothing and costs the
 #              fixes its author keeps shipping.
@@ -123,24 +126,6 @@ def main() -> int:
         if got != want:
             raise SystemExit(f"{ext_id}: pinned {commit} to get {want}, installed {got}")
         print(f"pinned {ext_id} -> v{got}  ({why})")
-
-    # ── The report: who needs what this host does not have ───────────────────
-    print()
-    print(f"{'extension':<22}{'version':<10}{'runtime features it needs but this host lacks'}")
-    unmet = 0
-    for ext in sorted(manager.list_installed(), key=lambda e: e.name):
-        needs = set(ext.manifest.get("requiredRuntimeFeatures") or [])
-        missing = sorted(needs - HOST_FEATURES)
-        if missing:
-            unmet += 1
-        print(f"{ext.name:<22}{str(ext.manifest.get('version')):<10}{', '.join(missing) or '-'}")
-    if unmet:
-        print()
-        print(
-            f"{unmet} extension(s) declare a feature this host does not implement. That is "
-            "not automatically a failure - qobuz-web does it and works - but it is where to "
-            "look first when a provider starts returning nothing."
-        )
     return 0
 
 
