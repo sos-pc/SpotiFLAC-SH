@@ -170,9 +170,11 @@ RUN python -c "import hooks.solver_fallback; print(f'hook solver_fallback: {\"ap
 # requirements found."
 #
 # This cannot see a module imported lazily inside a function. Nothing here
-# could. contract-check.py imports everything shim.py imports and starts every
-# JS bundle; a real download is what proves the rest.
-RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; print('import check OK')"     && python -m pip check
+# could. contract-check.py imports everything shim.py imports, starts every
+# JS bundle and checks every host call those bundles make; a real download is
+# what proves the rest.
+RUN python -c "from SpotiFLAC import AsyncSpotiFLAC; print('import check OK')" \
+    && python -m pip check
 
 # The import check above proves the package loads. It does not prove upstream
 # still takes the arguments shim.py passes it — and that is the failure this
@@ -225,10 +227,12 @@ raise SystemExit(0 if names else 'no extension installed - the registry served n
 # Hold the bundles the host cannot run at their last runnable version.
 #
 # The registry serves extensions built for SpotiFLAC Mobile, whose host runtime
-# has moved ahead of the Python module's. Two of them started requiring features
-# this module does not implement and failed every download with a JavaScript
-# TypeError, while the build stayed green. See pin-extensions.py for the
-# measurements and for why the other two are left alone.
+# has moved ahead of the Python module's. Two of them started calling host
+# methods this module did not implement and failed every download with a
+# JavaScript TypeError, while the build stayed green. One is still held here;
+# tidal-web was released on 2026-09-23 once 4.x implemented what it calls. The
+# build no longer stays green on that failure: contract-check.py, below, fails
+# it when a bundle calls a method the bridge lacks. See pin-extensions.py.
 COPY pin-extensions.py /tmp/pin-extensions.py
 RUN HOME=/home/nonroot python /tmp/pin-extensions.py && rm /tmp/pin-extensions.py
 
