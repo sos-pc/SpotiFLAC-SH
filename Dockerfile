@@ -86,7 +86,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o spotiflac .
 # no GPL-only codec (x264/x265/...) is used anywhere, so the GPL variant's
 # larger footprint buys nothing here.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS ffmpeg-static
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS ffmpeg-static
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
