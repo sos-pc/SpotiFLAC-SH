@@ -2,7 +2,8 @@
 
 Unified diffs applied to the **installed** upstream package at build time, from
 the site-packages root with `-p1`. Paths inside a patch therefore start at
-`SpotiFLAC/`.
+`mornye/` (the package was `SpotiFLAC/` until 2026-10-20; the examples below
+date from then).
 
 There are none right now. This file is not a placeholder for that reason — it is
 the convention every future patch has to follow, and the incident that produced

@@ -3,61 +3,61 @@
 This directory builds `ghcr.io/sos-pc/spotiflac-engine`: upstream's published
 package plus our HTTP shim, plus whatever patches upstream has not adopted yet.
 
+Upstream is **`mornye`** (PyPI, [mornyeapp/Mornye-Python](https://github.com/mornyeapp/Mornye-Python)).
+Until 2026-10-20 the same project shipped as `SpotiFLAC` from
+`BartolomeoRusso9/SpotiFLAC-Module-Version`. After Spotify's legal notice to the
+SpotiFLAC author it was renamed, its history and tags were reset, and the
+`SpotiFLAC` package stopped at 5.0.6. For this image the move was mechanical —
+`AsyncSpotiFLAC` became `AsyncMornye`, `SpotiFLAC.*` became `mornye.*`, the data
+directory `~/.spotiflac` became `~/.mornye` — which is the shim's contract doing
+its job: the Go app did not change.
+
 ```
-Dockerfile            builds the image (context = this directory)
-docker-entrypoint.sh  starts Xvfb, then hands over to uvicorn
-shim.py               the engine-agnostic HTTP adapter the Go app calls
-requirements.txt      the shim's own deps
-patches/*.patch       applied to the installed package at build time
-hooks/*.py            runtime wrappers loaded by shim.py at startup
-```
-
-## The image must carry a browser
-
-Several provider routes drive Chromium through `pydoll`. Upstream's own
-Dockerfile therefore installs `xvfb`, `chromium` and `fonts-liberation`, sets
-`DISPLAY=:99`, and starts Xvfb in its entrypoint before the application.
-
-Ours did none of that for a while: the package list here was ported from theirs
-with those three dropped. Nothing caught it, because the gap only surfaces when
-a route actually reaches for a browser, and it surfaces as
-`[Errno 2] No such file or directory: 'Xvfb'` — which reads like an engine bug
-rather than our packaging.
-
-Two consequences worth keeping in mind:
-
-- **`shm_size: 1g` in compose.** Chromium puts renderer shared memory in
-  `/dev/shm` and Docker's default is 64 MB. The wrapper below also passes
-  `--disable-dev-shm-usage`, so this is now a safety net rather than a
-  requirement — keep it anyway.
-- **Do not set `read_only: true` on this service.** It writes JS extensions, a
-  browser profile and the X socket.
-
-### Why `/usr/bin/chromium` is a wrapper script
-
-Upstream gates Chromium's container flags on being root:
-
-```python
-# SpotiFLAC/core/solver.py
-_docker_flags = []
-if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
-    _docker_flags = ["--no-sandbox", "--disable-dev-shm-usage"]
+Dockerfile             builds the image (context = this directory)
+shim.py                the engine-agnostic HTTP adapter the Go app calls
+requirements.txt       the shim's own deps
+patches/*.patch        applied to the installed package at build time (none today)
+pin-extensions.py      holds a provider bundle at an older version, when needed (none today)
+record-extensions.py   writes the installed bundles into the image (/health shows them)
+contract-check.py      fails the build if the image could not download (see below)
+compare-engines.py     real downloads through an engine, to compare two images
 ```
 
-Their image runs as root; ours runs as uid 1000, which is what makes `/staging`
-shareable with the Go app and is not up for negotiation. So the list stays empty
-and every browser launch dies with `No usable sandbox!` — `cap_drop: ALL` blocks
-the user-namespace sandbox and `no-new-privileges` blocks the setuid helper.
+## No browser in the image
 
-The Dockerfile therefore moves the real binary to `/usr/bin/chromium.real` and
-puts a wrapper at `/usr/bin/chromium` that appends the same two flags. It lives
-in our packaging rather than in their source, so there is nothing to re-verify
-on each release and no patch that can rot.
+A provider gateway can challenge a new session with Cloudflare Turnstile. The
+SpotiFLAC image answered that with a browser of its own — Xvfb, Chromium run
+without its sandbox, a wrapper to pass the flags, an entrypoint to start the
+display — and reached the deployment's external solver only through a hook,
+after its own browser had failed.
 
-**This drops Chromium's internal sandbox**: a compromised renderer holds
-container privileges. The container is already non-root, capability-dropped,
-`no-new-privileges` and unpublished — and the alternative, restoring `SYS_ADMIN`
-or dropping `no-new-privileges`, is strictly worse.
+`mornye` takes the external solver natively: `TURNSTILE_SOLVER_URL`, documented
+upstream as "an external Turnstile solver service to use instead of the built-in
+browser". This image therefore carries no browser at all. It is a third smaller,
+and it no longer runs Chromium without a sandbox next to third-party JavaScript.
+
+**The trade-off:** set `TURNSTILE_SOLVER_URL` on this service. Without it, or
+with that service down, a session that needs a challenge cannot be obtained and
+the providers that need one fail until it is back. `shm_size` is no longer
+needed — it was for Chromium.
+
+**Do not set `read_only: true` on this service.** It writes extension data and
+signed sessions under `~/.mornye`.
+
+## What the build refuses to publish
+
+`contract-check.py` runs inside `docker build` and fails it, rather than letting
+a scheduled rebuild move `:latest` to an image that cannot download:
+
+- every keyword `shim.py` passes to `AsyncMornye(...)` still exists;
+- every module `shim.py` imports still imports;
+- each service the app can delegate (qobuz, deezer, amazon, tidal) resolves to
+  an installed extension, and that extension **starts**;
+- every call that extension makes into the host (`file.*`, `http.*`, `utils.*`
+  and the rest) lands on something the bridge actually defines — the check that
+  would have stopped September's `file.downloadSegments is not a function`.
+
+A build that fails here leaves production on its last good image.
 
 ## Why there is no fork any more
 
@@ -87,53 +87,48 @@ Full reasoning and the measurements behind it:
 Every patch is a liability: it can rot if upstream rewrites the function around
 it, and it has to be re-verified on each release. So reach for one last.
 
-1. **Use their flags.** Tagging is off via `enrich_metadata=False` /
+1. **Use their parameters.** Tagging is off via `enrich_metadata=False` /
    `embed_lyrics=False`; providers and order come from the `services` list. Most
    of what we want is a parameter away.
-2. **Then use the shim.** Anything expressible as "call something before or
-   after their code" belongs in `shim.py`. `_prime_tidal_apis()` is the model:
-   upstream ships a priming function and never calls it, so we call it — without
+2. **Then use the shim.** Anything expressible as "do something before or after
+   their code" belongs in `shim.py`. `_quiet_engine_logs()` is the model: it
+   works around upstream's console interception from the outside, without
    touching their source.
 3. **Only then, a patch.** When the change has to happen *inside* one of their
-   functions and no call-order trick reaches it.
+   functions and nothing around the call reaches it.
 
 A patch is also the right shape for the opposite reason: it fails loudly. A
 monkey-patch redefining one of their functions from a copy would keep applying
 cleanly while silently going stale — a worse failure than a conflict.
 
-## Patches currently carried
+## Patches and pins currently carried
 
-**None.** The one there was — `amazon-songlink-unformatted-url.patch` — was
-retired on 2026-08-15: upstream 3.0.0 rewrote the whole resolution path into
-`core/link_resolver.py`, where the SongLink call passes
-`params={"url": url, "userCountry": "US"}` against a bare base URL. The
-unformatted template it fixed no longer exists to fix.
-
-That retirement is also why the build now runs a probe before each patch — see
-[`patches/README.md`](patches/README.md). Upstream adopting our fix used to
-fail the build and freeze this image on its previous version.
+**None.** The last patch, `amazon-songlink-unformatted-url.patch`, was retired on
+2026-08-15 when upstream rewrote that path. The last pins went with the move to
+`mornye`: tidal-web on 2026-09-23 and deezer on 2026-10-21, each once the bridge
+implemented what the newer bundle calls. `pin-extensions.py` keeps the mechanism
+for the next incompatible bundle; `contract-check.py` is what will name it.
 
 ## Where the download providers come from
 
-**Not from the wheel.** SpotiFLAC 3.0.0 deleted `SpotiFLAC/providers/` — eight
-Python modules — and replaced them with JavaScript extensions fetched from a
-registry. 1.7.3 carried that registry's URL as a hardcoded constant; 3.0.0
-removed it and expects `SPOTIFLAC_REGISTRIES` from the environment, a `.env`
-file, or the GUI settings screen, none of which a headless image has.
+**Not from the wheel.** Since SpotiFLAC 3.0.0 the providers are JavaScript
+extensions fetched from a registry, and `mornye` bundles no registry at all — by
+design: the operator names one in `MORNYE_REGISTRIES` (formerly
+`SPOTIFLAC_REGISTRIES`). A headless image has nowhere else to get it from.
 
 The Dockerfile therefore installs them **at build time**, with the registry URL
 as an `ARG` that deliberately does not become an `ENV`:
 
 | | at build | at runtime |
 |---|---|---|
-| `SPOTIFLAC_REGISTRIES` | set, from the `ARG` | **unset** |
-| effect | seven extensions installed into the image | manager skips its registry check and uses what is installed |
+| `MORNYE_REGISTRIES` | set, from the `ARG` | **unset** |
+| effect | the registry's extensions installed into the image | manager skips its registry check and uses what is installed |
 
-That is what makes the image reproducible again — `SPOTIFLAC_VERSION` pins the
-wheel, and this pins the code that actually downloads — and what stops every
-container recreation from re-fetching seven bundles from GitHub.
+That is what makes the image reproducible — `MORNYE_VERSION` pins the wheel, and
+this pins the code that actually downloads — and what stops every container
+recreation from re-fetching every bundle from GitHub.
 
-An operator who wants runtime updates can set `SPOTIFLAC_REGISTRIES` in compose.
+An operator who wants runtime updates can set `MORNYE_REGISTRIES` in compose.
 Then it is a choice.
 
 **The exposure, stated:** the bundles are executable JavaScript from a
@@ -144,31 +139,22 @@ fresh on every start; it is not the same as trusting them.
 
 Full measurements: [docs/engine-3.0-impact-plan.md](../docs/engine-3.0-impact-plan.md).
 
-## Runtime hooks
+## Comparing two engine images
 
-Behaviour that must happen *inside* an upstream function, but where a textual
-patch would be fragile (the function moves, the surrounding lines change), lives
-in `hooks/` as Python modules loaded by `shim.py` at startup.
+A green build does not prove a track comes out the other end. Before moving
+production from one image to another, run the same tracks through both, each
+inside its own container:
 
-- **`solver_fallback.py`** — wraps `run_community_verification` in
-  `signed_session_desktop.py` to try the external solver at
-  `TURNSTILE_SOLVER_URL` when upstream's own modes (GUI browser, internal
-  solver.py) have both failed. Survives line shifts — only breaks if the
-  function is renamed, removed, or its signature changes incompatibly.
+```bash
+docker cp engine/compare-engines.py spotiflac-engine:/tmp/ && docker exec spotiflac-engine python3 /tmp/compare-engines.py --label current --jsonl /tmp/current.jsonl
+```
 
-**When upstream adopts a patch textually**, `patch --dry-run` reports
-"Reversed (or previously applied)". **When upstream fixes the bug their own
-way**, as in 3.0.0, the patch simply stops finding its target. Both used to
-fail the build, which is the wrong answer for a bug that no longer exists: it
-freezes this image on its previous version and cuts the deployment off from
-every other upstream change until a human intervenes.
-
-A patch's probe is what separates those from a real breakage. See
-[`patches/README.md`](patches/README.md).
-
-**When a hook stops applying**, it logs a warning at import time and degrades
-gracefully — the build succeeds, the image is published, only the fallback is
-unavailable. The build log records whether each hook applied or skipped.
+Then the same against the candidate container with `--label candidate`, and
+`--compare current.jsonl candidate.jsonl` to read them side by side. Failures are
+filed by cause — `session` (challenge or signed session), `not_found`,
+`network`, `bad_file` (the file is not the audio its name claims) — so a
+difference in how two images obtain sessions is not mistaken for a provider
+that lacks the track. Pass your own tracks with `--tracks`.
 
 ## Adding or updating a patch
 
@@ -178,10 +164,10 @@ against a working tree:
 
 ```bash
 # extract the wheel you are targeting, edit a copy, then:
-diff -u a/SpotiFLAC/core/<file>.py b/SpotiFLAC/core/<file>.py > patches/<name>.patch
+diff -u a/mornye/core/<file>.py b/mornye/core/<file>.py > patches/<name>.patch
 ```
 
-Paths inside the patch must start at `SpotiFLAC/` — the Dockerfile applies with
+Paths inside the patch must start at `mornye/` — the Dockerfile applies with
 `-p1` from the site-packages root.
 
 Verify before committing — both halves:
@@ -198,9 +184,9 @@ PYTHONPATH=<extracted-wheel> python patches/<name>.probe.py; echo "probe exit=$?
 
 ```bash
 docker build -t spotiflac-engine ./engine
-docker build -t spotiflac-engine --build-arg SPOTIFLAC_VERSION=1.5.9 ./engine
+docker build -t spotiflac-engine --build-arg MORNYE_VERSION=1.0.3 ./engine
 ```
 
 Without the arg you get whatever is current on PyPI. CI always passes it
-explicitly, so the image tag and the `org.opencontainers.image.version` label
-match what is actually installed.
+explicitly, and tags the image `mornye-<version>` — the project restarted its
+numbering at 1.0.0, and SpotiFLAC images already used 1.6.x and 1.7.x tags.

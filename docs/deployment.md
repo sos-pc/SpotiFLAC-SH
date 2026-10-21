@@ -66,8 +66,7 @@ services:
       - "8080"                    # internal only — never publish it
     stdin_open: false             # one route prompts for a grant on stdin;
     tty: false                    # with no TTY it fails fast instead of hanging
-    shm_size: 1g                  # Chromium crashes on Docker's 64 MB default
-    # No read_only: it writes JS extensions, a browser profile and the X socket.
+    # No read_only: it writes extension data and signed sessions under ~/.mornye.
     volumes:
       - spotiflac_staging:/staging  # SAME path as above — not optional
       - engine_cache:/home/nonroot/.cache
@@ -85,9 +84,13 @@ The staging volume must be mounted at the **same path in both containers**: the
 engine returns an absolute path and the app opens it verbatim. `ENGINE_STAGING_DIR`
 moves it if `/staging` is inconvenient, but it has to move on both sides.
 
-The engine image carries Chromium (~480 MB against the app's ~114 MB) because
-several provider routes drive a real browser. That is where `shm_size` and the
-absence of `read_only` come from.
+The engine is the upstream `mornye` package (formerly SpotiFLAC) behind our
+shim. Its image no longer carries a browser: a provider gateway that challenges
+a new session is answered by the external service named in
+`TURNSTILE_SOLVER_URL`, which `mornye` uses instead of a built-in browser. That is
+why there is no `shm_size` any more; the absence of `read_only` stays, because
+the engine writes its extension data and signed sessions. See
+[engine/README.md](../engine/README.md).
 
 ### Volume mapping
 

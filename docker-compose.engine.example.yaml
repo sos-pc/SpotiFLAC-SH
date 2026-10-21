@@ -1,7 +1,7 @@
 # SpotiFLAC + download engine (two services).
 #
-# The engine is the upstream SpotiFLAC Python package wrapped in our HTTP shim
-# (see engine/README.md). Our Go app sends it "download this Spotify URL" and
+# The engine is the upstream `mornye` Python package (formerly SpotiFLAC)
+# wrapped in our HTTP shim (see engine/README.md). Our Go app sends it "download this Spotify URL" and
 # ingests the resulting FLAC — naming, tags and catalog stay ours.
 #
 # This file shows only the engine wiring. If you already run SpotiFLAC, add the
@@ -46,8 +46,8 @@ services:
     #
     # Updating is `docker compose pull && docker compose up -d`. To pin or roll
     # back, replace `latest` with a version tag — `docker inspect` reports the
-    # SpotiFLAC version inside any image in its org.opencontainers.image.version
-    # label.
+    # engine version inside any image (`mornye-<version>`) in its
+    # org.opencontainers.image.version label.
     image: ghcr.io/sos-pc/spotiflac-engine:latest
     container_name: spotiflac-engine
     restart: unless-stopped
@@ -63,12 +63,8 @@ services:
     # would hang the download waiting for a human. (Observed 2026-07-23.)
     stdin_open: false
     tty: false
-    # Chromium — which several provider routes drive through pydoll — puts its
-    # renderer shared memory in /dev/shm. Docker's 64 MB default is well under
-    # what it needs and it crashes on a blank tab; upstream's own run example
-    # passes --shm-size=1g for exactly this. Not optional once a route opens a
-    # browser.
-    shm_size: 1g
+    # No shm_size: it was for Chromium, and the image no longer carries a
+    # browser (see engine/README.md, "No browser in the image").
     volumes:
       - spotiflac_staging:/staging
       - engine_cache:/home/nonroot/.cache
