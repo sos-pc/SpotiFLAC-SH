@@ -1,6 +1,6 @@
-# Dependencies of the shim itself. The engine core is installed from PyPI by the
-# Dockerfile, together with upstream's own requirements.txt for that exact tag —
-# so nothing upstream needs is duplicated here.
+# Dependencies of the shim itself. The engine core (`mornye`) is installed from
+# PyPI by the Dockerfile and declares its own dependencies — so nothing upstream
+# needs is duplicated here.
 
 fastapi
 uvicorn[standard]
@@ -12,6 +12,7 @@ pydantic>=2
 # import (hit on the first container run, 2026-07-23). Upstream declares it in
 # both as of 1.5.9, so the workaround is gone.
 #
-# Gaps of that shape are handled by the Dockerfile now: it installs the tag's
-# requirements.txt straight from upstream rather than us tracking which
-# dependency they forgot this time.
+# Gaps of that shape were later handled by installing the tag's requirements.txt
+# straight from upstream. `mornye` declares everything in its wheel, so that
+# second install is gone too; the Dockerfile's import check and `pip check` are
+# what would catch a regression.
