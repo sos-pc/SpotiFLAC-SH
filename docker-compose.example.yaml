@@ -45,7 +45,7 @@ services:
   # Tiré, jamais construit : la CI le republie à chaque release amont.
   # Pour épingler ou revenir en arrière, remplacer `latest` par une version —
   # chaque image porte la sienne dans org.opencontainers.image.version, et
-  # l'annonce au démarrage ("engine shim: SpotiFLAC x.y.z, image <sha>").
+  # l'annonce au démarrage ("engine shim: mornye x.y.z, image <sha>").
   spotiflac-engine:
     image: ghcr.io/sos-pc/spotiflac-engine:latest
     container_name: spotiflac-engine
@@ -58,10 +58,9 @@ services:
     stdin_open: false      # une route retombe sur une saisie de grant au
     tty: false             # clavier ; sans TTY elle échoue vite au lieu de
                            # figer le téléchargement en attendant un humain
-    shm_size: 1g           # Chromium met sa mémoire de rendu dans /dev/shm et
-                           # plante sur les 64 Mo par défaut de Docker
-    # PAS de read_only : il écrit ses extensions JS, un profil navigateur et
-    # la socket X.
+    # Pas de shm_size : il servait à Chromium, et l'image n'embarque plus de
+    # navigateur (voir engine/README.md).
+    # PAS de read_only : il écrit ses extensions et ses sessions sous ~/.mornye.
     environment:
       # Le solveur, s'il tourne (service ci-dessous). C'est ICI qu'il se
       # déclare, pas sur l'app.

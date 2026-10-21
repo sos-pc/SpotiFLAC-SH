@@ -40,7 +40,8 @@ bundle started in well under a second, and tidal-web 1.2.2 still failed every
 download with `file.downloadSegments is not a function`: the bundle called a
 host method this module had never implemented. Starting a bundle proves it
 loads. It says nothing about whether the host provides what it calls, and the
-bundles are written for SpotiFLAC Mobile's host, which is ahead of this one.
+bundles are written for the mobile app's host (SpotiFLAC Mobile, now Mornye),
+which can be ahead of this one.
 So every call a bundle makes into the host is now compared with what this
 module's JavaScript bridge actually defines.
 
@@ -59,7 +60,11 @@ import sys
 import time
 from collections import Counter
 
-# Every keyword shim.py passes to AsyncSpotiFLAC(...). Keep this list and the
+# The engine package — `mornye`, formerly `SpotiFLAC` (renamed 2026-10-20). The
+# one name this file needs to know; everything below follows it.
+ENGINE_PACKAGE = "mornye"
+
+# Every keyword shim.py passes to AsyncMornye(...). Keep this list and the
 # call in _run_download in step: this file is the executable copy of that call's
 # assumptions, and a keyword added there without being added here is unchecked.
 REQUIRED_INIT_KWARGS = (
@@ -96,8 +101,9 @@ SHIM_PATH = "/app/shim.py"
 # service list, which reads like a caller mistake and is not one.
 REQUIRED_SERVICES = ("qobuz", "deezer", "amazon", "tidal")
 
-# The objects SpotiFLAC Mobile's runtime puts in every extension's global scope
-# (go_backend, `vm.Set("file", ...)` and its siblings). The bundles are written
+# The objects the mobile app's runtime puts in every extension's global scope
+# (read from SpotiFLAC Mobile's go_backend, `vm.Set("file", ...)` and its
+# siblings, before that app moved to Rust as Mornye). The bundles are written
 # against that runtime, so these are the names worth looking for in them. Which
 # methods each object has on THIS host is not listed here: it is read out of
 # the bridge the bundles actually run under, at build time.
@@ -121,7 +127,7 @@ KNOWN_HARMLESS_CALLS: dict[tuple[str, str], tuple[int, str]] = {
 
 
 def _shim_upstream_imports(path: str, problems: list[str]) -> list[str]:
-    """Every SpotiFLAC module shim.py imports, including inside functions."""
+    """Every engine module shim.py imports, including inside functions."""
     try:
         source = pathlib.Path(path).read_text(encoding="utf-8")
     except OSError as exc:
@@ -137,11 +143,11 @@ def _shim_upstream_imports(path: str, problems: list[str]) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] == "SpotiFLAC":
+                if alias.name.split(".")[0] == ENGINE_PACKAGE:
                     modules.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
             # level > 0 is a relative import, which cannot be upstream's.
-            if node.level == 0 and node.module and node.module.split(".")[0] == "SpotiFLAC":
+            if node.level == 0 and node.module and node.module.split(".")[0] == ENGINE_PACKAGE:
                 modules.add(node.module)
     return sorted(modules)
 
@@ -309,7 +315,7 @@ def _check_host_calls(service: str, ext: str, installed, api: dict[str, set[str]
 def _load_bridge_api() -> tuple[dict[str, set[str]] | None, str | None]:
     """The bridge node runs the bundles under, parsed. (api, None) or (None, why)."""
     try:
-        from SpotiFLAC.extensions import runtime as js_runtime
+        from mornye.extensions import runtime as js_runtime
     except Exception as exc:  # noqa: BLE001
         return None, f"cannot import the JS runtime to read its bridge: {exc}"
     # The same constant the runtime hands to node, so this reads the file that
@@ -336,15 +342,15 @@ def main() -> int:
     host_problems: list[str] = []
 
     try:
-        from SpotiFLAC import AsyncSpotiFLAC
+        from mornye import AsyncMornye
     except Exception as exc:  # noqa: BLE001 — any import failure is a hard stop
-        print(f"CONTRACT: cannot import AsyncSpotiFLAC: {exc}", file=sys.stderr)
+        print(f"CONTRACT: cannot import AsyncMornye: {exc}", file=sys.stderr)
         return 1
 
     try:
-        params = inspect.signature(AsyncSpotiFLAC.__init__).parameters
+        params = inspect.signature(AsyncMornye.__init__).parameters
     except (TypeError, ValueError) as exc:
-        print(f"CONTRACT: cannot inspect AsyncSpotiFLAC.__init__: {exc}", file=sys.stderr)
+        print(f"CONTRACT: cannot inspect AsyncMornye.__init__: {exc}", file=sys.stderr)
         return 1
 
     # A **kwargs in __init__ swallows any keyword, so absence proves nothing and
@@ -358,17 +364,17 @@ def main() -> int:
     missing = [k for k in REQUIRED_INIT_KWARGS if k not in params]
     if missing and not accepts_var_kw:
         problems.append(
-            "AsyncSpotiFLAC.__init__ no longer accepts: " + ", ".join(missing)
+            "AsyncMornye.__init__ no longer accepts: " + ", ".join(missing)
         )
     elif missing:
         notes.append(
-            "AsyncSpotiFLAC.__init__ takes **kwargs, so these could not be "
+            "AsyncMornye.__init__ takes **kwargs, so these could not be "
             "verified and may now be silently ignored: " + ", ".join(missing)
         )
 
     for attr in REQUIRED_ATTRS:
-        if not callable(getattr(AsyncSpotiFLAC, attr, None)):
-            problems.append(f"AsyncSpotiFLAC.{attr} is missing or not callable")
+        if not callable(getattr(AsyncMornye, attr, None)):
+            problems.append(f"AsyncMornye.{attr} is missing or not callable")
 
     # ── Everything shim.py imports from upstream ─────────────────────────────
     #
@@ -383,8 +389,8 @@ def main() -> int:
 
     # ── A service name must resolve to something installed ───────────────────
     try:
-        from SpotiFLAC.extensions.catalog import extension_id
-        from SpotiFLAC.extensions.manager import ExtensionManager
+        from mornye.extensions.catalog import extension_id
+        from mornye.extensions.manager import ExtensionManager
     except Exception as exc:  # noqa: BLE001
         notes.append(
             "the extension catalogue could not be imported, so service names "
@@ -435,7 +441,7 @@ def main() -> int:
             if getattr(installed, "runtime", "javascript") != "javascript":
                 continue
             try:
-                from SpotiFLAC.extensions.runtime import JSRuntime
+                from mornye.extensions.runtime import JSRuntime
             except Exception as exc:  # noqa: BLE001
                 problems.append(f"cannot import the JS runtime bridge: {exc}")
                 break

@@ -35,8 +35,8 @@ extension, the declared `requiredRuntimeFeatures` this host lacks - and that
 report cried wolf: four download providers out of five declared
 `preparedContext@1`, and all four read it as
 `options && options.preparedContext || {}` and do without it (read
-2026-09-23: amazon, deezer, qobuz-web, soundcloud). A declaration says what the author's host offers, not what the code
-cannot live without.
+2026-09-23: amazon, deezer, qobuz-web, soundcloud). A declaration says what
+the author's host offers, not what the code cannot live without.
 
 What decides is whether the bundle CALLS a host method the bridge does not
 define, without testing for it first. contract-check.py now checks exactly
@@ -54,6 +54,12 @@ tidal-web went that way on 2026-09-23: SpotiFLAC 4.x added
 `file.downloadSegments` (absent from 3.8.0, present in 4.3.0), and
 contract-check.py passes tidal-web 1.2.6 on 4.3.0 with a single missing call,
 `file.exists`, which sits inside a try/catch (see KNOWN_HARMLESS_CALLS there).
+
+deezer went the same way on 2026-10-21, with the move to `mornye`: its bridge
+defines `file.transformPatternedBlocks`, the method deezer 1.3.3 started
+calling, and contract-check.py passes deezer 1.3.7 with no missing call. That
+left no pin at all; the mechanism stays, because contract-check.py's failure
+message sends the next incompatible bundle here.
 """
 from __future__ import annotations
 
@@ -62,33 +68,28 @@ import pathlib
 import shutil
 import urllib.request
 
-REGISTRY_RAW = "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension"
+# The registry repository (formerly zarzet/SpotiFLAC-Extension, whose URLs
+# still redirect here). A pin names a commit in it.
+REGISTRY_RAW = "https://raw.githubusercontent.com/mornyeapp/Mornye-Extension"
 
 # id -> (commit, sha256 of the .sflx, version, why)
 #
 # The commit is a real ref, not a branch: the branch path serves whatever is
 # current, which is the thing that broke us.
-PINS: dict[str, tuple[str, str, str, str]] = {
-    "deezer": (
-        "923d942f3e",
-        "6320680f44f8292b16e3d83bc789305434442198820a0f11b4416538b143b04b",
-        "1.3.1",
-        "1.3.3 added patternedFileTransform@1 + preparedContext@1",
-    ),
-}
+PINS: dict[str, tuple[str, str, str, str]] = {}
 
 # Not pinned, deliberately:
 #
-#   tidal-web  pinned at 1.2.0 until 2026-09-23 - see "When a pin should go"
-#              above. contract-check.py is what would say if it needs one again.
+#   tidal-web  pinned at 1.2.0 until 2026-09-23, deezer at 1.3.1 until
+#              2026-10-21 - see "When a pin should go" above. contract-check.py
+#              is what would say if either needs one again.
 #   qobuz-web  declares features this host lacks and downloads anyway. Leave it
 #              on current; pinning a working provider buys nothing and costs the
 #              fixes its author keeps shipping.
-#   amzn       is broken at 2.3.3 AND at 2.3.1 — placeholder metadata ("Amazon
-#              Track B01N7QY2MB", an ASIN whose title never resolved) and a node
-#              process that dies. Downgrading two versions changed nothing, and
-#              the host has no memory limit and 31 GB free, so it is not ours.
-#              A pin would only hide that it is theirs.
+#   amzn       was broken at 2.3.3 AND at 2.3.1 in September 2026 — placeholder
+#              metadata and a node process that died. Downgrading two versions
+#              changed nothing, so it was not ours, and a pin would only have
+#              hidden that it was theirs.
 
 
 def install(manager, ext_id: str, commit: str, digest: str) -> str:
@@ -107,7 +108,7 @@ def install(manager, ext_id: str, commit: str, digest: str) -> str:
     # directory aside. os.replace() on a directory baked into the image raises
     # EXDEV under overlayfs — the extensions live in a lower layer, and renaming
     # across layers is not supported. Measured, in this exact image.
-    base = pathlib.Path.home() / ".spotiflac" / "extensions"
+    base = pathlib.Path.home() / ".mornye" / "extensions"
     for existing in base.iterdir() if base.is_dir() else []:
         if existing.is_dir() and existing.name in (ext_id, ext_id.replace("amzn", "amazon")):
             shutil.rmtree(existing)
@@ -117,7 +118,13 @@ def install(manager, ext_id: str, commit: str, digest: str) -> str:
 
 
 def main() -> int:
-    from SpotiFLAC.extensions.manager import ExtensionManager
+    from mornye.extensions.manager import ExtensionManager
+
+    if not PINS:
+        # Said out loud, so a build log shows the step ran and found nothing to
+        # hold, rather than leaving its silence to be read either way.
+        print("no pinned extensions - every bundle is the registry's current one")
+        return 0
 
     manager = ExtensionManager(auto_install_downloads=False)
 

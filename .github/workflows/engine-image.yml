@@ -59,110 +59,63 @@ jobs:
       issues: read
     outputs:
       version: ${{ steps.upstream.outputs.version }}
+      tag: ${{ steps.upstream.outputs.tag }}
       stale: ${{ steps.compare.outputs.stale }}
     steps:
-      # The newest version upstream has FINISHED publishing — not simply the
-      # newest on PyPI.
+      # The newest `mornye` release on PyPI.
       #
-      # An upstream release is two artifacts landing at different moments: the
-      # wheel on PyPI, and a `vX.Y.Z` tag in SpotiFLAC-Module-Version carrying
-      # the requirements.txt the Dockerfile fetches (see engine/Dockerfile — the
-      # wheel under-declares its dependencies, so that file is not optional).
-      # Asking PyPI alone means catching the window where they disagree: on
-      # 2026-08-10 1.6.7 was on PyPI with no matching tag, every build 404'd at
-      # the fetch, and #48 opened for what was a race rather than a breakage.
+      # This step used to walk down to the newest release whose git tag existed,
+      # because the SpotiFLAC wheel under-declared its dependencies and the
+      # Dockerfile fetched the tag's requirements.txt: wheel and tag landed at
+      # different moments, and a build in between 404'd. `mornye` declares its
+      # dependencies in the wheel, the Dockerfile fetches nothing from git, so a
+      # release is buildable the moment it is on PyPI. That fetch is also what
+      # froze this image on 2026-10-20 — the rename reset upstream's history,
+      # every old tag vanished, and every build stopped at "no complete release"
+      # (#145).
       #
-      # Walking down to the newest COMPLETE release fixes both halves at once:
-      # no false alarm, and the deployment still advances (that day it would
-      # have moved 1.6.4 -> 1.6.6 immediately instead of sitting at 1.6.4).
-      # Nothing else has to change — the Dockerfile already builds whatever
-      # SPOTIFLAC_VERSION it is handed and derives the tag from what actually
-      # installed, so pinning an older version keeps the image self-consistent.
-      - name: Newest fully published upstream release
+      # Yanked releases are skipped: upstream has already shipped one it later
+      # called "notworking", and a yank is how PyPI says the same thing.
+      #
+      # The image tag carries the project name. `mornye` restarted its numbering
+      # at 1.0.0, and the SpotiFLAC images already published 1.6.x and 1.7.x
+      # tags, so a bare "1.7.3" would one day name two different engines.
+      - name: Newest upstream release
         id: upstream
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import calendar, json, os, sys, time, urllib.error, urllib.request
+          import json, os, sys, urllib.request
 
-          # Duplicated from engine/Dockerfile, which is the dependency of this
-          # probe: if upstream ever moves the repository, BOTH have to change.
-          # The failure mode is contained on purpose — see "fail open" below.
-          REQ = "https://raw.githubusercontent.com/BartolomeoRusso9/SpotiFLAC-Module-Version/v{}/requirements.txt"
-          MAX_CANDIDATES = 5       # further back than this is not a race
-          GRACE_S = 24 * 3600      # past this, upstream forgot rather than raced
+          PACKAGE = "mornye"
 
           def parse(v):
               """Numeric key, or None for anything not X.Y.Z — sorting these as
-              strings would rank 1.6.9 above 1.6.10."""
+              strings would rank 1.6.9 above 1.6.10, and a pre-release such as
+              1.1.0rc1 is not something to publish as :latest."""
               try:
                   return tuple(int(p) for p in v.split("."))
               except ValueError:
                   return None
 
           with urllib.request.urlopen(
-                  "https://pypi.org/pypi/SpotiFLAC/json", timeout=30) as r:
+                  f"https://pypi.org/pypi/{PACKAGE}/json", timeout=30) as r:
               data = json.load(r)
 
           releases = []
           for version, files in data["releases"].items():
               key = parse(version)
-              if key is None or not files:
+              if key is None or not files or all(f.get("yanked") for f in files):
                   continue
-              releases.append((key, version, files[0]["upload_time"]))
-          releases.sort(reverse=True)
+              releases.append((key, version))
           if not releases:
-              sys.exit("no parseable release on PyPI")
+              sys.exit(f"no installable {PACKAGE} release on PyPI")
 
-          def ready(version):
-              """True when the requirements tag exists.
-
-              Fails OPEN: only a definite 404 means "not published yet". A
-              timeout, DNS failure or moved repository returns True so the build
-              runs and decides for itself. Failing closed here would silently
-              freeze every engine update for as long as the probe was broken —
-              worse than the race this step exists to absorb."""
-              req = urllib.request.Request(REQ.format(version), method="HEAD")
-              try:
-                  urllib.request.urlopen(req, timeout=20).close()
-                  return True
-              except urllib.error.HTTPError as e:
-                  if e.code == 404:
-                      return False
-                  return True
-              except Exception:
-                  return True
-
-          newest = releases[0][1]
-          chosen = None
-          for _, version, _ in releases[:MAX_CANDIDATES]:
-              if ready(version):
-                  chosen = version
-                  break
-              print(f"skipping {version}: requirements tag not published yet")
-
-          if chosen is None:
-              sys.exit(f"no complete release in the newest {MAX_CANDIDATES} "
-                       f"versions (newest: {newest}) — needs a human")
-
-          if chosen != newest:
-              # timegm, not mktime: PyPI's upload_time is naive UTC, and mktime
-              # would read it as local time. The usual "mktime() - time.timezone"
-              # patch is wrong under DST (time.timezone ignores it) and happens
-              # to work on the runner only because its clock is UTC.
-              age = time.time() - calendar.timegm(time.strptime(
-                  releases[0][2], "%Y-%m-%dT%H:%M:%S"))
-              if age > GRACE_S:
-                  print(f"::warning::upstream {newest} has been on PyPI for "
-                        f"{age / 3600:.0f}h with no requirements tag — this is "
-                        f"no longer a release race. Building {chosen} instead.")
-              else:
-                  print(f"{newest} still publishing ({age / 60:.0f} min old); "
-                        f"building {chosen}")
-
+          version = max(releases)[1]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write(f"version={chosen}\n")
-          print(f"PyPI: {newest}   buildable: {chosen}")
+              fh.write(f"version={version}\n")
+              fh.write(f"tag={PACKAGE}-{version}\n")
+          print(f"PyPI: {PACKAGE} {version}")
           PY
 
       - name: Version inside our published image
@@ -227,12 +180,12 @@ jobs:
                || [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "rebuilding: forced, or engine/ changed on this ref"
-          elif [ "${{ steps.upstream.outputs.version }}" != "${{ steps.published.outputs.version }}" ]; then
+          elif [ "${{ steps.upstream.outputs.tag }}" != "${{ steps.published.outputs.version }}" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
-            echo "rebuilding: ${{ steps.published.outputs.version }} -> ${{ steps.upstream.outputs.version }}"
+            echo "rebuilding: ${{ steps.published.outputs.version }} -> ${{ steps.upstream.outputs.tag }}"
           else
             echo "stale=false" >> "$GITHUB_OUTPUT"
-            echo "up to date at ${{ steps.upstream.outputs.version }}, nothing to do"
+            echo "up to date at ${{ steps.upstream.outputs.tag }}, nothing to do"
           fi
 
   build:
@@ -270,7 +223,7 @@ jobs:
         id: tags
         run: |
           set -euo pipefail
-          V="${{ needs.check.outputs.version }}"
+          V="${{ needs.check.outputs.tag }}"
           IMG="${REGISTRY}/${IMAGE_NAME}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             # pr-<number>, matching what docker/metadata-action produces for the
@@ -293,15 +246,15 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
-            SPOTIFLAC_VERSION=${{ needs.check.outputs.version }}
+            MORNYE_VERSION=${{ needs.check.outputs.version }}
             GIT_REVISION=${{ github.sha }}
           # The version label is what the check job reads next time round, so it
           # has to be the version actually installed — hence passing it in rather
           # than letting the build resolve its own.
           labels: |
-            org.opencontainers.image.title=SpotiFLAC engine
-            org.opencontainers.image.description=Download engine sidecar (upstream SpotiFLAC + our shim)
-            org.opencontainers.image.version=${{ needs.check.outputs.version }}
+            org.opencontainers.image.title=Download engine
+            org.opencontainers.image.description=Download engine sidecar (upstream mornye + our shim)
+            org.opencontainers.image.version=${{ needs.check.outputs.tag }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
@@ -313,7 +266,7 @@ jobs:
       # this only reads the file back out of the image that was just pushed, the
       # same way the app workflow smoke-tests ffmpeg.
       #
-      # Not a gate. `SPOTIFLAC_REGISTRIES` points at a branch, so a rebuild can
+      # Not a gate. `MORNYE_REGISTRIES` points at a branch, so a rebuild can
       # bring different download code under the same upstream version - rarely,
       # measured, but silently until now. Printing it makes a change visible
       # without freezing a provider set that has to track hostile APIs.
@@ -342,7 +295,7 @@ jobs:
           {
             echo "### Engine image published"
             echo ""
-            echo "- SpotiFLAC \`${{ needs.check.outputs.version }}\`"
+            echo "- mornye \`${{ needs.check.outputs.version }}\`"
             echo "- tags: \`${{ steps.tags.outputs.tags }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -468,7 +421,7 @@ jobs:
           *[engine-image.yml](../blob/main/.github/workflows/engine-image.yml) — updated in place, closes itself on recovery*
           EOF
 
-          TITLE="[Engine] image build failing (SpotiFLAC ${VERSION:-unknown})"
+          TITLE="[Engine] image build failing (mornye ${VERSION:-unknown})"
           if [ -n "$EXISTING" ]; then
             gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file /tmp/issue.md
             echo "updated #${EXISTING}"

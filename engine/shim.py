@@ -1,5 +1,5 @@
 """
-SpotiFLAC engine shim — a thin, engine-AGNOSTIC HTTP front for the download engine.
+Download engine shim — a thin, engine-AGNOSTIC HTTP front for the download engine.
 
 Stable contract (does NOT name the underlying engine):
     POST /download  {spotify_url, services[], quality, out_dir, allow_fallback}
@@ -7,11 +7,13 @@ Stable contract (does NOT name the underlying engine):
     GET|HEAD /health -> {status: "ok"}
 
 Our Go service talks ONLY to this contract. The concrete engine
-(BartolomeoRusso9/SpotiFLAC-Module-Version today) is named in exactly one place
+(`mornye`, github.com/mornyeapp/Mornye-Python) is named in exactly one place
 below. If that upstream dies, we rewrite `_run_download()` to call a different
-engine (spotbye, another downloader) and the Go side never changes. That
-swappability is the durability insurance for putting the anonymous foundation on
-a third-party upstream (see docs/module-engine.md §2).
+engine and the Go side never changes. That swappability is the durability
+insurance for putting the anonymous foundation on a third-party upstream (see
+docs/module-engine.md §2) — and it is what the 2026-10-20 rename tested: the
+same project, renamed from SpotiFLAC after a legal notice, changed only the
+package and class names this file imports.
 
 Tagging is deliberately OFF (enrich_metadata / embed_lyrics = False): the Go
 service re-tags at ingestion so it owns SPOTIFY_ID / genre / naming for catalog +
@@ -34,8 +36,11 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 # ── The ONE place the concrete engine is named. Swap here; contract unchanged. ──
-from SpotiFLAC import AsyncSpotiFLAC  # noqa: E402
-import hooks.solver_fallback  # noqa: F401 — applies runtime patches
+from mornye import AsyncMornye  # noqa: E402
+
+# The distribution name, for the version this image reports. Kept beside the
+# import so the two cannot drift apart again.
+ENGINE_DIST = "mornye"
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".opus"}
 
@@ -44,11 +49,14 @@ def _identity() -> dict[str, str]:
     """What this image actually is: engine version and the commit that built it."""
     try:
         import importlib.metadata as _md
-        engine = _md.version("SpotiFLAC")
+        version = _md.version(ENGINE_DIST)
     except Exception:  # noqa: BLE001 — identity must never break startup
-        engine = "unknown"
+        version = "unknown"
     rev = os.environ.get("ENGINE_REVISION") or "unknown"
-    return {"engine_version": engine, "revision": rev[:7] if rev != "unknown" else rev}
+    # `engine` is new, and additive: the version alone stopped saying which
+    # project it numbers when the same engine restarted at 1.0.0 under a new name.
+    return {"engine": ENGINE_DIST, "engine_version": version,
+            "revision": rev[:7] if rev != "unknown" else rev}
 
 
 # Written by record-extensions.py during the build, beside this file.
@@ -86,8 +94,8 @@ def _log_identity() -> None:
     # without UTF-8 stdio would turn a decorative separator into a logging
     # error where the identity line should be.
     logging.getLogger("uvicorn.error").info(
-        "engine shim: SpotiFLAC %s, image %s",
-        ident["engine_version"], ident["revision"],
+        "engine shim: %s %s, image %s",
+        ident["engine"], ident["engine_version"], ident["revision"],
     )
 
 
@@ -129,13 +137,15 @@ def _quiet_engine_logs() -> None:
     """Filter at logger level, and drop the progress handlers upstream leaks.
 
     This function previously attached the filter to the handlers on `root` and
-    on `SpotiFLAC`, and did nothing at all: production logs kept every traceback
-    and printed every line twice. Two upstream behaviours defeat it, both in
-    `SpotiFLAC/core/progress.py::install_console_interception`, which runs
-    *during* the download — after anything we do here:
+    on the package logger, and did nothing at all: production logs kept every
+    traceback and printed every line twice. Two upstream behaviours defeat it,
+    both in `core/progress.py::install_console_interception` (same file and
+    function in SpotiFLAC and in `mornye`), which runs *during* the download —
+    after anything we do here:
 
-    1. It removes every StreamHandler from root and from `SpotiFLAC*`, so the
-       handlers we just attached the filter to are destroyed moments later.
+    1. It removes every StreamHandler from root and from the package's
+       loggers, so the handlers we just attached the filter to are destroyed
+       moments later.
        Handler-level attachment can never survive that ordering. Logger-level
        does: a record is filtered at the logger it was logged on, before it
        reaches any handler, whatever handlers exist by then.
@@ -153,8 +163,9 @@ def _quiet_engine_logs() -> None:
     record entirely and silence the container.
 
     Loggers are enumerated rather than named: upstream creates 39 module-level
-    loggers at import, all of which exist by the time this runs, plus pydoll's
-    own tree, which is not under `SpotiFLAC` at all.
+    loggers at import, all of which exist by the time this runs, plus third-party
+    trees that are not under the package name at all. Enumerating is also what
+    let this survive the SpotiFLAC -> mornye rename without a change.
     """
     if os.environ.get("ENGINE_LOG_TRACEBACKS") == "1":
         return
@@ -248,8 +259,8 @@ def _missing_providers(services: list[str] | None = None) -> list[str]:
     which admits it could not check.
     """
     try:
-        from SpotiFLAC.extensions.catalog import extension_id
-        from SpotiFLAC.extensions.manager import ExtensionManager
+        from mornye.extensions.catalog import extension_id
+        from mornye.extensions.manager import ExtensionManager
 
         manager = ExtensionManager(auto_install_downloads=False)
         missing = []
@@ -301,8 +312,8 @@ async def _declared_health(services: list[str]) -> dict[str, dict]:
     try:
         import httpx
 
-        from SpotiFLAC.extensions.catalog import extension_id
-        from SpotiFLAC.extensions.manager import ExtensionManager
+        from mornye.extensions.catalog import extension_id
+        from mornye.extensions.manager import ExtensionManager
     except Exception:  # noqa: BLE001
         return {}
 
@@ -508,11 +519,12 @@ async def _run_download(req: DownloadRequest, out: pathlib.Path) -> None:
     Add a keyword to this call and add it there too, or it goes unchecked.
 
     Also available upstream if we ever want them: qobuz_token /
-    qobuz_local_api_url / tidal_custom_api (BYOT pass-through), allow_fallback
-    (quality), track_max_retries, timeout_s, max_concurrent_downloads,
-    use_extensions_fallback (the JS/Node route fallback — leave on).
+    qobuz_local_api_url / tidal_custom_api (BYOT pass-through), track_max_retries,
+    timeout_s, max_concurrent_downloads, and — new in `mornye` — verify_hires /
+    redownload_fake_hires, which check that a "hi-res" file is not upsampled CD
+    audio (see issue #103 on what quality fallback does and does not prove).
     """
-    async with AsyncSpotiFLAC(
+    async with AsyncMornye(
         output_dir=str(out),
         services=req.services,
         quality=req.quality,

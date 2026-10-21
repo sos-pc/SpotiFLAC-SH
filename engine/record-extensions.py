@@ -2,7 +2,7 @@
 """Write down which provider bundles this image installed, at build time.
 
 The image had no memory of this. Extensions are resolved from a registry branch
-URL during the build, unpacked into ~/.spotiflac/extensions, and that was the
+URL during the build, unpacked into ~/.mornye/extensions, and that was the
 end of the record: nothing in the image said which versions it carried or where
 they came from. Answering "what download code is actually running?" meant
 opening a shell in the container and introspecting the manager — which is not an
@@ -52,7 +52,7 @@ def registry_entries() -> dict[str, dict]:
     at this point the local digests still get recorded, which is the half that
     does not depend on anyone else.
     """
-    raw = os.environ.get("SPOTIFLAC_REGISTRIES") or ""
+    raw = os.environ.get("MORNYE_REGISTRIES") or ""
     entries: dict[str, dict] = {}
     for url in (u.strip() for u in raw.split(",") if u.strip()):
         try:
@@ -70,7 +70,7 @@ def registry_entries() -> dict[str, dict]:
 
 
 def main() -> int:
-    from SpotiFLAC.extensions.manager import ExtensionManager
+    from mornye.extensions.manager import ExtensionManager
 
     manager = ExtensionManager(auto_install_downloads=False)
     declared = registry_entries()
